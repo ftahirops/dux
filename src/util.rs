@@ -1,0 +1,137 @@
+use anyhow::{Context, Result};
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Where the index DB lives. Root-writable system path if we can, else per-user.
+pub fn data_dir() -> Result<PathBuf> {
+    // Prefer the system path (shared with xtop-style tooling) when writable.
+    let system = PathBuf::from("/var/lib/dux");
+    if can_use(&system) {
+        return Ok(system);
+    }
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .context("cannot determine data dir: set HOME or XDG_DATA_HOME")?;
+    let dir = base.join("dux");
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    Ok(dir)
+}
+
+fn can_use(p: &PathBuf) -> bool {
+    if std::fs::create_dir_all(p).is_err() {
+        return false;
+    }
+    // crude writability probe
+    let probe = p.join(".dux_write_probe");
+    let ok = std::fs::write(&probe, b"1").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+pub fn db_path() -> Result<PathBuf> {
+    Ok(data_dir()?.join("dux.db"))
+}
+
+/// Live filesystem capacity for the filesystem containing `path` (via statvfs).
+#[derive(Default, Clone, Copy)]
+#[allow(dead_code)] // free/inodes_free kept for completeness / future use
+pub struct FsStat {
+    pub total: i64,
+    pub free: i64,  // free to root
+    pub avail: i64, // available to unprivileged users
+    pub used: i64,
+    pub inodes_total: i64,
+    pub inodes_free: i64,
+    pub inodes_used: i64,
+}
+
+impl FsStat {
+    /// Percent used (df convention: used / (used + available)).
+    pub fn use_pct(&self) -> f64 {
+        let denom = self.used + self.avail;
+        if denom <= 0 {
+            0.0
+        } else {
+            self.used as f64 / denom as f64 * 100.0
+        }
+    }
+    pub fn inode_pct(&self) -> f64 {
+        if self.inodes_total <= 0 {
+            0.0
+        } else {
+            self.inodes_used as f64 / self.inodes_total as f64 * 100.0
+        }
+    }
+}
+
+pub fn fs_stat(path: &std::path::Path) -> Option<FsStat> {
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut s = MaybeUninit::<libc::statvfs>::uninit();
+    if unsafe { libc::statvfs(c.as_ptr(), s.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    let s = unsafe { s.assume_init() };
+    let bs = s.f_frsize as i64;
+    let total = s.f_blocks as i64 * bs;
+    let free = s.f_bfree as i64 * bs;
+    let avail = s.f_bavail as i64 * bs;
+    let it = s.f_files as i64;
+    let ifree = s.f_ffree as i64;
+    Some(FsStat {
+        total,
+        free,
+        avail,
+        used: total - free,
+        inodes_total: it,
+        inodes_free: ifree,
+        inodes_used: it - ifree,
+    })
+}
+
+pub fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Parse durations like "1h", "30m", "24h", "7d", "90s" into seconds.
+pub fn parse_duration(s: &str) -> Result<i64> {
+    let s = s.trim();
+    let (num, unit) = s.split_at(
+        s.find(|c: char| c.is_alphabetic())
+            .context("duration needs a unit, e.g. 1h, 30m, 7d")?,
+    );
+    let n: i64 = num.trim().parse().context("invalid duration number")?;
+    let mult = match unit {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        "d" => 86400,
+        "w" => 604800,
+        other => anyhow::bail!("unknown duration unit: {other}"),
+    };
+    Ok(n * mult)
+}
+
+pub fn human(bytes: i64) -> String {
+    use humansize::{format_size, BINARY};
+    format_size(bytes.max(0) as u64, BINARY)
+}
+
+/// Human-readable "time ago".
+pub fn ago(secs: i64) -> String {
+    let d = (now_secs() - secs).max(0);
+    if d < 60 {
+        format!("{d}s")
+    } else if d < 3600 {
+        format!("{}m", d / 60)
+    } else if d < 86400 {
+        format!("{}h", d / 3600)
+    } else {
+        format!("{}d", d / 86400)
+    }
+}

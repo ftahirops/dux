@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+# state dir for the index
+mkdir -p /var/lib/dux
+
+case "$1" in
+    configure)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+            systemctl enable dux.service || true
+            # Starting the service triggers the initial scan (ExecStartPre)
+            # and then launches the live daemon.
+            echo "dux: starting service (initial scan of / runs now, then the live daemon)…"
+            systemctl restart dux.service || true
+        else
+            echo "dux: systemd not detected; run 'dux scan /' then 'dux daemon /' manually."
+        fi
+        ;;
+esac
+
+exit 0

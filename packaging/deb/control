@@ -1,0 +1,12 @@
+Package: dux
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: libc6 (>= 2.34)
+Maintainer: dux maintainers <root@localhost>
+Description: persistent realtime disk usage + file search
+ dux is an indexed, persistent du/ncdu with fast trigram file-name search
+ and an optional live fanotify daemon. It answers "largest dirs/files",
+ "fastest-growing paths", inode-usage, and deleted-but-open queries in
+ milliseconds, and shows df-style filesystem capacity. Companion to xtop.

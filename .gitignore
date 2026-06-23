@@ -1,0 +1,6 @@
+/target
+/dist
+*.deb
+*.db
+*.db-wal
+*.db-shm
