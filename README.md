@@ -1,104 +1,132 @@
-# dux — persistent, realtime disk usage + file search
+# dux — the disk usage tool that already knows the answer
 
-A persistent, indexed `du`/`ncdu` with fast name search and an optional live
-fanotify daemon. Companion to `xtop` (same stack, same daemon model).
+**Stop running `du` and waiting. `dux` keeps a live index of your filesystem, so
+"what's eating my disk?" is answered in milliseconds — with history, growth
+rates, and realtime alerts the classic tools can't give you.**
 
-> Name note: the old X11 `xdu` exists in Debian/Ubuntu; this project is `dux`.
+```
+dux            # instant tree, sorted by size, live-updating
+dux top /var   # biggest dirs under /var — no rescan
+dux find /home --name '*.log' --larger 1G --newer 1h
+```
 
-## What works today
+---
 
-| Capability | Status |
+## The pain (every Linux admin / SRE / DevOps has lived this)
+
+> **02:14 — PagerDuty: `/ at 96%`.**
+
+You SSH in and the tools fight you:
+
+- **`du -sh /*` takes minutes** and hammers the disk you're already trying to
+  save — every single time, because it remembers nothing.
+- **`ncdu /` rescans from scratch** on every launch. Run it twice, scan twice.
+- **`df` says 96% full — but *where*?** It gives you a number, not a culprit.
+- **No history.** Something grew 40 GB since yesterday and nothing can tell you
+  *what* or *how fast* — by the time you look, the logs already rotated.
+- **`locate` is stale** (cron `updatedb` runs once a day) and **`find /` is slow**
+  and re-walks the whole tree for every query.
+- **A process deleted a 90 GB file but still holds it open** — `df` shows the
+  space gone, `du` can't see it, and you're grepping `lsof | grep deleted`.
+- **You're out of inodes, not bytes** — millions of tiny files somewhere
+  (a runaway cache, `node_modules`, a Go module dir) and *no tool ranks
+  directories by file count*.
+- **Which container/app is filling the disk right now?** You can't tell from a
+  point-in-time snapshot.
+
+Every one of these is "scan again and wait," done at the worst possible moment.
+
+---
+
+## The solution — why `dux` exists
+
+`dux` indexes the filesystem **once**, then keeps that index **live** with a
+fanotify daemon. Queries read the index, so they're instant — and because the
+index is maintained in realtime, it can answer questions `du`/`ncdu`/`df`/`find`
+structurally cannot.
+
+| The pain | How `dux` fixes it |
 |---|---|
-| Persistent index, instant re-query (`top`, `tui`) | ✅ |
-| Parallel scan with live progress | ✅ |
-| Path-scoped queries (`top PATH`, `find PATH`, `growth PATH`, `dux PATH`) | ✅ |
-| Trigram name search (`find --name/--ext`), faster than `locate` on globs | ✅ |
-| Size/time/owner filters (`--larger`, `--newer`, `--uid`) | ✅ |
-| Pseudo-fs skipped by default (no fake `/proc/kcore`) | ✅ |
-| WinDirStat-style expanding tree TUI with heat colors | ✅ |
-| **Inode-usage mode** (rank dirs by file count, not size) — `top --inodes`, TUI `i` | ✅ |
-| Live daemon: file **create** + **size-growth** tracked via fanotify | ✅ |
-| Growth alerts (`--alert-threshold … --alert-exec …`) | ✅ |
-| `deleted-open`, `by-owner`, `by-ext` | ✅ |
+| `du`/`ncdu` rescan every time | **Scan once, query in milliseconds** — persistent index |
+| `df` says full but not *where* | **Drill into the biggest dirs/files instantly**, df-style capacity gauge built in |
+| No idea what's growing | **`dux growth`** + live per-directory **write rates** and **ETA-to-full** |
+| `locate` stale, `find` slow | **Trigram name search on a live index** — fresh *and* fast |
+| Deleted-but-open space leaks | **`dux deleted-open`** — ranks the processes pinning freed space |
+| Out of inodes, not bytes | **Inode-usage mode** — rank directories by *file count*, not size |
+| Disk fills silently | **Growth alerts** — run a webhook/script when any path grows past a threshold |
+| "Is it safe to delete?" guesswork | **WinDirStat-style live tree** — see the hot spots at a glance |
 
-## Known limitations (honest)
+It's the tool you wish you'd had at 2 a.m.: **realtime, indexed, and it shows you
+the culprit — not just the symptom.**
 
-- **Daemon tracks create, delete, rename/move, dir-creation, and size-growth
-  live** (fanotify FID mode, `open_by_handle_at`). The remaining gap is the
-  **downtime window** — changes made while the daemon isn't running are missed
-  until the next `dux scan`. `status`/TUI show **live** (heartbeat) vs **snapshot**.
-- On a very busy whole-`/` watcher, the daemon can briefly **lag** behind bursts
-  of system-wide activity (events queue up; `FAN_UNLIMITED_QUEUE` prevents drops),
-  so live updates may take a few seconds to appear under heavy load.
-- **One tree per index.** Each `scan` resets the index (single-root model).
-- **Hardlinks: disk totals are correct** (shared inode counted once, matching
-  `du`/`df`), but a hardlinked file is searchable under **one name only** —
-  full multi-path modelling needs a separate paths table (roadmap).
-- **Disk usage = allocated blocks everywhere** (matches `du`; sparse files
-  report their real on-disk footprint, not apparent size).
-- Cross-mount scans store `parent_dev` so path reconstruction & scoping work
-  across mount points.
-- Networked FS (NFS/Ceph): scan works; live watch is limited.
-- fanotify daemon needs root (CAP_SYS_ADMIN) + kernel ≥ 5.9, and must **not**
-  run in a private mount namespace (uses `FAN_MARK_FILESYSTEM`).
-- Scanner buffers all nodes in memory during a scan (~hundreds of MB for a few
-  million files); very large filesystems may need a higher `MemoryMax`.
+---
 
-See `docs/architecture-analysis-and-roadmap.md` for the full roadmap.
-
-## Build & install
+## 60-second start
 
 ```bash
+# build + install
 cargo build --release
 sudo install -m755 target/release/dux /usr/local/bin/dux
-```
 
-## Use
+# index once, then everything is instant
+sudo dux scan /
+dux                       # live tree UI (↑↓ move · → expand · i size⇄inodes · q quit)
 
-```bash
-dux scan /                       # build the index (parallel, shows progress)
-dux                              # tree TUI at root
-dux /var/log                     # tree TUI scoped to /var/log
-dux top /var --dirs              # largest dirs under /var
-dux top --inodes                 # dirs with the MOST files/inodes (du/ncdu can't)
-dux find /home --name '*.log' --larger 100M
-dux find --newer 10m             # what changed in the last 10 min (global)
+# answer the incident
+dux top /var --dirs       # biggest directories
+dux top --inodes          # dirs with the MOST files (inode exhaustion)
+dux find /home --name '*.log' --larger 1G
 dux growth /data --since 1h
-dux deleted-open                 # deleted-but-open files wasting disk
-dux by-owner ; dux by-ext
-dux status                       # index freshness
+dux deleted-open          # space held by deleted-but-open files
+dux status                # capacity + index freshness
 ```
 
-### TUI keys
-`↑↓`/`jk` move · `→`/`⏎` expand · `←` collapse / up · **`i` toggle size⇄inodes** ·
-`r` refresh · `q` quit.
-Folders expand **inline** beneath their parent (the parent stays visible).
-Bars/colors are a heatmap: 🔴 red = dominant within its level → 🟢 green = small.
-Press `i` to switch the whole graph between **disk size** and **inode/file count** —
-the same heat bars then show which directories hold the most *files* (e.g. a Go
-module cache or `node_modules`), which size-based tools never reveal.
-
-## Realtime daemon (systemd)
+### Run it live (systemd)
 
 ```bash
 sudo cp packaging/dux.service /etc/systemd/system/
-sudo systemctl enable --now dux
-```
+sudo systemctl enable --now dux          # initial scan, then realtime daemon
 
-The daemon uses fanotify mount mode and **coalesces size deltas in memory**,
-flushing batched ancestor-total updates periodically — never a DB write per
-event. Overhead is ~0% idle, low single-digit % of one core under write load.
-
-Alerts:
-```bash
+# alert when something fills the disk
 dux daemon / --alert-threshold 1G --alert-window 10m --alert-exec /path/hook.sh
-# hook env: DUX_PATH, DUX_DELTA, DUX_DELTA_HUMAN, DUX_WINDOW
 ```
 
-## Architecture
+The daemon coalesces changes in memory and flushes batched updates — **~0% CPU
+idle, low single-digit % of one core under heavy write load, zero added read
+IOPS.**
 
-Two components, one SQLite WAL file:
+---
+
+## Trust it: independent verification
+
+`dux` ships with an audit harness that checks the index against ground truth
+(`du`/`df`/`find`) and its own internal consistency, and can auto-reconcile:
+
+```bash
+sudo scripts/dux-verify.sh audit          # integrity + ground-truth cross-checks
+sudo DUX_RECONCILE=1 scripts/dux-verify.sh install-cron   # verify every 3h, self-heal
 ```
-dux CLI / TUI  ──reads──►  SQLite WAL  ◄──writes──  dux daemon (scan + fanotify)
+
+---
+
+## How it works
+
+Two components, one SQLite WAL file — no server, no second database, no eBPF:
+
 ```
-No socket, no second DB, no eBPF.
+dux CLI / TUI  ──reads──►  SQLite WAL index  ◄──writes──  dux daemon (scan + fanotify)
+```
+
+The daemon uses fanotify **FID mode** (`open_by_handle_at`) to track
+**create / delete / rename / dir-creation / growth** live across every mounted
+filesystem.
+
+**Status & limitations** (disk usage = allocated blocks like `du`; live tracking
+needs the daemon running; one tree per index; hardlinks counted once) are
+documented honestly in **[docs/architecture-analysis-and-roadmap.md](docs/architecture-analysis-and-roadmap.md)**.
+
+> Note: an old X11 tool named `xdu` exists in Debian/Ubuntu — this project is `dux`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
