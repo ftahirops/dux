@@ -124,6 +124,10 @@ impl Store {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "temp_store", "MEMORY")?;
         conn.pragma_update(None, "cache_size", -64_000)?; // ~64MB page cache
+        // Cap the WAL: on checkpoint the file is truncated back to this size
+        // instead of growing without bound (a long-lived reader + PASSIVE
+        // checkpoints could otherwise let the -wal file balloon to many GB).
+        conn.pragma_update(None, "journal_size_limit", 128 * 1024 * 1024)?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
         Ok(())
     }
