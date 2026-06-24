@@ -139,6 +139,7 @@ pub fn run_daemon(
         .ok();
     let flush_every = Duration::from_millis(flush_ms);
     let mut last_flush = Instant::now();
+    let mut last_ckpt = Instant::now();
     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
     let mut pending: HashMap<PathBuf, Op> = HashMap::new();
     let mut buf = [0u8; 1 << 15];
@@ -175,13 +176,18 @@ pub fn run_daemon(
             }
             // Heartbeat EVERY cycle, independent of flush success — a failing
             // flush must not make `daemon_live` read false (which would let a
-            // concurrent `dux scan` corrupt the index).
+            // concurrent `dux scan` corrupt the index). Cheap, kept fresh.
             if let Err(e) = store.set_meta("daemon_heartbeat", &now_secs().to_string()) {
                 tracing::warn!("heartbeat write failed: {e}");
             }
-            // periodically checkpoint the WAL so a long-lived TUI reader can't let
-            // -wal grow unbounded
-            let _ = store.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+            // Checkpoint the WAL occasionally with PASSIVE — never every flush and
+            // never TRUNCATE: TRUNCATE blocks on a live TUI reader (up to the busy
+            // timeout), which stalls the daemon, burns CPU and freezes the heartbeat.
+            // PASSIVE reclaims what it can without blocking; ~every 60s is plenty.
+            if last_ckpt.elapsed() >= Duration::from_secs(60) {
+                let _ = store.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
+                last_ckpt = Instant::now();
+            }
             last_flush = Instant::now();
         }
     }

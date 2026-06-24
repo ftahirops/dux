@@ -375,7 +375,7 @@ pub fn status(store: &Store) -> Result<String> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
     let hb_age = crate::util::now_secs() - hb;
-    if hb != 0 && hb_age <= 10 {
+    if hb != 0 && hb_age <= 30 {
         out.push_str("daemon:     live (tracks create/delete/rename/growth)");
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
@@ -383,7 +383,7 @@ pub fn status(store: &Store) -> Result<String> {
     Ok(out)
 }
 
-/// True when the watch daemon has emitted a heartbeat within the last 10s.
+/// True when the watch daemon has emitted a heartbeat within the last 30s.
 pub fn daemon_live(store: &Store) -> bool {
     let hb: i64 = store
         .get_meta("daemon_heartbeat")
@@ -391,5 +391,5 @@ pub fn daemon_live(store: &Store) -> bool {
         .flatten()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    hb != 0 && (crate::util::now_secs() - hb) <= 10
+    hb != 0 && (crate::util::now_secs() - hb) <= 30
 }
