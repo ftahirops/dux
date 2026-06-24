@@ -401,6 +401,9 @@ fn parse_size(s: &str) -> Result<i64> {
         .trim()
         .parse()
         .map_err(|_| anyhow::anyhow!("invalid size"))?;
+    if !n.is_finite() || n < 0.0 {
+        anyhow::bail!("size must be a non-negative number");
+    }
     let mult = match unit.to_uppercase().as_str() {
         "" | "B" => 1.0,
         "K" | "KB" | "KIB" => 1024.0,
@@ -409,7 +412,11 @@ fn parse_size(s: &str) -> Result<i64> {
         "T" | "TB" | "TIB" => 1024.0_f64.powi(4),
         other => anyhow::bail!("unknown size unit: {other}"),
     };
-    Ok((n * mult) as i64)
+    let bytes = n * mult;
+    if bytes >= i64::MAX as f64 {
+        anyhow::bail!("size too large");
+    }
+    Ok(bytes as i64)
 }
 
 #[cfg(test)]

@@ -106,7 +106,10 @@ pub fn parse_duration(s: &str) -> Result<i64> {
             .context("duration needs a unit, e.g. 1h, 30m, 7d")?,
     );
     let n: i64 = num.trim().parse().context("invalid duration number")?;
-    let mult = match unit {
+    if n < 0 {
+        anyhow::bail!("duration must not be negative");
+    }
+    let mult: i64 = match unit {
         "s" => 1,
         "m" => 60,
         "h" => 3600,
@@ -114,7 +117,7 @@ pub fn parse_duration(s: &str) -> Result<i64> {
         "w" => 604800,
         other => anyhow::bail!("unknown duration unit: {other}"),
     };
-    Ok(n * mult)
+    n.checked_mul(mult).context("duration too large")
 }
 
 pub fn human(bytes: i64) -> String {
@@ -122,11 +125,11 @@ pub fn human(bytes: i64) -> String {
     format_size(bytes.max(0) as u64, BINARY)
 }
 
-/// Human-readable "time ago".
+/// Human-readable "time ago" — coarse (no ticking seconds).
 pub fn ago(secs: i64) -> String {
     let d = (now_secs() - secs).max(0);
     if d < 60 {
-        format!("{d}s")
+        "now".to_string()
     } else if d < 3600 {
         format!("{}m", d / 60)
     } else if d < 86400 {

@@ -21,6 +21,14 @@ enum Metric {
     Inodes,
 }
 
+/// Which section has keyboard focus (Tab cycles).
+#[derive(Clone, Copy, PartialEq)]
+enum Focus {
+    Tree,
+    Growth,
+    Files,
+}
+
 /// One visible row in the expandable tree.
 struct Row {
     dev: i64,
@@ -44,7 +52,7 @@ struct App {
     root_dev: i64,
     root_inode: i64,
     top_growth: Vec<(String, i64)>,
-    top_files: Vec<(String, i64)>,
+    top_files: Vec<(String, i64, i64, i64)>, // path, blocks, mtime, recent growth/h
     total_size: i64,
     last_scan: i64,
     window_secs: i64,
@@ -59,6 +67,10 @@ struct App {
     growth_calc: Instant,
     items: i64,          // total indexed nodes (files + dirs)
     growth_per_day: i64, // extrapolated from the last hour of change log
+    focus: Focus,        // which section the keyboard drives
+    gsel: usize,         // selected row in the Fastest-Growth panel
+    fsel: usize,         // selected row in the Largest-Files panel
+    detail: String,      // full path of the current selection (shown in footer)
 }
 
 /// WinDirStat-style live tree: folders expand inline beneath their parent (the
@@ -95,9 +107,14 @@ pub fn run(store: &Store, start: Option<(i64, i64)>) -> Result<()> {
         growth_calc: Instant::now() - Duration::from_secs(60),
         items: 0,
         growth_per_day: 0,
+        focus: Focus::Tree,
+        gsel: 0,
+        fsel: 0,
+        detail: String::new(),
     };
     app.init_root(store)?;
     app.refresh_panels(store)?;
+    app.update_detail(store);
 
     // Restore the terminal even on panic (panic=abort still runs hooks).
     let prev_hook = std::panic::take_hook();
@@ -176,12 +193,12 @@ impl App {
                chg(dev,ino,d) AS (
                  SELECT dev_id,inode,SUM(delta) FROM changes WHERE ts>=?1 GROUP BY dev_id,inode
                ),
-               anc(dev,ino,d) AS (
-                 SELECT dev,ino,d FROM chg
+               anc(dev,ino,d,depth) AS (
+                 SELECT dev,ino,d,0 FROM chg
                  UNION ALL
-                 SELECT n.parent_dev,n.parent_inode,a.d FROM anc a
+                 SELECT n.parent_dev,n.parent_inode,a.d,a.depth+1 FROM anc a
                  JOIN nodes n ON n.dev_id=a.dev AND n.inode=a.ino
-                 WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode)
+                 WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND a.depth<4096
                )
              SELECT dev,ino,SUM(d) FROM anc GROUP BY dev,ino",
         ) {
@@ -430,21 +447,55 @@ impl App {
             .collect();
 
         let mut fs = store.conn.prepare(
-            "SELECT dev_id, inode, size FROM nodes WHERE deleted=0 AND kind!='d'
-             ORDER BY size DESC LIMIT 6",
+            "SELECT dev_id, inode, blocks, mtime FROM nodes WHERE deleted=0 AND kind!='d'
+             ORDER BY blocks DESC LIMIT 6",
         )?;
         let f = fs.query_map([], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
                 r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
             ))
         })?;
         self.top_files = f
             .filter_map(|x| x.ok())
-            .map(|(d, i, s)| (pr.resolve(d, i), s))
+            .map(|(d, i, blocks, mtime)| {
+                // recent write rate for this file (leaf growth from the map)
+                let growth = self.growth_map.get(&(d, i)).copied().unwrap_or(0);
+                (pr.resolve(d, i), blocks, mtime, growth)
+            })
             .collect();
+        // keep panel selections in range as panels change
+        self.gsel = self.gsel.min(self.top_growth.len().saturating_sub(1));
+        self.fsel = self.fsel.min(self.top_files.len().saturating_sub(1));
         Ok(())
+    }
+
+    /// Full path of the current selection (focused section) — shown in the footer
+    /// so long/truncated names are always fully visible.
+    fn update_detail(&mut self, store: &Store) {
+        self.detail = match self.focus {
+            Focus::Tree => self
+                .rows
+                .get(self.sel)
+                .map(|r| {
+                    store
+                        .path_of(r.dev, r.inode)
+                        .unwrap_or_else(|_| r.name.clone())
+                })
+                .unwrap_or_default(),
+            Focus::Growth => self
+                .top_growth
+                .get(self.gsel)
+                .map(|x| x.0.clone())
+                .unwrap_or_default(),
+            Focus::Files => self
+                .top_files
+                .get(self.fsel)
+                .map(|x| x.0.clone())
+                .unwrap_or_default(),
+        };
     }
 }
 
@@ -488,45 +539,86 @@ fn event_loop<B: Backend>(term: &mut Terminal<B>, app: &mut App, store: &Store) 
 
 /// Handle one keypress. Returns Ok(true) to quit.
 fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
+    // Global keys
     match code {
         KeyCode::Char('q') => return Ok(true),
-        KeyCode::Down | KeyCode::Char('j') if app.sel + 1 < app.rows.len() => app.sel += 1,
-        KeyCode::Up | KeyCode::Char('k') => app.sel = app.sel.saturating_sub(1),
-        KeyCode::Enter | KeyCode::Char(' ') => app.toggle(store)?,
-        KeyCode::Right | KeyCode::Char('l') => {
-            let r = &app.rows[app.sel];
-            if r.kind == 'd' && !r.expanded {
-                app.expanded.insert((r.dev, r.inode));
-                app.rebuild(store)?;
-            }
-            if app.sel + 1 < app.rows.len() {
-                app.sel += 1;
-            }
-        }
-        KeyCode::Left | KeyCode::Char('h') => {
-            if app.rows[app.sel].expanded {
-                let id = (app.rows[app.sel].dev, app.rows[app.sel].inode);
-                app.expanded.remove(&id);
-                app.rebuild(store)?;
-            } else {
-                app.ascend(store)?;
-            }
-        }
-        KeyCode::Char('r') => {
-            app.refresh_panels(store).ok();
-            app.rebuild(store).ok();
-        }
-        KeyCode::Char('i') => {
-            app.metric = if app.metric == Metric::Size {
-                Metric::Inodes
-            } else {
-                Metric::Size
+        KeyCode::Tab => {
+            app.focus = match app.focus {
+                Focus::Tree => Focus::Growth,
+                Focus::Growth => Focus::Files,
+                Focus::Files => Focus::Tree,
             };
-            app.rebuild(store)?;
+            app.update_detail(store);
+            return Ok(false);
         }
-        KeyCode::Home | KeyCode::Char('g') => app.sel = 0,
-        KeyCode::End | KeyCode::Char('G') => app.sel = app.rows.len().saturating_sub(1),
         _ => {}
+    }
+
+    match app.focus {
+        // ---- panels: ↑↓ select; the footer shows the full path ----
+        Focus::Growth | Focus::Files => {
+            let len = if app.focus == Focus::Growth {
+                app.top_growth.len()
+            } else {
+                app.top_files.len()
+            };
+            let sel = if app.focus == Focus::Growth {
+                &mut app.gsel
+            } else {
+                &mut app.fsel
+            };
+            match code {
+                KeyCode::Down | KeyCode::Char('j') if *sel + 1 < len => *sel += 1,
+                KeyCode::Up | KeyCode::Char('k') => *sel = sel.saturating_sub(1),
+                KeyCode::Home | KeyCode::Char('g') => *sel = 0,
+                KeyCode::End | KeyCode::Char('G') => *sel = len.saturating_sub(1),
+                _ => {}
+            }
+            app.update_detail(store);
+        }
+        // ---- tree ----
+        Focus::Tree => {
+            match code {
+                KeyCode::Down | KeyCode::Char('j') if app.sel + 1 < app.rows.len() => app.sel += 1,
+                KeyCode::Up | KeyCode::Char('k') => app.sel = app.sel.saturating_sub(1),
+                KeyCode::Enter | KeyCode::Char(' ') => app.toggle(store)?,
+                KeyCode::Right | KeyCode::Char('l') => {
+                    let r = &app.rows[app.sel];
+                    if r.kind == 'd' && !r.expanded {
+                        app.expanded.insert((r.dev, r.inode));
+                        app.rebuild(store)?;
+                    }
+                    if app.sel + 1 < app.rows.len() {
+                        app.sel += 1;
+                    }
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if app.rows[app.sel].expanded {
+                        let id = (app.rows[app.sel].dev, app.rows[app.sel].inode);
+                        app.expanded.remove(&id);
+                        app.rebuild(store)?;
+                    } else {
+                        app.ascend(store)?;
+                    }
+                }
+                KeyCode::Char('r') => {
+                    app.refresh_panels(store).ok();
+                    app.rebuild(store).ok();
+                }
+                KeyCode::Char('i') => {
+                    app.metric = if app.metric == Metric::Size {
+                        Metric::Inodes
+                    } else {
+                        Metric::Size
+                    };
+                    app.rebuild(store)?;
+                }
+                KeyCode::Home | KeyCode::Char('g') => app.sel = 0,
+                KeyCode::End | KeyCode::Char('G') => app.sel = app.rows.len().saturating_sub(1),
+                _ => {}
+            }
+            app.update_detail(store);
+        }
     }
     Ok(false)
 }
@@ -534,22 +626,19 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
 /// Single UI accent for titles/borders, so the chrome is consistent.
 const ACCENT: Color = Color::Cyan;
 
-/// SIZE is shown with ONE calm color everywhere (the bar's LENGTH conveys size,
-/// so the color doesn't need to too). This keeps the only varying color in the
-/// UI = the write-rate channel.
-const SIZE_COLOR: Color = Color::Rgb(110, 160, 210);
+/// One calm blue for all sizes (the bar's LENGTH conveys magnitude).
+const SIZE_COLOR: Color = Color::Rgb(120, 170, 215);
+/// Neutral grey for write-rate text (direction shown by ▲/▼, not by color).
+const RATE_COLOR: Color = Color::Gray;
+/// The ONLY alert color in the UI — used solely for a critically-full disk.
+const CRIT_COLOR: Color = Color::Rgb(220, 70, 70);
 
-/// WRITE-RATE channel color (bytes written in the last hour) — the ONLY color
-/// that varies in the UI: blue=static, green=low, yellow=moderate, orange=high,
-/// red=extreme.
-fn activity_color(rate_per_h: i64) -> Color {
-    const MIB: i64 = 1024 * 1024;
-    match rate_per_h {
-        r if r <= 0 => Color::Rgb(90, 130, 230),  // static (blue)
-        r if r < MIB => Color::Rgb(120, 200, 70), // low (green)
-        r if r < 50 * MIB => Color::Rgb(235, 200, 0), // moderate (yellow)
-        r if r < 500 * MIB => Color::Rgb(255, 140, 0), // high (orange)
-        _ => Color::Rgb(255, 45, 45),             // extreme (red)
+/// Border style: bright accent for the focused section, dim otherwise.
+fn focus_style(focused: bool) -> Style {
+    if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(Color::DarkGray)
     }
 }
 
@@ -643,16 +732,11 @@ fn draw(f: &mut Frame, app: &mut App) {
             Style::default().fg(Color::DarkGray),
         ),
         if app.daemon_live {
-            Span::styled(
-                "● live",
-                Style::default()
-                    .fg(Color::Rgb(120, 200, 70))
-                    .add_modifier(Modifier::BOLD),
-            )
+            Span::styled("● live", Style::default().fg(Color::DarkGray))
         } else {
             Span::styled(
                 "○ snapshot (daemon off — growth/ETA need the daemon)",
-                Style::default().fg(Color::Rgb(255, 140, 0)),
+                Style::default().fg(Color::DarkGray),
             )
         },
     ]);
@@ -663,15 +747,8 @@ fn draw(f: &mut Frame, app: &mut App) {
     let pct = fs.use_pct();
     let bar_w = 18usize;
     let filled = ((pct / 100.0) * bar_w as f64).round() as usize;
-    let full_color = if pct >= 95.0 {
-        Color::Rgb(255, 45, 45)
-    } else if pct >= 85.0 {
-        Color::Rgb(255, 140, 0)
-    } else if pct >= 70.0 {
-        Color::Rgb(235, 200, 0)
-    } else {
-        Color::Rgb(120, 200, 70)
-    };
+    // calm blue normally; the ONE red alert only when the disk is critically full
+    let full_color = if pct >= 95.0 { CRIT_COLOR } else { SIZE_COLOR };
     let gbar: String = (0..bar_w)
         .map(|i| if i < filled { '█' } else { '░' })
         .collect();
@@ -715,10 +792,7 @@ fn draw(f: &mut Frame, app: &mut App) {
         Span::styled(human(fs.avail), Style::default()),
         sep(),
         label("Growth"),
-        Span::styled(
-            growth_str,
-            Style::default().fg(activity_color(app.growth_per_day / 24)),
-        ),
+        Span::styled(growth_str, Style::default().fg(RATE_COLOR)),
         sep(),
         label("ETA full"),
         Span::styled(eta_str, Style::default().add_modifier(Modifier::BOLD)),
@@ -744,18 +818,19 @@ fn draw(f: &mut Frame, app: &mut App) {
     } else {
         app.top_growth
             .iter()
-            .map(|(p, d)| {
-                // write-rate palette — same channel/colors as the tree dots
-                Line::from(vec![
-                    Span::styled("● ", Style::default().fg(activity_color(*d))),
+            .enumerate()
+            .map(|(idx, (p, d))| {
+                let mut line = Line::from(vec![
                     Span::styled(
-                        format!("{:<10}", rate_str(*d)),
-                        Style::default()
-                            .fg(activity_color(*d))
-                            .add_modifier(Modifier::BOLD),
+                        format!(" {:<11}", rate_str(*d)),
+                        Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(short(p, 40)),
-                ])
+                ]);
+                if app.focus == Focus::Growth && idx == app.gsel {
+                    line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
+                }
+                line
             })
             .collect()
     };
@@ -764,6 +839,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
+                .border_style(focus_style(app.focus == Focus::Growth))
                 .title(Span::styled(
                     " 🔥 Fastest Growth (1h) ",
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
@@ -774,15 +850,26 @@ fn draw(f: &mut Frame, app: &mut App) {
     let file_items: Vec<Line> = app
         .top_files
         .iter()
-        .map(|(p, s)| {
-            // size = the one calm SIZE_COLOR, same as the tree
-            Line::from(vec![
+        .enumerate()
+        .map(|(idx, (p, s, mtime, growth))| {
+            // size (calm) · age · "growing" marker (neutral) · path
+            let mark = if *growth != 0 { "▲ " } else { "  " };
+            let mut line = Line::from(vec![
                 Span::styled(
-                    format!(" {:<11}", human(*s)),
+                    format!(" {:>9} ", human(*s)),
                     Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(short(p, 42)),
-            ])
+                Span::styled(
+                    format!("{:>4} ", ago(*mtime)),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(mark, Style::default().fg(RATE_COLOR)),
+                Span::raw(short(p, 34)),
+            ]);
+            if app.focus == Focus::Files && idx == app.fsel {
+                line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
+            }
+            line
         })
         .collect();
     f.render_widget(
@@ -790,6 +877,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
+                .border_style(focus_style(app.focus == Focus::Files))
                 .title(Span::styled(
                     " 📦 Largest Files ",
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
@@ -843,10 +931,8 @@ fn draw(f: &mut Frame, app: &mut App) {
         } else {
             r.name.clone()
         };
-        // WRITE-RATE channel: r.growth = bytes in the last hour. Separate palette
-        // (blue=static → red=extreme), shown as a dot + rate, never sharing the
-        // size color.
-        let act = activity_color(r.growth);
+        // WRITE-RATE: r.growth = bytes in the last hour, shown as a neutral
+        // ▲/▼ rate (direction by arrow, not by color).
         let rate = rate_str(r.growth);
 
         let line = Line::from(vec![
@@ -858,9 +944,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                 format!("{} ", bar(ratio, 12)),
                 Style::default().fg(size_col),
             ),
-            // activity indicator + rate (own color channel)
-            Span::styled("● ", Style::default().fg(act)),
-            Span::styled(format!("{rate:<9} "), Style::default().fg(act)),
+            Span::styled(format!("{rate:<11} "), Style::default().fg(RATE_COLOR)),
             Span::raw(indent),
             Span::styled(marker, Style::default().fg(Color::DarkGray)),
             Span::styled(
@@ -875,21 +959,22 @@ fn draw(f: &mut Frame, app: &mut App) {
             ),
         ]);
         let mut line = line;
-        if selected {
+        if selected && app.focus == Focus::Tree {
             line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
         }
         lines.push(line);
     }
     let title = if inode_mode {
-        " 🌳 Tree — bar=INODE count · ●=write rate (blue→red) "
+        " 🌳 Tree — bar = inode count · ▲ = write rate "
     } else {
-        " 🌳 Tree — bar=SIZE · ●=write rate (blue→red) "
+        " 🌳 Tree — bar = size · ▲ = write rate "
     };
     f.render_widget(
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
+                .border_style(focus_style(app.focus == Focus::Tree))
                 .title(Span::styled(
                     title,
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
@@ -898,11 +983,31 @@ fn draw(f: &mut Frame, app: &mut App) {
         body,
     );
 
-    // footer
-    let mode = if inode_mode { "inodes" } else { "size" };
-    let footer = Line::from(format!(
-        " ↑↓ move   → / ⏎ expand   ← collapse/up   i size⇄inodes   r refresh   q quit    [{mode}] "
-    ))
-    .style(Style::default().fg(Color::Black).bg(Color::DarkGray));
-    f.render_widget(Paragraph::new(footer), rows[4]);
+    // footer: compact key legend + the FULL path of the current selection
+    // (long/truncated panel names are always fully readable here).
+    let foot = rows[4];
+    let legend = " Tab section · ↑↓ move · →/⏎ expand · i size⇄inodes · q quit │ ";
+    let avail = (foot.width as usize).saturating_sub(legend.chars().count() + 1);
+    let path = &app.detail;
+    let shown = if path.chars().count() > avail && avail > 1 {
+        let tail: String = path
+            .chars()
+            .rev()
+            .take(avail - 1)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        format!("…{tail}")
+    } else {
+        path.clone()
+    };
+    let footer = Line::from(vec![
+        Span::styled(legend, Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            shown,
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(footer), foot);
 }

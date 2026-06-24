@@ -29,6 +29,7 @@ const FAN_ONDIR: u64 = 0x4000_0000;
 const FAN_EVENT_METADATA_LEN: usize = 24;
 const FAN_EVENT_INFO_TYPE_DFID_NAME: u8 = 2;
 const MAX_HANDLE_SZ: usize = 128;
+const FANOTIFY_METADATA_VERSION: u8 = 3;
 
 #[repr(C)]
 struct FanotifyEventMetadata {
@@ -109,6 +110,7 @@ pub fn run_daemon(
         }
     }
     if fsfds.is_empty() {
+        unsafe { libc::close(fan) };
         anyhow::bail!(
             "no watchable filesystem found under {}",
             root_canon.display()
@@ -170,11 +172,16 @@ pub fn run_daemon(
                         tracing::warn!("alert check error: {e}");
                     }
                 }
-            } else {
-                store
-                    .set_meta("daemon_heartbeat", &now_secs().to_string())
-                    .ok();
             }
+            // Heartbeat EVERY cycle, independent of flush success — a failing
+            // flush must not make `daemon_live` read false (which would let a
+            // concurrent `dux scan` corrupt the index).
+            if let Err(e) = store.set_meta("daemon_heartbeat", &now_secs().to_string()) {
+                tracing::warn!("heartbeat write failed: {e}");
+            }
+            // periodically checkpoint the WAL so a long-lived TUI reader can't let
+            // -wal grow unbounded
+            let _ = store.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
             last_flush = Instant::now();
         }
     }
@@ -198,8 +205,7 @@ fn real_mounts(root: &Path, one_fs: bool) -> Vec<PathBuf> {
             if f.len() < 5 {
                 continue;
             }
-            let mp = unescape_mount(f[4]);
-            let p = PathBuf::from(&mp);
+            let p = unescape_mount(f[4]);
             if (root == Path::new("/") || p == *root || p.starts_with(root))
                 && !crate::scan::is_pseudo_fs(&p)
             {
@@ -211,24 +217,26 @@ fn real_mounts(root: &Path, one_fs: bool) -> Vec<PathBuf> {
 }
 
 /// mountinfo octal-escapes space/tab/newline/backslash as \040 etc.
-fn unescape_mount(s: &str) -> String {
+/// Works on raw bytes so non-ASCII (UTF-8) mountpoints survive intact.
+fn unescape_mount(s: &str) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
     let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' && i + 3 < b.len() {
+        if b[i] == b'\\' && i + 4 <= b.len() {
             if let Ok(n) =
                 u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 4]).unwrap_or(""), 8)
             {
-                out.push(n as char);
+                out.push(n);
                 i += 4;
                 continue;
             }
         }
-        out.push(b[i] as char);
+        out.push(b[i]);
         i += 1;
     }
-    out
+    PathBuf::from(std::ffi::OsStr::from_bytes(&out))
 }
 
 /// The filesystem id (matches the fanotify event fsid) for the fs containing path.
@@ -313,6 +321,11 @@ fn parse_events(
     while buf.len() >= FAN_EVENT_METADATA_LEN {
         let meta: FanotifyEventMetadata =
             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
+        // a version mismatch means the struct layout differs from ours — bail
+        // rather than misinterpret every subsequent offset.
+        if meta.vers != FANOTIFY_METADATA_VERSION {
+            break;
+        }
         let len = meta.event_len as usize;
         if len < FAN_EVENT_METADATA_LEN || len > buf.len() {
             break;
@@ -498,12 +511,12 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
         let mut get_parent =
             tx.prepare("SELECT parent_dev, parent_inode FROM nodes WHERE dev_id=?1 AND inode=?2")?;
         let mut descendants = tx.prepare(
-            "WITH RECURSIVE sub(d,i) AS (
-                SELECT ?1,?2
+            "WITH RECURSIVE sub(d,i,depth) AS (
+                SELECT ?1,?2,0
                 UNION ALL
-                SELECT n.dev_id,n.inode FROM nodes n
+                SELECT n.dev_id,n.inode,sub.depth+1 FROM nodes n
                 JOIN sub ON n.parent_dev=sub.d AND n.parent_inode=sub.i
-                WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode)
+                WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND sub.depth<4096
              ) SELECT d,i FROM sub",
         )?;
         let mut del_node = tx.prepare("DELETE FROM nodes WHERE dev_id=?1 AND inode=?2")?;
@@ -616,6 +629,39 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                     })
                     .ok();
                 if let Some((_oldname, opdev, opino, _k, rb, ri)) = existing {
+                    // Cycle guard: never relocate a node under its OWN subtree
+                    // (a stale tree could otherwise install A→B→A and hang the
+                    // recursive CTEs). Walk up from the new parent looking for
+                    // the node being moved.
+                    let (mut cd, mut ci) = (npdev, npino);
+                    let mut g = 0;
+                    let mut cycle = false;
+                    loop {
+                        if cd == dev && ci == ino {
+                            cycle = true;
+                            break;
+                        }
+                        g += 1;
+                        if g > 4096 {
+                            break;
+                        }
+                        match get_parent
+                            .query_row(params![cd, ci], |r| {
+                                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                            })
+                            .ok()
+                        {
+                            Some((pd, pi)) if !(pd == cd && pi == ci) => {
+                                cd = pd;
+                                ci = pi;
+                            }
+                            _ => break,
+                        }
+                    }
+                    if cycle {
+                        tracing::debug!("skip move-to (would cycle): dev={dev} ino={ino}");
+                        return Ok(());
+                    }
                     // RELOCATE: move the row + its (unchanged) subtree to the new
                     // parent. Children reference (dev,ino) so they follow for free.
                     walk_ancestors(&mut bump, &mut get_parent, opdev, opino, -rb, -ri)?;

@@ -37,13 +37,15 @@ pub fn resolve_scope(store: &Store, path: &Path) -> Result<Option<(i64, i64)>> {
 
 /// A SQL predicate restricting `nodes` rows to descendants of (dev,inode).
 /// Uses a recursive CTE over parent_inode. The two bind params are dev then inode.
+// `depth` bound mirrors the 4096 cycle-guard used by the Rust tree walkers — a
+// corrupt parent pointer (cycle) must not make this recursion run unbounded.
 const SCOPE_PREDICATE: &str = " AND (dev_id,inode) IN (
-    WITH RECURSIVE sub(d,i) AS (
-        SELECT ?,?
+    WITH RECURSIVE sub(d,i,depth) AS (
+        SELECT ?,?,0
         UNION ALL
-        SELECT n.dev_id, n.inode FROM nodes n
+        SELECT n.dev_id, n.inode, sub.depth+1 FROM nodes n
         JOIN sub ON n.parent_inode=sub.i AND n.parent_dev=sub.d
-        WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode)
+        WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND sub.depth<4096
     ) SELECT d,i FROM sub
 )";
 

@@ -93,6 +93,22 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     let n_bytes = Arc::new(AtomicI64::new((meta.blocks() as i64) * 512));
     let done = Arc::new(AtomicBool::new(false));
     let indexing = Arc::new(AtomicBool::new(false));
+    // RAII guard: signals `done` and joins the printer on EVERY exit path
+    // (including an early `?` error in a later phase), so the thread never leaks
+    // or keeps spinning.
+    struct ProgressGuard {
+        done: Arc<AtomicBool>,
+        handle: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Drop for ProgressGuard {
+        fn drop(&mut self) {
+            self.done.store(true, Ordering::Relaxed);
+            if let Some(h) = self.handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
+
     let progress_thread = if opts.progress {
         let (f, d, b, dn, ix) = (
             n_files.clone(),
@@ -126,6 +142,10 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         }))
     } else {
         None
+    };
+    let progress_guard = ProgressGuard {
+        done: done.clone(),
+        handle: progress_thread,
     };
 
     // ---- phase 1: parallel walk, collect raw nodes ----
@@ -274,10 +294,9 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         errors: n_errors.load(Ordering::Relaxed),
     };
 
-    done.store(true, Ordering::Relaxed);
-    if let Some(t) = progress_thread {
-        t.join().ok();
-    }
+    // stop + join the printer thread (the guard would also do this on early
+    // error returns); then clear the progress line.
+    drop(progress_guard);
     if opts.progress {
         eprint!("\r\x1b[K");
         std::io::stderr().flush().ok();
