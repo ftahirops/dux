@@ -61,13 +61,33 @@ the culprit — not just the symptom.**
 
 ---
 
+## Install
+
+**Debian / Ubuntu** — download the `.deb` from the [latest release](https://github.com/ftahirops/dux/releases/latest):
+```bash
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.1.0_amd64.deb
+sudo dpkg -i dux_0.1.0_amd64.deb
+```
+
+**RHEL / Fedora / openSUSE**:
+```bash
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.1.0-1.x86_64.rpm
+sudo rpm -i dux-0.1.0-1.x86_64.rpm
+```
+
+Both packages install `/usr/bin/dux` and a systemd unit that builds the index on
+first start and then runs the realtime daemon — so after install you can go
+straight to `dux`.
+
+**From source** (Rust toolchain):
+```bash
+cargo build --release
+sudo install -m755 target/release/dux /usr/local/bin/dux
+```
+
 ## 60-second start
 
 ```bash
-# build + install
-cargo build --release
-sudo install -m755 target/release/dux /usr/local/bin/dux
-
 # index once, then everything is instant
 sudo dux scan /
 dux                       # live tree UI (↑↓ move · → expand · i size⇄inodes · q quit)
