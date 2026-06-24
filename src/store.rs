@@ -194,6 +194,11 @@ impl Store {
             "ALTER TABLE nodes ADD COLUMN parent_dev INTEGER NOT NULL DEFAULT 0",
             [],
         );
+        // FTS docid for this node's name row, so deletes are O(1) by rowid
+        // instead of a full scan of the (UNINDEXED) names_fts.dev/ino columns.
+        let _ = self
+            .conn
+            .execute("ALTER TABLE nodes ADD COLUMN fts_rowid INTEGER", []);
         self.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
         Ok(())
     }

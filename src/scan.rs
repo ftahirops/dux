@@ -254,8 +254,8 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
             let mut stmt = tx.prepare(
                 "INSERT OR REPLACE INTO nodes
                  (dev_id,inode,parent_dev,parent_inode,name,kind,size,blocks,recursive_bytes,
-                  recursive_inodes,uid,gid,mode,mtime,last_seen,deleted)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,0)",
+                  recursive_inodes,uid,gid,mode,mtime,last_seen,fts_rowid,deleted)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0)",
             )?;
             let mut fts = tx.prepare("INSERT INTO names_fts(name,dev,ino) VALUES(?1,?2,?3)")?;
             for j in idx..end {
@@ -263,6 +263,10 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                 if !primary[j] {
                     continue; // extra hardlink: no row, no FTS name (one per inode)
                 }
+                // insert the FTS name first so we can store its rowid on the node
+                // (lets the daemon delete the name in O(1) by rowid later).
+                fts.execute(params![n.name, n.dev, n.inode])?;
+                let fts_rowid = tx.last_insert_rowid();
                 stmt.execute(params![
                     n.dev,
                     n.inode,
@@ -279,8 +283,8 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                     n.mode,
                     n.mtime,
                     now,
+                    fts_rowid,
                 ])?;
-                fts.execute(params![n.name, n.dev, n.inode])?;
             }
         }
         tx.commit()?;
