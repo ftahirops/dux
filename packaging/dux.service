@@ -31,10 +31,41 @@ MemoryHigh=2G
 MemoryMax=4G
 
 # fanotify needs CAP_SYS_ADMIN; reading all files needs DAC override.
-# NOTE: do NOT enable ProtectSystem/ProtectHome/PrivateTmp etc. — those put the
-# service in a private mount namespace, and a fanotify filesystem mark there
-# would not see writes happening through the host's mounts.
+# NOTE: do NOT enable ProtectSystem/ProtectHome/PrivateTmp/PrivateMounts/
+# ReadOnlyPaths etc. — those put the service in a PRIVATE MOUNT NAMESPACE, and a
+# fanotify filesystem mark there would not see writes through the host's mounts.
 AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+# Cap what the process can ever acquire to exactly the two it needs (CAP_SYS_ADMIN
+# is broad, so this is the main lever for reducing the privilege surface).
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+# Hardening that does NOT require a private mount namespace (all fanotify-safe):
+NoNewPrivileges=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+# The alert exec (--alert-exec) and nothing else needs the network; if you don't
+# use it you can also set: RestrictAddressFamilies=AF_UNIX
+
+# --- index exposure (READ THIS) -------------------------------------------
+# The index at /var/lib/dux/dux.db contains the FULL FILENAME LIST of the root
+# filesystem, including names inside directories a user could not otherwise
+# traverse. By default it is world-readable (0644) so unprivileged `dux find` /
+# `dux status` work (dux is a companion to user-facing tooling). This is an
+# information-disclosure tradeoff. To make the index ROOT-ONLY instead, set:
+#     StateDirectory=dux
+#     StateDirectoryMode=0700
+#     UMask=0077
+# (the daemon then creates dux.db 0600); unprivileged users lose direct query
+# access and must go through a privileged wrapper.
 
 [Install]
 WantedBy=multi-user.target

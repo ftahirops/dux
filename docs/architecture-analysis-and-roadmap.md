@@ -1,5 +1,16 @@
 # xdu Architecture Analysis and Developer Specification
 
+> **STATUS (2026-06-25): historical — predates schema v4.** This document
+> describes an early `xdu`/`dux` snapshot. The schema it references is obsolete:
+> the single `nodes` table has been split into **`inodes`** (one row per
+> `(dev,inode)` with recursive directory totals) and **`dirents`** (one row per
+> path/name, BLOB-named, `UNIQUE(parent_dev,parent_inode,name)`); the `changes`
+> table was replaced by the bucketed **`growth`** table (5-minute buckets). Many
+> blockers listed below (hardlink paths, delete/rename/metadata handling,
+> per-inode path records, tests) are now implemented — see
+> `src/store.rs` for the authoritative schema and `docs/full-code-audit.md` for
+> the remediation history. Treat the table/column names below as out of date.
+
 ## Scope of This Review
 
 This document analyzes the repository as it exists now. It is based on the Rust
