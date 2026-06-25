@@ -185,6 +185,11 @@ fn real_main() -> Result<()> {
                      or pass --force to override (may corrupt the index)."
                 );
             }
+            // Exclusive per-db lock for the whole scan: blocks a second scan or a
+            // daemon from writing the same index concurrently (the heartbeat check
+            // above is only advisory; this is the hard guard). Held until `_lock`
+            // drops at the end of this arm.
+            let _lock = util::lock_db(&db)?;
             let opts = scan::ScanOptions {
                 one_file_system,
                 exclude,

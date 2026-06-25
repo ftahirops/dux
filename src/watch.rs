@@ -5,7 +5,17 @@ use rusqlite::params;
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+/// Set by the SIGTERM/SIGINT handler so the daemon loop can flush pending events
+/// and exit cleanly (systemd sends SIGTERM on stop). Async-signal-safe: the
+/// handler only stores to this flag.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_term(_sig: libc::c_int) {
+    SHUTDOWN.store(true, Ordering::SeqCst);
+}
 
 // ---- fanotify constants (FID / dirent-event mode) ----
 const FAN_CLASS_NOTIF: libc::c_uint = 0x0000_0000;
@@ -76,6 +86,36 @@ pub struct AlertConfig {
 
 /// Run the watch daemon. Uses fanotify FID mode so creates, deletes, renames,
 /// and size-growth are all tracked live — no rescan needed for normal activity.
+/// True if the index at `db` is already rooted at `root_canon` (its stored
+/// root_dev/root_inode match). Returns true when it can't tell (missing meta /
+/// unreadable / unstattable root) so we don't trigger a spurious rebuild — the
+/// needs_rebuild check handles the genuinely-broken cases.
+fn root_matches(db: &Path, root_canon: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let want = match std::fs::symlink_metadata(root_canon) {
+        Ok(m) => (m.dev() as i64, m.ino() as i64),
+        Err(_) => return true,
+    };
+    let store = match Store::open_ro(db) {
+        Ok(s) => s,
+        Err(_) => return true,
+    };
+    let rdev: Option<i64> = store
+        .get_meta("root_dev")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    let rino: Option<i64> = store
+        .get_meta("root_inode")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    match (rdev, rino) {
+        (Some(d), Some(i)) => (d, i) == want,
+        _ => true,
+    }
+}
+
 pub fn run_daemon(
     db: &Path,
     root: &Path,
@@ -83,10 +123,18 @@ pub fn run_daemon(
     one_file_system: bool,
     alert: Option<AlertConfig>,
 ) -> Result<()> {
-    // Never start on a missing or schema-incompatible index and silently present
-    // an empty/wrong tree. Rebuild atomically first (a no-op for a current index).
-    if Store::needs_rebuild(db) {
-        tracing::info!("index missing or schema-incompatible — rebuilding before watching");
+    // Exclusive per-db lock for the daemon's whole lifetime — no second daemon or
+    // concurrent scan can write this index (the heartbeat is only advisory). Held
+    // until `_lock` drops when run_daemon returns.
+    let _lock = crate::util::lock_db(db).context("acquiring daemon db lock")?;
+    let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+    // Never start on a missing/incompatible index, OR one indexed for a DIFFERENT
+    // root than we're told to watch (that would attach live events to the wrong
+    // tree → missing parents, wrong totals). Rebuild atomically in either case;
+    // a no-op when the index is current AND already rooted here.
+    if Store::needs_rebuild(db) || !root_matches(db, &root_canon) {
+        tracing::info!("index missing, schema-incompatible, or rooted elsewhere — rebuilding before watching");
         let opts = crate::scan::ScanOptions {
             one_file_system,
             progress: false,
@@ -95,7 +143,6 @@ pub fn run_daemon(
         crate::scan::rebuild_atomic(db, root, &opts).context("rebuilding index before watch")?;
     }
     let mut store = Store::open_rw(db)?;
-    let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
     let fan = init_fanotify().context("fanotify_init (need CAP_SYS_ADMIN, kernel >= 5.9)")?;
 
@@ -146,6 +193,14 @@ pub fn run_daemon(
         );
     }
 
+    // Flush pending events on SIGTERM/SIGINT instead of dropping up to a full
+    // flush window on shutdown (systemd stops the daemon with SIGTERM).
+    unsafe {
+        let h = on_term as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGTERM, h);
+        libc::signal(libc::SIGINT, h);
+    }
+
     crate::util::write_heartbeat(db);
     let flush_every = Duration::from_millis(flush_ms);
     let mut last_flush = Instant::now();
@@ -155,6 +210,16 @@ pub fn run_daemon(
     let mut buf = [0u8; 1 << 15];
 
     loop {
+        if SHUTDOWN.load(Ordering::SeqCst) {
+            if !pending.is_empty() {
+                if let Err(e) = flush(&mut store, &mut pending, db) {
+                    tracing::warn!("final flush on shutdown failed (events retried on restart): {e}");
+                }
+            }
+            tracing::info!("dux daemon: received SIGTERM/SIGINT — flushed pending, exiting");
+            unsafe { libc::close(fan) };
+            return Ok(());
+        }
         let n = unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
         if n > 0 {
             parse_events(

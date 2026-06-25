@@ -33,6 +33,42 @@ pub fn db_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("dux.db"))
 }
 
+/// Acquire an EXCLUSIVE, non-blocking advisory lock for `db`, held for the
+/// lifetime of the returned file handle. This is the real mutual-exclusion guard
+/// (the heartbeat is only advisory): two concurrent writers — scan+scan,
+/// scan+daemon, or daemon+daemon — race on the same `<db>.new`/WAL and corrupt
+/// the index. Both `dux scan` and the daemon take this before touching the DB.
+pub fn lock_db(db: &std::path::Path) -> Result<std::fs::File> {
+    use std::os::unix::io::AsRawFd;
+    let mut lp = db.to_path_buf().into_os_string();
+    lp.push(".lock");
+    let lock_path = PathBuf::from(lp);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("opening lock {}", lock_path.display()))?;
+    // LOCK_EX | LOCK_NB: fail fast rather than block if another process holds it.
+    let rc = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        let e = std::io::Error::last_os_error();
+        if matches!(e.raw_os_error(), Some(libc::EWOULDBLOCK)) {
+            anyhow::bail!(
+                "another dux scan or daemon already holds {} — stop it first \
+                 (e.g. `sudo systemctl stop dux`) before scanning",
+                db.display()
+            );
+        }
+        return Err(anyhow::anyhow!("flock {}: {e}", lock_path.display()));
+    }
+    Ok(f)
+}
+
 /// Live filesystem capacity for the filesystem containing `path` (via statvfs).
 #[derive(Default, Clone, Copy)]
 #[allow(dead_code)] // free/inodes_free kept for completeness / future use
