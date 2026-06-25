@@ -98,6 +98,26 @@ pub fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Runtime heartbeat file (tmpfs). Liveness lives here, not in SQLite, so an
+/// idle daemon performs zero database/WAL writes. systemd's RuntimeDirectory
+/// creates /run/dux and removes it on stop, so the file vanishes when the
+/// daemon dies — no stale "live" reading.
+pub const HEARTBEAT_PATH: &str = "/run/dux/heartbeat";
+
+/// Stamp the heartbeat file with the current epoch seconds (best-effort).
+pub fn write_heartbeat() {
+    let _ = std::fs::create_dir_all("/run/dux");
+    let _ = std::fs::write(HEARTBEAT_PATH, now_secs().to_string());
+}
+
+/// Epoch seconds of the last heartbeat, or 0 if absent/unreadable.
+pub fn read_heartbeat() -> i64 {
+    std::fs::read_to_string(HEARTBEAT_PATH)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 /// Parse durations like "1h", "30m", "24h", "7d", "90s" into seconds.
 pub fn parse_duration(s: &str) -> Result<i64> {
     let s = s.trim();

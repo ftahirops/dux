@@ -134,9 +134,7 @@ pub fn run_daemon(
         );
     }
 
-    store
-        .set_meta("daemon_heartbeat", &now_secs().to_string())
-        .ok();
+    crate::util::write_heartbeat();
     let flush_every = Duration::from_millis(flush_ms);
     let mut last_flush = Instant::now();
     let mut last_ckpt = Instant::now();
@@ -176,10 +174,9 @@ pub fn run_daemon(
             }
             // Heartbeat EVERY cycle, independent of flush success — a failing
             // flush must not make `daemon_live` read false (which would let a
-            // concurrent `dux scan` corrupt the index). Cheap, kept fresh.
-            if let Err(e) = store.set_meta("daemon_heartbeat", &now_secs().to_string()) {
-                tracing::warn!("heartbeat write failed: {e}");
-            }
+            // concurrent `dux scan` corrupt the index). Written to tmpfs, so
+            // an idle daemon makes no database/WAL writes at all.
+            crate::util::write_heartbeat();
             // Checkpoint the WAL occasionally with PASSIVE — never every flush and
             // never TRUNCATE: TRUNCATE blocks on a live TUI reader (up to the busy
             // timeout), which stalls the daemon, burns CPU and freezes the heartbeat.
@@ -822,7 +819,7 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
         }
     }
     tx.commit()?;
-    store.set_meta("daemon_heartbeat", &now.to_string()).ok();
+    crate::util::write_heartbeat();
     store
         .conn
         .execute("DELETE FROM changes WHERE ts < ?1", params![now - 86400])?;

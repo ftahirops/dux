@@ -13,6 +13,11 @@ ExecStartPre=/bin/sh -c '[ -s /var/lib/dux/dux.db ] || /usr/bin/dux scan / --qui
 ExecStart=/usr/bin/dux daemon /
 Restart=on-failure
 RestartSec=5
+# Liveness heartbeat lives in /run/dux (tmpfs), not SQLite, so an idle daemon
+# makes zero DB/WAL writes. RuntimeDirectory creates it and removes it on stop,
+# so the heartbeat file vanishes when the daemon dies (no stale "live").
+RuntimeDirectory=dux
+RuntimeDirectoryMode=0755
 # First-time scan can take a while on big/slow disks; give it room.
 TimeoutStartSec=3600
 

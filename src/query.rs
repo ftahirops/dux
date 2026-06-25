@@ -369,11 +369,8 @@ pub fn status(store: &Store) -> Result<String> {
         human(total),
         age
     ));
-    // daemon liveness from heartbeat
-    let hb: i64 = store
-        .get_meta("daemon_heartbeat")?
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    // daemon liveness from the tmpfs heartbeat file
+    let hb = crate::util::read_heartbeat();
     let hb_age = crate::util::now_secs() - hb;
     if hb != 0 && hb_age <= 30 {
         out.push_str("daemon:     live (tracks create/delete/rename/growth)");
@@ -384,12 +381,7 @@ pub fn status(store: &Store) -> Result<String> {
 }
 
 /// True when the watch daemon has emitted a heartbeat within the last 30s.
-pub fn daemon_live(store: &Store) -> bool {
-    let hb: i64 = store
-        .get_meta("daemon_heartbeat")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+pub fn daemon_live(_store: &Store) -> bool {
+    let hb = crate::util::read_heartbeat();
     hb != 0 && (crate::util::now_secs() - hb) <= 30
 }

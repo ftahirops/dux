@@ -118,7 +118,7 @@ enum Cmd {
         #[arg(default_value = "/")]
         root: PathBuf,
         /// Flush coalesced changes every N ms
-        #[arg(long, default_value_t = 500)]
+        #[arg(long, default_value_t = 2000)]
         flush_ms: u64,
         /// Only watch the root's filesystem (match `scan --one-file-system`)
         #[arg(long)]
