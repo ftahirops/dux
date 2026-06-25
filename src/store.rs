@@ -160,7 +160,6 @@ impl Store {
                 PRIMARY KEY (dev_id, inode)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(dev_id, parent_inode);
             -- children are looked up by (parent_dev, parent_inode) everywhere
             -- (TUI expand, scope CTE, daemon ancestor walk) — index it or those
             -- queries full-scan the whole table.
@@ -169,8 +168,11 @@ impl Store {
             CREATE INDEX IF NOT EXISTS idx_nodes_rsize  ON nodes(recursive_bytes DESC);
             CREATE INDEX IF NOT EXISTS idx_nodes_rinode ON nodes(recursive_inodes DESC);
             CREATE INDEX IF NOT EXISTS idx_nodes_mtime  ON nodes(mtime DESC);
-            CREATE INDEX IF NOT EXISTS idx_nodes_name   ON nodes(name);
             CREATE INDEX IF NOT EXISTS idx_nodes_uid    ON nodes(uid);
+            -- drop dead indexes from older schemas (name search uses the FTS
+            -- index; children use idx_nodes_pparent) — they wasted ~80 MB.
+            DROP INDEX IF EXISTS idx_nodes_name;
+            DROP INDEX IF EXISTS idx_nodes_parent;
 
             CREATE TABLE IF NOT EXISTS changes (
                 ts          INTEGER NOT NULL,
