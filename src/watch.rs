@@ -17,6 +17,16 @@ extern "C" fn on_term(_sig: libc::c_int) {
     SHUTDOWN.store(true, Ordering::SeqCst);
 }
 
+/// Pause index writes when the index's filesystem drops below this much free
+/// space, so the daemon can never be the process that fills the disk to 0.
+const MIN_FREE_BYTES: i64 = 256 * 1024 * 1024;
+
+/// Hard cap on un-flushed pending events. If SQLite is wedged or an event storm
+/// outruns flushing, the map would otherwise grow without bound (logical OOM).
+/// Past this we drop the backlog and mark the index dirty (reconcile via rescan)
+/// — bounded memory beats an OOM kill that loses everything anyway.
+const MAX_PENDING: usize = 500_000;
+
 // ---- fanotify constants (FID / dirent-event mode) ----
 const FAN_CLASS_NOTIF: libc::c_uint = 0x0000_0000;
 const FAN_CLOEXEC: libc::c_uint = 0x0000_0001;
@@ -253,6 +263,17 @@ pub fn run_daemon(
                 &mut pending,
                 &mut store,
             );
+            // Overload backstop: if flushing can't keep up (SQLite wedged, or a
+            // genuine storm), don't let pending grow until the daemon is OOM-killed.
+            // Drop the backlog and mark dirty so a reconcile rescan repairs it.
+            if pending.len() > MAX_PENDING {
+                tracing::warn!(
+                    "pending backlog exceeded {MAX_PENDING} — dropping it to bound memory; \
+                     index marked dirty (rescan to reconcile)"
+                );
+                store.set_meta("dirty_since", &now_secs().to_string()).ok();
+                pending.clear();
+            }
         } else if n < 0 {
             let err = std::io::Error::last_os_error();
             match err.raw_os_error() {
@@ -914,6 +935,21 @@ fn reconcile_subtree(
 /// commits partial drift.
 fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Result<()> {
     let now = now_secs();
+    // Low-disk protection: never let the index's own writes fill the host's last
+    // free space. Below the floor, pause writes (keep `pending` for retry) and
+    // mark the index dirty so status/TUI report degraded — the daemon must not be
+    // the process that takes the filesystem to 0 bytes.
+    let watch_dir = db.parent().unwrap_or_else(|| Path::new("/"));
+    if let Some(fs) = crate::util::fs_stat(watch_dir) {
+        if fs.avail < MIN_FREE_BYTES {
+            tracing::warn!(
+                "low disk space ({} free) — pausing index writes to protect the host",
+                crate::util::human(fs.avail)
+            );
+            store.set_meta("dirty_since", &now.to_string()).ok();
+            return Ok(()); // pending preserved; resumes when space frees
+        }
+    }
     // COPY, don't drain: if the transaction below fails (disk full, lock, I/O),
     // we return Err with `pending` intact so the events are retried next flush
     // instead of being lost. `pending` is only cleared after a durable commit.
