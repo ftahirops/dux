@@ -186,12 +186,12 @@ impl App {
         if self.growth_calc.elapsed() < Duration::from_secs(3) {
             return;
         }
-        let cutoff = crate::util::now_secs() - 3600;
+        let cutoff = (crate::util::now_secs() - 3600) / crate::store::GROWTH_BUCKET_SECS;
         let mut map = std::collections::HashMap::new();
         if let Ok(mut stmt) = store.conn.prepare(
             "WITH RECURSIVE
                chg(dev,ino,d) AS (
-                 SELECT dev_id,inode,SUM(delta) FROM changes WHERE ts>=?1 GROUP BY dev_id,inode
+                 SELECT dev_id,inode,SUM(delta) FROM growth WHERE bucket>=?1 GROUP BY dev_id,inode
                ),
                anc(dev,ino,d,depth) AS (
                  SELECT dev,ino,d,0 FROM chg
@@ -406,22 +406,22 @@ impl App {
             .unwrap_or(0);
         // growth/day = bytes written in the last hour, extrapolated (×24).
         // Only meaningful with a running daemon + history; 0 otherwise.
-        let hour_ago = crate::util::now_secs() - 3600;
+        let hour_ago = (crate::util::now_secs() - 3600) / crate::store::GROWTH_BUCKET_SECS;
         let last_hour: i64 = store
             .conn
             .query_row(
-                "SELECT COALESCE(SUM(delta),0) FROM changes WHERE ts>=?1 AND delta>0",
+                "SELECT COALESCE(SUM(delta),0) FROM growth WHERE bucket>=?1 AND delta>0",
                 params![hour_ago],
                 |r| r.get(0),
             )
             .unwrap_or(0);
         self.growth_per_day = last_hour * 24;
 
-        let cutoff = crate::util::now_secs() - self.window_secs;
+        let cutoff = (crate::util::now_secs() - self.window_secs) / crate::store::GROWTH_BUCKET_SECS;
         let mut pr = PathResolver::new(&store.conn);
         // pull extra rows; we drop unresolved/duplicate paths then take 6
         let mut gs = store.conn.prepare(
-            "SELECT dev_id, inode, SUM(delta) d FROM changes WHERE ts>=?1
+            "SELECT dev_id, inode, SUM(delta) d FROM growth WHERE bucket>=?1
              GROUP BY dev_id, inode HAVING d>0 ORDER BY d DESC LIMIT 60",
         )?;
         let g = gs.query_map(params![cutoff], |r| {
