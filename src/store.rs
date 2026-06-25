@@ -79,7 +79,10 @@ pub struct Node {
     pub mtime: i64,
 }
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
+
+/// Width of a growth history bucket, in seconds (5 minutes).
+pub const GROWTH_BUCKET_SECS: i64 = 300;
 
 /// Steady-state schema (v2). `nodes` carries only what queries read; the name
 /// search index is an EXTERNAL-CONTENT FTS5 over `nodes.name` (no second copy of
@@ -102,16 +105,16 @@ CREATE TABLE IF NOT EXISTS nodes (
     PRIMARY KEY (dev_id, inode)
 );
 
-CREATE TABLE IF NOT EXISTS changes (
-    ts          INTEGER NOT NULL,
-    dev_id      INTEGER NOT NULL,
-    inode       INTEGER NOT NULL,
-    size_before INTEGER NOT NULL,
-    size_after  INTEGER NOT NULL,
-    delta       INTEGER NOT NULL,
-    event_type  TEXT    NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_changes_ts ON changes(ts);
+-- Growth history as fixed 5-minute buckets per inode (delta of allocated
+-- blocks), not one row per event. A continuously-written file produces ~288
+-- rows/day instead of tens of thousands; queries SUM over the bucket range.
+CREATE TABLE IF NOT EXISTS growth (
+    bucket  INTEGER NOT NULL,   -- epoch seconds / 300
+    dev_id  INTEGER NOT NULL,
+    inode   INTEGER NOT NULL,
+    delta   INTEGER NOT NULL,
+    PRIMARY KEY (bucket, dev_id, inode)
+) WITHOUT ROWID;
 
 -- External-content trigram FTS: stores only the search index, not a copy of the
 -- names (those live in nodes). ~62% smaller than a content-stored FTS. GLOB/LIKE
@@ -221,7 +224,8 @@ impl Store {
                  DROP TRIGGER IF EXISTS nodes_au;
                  DROP TABLE IF EXISTS names_fts;
                  DROP TABLE IF EXISTS nodes;
-                 DROP TABLE IF EXISTS changes;",
+                 DROP TABLE IF EXISTS changes;
+                 DROP TABLE IF EXISTS growth;",
             )?;
         }
         self.conn.execute_batch(SCHEMA_SQL)?;

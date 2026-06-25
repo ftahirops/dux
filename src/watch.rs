@@ -134,7 +134,7 @@ pub fn run_daemon(
         );
     }
 
-    crate::util::write_heartbeat();
+    crate::util::write_heartbeat(db);
     let flush_every = Duration::from_millis(flush_ms);
     let mut last_flush = Instant::now();
     let mut last_ckpt = Instant::now();
@@ -163,7 +163,7 @@ pub fn run_daemon(
 
         if last_flush.elapsed() >= flush_every {
             if !pending.is_empty() {
-                if let Err(e) = flush(&mut store, &mut pending) {
+                if let Err(e) = flush(&mut store, &mut pending, db) {
                     tracing::warn!("flush error: {e}");
                 }
                 if let Some(cfg) = &alert {
@@ -176,7 +176,7 @@ pub fn run_daemon(
             // flush must not make `daemon_live` read false (which would let a
             // concurrent `dux scan` corrupt the index). Written to tmpfs, so
             // an idle daemon makes no database/WAL writes at all.
-            crate::util::write_heartbeat();
+            crate::util::write_heartbeat(db);
             // Checkpoint the WAL occasionally with PASSIVE — never every flush and
             // never TRUNCATE: TRUNCATE blocks on a live TUI reader (up to the busy
             // timeout), which stalls the daemon, burns CPU and freezes the heartbeat.
@@ -445,7 +445,7 @@ fn resolve_handle(payload: &[u8], fsfds: &HashMap<(i32, i32), RawFd>) -> Option<
 ///                                        subtree; children reference the inode),
 ///                                        or insert if it's new to the tree
 ///   E. upserts (shallow-first)         — create / modify / hardlink
-fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
+fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Result<()> {
     let now = now_secs();
     let items: Vec<(PathBuf, Op)> = pending.drain().collect();
 
@@ -524,9 +524,10 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
              ) SELECT d, i FROM sub",
         )?;
         let mut del_node = tx.prepare("DELETE FROM nodes WHERE dev_id=?1 AND inode=?2")?;
-        let mut log = tx.prepare(
-            "INSERT INTO changes(ts,dev_id,inode,size_before,size_after,delta,event_type)
-             VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        let bucket = now / crate::store::GROWTH_BUCKET_SECS;
+        let mut gro = tx.prepare(
+            "INSERT INTO growth(bucket,dev_id,inode,delta) VALUES(?1,?2,?3,?4)
+             ON CONFLICT(bucket,dev_id,inode) DO UPDATE SET delta=delta+excluded.delta",
         )?;
 
         // delete a node's whole subtree; the FTS rows go with each node via the
@@ -546,6 +547,43 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
             Ok(())
         };
 
+        // Ancestor totals are COALESCED: each affected dir's delta is summed in
+        // memory here and written ONCE at the end of the flush, instead of one
+        // UPDATE per changed file (which rewrote shared ancestors N times). The
+        // map is also the source of truth for a node's *effective* total mid-
+        // flush, so nested deletes in the same batch don't double-count.
+        let mut anc: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
+        let accrue = |anc: &mut HashMap<(i64, i64), (i64, i64)>,
+                      gp: &mut rusqlite::Statement,
+                      sdev: i64,
+                      sino: i64,
+                      dbytes: i64,
+                      dinodes: i64|
+         -> Result<()> {
+            let (mut cd, mut ci) = (sdev, sino);
+            let mut guard = 0;
+            loop {
+                guard += 1;
+                if guard > 4096 {
+                    break;
+                }
+                let e = anc.entry((cd, ci)).or_insert((0, 0));
+                e.0 += dbytes;
+                e.1 += dinodes;
+                match gp
+                    .query_row(params![cd, ci], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+                    .ok()
+                {
+                    Some((pd, pi)) if !(pd == cd && pi == ci) => {
+                        cd = pd;
+                        ci = pi;
+                    }
+                    _ => break,
+                }
+            }
+            Ok(())
+        };
+
         // ---- Phase B: deletes ----
         for full in &deletes {
             let r: Result<()> = (|| {
@@ -560,9 +598,15 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                 if let Ok((cdev, cino, _k, crb, cri, _b)) =
                     find.query_row(params![pdev, pino, name], row6)
                 {
+                    // effective total = stored + any delta already pending for
+                    // this node this flush (e.g. a child deleted earlier).
+                    let adj = anc.get(&(cdev, cino)).copied().unwrap_or((0, 0));
+                    let (eff_rb, eff_ri) = (crb + adj.0, cri + adj.1);
                     del_subtree(&mut descendants, &mut del_node, cdev, cino)?;
-                    walk_ancestors(&mut bump, &mut get_parent, pdev, pino, -crb, -cri)?;
-                    log.execute(params![now, cdev, cino, crb, 0i64, -crb, "delete"])?;
+                    accrue(&mut anc, &mut get_parent, pdev, pino, -eff_rb, -eff_ri)?;
+                    if eff_rb != 0 {
+                        gro.execute(params![bucket, cdev, cino, -eff_rb])?;
+                    }
                 }
                 Ok(())
             })();
@@ -589,9 +633,13 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                         return Ok(()); // it's a rename — move-to will relocate it
                     }
                     // genuinely left the watched tree: remove it
+                    let adj = anc.get(&(cdev, cino)).copied().unwrap_or((0, 0));
+                    let (eff_rb, eff_ri) = (crb + adj.0, cri + adj.1);
                     del_subtree(&mut descendants, &mut del_node, cdev, cino)?;
-                    walk_ancestors(&mut bump, &mut get_parent, pdev, pino, -crb, -cri)?;
-                    log.execute(params![now, cdev, cino, crb, 0i64, -crb, "moved_out"])?;
+                    accrue(&mut anc, &mut get_parent, pdev, pino, -eff_rb, -eff_ri)?;
+                    if eff_rb != 0 {
+                        gro.execute(params![bucket, cdev, cino, -eff_rb])?;
+                    }
                 }
                 Ok(())
             })();
@@ -667,10 +715,13 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                     // RELOCATE: move the row + its (unchanged) subtree to the new
                     // parent. Children reference (dev,ino) so they follow for free.
                     // The UPDATE-of-name trigger refreshes the FTS automatically.
-                    walk_ancestors(&mut bump, &mut get_parent, opdev, opino, -rb, -ri)?;
+                    // Subtree total may already carry pending deltas this flush.
+                    let adj = anc.get(&(dev, ino)).copied().unwrap_or((0, 0));
+                    let (eff_rb, eff_ri) = (rb + adj.0, ri + adj.1);
+                    accrue(&mut anc, &mut get_parent, opdev, opino, -eff_rb, -eff_ri)?;
                     relocate.execute(params![dev, ino, name, npdev, npino])?;
-                    walk_ancestors(&mut bump, &mut get_parent, npdev, npino, rb, ri)?;
-                    log.execute(params![now, dev, ino, rb, rb, 0i64, "rename"])?;
+                    accrue(&mut anc, &mut get_parent, npdev, npino, eff_rb, eff_ri)?;
+                    // a rename has zero net byte delta -> no growth row
                 } else {
                     // moved in from outside the tree -> treat as a fresh create
                     let blocks = (m.blocks() as i64) * 512;
@@ -688,8 +739,8 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                         m.uid() as i64,
                         m.mtime(),
                     ])?;
-                    walk_ancestors(&mut bump, &mut get_parent, npdev, npino, blocks, 1)?;
-                    log.execute(params![now, dev, ino, 0i64, blocks, blocks, "create"])?;
+                    accrue(&mut anc, &mut get_parent, npdev, npino, blocks, 1)?;
+                    gro.execute(params![bucket, dev, ino, blocks])?;
                 }
                 Ok(())
             })();
@@ -732,15 +783,17 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                         let delta = blocks - erb;
                         upd_file.execute(params![dev, ino, blocks, mtime])?;
                         if delta != 0 {
-                            walk_ancestors(&mut bump, &mut get_parent, pdev, pino, delta, 0)?;
-                            log.execute(params![now, dev, ino, erb, blocks, delta, "modify"])?;
+                            accrue(&mut anc, &mut get_parent, pdev, pino, delta, 0)?;
+                            gro.execute(params![bucket, dev, ino, delta])?;
                         }
                     }
                     other => {
                         if let Some((edev, eino, _ek, erb, eri, _eb)) = other {
                             // name reused by a DIFFERENT inode: drop the stale occupant
+                            let adj = anc.get(&(edev, eino)).copied().unwrap_or((0, 0));
+                            let (eff_rb, eff_ri) = (erb + adj.0, eri + adj.1);
                             del_subtree(&mut descendants, &mut del_node, edev, eino)?;
-                            walk_ancestors(&mut bump, &mut get_parent, pdev, pino, -erb, -eri)?;
+                            accrue(&mut anc, &mut get_parent, pdev, pino, -eff_rb, -eff_ri)?;
                         }
                         // Skip if this inode is already indexed under another name
                         // (a hardlink): count it once, and keep one FTS name per
@@ -761,8 +814,8 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                                 m.uid() as i64,
                                 mtime,
                             ])?;
-                            walk_ancestors(&mut bump, &mut get_parent, pdev, pino, blocks, 1)?;
-                            log.execute(params![now, dev, ino, 0i64, blocks, blocks, "create"])?;
+                            accrue(&mut anc, &mut get_parent, pdev, pino, blocks, 1)?;
+                            gro.execute(params![bucket, dev, ino, blocks])?;
                         }
                     }
                 }
@@ -772,12 +825,21 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                 tracing::debug!("upsert {} failed: {e}", full.display());
             }
         }
+
+        // ---- apply coalesced ancestor totals: ONE write per affected dir ----
+        for (&(d, i), &(db, di)) in &anc {
+            if db != 0 || di != 0 {
+                bump.execute(params![d, i, db, di])?;
+            }
+        }
     }
     tx.commit()?;
-    crate::util::write_heartbeat();
+    crate::util::write_heartbeat(db);
+    // keep ~7 days of growth buckets (cheap: ~288 rows/day per active inode)
+    let keep_bucket = (now - 7 * 86400) / crate::store::GROWTH_BUCKET_SECS;
     store
         .conn
-        .execute("DELETE FROM changes WHERE ts < ?1", params![now - 86400])?;
+        .execute("DELETE FROM growth WHERE bucket < ?1", params![keep_bucket])?;
     pending.clear();
     Ok(())
 }
@@ -813,37 +875,6 @@ fn row6(r: &rusqlite::Row) -> rusqlite::Result<(i64, i64, String, i64, i64, i64)
     ))
 }
 
-/// Walk ancestors from (dev,ino) upward, applying byte/inode deltas once each.
-fn walk_ancestors(
-    bump: &mut rusqlite::Statement,
-    get_parent: &mut rusqlite::Statement,
-    sdev: i64,
-    sino: i64,
-    dbytes: i64,
-    dinodes: i64,
-) -> Result<()> {
-    let (mut cd, mut ci) = (sdev, sino);
-    let mut guard = 0;
-    loop {
-        guard += 1;
-        if guard > 4096 {
-            break;
-        }
-        bump.execute(params![cd, ci, dbytes, dinodes])?;
-        let nxt: Option<(i64, i64)> = get_parent
-            .query_row(params![cd, ci], |r| Ok((r.get(0)?, r.get(1)?)))
-            .ok();
-        match nxt {
-            Some((pd, pi)) if !(pd == cd && pi == ci) => {
-                cd = pd;
-                ci = pi;
-            }
-            _ => break,
-        }
-    }
-    Ok(())
-}
-
 /// Stat a path for its (dev, inode).
 fn stat_id(path: &Path) -> Option<(i64, i64)> {
     use std::os::unix::fs::MetadataExt;
@@ -859,10 +890,11 @@ fn check_alerts(
     last: &mut HashMap<(i64, i64), i64>,
 ) -> Result<()> {
     let now = now_secs();
-    let cutoff = now - cfg.window;
+    // bucket granularity means the window is rounded up to the next 5 min
+    let cutoff = (now - cfg.window) / crate::store::GROWTH_BUCKET_SECS;
     let mut stmt = store.conn.prepare(
-        "SELECT dev_id, inode, SUM(delta) d FROM changes
-         WHERE ts >= ?1 GROUP BY dev_id, inode HAVING d >= ?2 ORDER BY d DESC",
+        "SELECT dev_id, inode, SUM(delta) d FROM growth
+         WHERE bucket >= ?1 GROUP BY dev_id, inode HAVING d >= ?2 ORDER BY d DESC",
     )?;
     let rows = stmt.query_map(params![cutoff, cfg.threshold], |r| {
         Ok((

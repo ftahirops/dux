@@ -104,18 +104,34 @@ pub fn now_secs() -> i64 {
 /// daemon dies — no stale "live" reading.
 pub const HEARTBEAT_PATH: &str = "/run/dux/heartbeat";
 
-/// Stamp the heartbeat file with the current epoch seconds (best-effort).
-pub fn write_heartbeat() {
+/// Stamp the heartbeat file with the current epoch seconds and the absolute
+/// path of the DB the daemon is writing (best-effort). Format: "<secs> <db>".
+pub fn write_heartbeat(db: &std::path::Path) {
     let _ = std::fs::create_dir_all("/run/dux");
-    let _ = std::fs::write(HEARTBEAT_PATH, now_secs().to_string());
+    let db = db
+        .canonicalize()
+        .unwrap_or_else(|_| db.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    let _ = std::fs::write(HEARTBEAT_PATH, format!("{} {db}", now_secs()));
 }
 
 /// Epoch seconds of the last heartbeat, or 0 if absent/unreadable.
 pub fn read_heartbeat() -> i64 {
     std::fs::read_to_string(HEARTBEAT_PATH)
         .ok()
-        .and_then(|s| s.trim().parse().ok())
+        .and_then(|s| s.split_whitespace().next().and_then(|t| t.parse().ok()))
         .unwrap_or(0)
+}
+
+/// (epoch, db_path) of the last heartbeat — lets a scan tell whether the daemon
+/// is writing the SAME db it's about to rebuild (per-db guard, not global).
+pub fn read_heartbeat_db() -> Option<(i64, String)> {
+    let s = std::fs::read_to_string(HEARTBEAT_PATH).ok()?;
+    let mut it = s.splitn(2, ' ');
+    let secs: i64 = it.next()?.trim().parse().ok()?;
+    let db = it.next().unwrap_or("").trim().to_string();
+    Some((secs, db))
 }
 
 /// Parse durations like "1h", "30m", "24h", "7d", "90s" into seconds.

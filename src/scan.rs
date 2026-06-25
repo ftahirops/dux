@@ -345,6 +345,10 @@ fn parallel_collect(
 ) -> Vec<RawNode> {
     use jwalk::WalkDirGeneric;
 
+    // NOTE: this channel must stay UNBOUNDED. The walk is driven to completion
+    // (`for _ in walk {}`) BEFORE rx is drained, so a bounded channel would block
+    // the walkers once full and deadlock. Truly capping scan memory needs a
+    // concurrent-consume redesign (the node Vec dominates peak RAM anyway).
     let (tx, rx) = crossbeam_channel::unbounded::<RawNode>();
     // canonicalize excludes so relative paths match the canonical entry paths
     let exclude: Vec<PathBuf> = opts

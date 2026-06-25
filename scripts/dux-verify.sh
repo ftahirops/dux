@@ -322,7 +322,7 @@ selftest() {
   summary
 }
 
-daemon_live() { local hb; hb="$(cat /run/dux/heartbeat 2>/dev/null)"; [ -n "$hb" ] && [ $(( $(date +%s) - hb )) -le 15 ]; }
+daemon_live() { local hb; hb="$(awk '{print $1}' /run/dux/heartbeat 2>/dev/null)"; [ -n "$hb" ] && [ $(( $(date +%s) - hb )) -le 15 ]; }
 node_exists_name() { q "SELECT count(*) FROM nodes WHERE name='$1'"; }
 dir_recursive() { local di; di="$(stat -c '%d %i' "$1")"; set -- $di; q "SELECT recursive_bytes FROM nodes WHERE dev_id=$1 AND inode=$2"; }
 

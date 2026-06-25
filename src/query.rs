@@ -220,11 +220,12 @@ pub fn growth(
     limit: usize,
     scope: Option<(i64, i64)>,
 ) -> Result<Vec<GrowthRow>> {
-    let cutoff = now_secs() - since_secs;
-    let mut sql = String::from("SELECT dev_id, inode, SUM(delta) AS d FROM changes WHERE ts >= ?");
+    // growth history is bucketed (5-min); the window is rounded to the bucket
+    let cutoff = (now_secs() - since_secs) / crate::store::GROWTH_BUCKET_SECS;
+    let mut sql = String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];
     if let Some((d, i)) = scope {
-        // reuse the scope predicate against the changes rows
+        // reuse the scope predicate against the growth rows
         sql.push_str(SCOPE_PREDICATE);
         args.push(Box::new(d));
         args.push(Box::new(i));
@@ -308,7 +309,7 @@ pub fn by_ext(store: &Store, limit: usize) -> Result<Vec<ExtRow>> {
 }
 
 /// Index status summary.
-pub fn status(store: &Store) -> Result<String> {
+pub fn status(store: &Store, db: &Path) -> Result<String> {
     let root = store.get_meta("last_scan_root")?.unwrap_or_default();
     let ts: i64 = store
         .get_meta("last_scan_ts")?
@@ -366,6 +367,34 @@ pub fn status(store: &Store) -> Result<String> {
         "indexed:    {count} nodes, {} (allocated blocks)\nlast scan:  {} ago\n",
         human(total),
         age
+    ));
+    // on-disk footprint of the index itself (db + WAL + reclaimable free pages)
+    let dbsz = std::fs::metadata(db).map(|m| m.len() as i64).unwrap_or(0);
+    let walsz = std::fs::metadata(format!("{}-wal", db.display()))
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+    let psize: i64 = store
+        .conn
+        .query_row("PRAGMA page_size", [], |r| r.get(0))
+        .unwrap_or(4096);
+    let free: i64 = store
+        .conn
+        .query_row("PRAGMA freelist_count", [], |r| r.get(0))
+        .unwrap_or(0);
+    let fts: i64 = store
+        .conn
+        .query_row(
+            "SELECT COALESCE(SUM(pgsize),0) FROM dbstat WHERE name LIKE 'names_fts%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    out.push_str(&format!(
+        "index size: {} db + {} WAL  ({} search, {} reclaimable)\n",
+        human(dbsz),
+        human(walsz),
+        human(fts),
+        human(free * psize),
     ));
     // daemon liveness from the tmpfs heartbeat file
     let hb = crate::util::read_heartbeat();

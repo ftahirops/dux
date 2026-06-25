@@ -167,10 +167,17 @@ fn real_main() -> Result<()> {
             quiet,
             force,
         }) => {
-            // Refuse to scan while the daemon is writing the same DB — two
-            // concurrent SQLite writers corrupt the tree (orphans/drift).
-            let hb = util::read_heartbeat();
-            let daemon_live = hb != 0 && (util::now_secs() - hb) <= 30;
+            // Refuse to scan while the daemon is writing THIS db — two
+            // concurrent SQLite writers corrupt the tree (orphans/drift). The
+            // guard is per-db: a daemon on a different index doesn't block us.
+            let scanned_db = db.canonicalize().unwrap_or_else(|_| db.clone());
+            let daemon_live = match util::read_heartbeat_db() {
+                Some((secs, hbdb)) => {
+                    (util::now_secs() - secs) <= 30
+                        && std::path::Path::new(&hbdb) == scanned_db.as_path()
+                }
+                None => false,
+            };
             if !force && daemon_live {
                 anyhow::bail!(
                     "the dux daemon is running and writing this index.\n\
@@ -333,7 +340,7 @@ fn real_main() -> Result<()> {
         }
         Some(Cmd::Status) => {
             let store = Store::open_ro(&db)?;
-            println!("{}", query::status(&store)?);
+            println!("{}", query::status(&store, &db)?);
         }
         Some(Cmd::Daemon {
             root,
