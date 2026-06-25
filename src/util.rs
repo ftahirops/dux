@@ -134,6 +134,19 @@ pub fn read_heartbeat_db() -> Option<(i64, String)> {
     Some((secs, db))
 }
 
+/// True only when a daemon heartbeat is FRESH (≤30s) AND belongs to THIS db.
+/// Prevents the global heartbeat from reporting an unrelated index as live.
+pub fn daemon_live_for(db: &std::path::Path) -> bool {
+    match read_heartbeat_db() {
+        Some((secs, hbdb)) => {
+            let fresh = now_secs() - secs <= 30;
+            let want = db.canonicalize().unwrap_or_else(|_| db.to_path_buf());
+            fresh && std::path::Path::new(&hbdb) == want.as_path()
+        }
+        None => false,
+    }
+}
+
 /// Parse durations like "1h", "30m", "24h", "7d", "90s" into seconds.
 pub fn parse_duration(s: &str) -> Result<i64> {
     let s = s.trim();

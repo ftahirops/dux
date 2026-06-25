@@ -314,7 +314,7 @@ fn real_main() -> Result<()> {
         Some(Cmd::Tui { path }) => {
             let store = Store::open_ro(&db)?;
             let start = resolve_start(&store, &path)?;
-            tui::run(&store, start)?;
+            tui::run(&store, &db, start)?;
         }
         Some(Cmd::Status) => {
             let store = Store::open_ro(&db)?;
@@ -353,7 +353,7 @@ fn real_main() -> Result<()> {
                 Some(p) => resolve_start(&store, p)?,
                 None => None,
             };
-            tui::run(&store, start)?;
+            tui::run(&store, &db, start)?;
         }
     }
     Ok(())

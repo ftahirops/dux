@@ -60,6 +60,7 @@ struct App {
     scroll: usize,
     metric: Metric,
     root_path: String,
+    db: std::path::PathBuf,
     fs: crate::util::FsStat,
     daemon_live: bool,
     // recursive write-rate per node (bytes in the last hour), summed up the tree
@@ -76,7 +77,7 @@ struct App {
 /// WinDirStat-style live tree: folders expand inline beneath their parent (the
 /// parent stays visible), indented, with a per-row heat bar (RED = hot). Opens
 /// at `start` (dev,inode) — the scoped path or the index root.
-pub fn run(store: &Store, start: Option<(i64, i64)>) -> Result<()> {
+pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Result<()> {
     let root = start.or_else(|| root_node(store));
     let (dev, inode) = match root {
         Some(v) => v,
@@ -101,6 +102,7 @@ pub fn run(store: &Store, start: Option<(i64, i64)>) -> Result<()> {
         scroll: 0,
         metric: Metric::Size,
         root_path: store.path_of(dev, inode).unwrap_or_else(|_| "/".into()),
+        db: db.to_path_buf(),
         fs: crate::util::FsStat::default(),
         daemon_live: false,
         growth_map: std::collections::HashMap::new(),
@@ -393,7 +395,7 @@ impl App {
         if let Some(fs) = crate::util::fs_stat(std::path::Path::new(&self.root_path)) {
             self.fs = fs;
         }
-        self.daemon_live = crate::query::daemon_live(store);
+        self.daemon_live = crate::query::daemon_live(&self.db);
 
         // status-bar aggregates
         self.items = store

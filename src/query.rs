@@ -409,10 +409,8 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         human(fts),
         human(free * psize),
     ));
-    // daemon liveness from the tmpfs heartbeat file
-    let hb = crate::util::read_heartbeat();
-    let hb_age = crate::util::now_secs() - hb;
-    if hb != 0 && hb_age <= 30 {
+    // daemon liveness — only "live" if the heartbeat belongs to THIS db
+    if crate::util::daemon_live_for(db) {
         out.push_str("daemon:     live (tracks create/delete/rename/growth)");
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
@@ -420,8 +418,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     Ok(out)
 }
 
-/// True when the watch daemon has emitted a heartbeat within the last 30s.
-pub fn daemon_live(_store: &Store) -> bool {
-    let hb = crate::util::read_heartbeat();
-    hb != 0 && (crate::util::now_secs() - hb) <= 30
+/// True when a watch daemon for THIS db has heart-beaten within the last 30s.
+pub fn daemon_live(db: &Path) -> bool {
+    crate::util::daemon_live_for(db)
 }
