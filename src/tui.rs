@@ -417,7 +417,8 @@ impl App {
             .unwrap_or(0);
         self.growth_per_day = last_hour * 24;
 
-        let cutoff = (crate::util::now_secs() - self.window_secs) / crate::store::GROWTH_BUCKET_SECS;
+        let cutoff =
+            (crate::util::now_secs() - self.window_secs) / crate::store::GROWTH_BUCKET_SECS;
         let mut pr = PathResolver::new(&store.conn);
         // pull extra rows; we drop unresolved/duplicate paths then take 6
         let mut gs = store.conn.prepare(
@@ -684,6 +685,22 @@ fn count_human(n: i64) -> String {
     }
 }
 
+/// Pad OR CLIP `s` to exactly `w` columns. Tree/table columns must be fixed
+/// width: a value wider than its slot (e.g. a big "▲130.0 MiB/h" rate) would
+/// otherwise push the indent + path right and scatter the whole tree.
+fn fixw(s: &str, w: usize, right: bool) -> String {
+    let n = s.chars().count();
+    if n >= w {
+        return s.chars().take(w).collect();
+    }
+    let pad = " ".repeat(w - n);
+    if right {
+        format!("{pad}{s}")
+    } else {
+        format!("{s}{pad}")
+    }
+}
+
 fn short(p: &str, max: usize) -> String {
     if p.chars().count() <= max {
         p.to_string()
@@ -856,11 +873,11 @@ fn draw(f: &mut Frame, app: &mut App) {
             let mark = if *growth != 0 { "▲ " } else { "  " };
             let mut line = Line::from(vec![
                 Span::styled(
-                    format!(" {:>9} ", human(*s)),
+                    format!(" {} ", fixw(&human(*s), 9, true)),
                     Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{:>4} ", ago(*mtime)),
+                    format!("{} ", fixw(&ago(*mtime), 4, true)),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(mark, Style::default().fg(RATE_COLOR)),
@@ -920,9 +937,9 @@ fn draw(f: &mut Frame, app: &mut App) {
             r.ratio_size
         };
         let value = if inode_mode {
-            format!("{:>10}", count_human(r.inodes))
+            count_human(r.inodes)
         } else {
-            format!("{:>10}", human(r.size))
+            human(r.size)
         };
         // SIZE channel: one calm color (the bar LENGTH conveys magnitude)
         let size_col = SIZE_COLOR;
@@ -935,16 +952,22 @@ fn draw(f: &mut Frame, app: &mut App) {
         // ▲/▼ rate (direction by arrow, not by color).
         let rate = rate_str(r.growth);
 
+        // Every column before the path is EXACTLY fixed width (value 10 + bar 12
+        // + rate 12, each followed by a space) so the indent + path always start
+        // at the same column and the tree can never scatter.
         let line = Line::from(vec![
             Span::styled(
-                format!("{value} "),
+                format!("{} ", fixw(&value, 10, true)),
                 Style::default().fg(size_col).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("{} ", bar(ratio, 12)),
                 Style::default().fg(size_col),
             ),
-            Span::styled(format!("{rate:<11} "), Style::default().fg(RATE_COLOR)),
+            Span::styled(
+                format!("{} ", fixw(&rate, 12, false)),
+                Style::default().fg(RATE_COLOR),
+            ),
             Span::raw(indent),
             Span::styled(marker, Style::default().fg(Color::DarkGray)),
             Span::styled(

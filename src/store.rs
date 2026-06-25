@@ -39,6 +39,15 @@ impl<'a> PathResolver<'a> {
     }
 
     pub fn resolve(&mut self, dev: i64, inode: i64) -> String {
+        self.resolve_d(dev, inode, 0)
+    }
+
+    // depth-guarded so a corrupt parent CYCLE can't recurse until the stack
+    // overflows (mirrors the 4096 guard in path_of and the SQL CTEs).
+    fn resolve_d(&mut self, dev: i64, inode: i64, depth: u32) -> String {
+        if depth > 4096 {
+            return format!("inode:{inode}");
+        }
         if let Some(p) = self.full.get(&(dev, inode)) {
             return p.clone();
         }
@@ -50,7 +59,7 @@ impl<'a> PathResolver<'a> {
         let path = if (pdev == dev && pino == inode) || pino == 0 {
             name
         } else {
-            let prefix = self.resolve(pdev, pino);
+            let prefix = self.resolve_d(pdev, pino, depth + 1);
             if prefix.ends_with('/') {
                 format!("{prefix}{name}")
             } else {
@@ -190,19 +199,21 @@ impl Store {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "temp_store", "MEMORY")?;
         conn.pragma_update(None, "cache_size", -64_000)?; // ~64MB page cache
-        // Cap the WAL: on checkpoint the file is truncated back to this size
-        // instead of growing without bound (a long-lived reader + PASSIVE
-        // checkpoints could otherwise let the -wal file balloon to many GB).
+                                                          // Cap the WAL: on checkpoint the file is truncated back to this size
+                                                          // instead of growing without bound (a long-lived reader + PASSIVE
+                                                          // checkpoints could otherwise let the -wal file balloon to many GB).
         conn.pragma_update(None, "journal_size_limit", 128 * 1024 * 1024)?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
         Ok(())
     }
 
     fn migrate(&self) -> Result<()> {
-        // The v2 schema (external-content FTS, slim rows) is incompatible with
-        // the v1 layout (content-stored FTS, extra columns). If we find an older
-        // DB, drop the data objects and recreate empty — a `dux scan` repopulates
-        // (the install/deploy path forces one). Cheaper and safer than ALTERs.
+        // NEVER silently wipe a populated index. The v2/v3 layout changes are
+        // incompatible with older schemas, but dropping the data here (the daemon
+        // opens rw on startup) could turn a full index into an empty one while
+        // still reporting "live". Instead refuse loudly — the rebuild path is an
+        // ATOMIC rescan (Store::create_fresh + rename), driven by `dux scan` and
+        // by the daemon's own self-heal (see needs_rebuild + scan::rebuild_atomic).
         let ver: i64 = self
             .get_meta("schema_version")
             .ok()
@@ -217,22 +228,55 @@ impl Store {
                 |_| Ok(()),
             )
             .is_ok();
-        if has_nodes && ver < SCHEMA_VERSION {
-            self.conn.execute_batch(
-                "DROP TRIGGER IF EXISTS nodes_ai;
-                 DROP TRIGGER IF EXISTS nodes_ad;
-                 DROP TRIGGER IF EXISTS nodes_au;
-                 DROP TABLE IF EXISTS names_fts;
-                 DROP TABLE IF EXISTS nodes;
-                 DROP TABLE IF EXISTS changes;
-                 DROP TABLE IF EXISTS growth;",
-            )?;
+        if has_nodes && ver != SCHEMA_VERSION {
+            anyhow::bail!(
+                "index schema is v{ver} but this dux build needs v{}; \
+                 rebuild it with `dux scan <root>` (the daemon does this \
+                 automatically on start). The existing index was left untouched.",
+                SCHEMA_VERSION
+            );
         }
         self.conn.execute_batch(SCHEMA_SQL)?;
         self.conn.execute_batch(INDEXES_SQL)?;
         self.conn.execute_batch(FTS_TRIGGERS_SQL)?;
         self.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
         Ok(())
+    }
+
+    /// True if `db` is missing, has no `nodes` table, or carries a schema version
+    /// other than the current build's — i.e. it must be atomically rebuilt before
+    /// the daemon opens it rw (so an upgrade never yields an empty/wrong index).
+    pub fn needs_rebuild(db: &Path) -> bool {
+        if !db.exists() {
+            return true;
+        }
+        let conn = match Connection::open_with_flags(
+            db,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            Ok(c) => c,
+            Err(_) => return true,
+        };
+        let has_nodes = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
+        if !has_nodes {
+            return true;
+        }
+        let ver: i64 = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        ver != SCHEMA_VERSION
     }
 
     /// Create a fresh, empty index with ONLY the table + FTS vtable (no triggers,

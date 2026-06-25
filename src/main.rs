@@ -6,7 +6,7 @@ mod tui;
 mod util;
 mod watch;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use store::Store;
@@ -192,32 +192,10 @@ fn real_main() -> Result<()> {
                 include_pseudo,
                 progress: !quiet,
             };
-            // Atomic rescan: build a brand-new index next to the live one, then
-            // replace it in a single rename. This guarantees a fragmentation-free
-            // file (no leftover free pages) and never leaves a half-built index.
-            let mut new_os = db.clone().into_os_string();
-            new_os.push(".new");
-            let db_new = std::path::PathBuf::from(new_os);
-            for suf in ["", "-wal", "-shm"] {
-                let _ = std::fs::remove_file(format!("{}{suf}", db_new.display()));
-            }
+            // Atomic rebuild: scan into a sibling file, then rename over the live
+            // index — fragmentation-free, never a half-built or empty index.
             let start = std::time::Instant::now();
-            let s = {
-                let mut store = Store::create_fresh(&db_new)?;
-                let s = scan::scan(&mut store, &path, &opts)?;
-                // drain the WAL so the file is self-contained before the swap
-                store
-                    .conn
-                    .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-                    .ok();
-                s
-            }; // store dropped here → connection closed, -wal/-shm removed
-            // replace the live index atomically
-            for suf in ["-wal", "-shm"] {
-                let _ = std::fs::remove_file(format!("{}{suf}", db.display()));
-            }
-            std::fs::rename(&db_new, &db)
-                .with_context(|| format!("installing new index at {}", db.display()))?;
+            let s = scan::rebuild_atomic(&db, &path, &opts)?;
             eprintln!(
                 "scanned {} files, {} dirs, {} in {:.1}s ({} errors)",
                 s.files,

@@ -49,6 +49,12 @@ const SCOPE_PREDICATE: &str = " AND (dev_id,inode) IN (
     ) SELECT d,i FROM sub
 )";
 
+/// Clamp a usize LIMIT to a positive i64: a value past i64::MAX casts negative,
+/// and SQLite treats a negative LIMIT as "unlimited" (returns everything).
+fn lim(n: usize) -> i64 {
+    n.min(i64::MAX as usize) as i64
+}
+
 pub struct Row {
     pub path: String,
     pub size: i64,
@@ -87,7 +93,7 @@ pub fn top(
         args.push(Box::new(i));
     }
     sql.push_str(" ORDER BY s DESC LIMIT ?");
-    args.push(Box::new(limit as i64));
+    args.push(Box::new(lim(limit)));
 
     let mut stmt = store.conn.prepare(&sql)?;
     let pref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -180,7 +186,7 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
         sql.push_str(" ORDER BY blocks DESC");
     }
     sql.push_str(" LIMIT ?");
-    args.push(Box::new(o.limit as i64));
+    args.push(Box::new(lim(o.limit)));
 
     let mut stmt = store.conn.prepare(&sql)?;
     let params_ref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -222,7 +228,8 @@ pub fn growth(
 ) -> Result<Vec<GrowthRow>> {
     // growth history is bucketed (5-min); the window is rounded to the bucket
     let cutoff = (now_secs() - since_secs) / crate::store::GROWTH_BUCKET_SECS;
-    let mut sql = String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
+    let mut sql =
+        String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];
     if let Some((d, i)) = scope {
         // reuse the scope predicate against the growth rows
@@ -231,7 +238,7 @@ pub fn growth(
         args.push(Box::new(i));
     }
     sql.push_str(" GROUP BY dev_id, inode HAVING d != 0 ORDER BY d DESC LIMIT ?");
-    args.push(Box::new(limit as i64));
+    args.push(Box::new(lim(limit)));
     let mut stmt = store.conn.prepare(&sql)?;
     let pref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(pref.as_slice(), |r| {
@@ -265,7 +272,7 @@ pub fn by_owner(store: &Store, limit: usize) -> Result<Vec<OwnerRow>> {
          WHERE kind!='d'
          GROUP BY uid ORDER BY s DESC LIMIT ?1",
     )?;
-    let rows = stmt.query_map(params![limit as i64], |r| {
+    let rows = stmt.query_map(params![lim(limit)], |r| {
         Ok(OwnerRow {
             uid: r.get(0)?,
             bytes: r.get(1)?,
@@ -340,10 +347,16 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
             )
             .unwrap_or(0),
     };
+    // Phrase the freshness without the awkward "now ago" / "never ago".
     let age = if ts == 0 {
-        "never".to_string()
+        "never scanned".to_string()
     } else {
-        crate::util::ago(ts)
+        let a = crate::util::ago(ts);
+        if a == "now" {
+            "just now".to_string()
+        } else {
+            format!("{a} ago")
+        }
     };
 
     let mut out = format!("root: {root}\n");
@@ -364,7 +377,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         ));
     }
     out.push_str(&format!(
-        "indexed:    {count} nodes, {} (allocated blocks)\nlast scan:  {} ago\n",
+        "indexed:    {count} nodes, {} (allocated blocks)\nlast scan:  {}\n",
         human(total),
         age
     ));

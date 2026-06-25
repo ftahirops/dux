@@ -63,6 +63,35 @@ pub struct ScanStats {
     pub errors: u64,
 }
 
+/// Atomic full rebuild: scan `root` into a brand-new index next to `db`, then
+/// replace `db` in a single rename. Guarantees a fragmentation-free file and
+/// never leaves a half-built or empty index in place (callers: `dux scan` and
+/// the daemon's self-heal when the on-disk schema is incompatible/missing).
+pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+    let mut new_os = db.to_path_buf().into_os_string();
+    new_os.push(".new");
+    let db_new = PathBuf::from(new_os);
+    for suf in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suf}", db_new.display()));
+    }
+    let stats = {
+        let mut store = Store::create_fresh(&db_new)?;
+        let s = scan(&mut store, root, opts)?;
+        // drain the WAL so the file is self-contained before the swap
+        store
+            .conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .ok();
+        s
+    }; // store dropped here -> connection closed, -wal/-shm removed
+    for suf in ["-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suf}", db.display()));
+    }
+    std::fs::rename(&db_new, db)
+        .with_context(|| format!("installing new index at {}", db.display()))?;
+    Ok(stats)
+}
+
 /// Full scan of `root` into the index. Computes recursive directory totals
 /// bottom-up in a single transaction (batched inserts — never row-at-a-time IO).
 pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {

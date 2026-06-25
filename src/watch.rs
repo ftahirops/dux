@@ -82,6 +82,17 @@ pub fn run_daemon(
     one_file_system: bool,
     alert: Option<AlertConfig>,
 ) -> Result<()> {
+    // Never start on a missing or schema-incompatible index and silently present
+    // an empty/wrong tree. Rebuild atomically first (a no-op for a current index).
+    if Store::needs_rebuild(db) {
+        tracing::info!("index missing or schema-incompatible — rebuilding before watching");
+        let opts = crate::scan::ScanOptions {
+            one_file_system,
+            progress: false,
+            ..Default::default()
+        };
+        crate::scan::rebuild_atomic(db, root, &opts).context("rebuilding index before watch")?;
+    }
     let mut store = Store::open_rw(db)?;
     let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
@@ -447,7 +458,10 @@ fn resolve_handle(payload: &[u8], fsfds: &HashMap<(i32, i32), RawFd>) -> Option<
 ///   E. upserts (shallow-first)         — create / modify / hardlink
 fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Result<()> {
     let now = now_secs();
-    let items: Vec<(PathBuf, Op)> = pending.drain().collect();
+    // COPY, don't drain: if the transaction below fails (disk full, lock, I/O),
+    // we return Err with `pending` intact so the events are retried next flush
+    // instead of being lost. `pending` is only cleared after a durable commit.
+    let items: Vec<(PathBuf, Op)> = pending.iter().map(|(p, op)| (p.clone(), *op)).collect();
 
     let mut deletes: Vec<&PathBuf> = Vec::new();
     let mut moved_from: Vec<&PathBuf> = Vec::new();
@@ -571,7 +585,9 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
                 e.0 += dbytes;
                 e.1 += dinodes;
                 match gp
-                    .query_row(params![cd, ci], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+                    .query_row(params![cd, ci], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                    })
                     .ok()
                 {
                     Some((pd, pi)) if !(pd == cd && pi == ci) => {
@@ -834,13 +850,16 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
         }
     }
     tx.commit()?;
-    crate::util::write_heartbeat(db);
-    // keep ~7 days of growth buckets (cheap: ~288 rows/day per active inode)
-    let keep_bucket = (now - 7 * 86400) / crate::store::GROWTH_BUCKET_SECS;
-    store
-        .conn
-        .execute("DELETE FROM growth WHERE bucket < ?1", params![keep_bucket])?;
+    // Events are now durably applied — safe to drop them. (Clearing BEFORE the
+    // best-effort prune below ensures a prune error can't trigger a re-apply.)
     pending.clear();
+    crate::util::write_heartbeat(db);
+    // keep ~7 days of growth buckets (cheap: ~288 rows/day per active inode).
+    // best-effort: a prune failure must not fail the (already committed) flush.
+    let keep_bucket = (now - 7 * 86400) / crate::store::GROWTH_BUCKET_SECS;
+    let _ = store
+        .conn
+        .execute("DELETE FROM growth WHERE bucket < ?1", params![keep_bucket]);
     Ok(())
 }
 
