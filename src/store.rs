@@ -24,12 +24,22 @@ impl<'a> PathResolver<'a> {
         if let Some(v) = self.node.get(&(dev, inode)) {
             return Some(v.clone());
         }
+        // an inode may have several dirents (hardlinks); pick the prime one for a
+        // stable canonical path. name is a BLOB — decode lossily for display.
         let v: Option<(String, i64, i64)> = self
             .conn
             .query_row(
-                "SELECT name, parent_dev, parent_inode FROM nodes WHERE dev_id=?1 AND inode=?2",
+                "SELECT name, parent_dev, parent_inode FROM dirents
+                 WHERE dev_id=?1 AND inode=?2 ORDER BY prime DESC LIMIT 1",
                 params![dev, inode],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| {
+                    let nb: Vec<u8> = r.get(0)?;
+                    Ok((
+                        String::from_utf8_lossy(&nb).into_owned(),
+                        r.get(1)?,
+                        r.get(2)?,
+                    ))
+                },
             )
             .ok();
         if let Some(ref t) = v {
@@ -71,40 +81,24 @@ impl<'a> PathResolver<'a> {
     }
 }
 
-/// A node row as stored in the index.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct Node {
-    pub dev_id: i64,
-    pub inode: i64,
-    pub parent_dev: i64,
-    pub parent_inode: i64,
-    pub name: String,
-    pub kind: char, // 'f' file, 'd' dir, 'l' symlink, 'o' other
-    pub blocks: i64,
-    pub recursive_bytes: i64,
-    pub recursive_inodes: i64,
-    pub uid: i64,
-    pub mtime: i64,
-}
-
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Width of a growth history bucket, in seconds (5 minutes).
 pub const GROWTH_BUCKET_SECS: i64 = 300;
 
-/// Steady-state schema (v2). `nodes` carries only what queries read; the name
-/// search index is an EXTERNAL-CONTENT FTS5 over `nodes.name` (no second copy of
-/// the names) kept in sync by triggers, and totals live in recursive_* columns.
+/// Steady-state schema (v4). Inode metadata and path/directory-entry records are
+/// SEPARATE: `inodes` holds one row per (dev,inode) with allocated blocks and (for
+/// directories) recursive totals; `dirents` holds one row per name/path and points
+/// at an inode. A hardlinked file therefore has ONE `inodes` row and SEVERAL
+/// `dirents` rows — every valid path is represented, and the inode's blocks are
+/// counted once (attributed to the single `prime` dirent). `name` is a BLOB so two
+/// distinct non-UTF-8 filenames never collapse to the same key.
 pub const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
-CREATE TABLE IF NOT EXISTS nodes (
+CREATE TABLE IF NOT EXISTS inodes (
     dev_id           INTEGER NOT NULL,
     inode            INTEGER NOT NULL,
-    parent_dev       INTEGER NOT NULL DEFAULT 0,
-    parent_inode     INTEGER NOT NULL,
-    name             TEXT    NOT NULL,
     kind             TEXT    NOT NULL,
     blocks           INTEGER NOT NULL,
     recursive_bytes  INTEGER NOT NULL DEFAULT 0,
@@ -112,6 +106,16 @@ CREATE TABLE IF NOT EXISTS nodes (
     uid              INTEGER NOT NULL,
     mtime            INTEGER NOT NULL,
     PRIMARY KEY (dev_id, inode)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS dirents (
+    parent_dev   INTEGER NOT NULL,
+    parent_inode INTEGER NOT NULL,
+    name         BLOB    NOT NULL,
+    dev_id       INTEGER NOT NULL,
+    inode        INTEGER NOT NULL,
+    prime        INTEGER NOT NULL DEFAULT 1,   -- 1 = carries the inode's block attribution
+    UNIQUE (parent_dev, parent_inode, name)    -- one inode may occupy a given path
 );
 
 -- Growth history as fixed 5-minute buckets per inode (delta of allocated
@@ -125,25 +129,25 @@ CREATE TABLE IF NOT EXISTS growth (
     PRIMARY KEY (bucket, dev_id, inode)
 ) WITHOUT ROWID;
 
--- External-content trigram FTS: stores only the search index, not a copy of the
--- names (those live in nodes). ~62% smaller than a content-stored FTS. GLOB/LIKE
--- substring search is accelerated by the trigram index; rowid == nodes.rowid.
+-- External-content trigram FTS over EVERY path component (dirents.name), so a
+-- search finds all hardlink names. rowid == dirents.rowid. Stores no second copy
+-- of the names. GLOB/LIKE substring search is accelerated by the trigram index.
 CREATE VIRTUAL TABLE IF NOT EXISTS names_fts USING fts5(
-    name, content='nodes', tokenize='trigram', detail=none, columnsize=0
+    name, content='dirents', tokenize='trigram', detail=none, columnsize=0
 );
 "#;
 
-/// Triggers that keep the external-content FTS in sync with `nodes`. Created
+/// Triggers that keep the external-content FTS in sync with `dirents`. Created
 /// AFTER a bulk scan load (so the load isn't slowed by per-row FTS writes — the
 /// scan rebuilds the FTS in one pass instead), and always present for the daemon.
 pub const FTS_TRIGGERS_SQL: &str = r#"
-CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+CREATE TRIGGER IF NOT EXISTS dirents_ai AFTER INSERT ON dirents BEGIN
     INSERT INTO names_fts(rowid, name) VALUES (new.rowid, new.name);
 END;
-CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
+CREATE TRIGGER IF NOT EXISTS dirents_ad AFTER DELETE ON dirents BEGIN
     INSERT INTO names_fts(names_fts, rowid, name) VALUES('delete', old.rowid, old.name);
 END;
-CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE OF name ON nodes BEGIN
+CREATE TRIGGER IF NOT EXISTS dirents_au AFTER UPDATE OF name ON dirents BEGIN
     INSERT INTO names_fts(names_fts, rowid, name) VALUES('delete', old.rowid, old.name);
     INSERT INTO names_fts(rowid, name) VALUES (new.rowid, new.name);
 END;
@@ -153,10 +157,11 @@ END;
 /// indexes directories, file ranking only indexes non-directories. Created after
 /// a bulk load for speed.
 pub const INDEXES_SQL: &str = r#"
-CREATE INDEX IF NOT EXISTS idx_nodes_pparent ON nodes(parent_dev, parent_inode);
-CREATE INDEX IF NOT EXISTS idx_nodes_lfiles  ON nodes(blocks DESC)           WHERE kind<>'d';
-CREATE INDEX IF NOT EXISTS idx_nodes_ldirs   ON nodes(recursive_bytes DESC)  WHERE kind='d';
-CREATE INDEX IF NOT EXISTS idx_nodes_linode  ON nodes(recursive_inodes DESC) WHERE kind='d';
+CREATE INDEX IF NOT EXISTS idx_dirents_target ON dirents(dev_id, inode);
+CREATE INDEX IF NOT EXISTS idx_dirents_parent ON dirents(parent_dev, parent_inode);
+CREATE INDEX IF NOT EXISTS idx_inodes_lfiles  ON inodes(blocks DESC)           WHERE kind<>'d';
+CREATE INDEX IF NOT EXISTS idx_inodes_ldirs   ON inodes(recursive_bytes DESC)  WHERE kind='d';
+CREATE INDEX IF NOT EXISTS idx_inodes_linode  ON inodes(recursive_inodes DESC) WHERE kind='d';
 "#;
 
 pub struct Store {
@@ -220,15 +225,15 @@ impl Store {
             .flatten()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
-        let has_nodes = self
+        let has_inodes = self
             .conn
             .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes'",
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inodes'",
                 [],
                 |_| Ok(()),
             )
             .is_ok();
-        if has_nodes && ver != SCHEMA_VERSION {
+        if has_inodes && ver != SCHEMA_VERSION {
             anyhow::bail!(
                 "index schema is v{ver} but this dux build needs v{}; \
                  rebuild it with `dux scan <root>` (the daemon does this \
@@ -257,14 +262,14 @@ impl Store {
             Ok(c) => c,
             Err(_) => return true,
         };
-        let has_nodes = conn
+        let has_inodes = conn
             .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes'",
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inodes'",
                 [],
                 |_| Ok(()),
             )
             .is_ok();
-        if !has_nodes {
+        if !has_inodes {
             return true;
         }
         let ver: i64 = conn
@@ -346,9 +351,17 @@ impl Store {
             let row: Option<(String, i64, i64)> = self
                 .conn
                 .query_row(
-                    "SELECT name, parent_dev, parent_inode FROM nodes WHERE dev_id=?1 AND inode=?2",
+                    "SELECT name, parent_dev, parent_inode FROM dirents
+                     WHERE dev_id=?1 AND inode=?2 ORDER BY prime DESC LIMIT 1",
                     params![cur_dev, cur],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    |r| {
+                        let nb: Vec<u8> = r.get(0)?;
+                        Ok((
+                            String::from_utf8_lossy(&nb).into_owned(),
+                            r.get(1)?,
+                            r.get(2)?,
+                        ))
+                    },
                 )
                 .ok();
             match row {

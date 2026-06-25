@@ -227,7 +227,13 @@ fn real_main() -> Result<()> {
                     } else {
                         ""
                     };
-                    println!("{:<12} {:<6} {}{}", r.inodes, ago(r.mtime), r.path, suffix);
+                    println!(
+                        "{:<12} {:<6} {}{}",
+                        r.inodes,
+                        ago(r.mtime),
+                        util::display_path(&r.path),
+                        suffix
+                    );
                 }
             } else {
                 print_rows(&rows);
@@ -273,7 +279,7 @@ fn real_main() -> Result<()> {
                 println!(
                     "{:<14} {}",
                     format!("{sign}{}", human(r.delta.abs())),
-                    r.path
+                    util::display_path(&r.path)
                 );
             }
         }
@@ -293,7 +299,7 @@ fn real_main() -> Result<()> {
                     r.process,
                     r.uid,
                     human(r.size),
-                    r.path
+                    util::display_path(&r.path)
                 );
             }
         }
@@ -308,7 +314,12 @@ fn real_main() -> Result<()> {
             let store = Store::open_ro(&db)?;
             println!("{:<14} {:<12} FILES", "EXT", "SIZE");
             for r in query::by_ext(&store, limit)? {
-                println!("{:<14} {:<12} {}", r.ext, human(r.bytes), r.files);
+                println!(
+                    "{:<14} {:<12} {}",
+                    util::display_path(&r.ext),
+                    human(r.bytes),
+                    r.files
+                );
             }
         }
         Some(Cmd::Tui { path }) => {
@@ -368,7 +379,7 @@ fn resolve_start(store: &Store, path: &std::path::Path) -> Result<Option<(i64, i
     let ok = store
         .conn
         .query_row(
-            "SELECT 1 FROM nodes WHERE dev_id=?1 AND inode=?2",
+            "SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2",
             rusqlite::params![id.0, id.1],
             |_| Ok(()),
         )
@@ -390,11 +401,13 @@ fn print_rows(rows: &[query::Row]) {
         } else {
             ""
         };
+        // escape control/escape chars: a crafted filename must not inject ANSI/
+        // OSC sequences or newlines into the terminal of whoever runs `dux`.
         println!(
             "{:<14} {:<6} {}{}",
             human(r.size),
             ago(r.mtime),
-            r.path,
+            util::display_path(&r.path),
             suffix
         );
     }
@@ -521,7 +534,7 @@ mod tests {
         let b_total: i64 = store
             .conn
             .query_row(
-                "SELECT recursive_bytes FROM nodes WHERE dev_id=?1 AND inode=?2",
+                "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
                 rusqlite::params![b_id.0, b_id.1],
                 |r| r.get(0),
             )

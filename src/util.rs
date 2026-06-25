@@ -116,14 +116,6 @@ pub fn write_heartbeat(db: &std::path::Path) {
     let _ = std::fs::write(HEARTBEAT_PATH, format!("{} {db}", now_secs()));
 }
 
-/// Epoch seconds of the last heartbeat, or 0 if absent/unreadable.
-pub fn read_heartbeat() -> i64 {
-    std::fs::read_to_string(HEARTBEAT_PATH)
-        .ok()
-        .and_then(|s| s.split_whitespace().next().and_then(|t| t.parse().ok()))
-        .unwrap_or(0)
-}
-
 /// (epoch, db_path) of the last heartbeat — lets a scan tell whether the daemon
 /// is writing the SAME db it's about to rebuild (per-db guard, not global).
 pub fn read_heartbeat_db() -> Option<(i64, String)> {
@@ -172,6 +164,42 @@ pub fn parse_duration(s: &str) -> Result<i64> {
 pub fn human(bytes: i64) -> String {
     use humansize::{format_size, BINARY};
     format_size(bytes.max(0) as u64, BINARY)
+}
+
+/// Render a raw filename (bytes) for SAFE terminal display: decode lossily, then
+/// escape control/escape characters. A local user can otherwise craft a filename
+/// containing newlines or ANSI/OSC escape sequences (e.g. OSC 52 clipboard
+/// writes) that forge or hijack the terminal of an admin running `dux`.
+pub fn display_name(raw: &[u8]) -> String {
+    escape_controls(&String::from_utf8_lossy(raw))
+}
+
+/// Same escaping for an already-decoded path string (CLI output paths).
+pub fn display_path(s: &str) -> String {
+    escape_controls(s)
+}
+
+fn escape_controls(s: &str) -> String {
+    // Fast path: most paths have no control characters.
+    if !s
+        .chars()
+        .any(|c| (c as u32) < 0x20 || c as u32 == 0x7f || (0x80..=0x9f).contains(&(c as u32)))
+    {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f || (0x80..=0x9f).contains(&(c as u32)) => {
+                out.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Human-readable "time ago" — coarse (no ticking seconds).

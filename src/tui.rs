@@ -14,6 +14,10 @@ use rusqlite::params;
 use std::io::stdout;
 use std::time::{Duration, Instant};
 
+/// Max children loaded per directory in the tree view. A directory with more
+/// shows a visible "… more than N entries" marker instead of silently hiding.
+const CHILD_LIMIT: usize = 5000;
+
 /// What the tree graph visualizes.
 #[derive(Clone, Copy, PartialEq)]
 enum Metric {
@@ -63,6 +67,7 @@ struct App {
     db: std::path::PathBuf,
     fs: crate::util::FsStat,
     daemon_live: bool,
+    dirty_since: Option<i64>, // Some(epoch) if the index missed events (overflow)
     // recursive write-rate per node (bytes in the last hour), summed up the tree
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     growth_calc: Instant,
@@ -105,6 +110,7 @@ pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Re
         db: db.to_path_buf(),
         fs: crate::util::FsStat::default(),
         daemon_live: false,
+        dirty_since: None,
         growth_map: std::collections::HashMap::new(),
         growth_calc: Instant::now() - Duration::from_secs(60),
         items: 0,
@@ -161,7 +167,7 @@ fn root_node(store: &Store) -> Option<(i64, i64)> {
     store
         .conn
         .query_row(
-            "SELECT dev_id, inode FROM nodes WHERE inode=parent_inode
+            "SELECT dev_id, inode FROM inodes WHERE kind='d'
              ORDER BY recursive_bytes DESC LIMIT 1",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -199,7 +205,7 @@ impl App {
                  SELECT dev,ino,d,0 FROM chg
                  UNION ALL
                  SELECT n.parent_dev,n.parent_inode,a.d,a.depth+1 FROM anc a
-                 JOIN nodes n ON n.dev_id=a.dev AND n.inode=a.ino
+                 JOIN dirents n ON n.dev_id=a.dev AND n.inode=a.ino AND n.prime=1
                  WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND a.depth<4096
                )
              SELECT dev,ino,SUM(d) FROM anc GROUP BY dev,ino",
@@ -224,15 +230,16 @@ impl App {
         let sel_id = self.rows.get(self.sel).map(|r| (r.dev, r.inode));
         let mut out: Vec<Row> = Vec::new();
 
-        // root row
-        let (name, size, inodes): (String, i64, i64) = store
+        // root row (name is the scan root path; totals live on the inode)
+        let (size, inodes): (i64, i64) = store
             .conn
             .query_row(
-                "SELECT name, recursive_bytes, recursive_inodes FROM nodes WHERE dev_id=?1 AND inode=?2",
+                "SELECT recursive_bytes, recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
                 params![self.root_dev, self.root_inode],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .unwrap_or_else(|_| (self.root_path.clone(), 0, 0));
+            .unwrap_or((0, 0));
+        let name = crate::util::display_path(&self.root_path);
         let root_expanded = self.expanded.contains(&(self.root_dev, self.root_inode));
         out.push(Row {
             dev: self.root_dev,
@@ -286,11 +293,15 @@ impl App {
         } else {
             "CASE WHEN kind='d' THEN recursive_bytes ELSE blocks END"
         };
+        // children are dirents under this parent; metadata joins from inodes.
+        // LIMIT is CHILD_LIMIT+1 so we can tell whether the list was truncated.
         let sql = format!(
-            "SELECT dev_id, inode, name, kind, blocks, recursive_bytes, recursive_inodes
-             FROM nodes WHERE parent_dev=?1 AND parent_inode=?2
-               AND NOT (dev_id=?1 AND inode=?2)
-             ORDER BY {order} DESC LIMIT 5000"
+            "SELECT d.dev_id, d.inode, d.name, i.kind, i.blocks, i.recursive_bytes, i.recursive_inodes
+             FROM dirents d JOIN inodes i ON i.dev_id=d.dev_id AND i.inode=d.inode
+             WHERE d.parent_dev=?1 AND d.parent_inode=?2
+               AND NOT (d.dev_id=?1 AND d.inode=?2)
+             ORDER BY {order} DESC LIMIT {}",
+            CHILD_LIMIT + 1
         );
         let mut stmt = store.conn.prepare(&sql)?;
         let rows = stmt.query_map(params![dev, inode], |r| {
@@ -302,10 +313,11 @@ impl App {
                 r.get::<_, i64>(4)?
             };
             let inodes = if k == 'd' { r.get::<_, i64>(6)? } else { 1 };
+            let nb: Vec<u8> = r.get(2)?;
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
+                crate::util::display_name(&nb),
                 k,
                 size,
                 inodes,
@@ -318,11 +330,19 @@ impl App {
         if kids.is_empty() {
             return Ok(());
         }
+        // truncated? drop the probe row and remember to show a marker.
+        let truncated = kids.len() > CHILD_LIMIT;
+        if truncated {
+            kids.truncate(CHILD_LIMIT);
+        }
         let maxs = kids.iter().map(|k| k.4).max().unwrap_or(1).max(1);
         let maxi = kids.iter().map(|k| k.5).max().unwrap_or(1).max(1);
 
         for (cdev, cino, name, kind, size, inodes) in kids {
             let is_expanded = kind == 'd' && self.expanded.contains(&(cdev, cino));
+            // a directory is only collapsible/expandable if it actually has
+            // descendants (recursive_inodes counts itself, so >1 means non-empty).
+            let has_children = kind == 'd' && inodes > 1;
             out.push(Row {
                 dev: cdev,
                 inode: cino,
@@ -332,7 +352,7 @@ impl App {
                 inodes,
                 depth,
                 expanded: is_expanded,
-                has_children: kind == 'd',
+                has_children,
                 ratio_size: size as f64 / maxs as f64,
                 ratio_inodes: inodes as f64 / maxi as f64,
                 // recursive write-rate (subtree), from the cached growth map
@@ -341,6 +361,23 @@ impl App {
             if is_expanded {
                 self.append_children(store, out, cdev, cino, depth + 1)?;
             }
+        }
+        if truncated {
+            // visible marker so a >CHILD_LIMIT directory never silently hides rows
+            out.push(Row {
+                dev: 0,
+                inode: 0,
+                name: format!("… more than {CHILD_LIMIT} entries — narrow with `dux find`"),
+                kind: 'o',
+                size: 0,
+                inodes: 0,
+                depth,
+                expanded: false,
+                has_children: false,
+                ratio_size: 0.0,
+                ratio_inodes: 0.0,
+                growth: 0,
+            });
         }
         Ok(())
     }
@@ -378,11 +415,36 @@ impl App {
         Ok(())
     }
 
+    /// When the TUI is opened at a subtree (not the whole index root), the
+    /// largest-files / fastest-growth panels must be scoped to that subtree too,
+    /// or they'd show unrelated global entries. Returns the ` AND (...) IN (...)`
+    /// clause + bind params, or empty strings when viewing the whole index.
+    fn panel_scope(&self, store: &Store) -> (String, Vec<i64>) {
+        let rdev: Option<i64> = store
+            .get_meta("root_dev")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse().ok());
+        let rino: Option<i64> = store
+            .get_meta("root_inode")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse().ok());
+        if rdev == Some(self.root_dev) && rino == Some(self.root_inode) {
+            (String::new(), Vec::new()) // viewing the whole index — no filter
+        } else {
+            (
+                format!(" AND (dev_id,inode) IN ({})", crate::query::SUBTREE_CTE),
+                vec![self.root_dev, self.root_inode],
+            )
+        }
+    }
+
     fn refresh_panels(&mut self, store: &Store) -> Result<()> {
         self.total_size = store
             .conn
             .query_row(
-                "SELECT recursive_bytes FROM nodes WHERE dev_id=?1 AND inode=?2",
+                "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
                 params![self.root_dev, self.root_inode],
                 |r| r.get(0),
             )
@@ -396,12 +458,13 @@ impl App {
             self.fs = fs;
         }
         self.daemon_live = crate::query::daemon_live(&self.db);
+        self.dirty_since = crate::query::dirty_since(store);
 
         // status-bar aggregates
         self.items = store
             .conn
             .query_row(
-                "SELECT recursive_inodes FROM nodes WHERE dev_id=?1 AND inode=?2",
+                "SELECT recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
                 params![self.root_dev, self.root_inode],
                 |r| r.get(0),
             )
@@ -421,13 +484,17 @@ impl App {
 
         let cutoff =
             (crate::util::now_secs() - self.window_secs) / crate::store::GROWTH_BUCKET_SECS;
+        let (scope_sql, scope_args) = self.panel_scope(store);
         let mut pr = PathResolver::new(&store.conn);
         // pull extra rows; we drop unresolved/duplicate paths then take 6
-        let mut gs = store.conn.prepare(
-            "SELECT dev_id, inode, SUM(delta) d FROM growth WHERE bucket>=?1
-             GROUP BY dev_id, inode HAVING d>0 ORDER BY d DESC LIMIT 60",
-        )?;
-        let g = gs.query_map(params![cutoff], |r| {
+        let gsql = format!(
+            "SELECT dev_id, inode, SUM(delta) d FROM growth WHERE bucket>=?1{scope_sql}
+             GROUP BY dev_id, inode HAVING d>0 ORDER BY d DESC LIMIT 60"
+        );
+        let mut gs = store.conn.prepare(&gsql)?;
+        let mut gbind: Vec<i64> = vec![cutoff];
+        gbind.extend_from_slice(&scope_args);
+        let g = gs.query_map(rusqlite::params_from_iter(gbind.iter()), |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
@@ -443,17 +510,18 @@ impl App {
                 if p.starts_with("inode:") || !seen_paths.insert(p.clone()) {
                     None
                 } else {
-                    Some((p, delta))
+                    Some((crate::util::display_path(&p), delta))
                 }
             })
             .take(6)
             .collect();
 
-        let mut fs = store.conn.prepare(
-            "SELECT dev_id, inode, blocks, mtime FROM nodes WHERE kind!='d'
-             ORDER BY blocks DESC LIMIT 6",
-        )?;
-        let f = fs.query_map([], |r| {
+        let fsql = format!(
+            "SELECT dev_id, inode, blocks, mtime FROM inodes WHERE kind!='d'{scope_sql}
+             ORDER BY blocks DESC LIMIT 6"
+        );
+        let mut fs = store.conn.prepare(&fsql)?;
+        let f = fs.query_map(rusqlite::params_from_iter(scope_args.iter()), |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
@@ -466,7 +534,12 @@ impl App {
             .map(|(d, i, blocks, mtime)| {
                 // recent write rate for this file (leaf growth from the map)
                 let growth = self.growth_map.get(&(d, i)).copied().unwrap_or(0);
-                (pr.resolve(d, i), blocks, mtime, growth)
+                (
+                    crate::util::display_path(&pr.resolve(d, i)),
+                    blocks,
+                    mtime,
+                    growth,
+                )
             })
             .collect();
         // keep panel selections in range as panels change
@@ -750,7 +823,13 @@ fn draw(f: &mut Frame, app: &mut App) {
             format!("   index {} old   ", ago(app.last_scan)),
             Style::default().fg(Color::DarkGray),
         ),
-        if app.daemon_live {
+        if let Some(since) = app.dirty_since {
+            // known event loss trumps "live": the index is no longer trustworthy
+            Span::styled(
+                format!("⚠ DIRTY {} — rescan needed", ago(since)),
+                Style::default().fg(CRIT_COLOR).add_modifier(Modifier::BOLD),
+            )
+        } else if app.daemon_live {
             Span::styled("● live", Style::default().fg(Color::DarkGray))
         } else {
             Span::styled(
