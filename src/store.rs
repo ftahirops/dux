@@ -68,21 +68,84 @@ impl<'a> PathResolver<'a> {
 pub struct Node {
     pub dev_id: i64,
     pub inode: i64,
+    pub parent_dev: i64,
     pub parent_inode: i64,
     pub name: String,
     pub kind: char, // 'f' file, 'd' dir, 'l' symlink, 'o' other
-    pub size: i64,
     pub blocks: i64,
     pub recursive_bytes: i64,
+    pub recursive_inodes: i64,
     pub uid: i64,
-    pub gid: i64,
-    pub mode: i64,
     pub mtime: i64,
-    pub last_seen: i64,
-    pub deleted: bool,
 }
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
+
+/// Steady-state schema (v2). `nodes` carries only what queries read; the name
+/// search index is an EXTERNAL-CONTENT FTS5 over `nodes.name` (no second copy of
+/// the names) kept in sync by triggers, and totals live in recursive_* columns.
+pub const SCHEMA_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS nodes (
+    dev_id           INTEGER NOT NULL,
+    inode            INTEGER NOT NULL,
+    parent_dev       INTEGER NOT NULL DEFAULT 0,
+    parent_inode     INTEGER NOT NULL,
+    name             TEXT    NOT NULL,
+    kind             TEXT    NOT NULL,
+    blocks           INTEGER NOT NULL,
+    recursive_bytes  INTEGER NOT NULL DEFAULT 0,
+    recursive_inodes INTEGER NOT NULL DEFAULT 1,
+    uid              INTEGER NOT NULL,
+    mtime            INTEGER NOT NULL,
+    PRIMARY KEY (dev_id, inode)
+);
+
+CREATE TABLE IF NOT EXISTS changes (
+    ts          INTEGER NOT NULL,
+    dev_id      INTEGER NOT NULL,
+    inode       INTEGER NOT NULL,
+    size_before INTEGER NOT NULL,
+    size_after  INTEGER NOT NULL,
+    delta       INTEGER NOT NULL,
+    event_type  TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_changes_ts ON changes(ts);
+
+-- External-content trigram FTS: stores only the search index, not a copy of the
+-- names (those live in nodes). ~62% smaller than a content-stored FTS. GLOB/LIKE
+-- substring search is accelerated by the trigram index; rowid == nodes.rowid.
+CREATE VIRTUAL TABLE IF NOT EXISTS names_fts USING fts5(
+    name, content='nodes', tokenize='trigram', detail=none, columnsize=0
+);
+"#;
+
+/// Triggers that keep the external-content FTS in sync with `nodes`. Created
+/// AFTER a bulk scan load (so the load isn't slowed by per-row FTS writes — the
+/// scan rebuilds the FTS in one pass instead), and always present for the daemon.
+pub const FTS_TRIGGERS_SQL: &str = r#"
+CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+    INSERT INTO names_fts(rowid, name) VALUES (new.rowid, new.name);
+END;
+CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
+    INSERT INTO names_fts(names_fts, rowid, name) VALUES('delete', old.rowid, old.name);
+END;
+CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE OF name ON nodes BEGIN
+    INSERT INTO names_fts(names_fts, rowid, name) VALUES('delete', old.rowid, old.name);
+    INSERT INTO names_fts(rowid, name) VALUES (new.rowid, new.name);
+END;
+"#;
+
+/// Secondary indexes. Partial indexes keep them small: directory ranking only
+/// indexes directories, file ranking only indexes non-directories. Created after
+/// a bulk load for speed.
+pub const INDEXES_SQL: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_nodes_pparent ON nodes(parent_dev, parent_inode);
+CREATE INDEX IF NOT EXISTS idx_nodes_lfiles  ON nodes(blocks DESC)           WHERE kind<>'d';
+CREATE INDEX IF NOT EXISTS idx_nodes_ldirs   ON nodes(recursive_bytes DESC)  WHERE kind='d';
+CREATE INDEX IF NOT EXISTS idx_nodes_linode  ON nodes(recursive_inodes DESC) WHERE kind='d';
+"#;
 
 pub struct Store {
     pub conn: Connection,
@@ -133,91 +196,72 @@ impl Store {
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS nodes (
-                dev_id          INTEGER NOT NULL,
-                inode           INTEGER NOT NULL,
-                parent_dev      INTEGER NOT NULL DEFAULT 0,
-                parent_inode    INTEGER NOT NULL,
-                name            TEXT    NOT NULL,
-                kind            TEXT    NOT NULL,
-                size            INTEGER NOT NULL,
-                blocks          INTEGER NOT NULL,
-                recursive_bytes INTEGER NOT NULL DEFAULT 0,
-                recursive_inodes INTEGER NOT NULL DEFAULT 1,
-                uid             INTEGER NOT NULL,
-                gid             INTEGER NOT NULL,
-                mode            INTEGER NOT NULL,
-                mtime           INTEGER NOT NULL,
-                last_seen       INTEGER NOT NULL,
-                deleted         INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (dev_id, inode)
-            );
-
-            -- children are looked up by (parent_dev, parent_inode) everywhere
-            -- (TUI expand, scope CTE, daemon ancestor walk) — index it or those
-            -- queries full-scan the whole table.
-            CREATE INDEX IF NOT EXISTS idx_nodes_pparent ON nodes(parent_dev, parent_inode);
-            CREATE INDEX IF NOT EXISTS idx_nodes_size   ON nodes(size DESC);
-            CREATE INDEX IF NOT EXISTS idx_nodes_rsize  ON nodes(recursive_bytes DESC);
-            CREATE INDEX IF NOT EXISTS idx_nodes_rinode ON nodes(recursive_inodes DESC);
-            CREATE INDEX IF NOT EXISTS idx_nodes_mtime  ON nodes(mtime DESC);
-            CREATE INDEX IF NOT EXISTS idx_nodes_uid    ON nodes(uid);
-            -- drop dead indexes from older schemas (name search uses the FTS
-            -- index; children use idx_nodes_pparent) — they wasted ~80 MB.
-            DROP INDEX IF EXISTS idx_nodes_name;
-            DROP INDEX IF EXISTS idx_nodes_parent;
-
-            CREATE TABLE IF NOT EXISTS changes (
-                ts          INTEGER NOT NULL,
-                dev_id      INTEGER NOT NULL,
-                inode       INTEGER NOT NULL,
-                size_before INTEGER NOT NULL,
-                size_after  INTEGER NOT NULL,
-                delta       INTEGER NOT NULL,
-                event_type  TEXT    NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_changes_ts ON changes(ts);
-
-            -- Trigram FTS over names: accelerates substring/glob search to
-            -- locate-class speed. Rebuilt after each scan.
-            CREATE VIRTUAL TABLE IF NOT EXISTS names_fts
-                USING fts5(name, dev UNINDEXED, ino UNINDEXED, tokenize='trigram');
-            "#,
-        )?;
-        // best-effort upgrades for DBs created before these columns existed
-        let _ = self.conn.execute(
-            "ALTER TABLE nodes ADD COLUMN recursive_inodes INTEGER NOT NULL DEFAULT 1",
-            [],
-        );
-        let _ = self.conn.execute(
-            "ALTER TABLE nodes ADD COLUMN parent_dev INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        // FTS docid for this node's name row, so deletes are O(1) by rowid
-        // instead of a full scan of the (UNINDEXED) names_fts.dev/ino columns.
-        let _ = self
+        // The v2 schema (external-content FTS, slim rows) is incompatible with
+        // the v1 layout (content-stored FTS, extra columns). If we find an older
+        // DB, drop the data objects and recreate empty — a `dux scan` repopulates
+        // (the install/deploy path forces one). Cheaper and safer than ALTERs.
+        let ver: i64 = self
+            .get_meta("schema_version")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let has_nodes = self
             .conn
-            .execute("ALTER TABLE nodes ADD COLUMN fts_rowid INTEGER", []);
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
+        if has_nodes && ver < SCHEMA_VERSION {
+            self.conn.execute_batch(
+                "DROP TRIGGER IF EXISTS nodes_ai;
+                 DROP TRIGGER IF EXISTS nodes_ad;
+                 DROP TRIGGER IF EXISTS nodes_au;
+                 DROP TABLE IF EXISTS names_fts;
+                 DROP TABLE IF EXISTS nodes;
+                 DROP TABLE IF EXISTS changes;",
+            )?;
+        }
+        self.conn.execute_batch(SCHEMA_SQL)?;
+        self.conn.execute_batch(INDEXES_SQL)?;
+        self.conn.execute_batch(FTS_TRIGGERS_SQL)?;
         self.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
         Ok(())
     }
 
+    /// Create a fresh, empty index with ONLY the table + FTS vtable (no triggers,
+    /// no secondary indexes). Used by an atomic rescan to bulk-load into a new
+    /// file before `finalize_bulk` adds the FTS rebuild, triggers and indexes.
+    pub fn create_fresh(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        let conn = Connection::open(path).with_context(|| format!("create {}", path.display()))?;
+        Self::pragmas(&conn)?;
+        conn.execute_batch(SCHEMA_SQL)?;
+        let s = Store { conn };
+        s.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
+        Ok(s)
+    }
+
+    /// After a bulk `nodes` load: rebuild the FTS from content in one pass, then
+    /// install the sync triggers and secondary indexes. Order matters — building
+    /// FTS and indexes after the load is far faster than maintaining them per row.
+    pub fn finalize_bulk(&self) -> Result<()> {
+        self.conn
+            .execute_batch("INSERT INTO names_fts(names_fts) VALUES('rebuild');")?;
+        self.conn.execute_batch(FTS_TRIGGERS_SQL)?;
+        self.conn.execute_batch(INDEXES_SQL)?;
+        Ok(())
+    }
+
     /// Rebuild the trigram name index from the current `nodes` table.
-    /// (Scan now populates FTS inline; kept for manual reindex / recovery.)
     #[allow(dead_code)]
     pub fn rebuild_fts(&self) -> Result<()> {
-        self.conn.execute_batch(
-            "DELETE FROM names_fts;
-             INSERT INTO names_fts(name, dev, ino)
-                SELECT name, dev_id, inode FROM nodes WHERE deleted=0;",
-        )?;
+        self.conn
+            .execute_batch("INSERT INTO names_fts(names_fts) VALUES('rebuild');")?;
         Ok(())
     }
 

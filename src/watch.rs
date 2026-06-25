@@ -486,27 +486,26 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
     {
         let mut find = tx.prepare(
             "SELECT dev_id, inode, kind, recursive_bytes, recursive_inodes, blocks
-             FROM nodes WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 AND deleted=0 LIMIT 1",
+             FROM nodes WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 LIMIT 1",
         )?;
         let mut find_inode = tx.prepare(
             "SELECT name, parent_dev, parent_inode, kind, recursive_bytes, recursive_inodes
              FROM nodes WHERE dev_id=?1 AND inode=?2 LIMIT 1",
         )?;
+        // FTS is maintained automatically by triggers on nodes (insert/delete/
+        // rename), so the daemon never touches names_fts directly.
         let mut insert_node = tx.prepare(
             "INSERT OR REPLACE INTO nodes
-             (dev_id,inode,parent_dev,parent_inode,name,kind,size,blocks,recursive_bytes,
-              recursive_inodes,uid,gid,mode,mtime,last_seen,fts_rowid,deleted)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0)",
+             (dev_id,inode,parent_dev,parent_inode,name,kind,blocks,recursive_bytes,
+              recursive_inodes,uid,mtime)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         )?;
-        let mut insert_fts = tx.prepare("INSERT INTO names_fts(name,dev,ino) VALUES(?1,?2,?3)")?;
-        let mut get_fts_rowid =
-            tx.prepare("SELECT fts_rowid FROM nodes WHERE dev_id=?1 AND inode=?2")?;
         let mut upd_file = tx.prepare(
-            "UPDATE nodes SET size=?3, blocks=?4, recursive_bytes=?4, mtime=?5, last_seen=?6
+            "UPDATE nodes SET blocks=?3, recursive_bytes=?3, mtime=?4
              WHERE dev_id=?1 AND inode=?2",
         )?;
         let mut relocate = tx.prepare(
-            "UPDATE nodes SET name=?3, parent_dev=?4, parent_inode=?5, last_seen=?6, fts_rowid=?7
+            "UPDATE nodes SET name=?3, parent_dev=?4, parent_inode=?5
              WHERE dev_id=?1 AND inode=?2",
         )?;
         let mut bump = tx.prepare(
@@ -522,40 +521,26 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                 SELECT n.dev_id,n.inode,sub.depth+1 FROM nodes n
                 JOIN sub ON n.parent_dev=sub.d AND n.parent_inode=sub.i
                 WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND sub.depth<4096
-             ) SELECT s.d, s.i, n.fts_rowid FROM sub s
-               JOIN nodes n ON n.dev_id=s.d AND n.inode=s.i",
+             ) SELECT d, i FROM sub",
         )?;
         let mut del_node = tx.prepare("DELETE FROM nodes WHERE dev_id=?1 AND inode=?2")?;
-        // fast path: delete the name by its FTS docid (O(1)); slow fallback for
-        // legacy rows whose fts_rowid was never recorded (pre-migration scans).
-        let mut del_fts = tx.prepare("DELETE FROM names_fts WHERE rowid=?1")?;
-        let mut del_fts_legacy = tx.prepare("DELETE FROM names_fts WHERE dev=?1 AND ino=?2")?;
         let mut log = tx.prepare(
             "INSERT INTO changes(ts,dev_id,inode,size_before,size_after,delta,event_type)
              VALUES(?1,?2,?3,?4,?5,?6,?7)",
         )?;
 
-        // delete a node's whole subtree (rows + FTS); caller subtracts totals
+        // delete a node's whole subtree; the FTS rows go with each node via the
+        // AFTER DELETE trigger. Caller subtracts totals from ancestors.
         let del_subtree = |descendants: &mut rusqlite::Statement,
-                           del_fts: &mut rusqlite::Statement,
-                           del_fts_legacy: &mut rusqlite::Statement,
                            del_node: &mut rusqlite::Statement,
                            d: i64,
                            i: i64|
          -> Result<()> {
-            let sub: Vec<(i64, i64, Option<i64>)> = descendants
-                .query_map(params![d, i], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            let sub: Vec<(i64, i64)> = descendants
+                .query_map(params![d, i], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .filter_map(|x| x.ok())
                 .collect();
-            for (dd, ii, frow) in &sub {
-                match frow {
-                    Some(rid) => {
-                        del_fts.execute(params![rid])?;
-                    }
-                    None => {
-                        del_fts_legacy.execute(params![dd, ii])?;
-                    }
-                }
+            for (dd, ii) in &sub {
                 del_node.execute(params![dd, ii])?;
             }
             Ok(())
@@ -575,7 +560,7 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                 if let Ok((cdev, cino, _k, crb, cri, _b)) =
                     find.query_row(params![pdev, pino, name], row6)
                 {
-                    del_subtree(&mut descendants, &mut del_fts, &mut del_fts_legacy, &mut del_node, cdev, cino)?;
+                    del_subtree(&mut descendants, &mut del_node, cdev, cino)?;
                     walk_ancestors(&mut bump, &mut get_parent, pdev, pino, -crb, -cri)?;
                     log.execute(params![now, cdev, cino, crb, 0i64, -crb, "delete"])?;
                 }
@@ -604,7 +589,7 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                         return Ok(()); // it's a rename — move-to will relocate it
                     }
                     // genuinely left the watched tree: remove it
-                    del_subtree(&mut descendants, &mut del_fts, &mut del_fts_legacy, &mut del_node, cdev, cino)?;
+                    del_subtree(&mut descendants, &mut del_node, cdev, cino)?;
                     walk_ancestors(&mut bump, &mut get_parent, pdev, pino, -crb, -cri)?;
                     log.execute(params![now, cdev, cino, crb, 0i64, -crb, "moved_out"])?;
                 }
@@ -681,32 +666,15 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                     }
                     // RELOCATE: move the row + its (unchanged) subtree to the new
                     // parent. Children reference (dev,ino) so they follow for free.
-                    // refresh the FTS name: drop the old docid, insert the new
-                    // name, and store its docid back on the relocated row.
-                    let old_frow: Option<i64> = get_fts_rowid
-                        .query_row(params![dev, ino], |r| r.get(0))
-                        .ok()
-                        .flatten();
-                    match old_frow {
-                        Some(rid) => {
-                            del_fts.execute(params![rid])?;
-                        }
-                        None => {
-                            del_fts_legacy.execute(params![dev, ino])?;
-                        }
-                    }
-                    insert_fts.execute(params![name, dev, ino])?;
-                    let new_frow = tx.last_insert_rowid();
+                    // The UPDATE-of-name trigger refreshes the FTS automatically.
                     walk_ancestors(&mut bump, &mut get_parent, opdev, opino, -rb, -ri)?;
-                    relocate.execute(params![dev, ino, name, npdev, npino, now, new_frow])?;
+                    relocate.execute(params![dev, ino, name, npdev, npino])?;
                     walk_ancestors(&mut bump, &mut get_parent, npdev, npino, rb, ri)?;
                     log.execute(params![now, dev, ino, rb, rb, 0i64, "rename"])?;
                 } else {
                     // moved in from outside the tree -> treat as a fresh create
                     let blocks = (m.blocks() as i64) * 512;
                     let kind = kind_of(&m);
-                    insert_fts.execute(params![name, dev, ino])?;
-                    let frow = tx.last_insert_rowid();
                     insert_node.execute(params![
                         dev,
                         ino,
@@ -714,16 +682,11 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                         npino,
                         name,
                         kind,
-                        m.size() as i64,
                         blocks,
                         blocks,
                         1i64,
                         m.uid() as i64,
-                        m.gid() as i64,
-                        m.mode() as i64,
                         m.mtime(),
-                        now,
-                        frow
                     ])?;
                     walk_ancestors(&mut bump, &mut get_parent, npdev, npino, blocks, 1)?;
                     log.execute(params![now, dev, ino, 0i64, blocks, blocks, "create"])?;
@@ -754,7 +717,6 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                 let dev = m.dev() as i64;
                 let ino = m.ino() as i64;
                 let blocks = (m.blocks() as i64) * 512;
-                let size = m.size() as i64;
                 let mtime = m.mtime();
                 let is_dir = m.is_dir();
                 let kind = kind_of(&m);
@@ -768,7 +730,7 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                             return Ok(()); // dir totals driven by children
                         }
                         let delta = blocks - erb;
-                        upd_file.execute(params![dev, ino, size, blocks, mtime, now])?;
+                        upd_file.execute(params![dev, ino, blocks, mtime])?;
                         if delta != 0 {
                             walk_ancestors(&mut bump, &mut get_parent, pdev, pino, delta, 0)?;
                             log.execute(params![now, dev, ino, erb, blocks, delta, "modify"])?;
@@ -777,7 +739,7 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                     other => {
                         if let Some((edev, eino, _ek, erb, eri, _eb)) = other {
                             // name reused by a DIFFERENT inode: drop the stale occupant
-                            del_subtree(&mut descendants, &mut del_fts, &mut del_fts_legacy, &mut del_node, edev, eino)?;
+                            del_subtree(&mut descendants, &mut del_node, edev, eino)?;
                             walk_ancestors(&mut bump, &mut get_parent, pdev, pino, -erb, -eri)?;
                         }
                         // Skip if this inode is already indexed under another name
@@ -786,8 +748,6 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                         let is_hardlink =
                             find_inode.query_row(params![dev, ino], |_| Ok(())).is_ok();
                         if !is_hardlink {
-                            insert_fts.execute(params![name, dev, ino])?;
-                            let frow = tx.last_insert_rowid();
                             insert_node.execute(params![
                                 dev,
                                 ino,
@@ -795,16 +755,11 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>) -> Result<()> {
                                 pino,
                                 name,
                                 kind,
-                                size,
                                 blocks,
                                 blocks,
                                 1i64,
                                 m.uid() as i64,
-                                m.gid() as i64,
-                                m.mode() as i64,
                                 mtime,
-                                now,
-                                frow
                             ])?;
                             walk_ancestors(&mut bump, &mut get_parent, pdev, pino, blocks, 1)?;
                             log.execute(params![now, dev, ino, 0i64, blocks, blocks, "create"])?;

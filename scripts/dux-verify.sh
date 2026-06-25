@@ -323,7 +323,7 @@ selftest() {
 }
 
 daemon_live() { local hb; hb="$(cat /run/dux/heartbeat 2>/dev/null)"; [ -n "$hb" ] && [ $(( $(date +%s) - hb )) -le 15 ]; }
-node_exists_name() { q "SELECT count(*) FROM nodes WHERE name='$1' AND deleted=0"; }
+node_exists_name() { q "SELECT count(*) FROM nodes WHERE name='$1'"; }
 dir_recursive() { local di; di="$(stat -c '%d %i' "$1")"; set -- $di; q "SELECT recursive_bytes FROM nodes WHERE dev_id=$1 AND inode=$2"; }
 
 # poll the index until COND is true (handles daemon lag on busy systems)

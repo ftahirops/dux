@@ -81,11 +81,9 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     let now = now_secs();
     let started = Instant::now();
 
-    // Reset the whole index — one scan == one tree. This avoids stale roots
-    // from earlier scans of other paths/devices polluting the view.
-    store
-        .conn
-        .execute_batch("DELETE FROM nodes; DELETE FROM names_fts;")?;
+    // The caller builds into a FRESH, empty index (atomic rescan), so there is
+    // nothing to reset here — and the FTS sync triggers don't exist yet, which
+    // is why the bulk load below is fast (FTS is rebuilt once in finalize_bulk).
 
     // ---- shared progress counters + background printer thread ----
     let n_files = Arc::new(AtomicU64::new(0));
@@ -245,28 +243,26 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         .map(|&i| bytes_sub[i])
         .unwrap_or(0);
 
-    // ---- phase 3: batched insert (nodes + trigram FTS inline) ----
+    // ---- phase 3: batched bulk insert (no triggers/indexes yet — fast) ----
     let mut idx = 0;
     while idx < nodes.len() {
         let end = (idx + 50_000).min(nodes.len());
         let tx = store.conn.transaction()?;
         {
+            // OR REPLACE dedups the root (emitted by both the manual push and the
+            // walk) and any repeated dir entry. Safe during bulk load: the FTS
+            // sync triggers don't exist yet, so REPLACE can't double-fire them.
             let mut stmt = tx.prepare(
                 "INSERT OR REPLACE INTO nodes
-                 (dev_id,inode,parent_dev,parent_inode,name,kind,size,blocks,recursive_bytes,
-                  recursive_inodes,uid,gid,mode,mtime,last_seen,fts_rowid,deleted)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0)",
+                 (dev_id,inode,parent_dev,parent_inode,name,kind,blocks,recursive_bytes,
+                  recursive_inodes,uid,mtime)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             )?;
-            let mut fts = tx.prepare("INSERT INTO names_fts(name,dev,ino) VALUES(?1,?2,?3)")?;
             for j in idx..end {
                 let n = &nodes[j];
                 if !primary[j] {
                     continue; // extra hardlink: no row, no FTS name (one per inode)
                 }
-                // insert the FTS name first so we can store its rowid on the node
-                // (lets the daemon delete the name in O(1) by rowid later).
-                fts.execute(params![n.name, n.dev, n.inode])?;
-                let fts_rowid = tx.last_insert_rowid();
                 stmt.execute(params![
                     n.dev,
                     n.inode,
@@ -274,22 +270,19 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                     n.parent_inode,
                     n.name,
                     n.kind.to_string(),
-                    n.size,
                     n.blocks,
                     n.recursive,
                     n.rinodes,
                     n.uid,
-                    n.gid,
-                    n.mode,
                     n.mtime,
-                    now,
-                    fts_rowid,
                 ])?;
             }
         }
         tx.commit()?;
         idx = end;
     }
+    // Build the FTS index in one pass and install the sync triggers + indexes.
+    store.finalize_bulk()?;
 
     let stats = ScanStats {
         files: n_files.load(Ordering::Relaxed),
@@ -315,7 +308,9 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
 
 /// A node captured during the parallel walk. parent (dev,inode) and depth are
 /// recorded at walk time so post-processing needs no path map. `recursive` is
-/// filled in phase 2.
+/// filled in phase 2. (`size`/`gid`/`mode` are captured but no longer stored —
+/// the v2 schema keeps only allocated `blocks`, owner `uid` and `mtime`.)
+#[allow(dead_code)]
 struct RawNode {
     dev: i64,
     inode: i64,

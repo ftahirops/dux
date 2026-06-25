@@ -282,12 +282,12 @@ impl App {
         let order = if self.metric == Metric::Inodes {
             "recursive_inodes"
         } else {
-            "CASE WHEN kind='d' THEN recursive_bytes ELSE size END"
+            "CASE WHEN kind='d' THEN recursive_bytes ELSE blocks END"
         };
         let sql = format!(
-            "SELECT dev_id, inode, name, kind, size, recursive_bytes, recursive_inodes
+            "SELECT dev_id, inode, name, kind, blocks, recursive_bytes, recursive_inodes
              FROM nodes WHERE parent_dev=?1 AND parent_inode=?2
-               AND NOT (dev_id=?1 AND inode=?2) AND deleted=0
+               AND NOT (dev_id=?1 AND inode=?2)
              ORDER BY {order} DESC LIMIT 5000"
         );
         let mut stmt = store.conn.prepare(&sql)?;
@@ -447,7 +447,7 @@ impl App {
             .collect();
 
         let mut fs = store.conn.prepare(
-            "SELECT dev_id, inode, blocks, mtime FROM nodes WHERE deleted=0 AND kind!='d'
+            "SELECT dev_id, inode, blocks, mtime FROM nodes WHERE kind!='d'
              ORDER BY blocks DESC LIMIT 6",
         )?;
         let f = fs.query_map([], |r| {

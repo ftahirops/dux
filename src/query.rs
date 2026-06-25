@@ -78,7 +78,7 @@ pub fn top(
     let kind_cmp = if dirs { "=" } else { "!=" };
     let mut sql = format!(
         "SELECT dev_id, inode, blocks, recursive_bytes, recursive_inodes, mtime, kind, {col} AS s
-         FROM nodes WHERE deleted=0 AND kind{kind_cmp}'d'"
+         FROM nodes WHERE kind{kind_cmp}'d'"
     );
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some((d, i)) = scope {
@@ -136,23 +136,23 @@ pub struct FindOpts {
 /// Ultra-fast search over the live index — the locate/find replacement.
 pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
     // report allocated blocks (disk usage), consistent with `top`
-    let mut sql =
-        String::from("SELECT dev_id, inode, blocks, mtime, kind FROM nodes WHERE deleted=0");
+    let mut sql = String::from("SELECT dev_id, inode, blocks, mtime, kind FROM nodes WHERE 1=1");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     if let Some(n) = &o.name {
-        // GLOB natively supports * and ?; the trigram FTS accelerates it.
+        // GLOB natively supports * and ?; the trigram FTS accelerates it. The
+        // external-content FTS shares nodes.rowid, so we match on rowid.
         let pat = if n.contains('*') || n.contains('?') {
             n.clone()
         } else {
             format!("*{n}*") // bare term => substring match
         };
-        sql.push_str(" AND (dev_id,inode) IN (SELECT dev,ino FROM names_fts WHERE name GLOB ?)");
+        sql.push_str(" AND rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
         args.push(Box::new(pat));
     }
     if let Some(e) = &o.ext {
         let e = e.trim_start_matches('.');
-        sql.push_str(" AND (dev_id,inode) IN (SELECT dev,ino FROM names_fts WHERE name GLOB ?)");
+        sql.push_str(" AND rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
         args.push(Box::new(format!("*.{e}")));
     }
     if let Some(t) = o.newer_than {
@@ -261,7 +261,7 @@ pub struct OwnerRow {
 pub fn by_owner(store: &Store, limit: usize) -> Result<Vec<OwnerRow>> {
     let mut stmt = store.conn.prepare(
         "SELECT uid, SUM(blocks) AS s, COUNT(*) FROM nodes
-         WHERE deleted=0 AND kind!='d'
+         WHERE kind!='d'
          GROUP BY uid ORDER BY s DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit as i64], |r| {
@@ -284,7 +284,7 @@ pub fn by_ext(store: &Store, limit: usize) -> Result<Vec<ExtRow>> {
     // Extract extension in Rust to avoid brittle SQL string ops.
     let mut stmt = store
         .conn
-        .prepare("SELECT name, blocks FROM nodes WHERE deleted=0 AND kind='f'")?;
+        .prepare("SELECT name, blocks FROM nodes WHERE kind='f'")?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
     use std::collections::HashMap;
     let mut map: HashMap<String, (i64, i64)> = HashMap::new();
@@ -316,9 +316,7 @@ pub fn status(store: &Store) -> Result<String> {
         .unwrap_or(0);
     let count: i64 = store
         .conn
-        .query_row("SELECT COUNT(*) FROM nodes WHERE deleted=0", [], |r| {
-            r.get(0)
-        })
+        .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
         .unwrap_or(0);
     let root_dev: Option<i64> = store.get_meta("root_dev")?.and_then(|s| s.parse().ok());
     let root_inode: Option<i64> = store.get_meta("root_inode")?.and_then(|s| s.parse().ok());
