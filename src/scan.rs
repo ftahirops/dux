@@ -317,6 +317,15 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                         n.mtime,
                     ])?;
                 }
+                // The walker also emits the scan root as a child of its real parent
+                // dir (parent=<real parent>, name=<basename>). The canonical root
+                // dirent is the SELF-parented one pushed manually (name=abspath);
+                // skip the walker's duplicate so the root resolves to its full path.
+                let is_root = n.dev == root_dev && n.inode == root_inode;
+                let self_parented = n.parent_dev == n.dev && n.parent_inode == n.inode;
+                if is_root && !self_parented {
+                    continue;
+                }
                 de_stmt.execute(params![
                     n.parent_dev,
                     n.parent_inode,
@@ -467,10 +476,18 @@ fn parallel_collect(
                     } else {
                         'o'
                     };
+                    let ino = m.ino() as i64;
+                    // The walker also surfaces the scan root as a child of its real
+                    // parent dir. Don't emit or count that duplicate (the canonical
+                    // self-parented root is added separately) — but still recurse
+                    // into it so the real subtree is walked.
+                    if dev == root_dev && ino == root_inode {
+                        return true;
+                    }
                     let name = entry.file_name().as_bytes().to_vec();
                     let _ = tx.send(RawNode {
                         dev,
-                        inode: m.ino() as i64,
+                        inode: ino,
                         parent_dev: pdev,
                         parent_inode: pino,
                         depth: cdepth,
