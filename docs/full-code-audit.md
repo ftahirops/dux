@@ -940,3 +940,78 @@ UI work.
   <https://rustsec.org/advisories/RUSTSEC-2026-0002.html>
 - RustSec `paste` advisory:
   <https://rustsec.org/advisories/RUSTSEC-2024-0436.html>
+
+---
+
+# Remediation — implemented 2026-06-25 (branch `audit-fixes-v4`)
+
+The findings above were addressed by a schema-breaking data-model rewrite
+(**schema v4**) plus correctness, security, and resource work. The on-disk
+schema bump triggers the existing atomic-rebuild path, so upgrading is safe.
+
+## Data model (schema v4)
+The single `nodes` table was split into:
+- **`inodes`** — one row per `(dev,inode)`: `kind`, allocated `blocks`, recursive
+  directory totals, `uid`, `mtime`.
+- **`dirents`** — one row per path/name: `BLOB` name, target `(dev,inode)`, a
+  `prime` flag, and `UNIQUE(parent_dev,parent_inode,name)`.
+
+This directly resolves the critical structural findings:
+- **Multiple inodes per path** → forbidden by `UNIQUE(parent,name)`.
+- **Hardlinks** → every link is its own `dirents` row (all paths searchable);
+  the inode's blocks are counted once, attributed to a single *prime* dirent
+  (`du` semantics). Deleting one link keeps the inode while any link remains.
+- **Non-UTF-8 filenames** → stored as raw `BLOB` bytes; distinct names never
+  collapse. (FTS search is best-effort lossy; identity is byte-exact.)
+
+## Fixed
+- TUI/queries/scan/daemon ported to v4; `find` returns every hardlink path.
+- Flush is **atomic**: any per-op error aborts the transaction (`?`), so pending
+  events are preserved and retried — no more silently-committed partial drift.
+- Per-database **`flock`** (`<db>.lock`, `LOCK_EX|LOCK_NB`) held for the lifetime
+  of every scan and the daemon — the real guard against concurrent writers.
+- **`dirty_since`** is operational: shown in `status` and the TUI (takes
+  precedence over "live"); set on queue overflow, partial watch, overload,
+  low-disk, and budget-exhausted reconcile.
+- Graceful **SIGTERM/SIGINT** flush before exit.
+- Daemon **root validation**: rebuilds if the index is rooted at a different tree.
+- `FAN_ATTRIB` tracked (owner/mtime + directory-block changes).
+- Populated **directories moved into** the tree are reconciled (subtree indexed).
+- **Terminal-escape injection** fixed: all CLI/TUI path output escapes control
+  characters (`util::display_path`/`display_name`).
+- **Alert subprocesses** bounded (≤16 concurrent), reaped; debounce map pruned.
+- **Atomic rebuild** is crash-durable (fsync of file + parent dir around rename).
+- **Mount-mark failures** warn and mark dirty (no silent partial coverage).
+- **Low-disk protection** (pause writes < 256 MiB free) and **bounded pending**
+  backlog (drop + dirty past 500k) — host stability under overload.
+- TUI: child-truncation marker, empty-dir indicator, subtree-scoped panels.
+- Scan no longer double-counts the root (dir count off-by-one fixed); root path
+  resolves correctly.
+- Removed dead `read_heartbeat` (Clippy); `cargo fmt`/`clippy -D warnings` clean.
+- Service hardening (`CapabilityBoundingSet`, `NoNewPrivileges`,
+  `MemoryDenyWriteExecute`, fanotify-compatible `Protect*`/`Restrict*`); index
+  exposure documented + made configurable; `SECURITY.md` added.
+- `dux-verify.sh` rewritten for v4 (duplicate-PATH check, negative totals,
+  `dirty_since`, per-db liveness, delimiter-safe hex path rebuild, dead loop
+  removed, hardlink selftest, dropped the overstated `ROCK SOLID` verdict).
+- Tests: hardlink lifecycle, duplicate-path prevention, non-UTF-8 identity
+  (drive `flush()` over real temp trees); the existing scan/scope/hardlink test
+  is green on v4.
+
+## Deferred (documented, not yet implemented)
+These remain larger efforts and are intentionally left for a follow-up rather
+than rushed:
+- **Streaming scan** — the walk still buffers all node metadata in RAM before
+  the bulk load (the in-code note explains why a bounded channel deadlocks the
+  current design; truly capping peak scan RAM needs a concurrent-consume
+  redesign). `MemoryHigh=2G`/`MemoryMax=4G` in the unit bound the blast radius.
+- **Mid-run mount detection** — filesystems mounted *after* daemon start are not
+  auto-marked yet (startup marks all current real mounts; a failed mark now
+  reports dirty).
+- **Incremental vacuum / periodic compaction** and a hard **bytes/rows budget**
+  for `growth` (currently 7-day time-based retention).
+- **Startup reconciliation / event journaling across the initial scan** — the
+  daemon rebuilds atomically on schema/root mismatch, flushes on SIGTERM, and
+  marks dirty on known loss, but does not yet auto-reconcile downtime gaps.
+- **RustSec `lru`/`paste`** — transitive via `ratatui 0.28`; unfixable without
+  an upstream bump (see `docs/SECURITY.md`). Low severity.
