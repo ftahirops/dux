@@ -84,8 +84,6 @@ pub struct AlertConfig {
     pub debounce: i64,
 }
 
-/// Run the watch daemon. Uses fanotify FID mode so creates, deletes, renames,
-/// and size-growth are all tracked live — no rescan needed for normal activity.
 /// True if the index at `db` is already rooted at `root_canon` (its stored
 /// root_dev/root_inode match). Returns true when it can't tell (missing meta /
 /// unreadable / unstattable root) so we don't trigger a spurious rebuild — the
@@ -116,6 +114,8 @@ fn root_matches(db: &Path, root_canon: &Path) -> bool {
     }
 }
 
+/// Run the watch daemon. Uses fanotify FID mode so creates, deletes, renames,
+/// and size-growth are all tracked live — no rescan needed for normal activity.
 pub fn run_daemon(
     db: &Path,
     root: &Path,
@@ -1210,4 +1210,215 @@ fn check_alerts(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scan::{self, ScanOptions};
+    use std::collections::HashMap;
+
+    fn tmp(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("dux-wt-{tag}-{}", std::process::id()))
+    }
+    fn cleanup(dir: &Path, db: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
+        for s in ["", "-wal", "-shm", ".lock"] {
+            let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+    }
+    fn id_of(p: &Path) -> (i64, i64) {
+        use std::os::unix::fs::MetadataExt;
+        let m = std::fs::symlink_metadata(p).unwrap();
+        (m.dev() as i64, m.ino() as i64)
+    }
+    fn count_dirents(store: &Store, dev: i64, ino: i64) -> i64 {
+        store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE dev_id=?1 AND inode=?2",
+                params![dev, ino],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    fn inode_rows(store: &Store, dev: i64, ino: i64) -> i64 {
+        store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM inodes WHERE dev_id=?1 AND inode=?2",
+                params![dev, ino],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    fn rbytes(store: &Store, dev: i64, ino: i64) -> i64 {
+        store
+            .conn
+            .query_row(
+                "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+                params![dev, ino],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+    }
+    fn scan_into(dir: &Path, db: &Path) {
+        let mut s = Store::open_rw(db).unwrap();
+        scan::scan(
+            &mut s,
+            dir,
+            &ScanOptions {
+                progress: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    // A hardlink is added, then both links are removed one at a time. The inode's
+    // blocks must be counted once, both paths must be searchable, the inode must
+    // survive while ANY link remains, and vanish only on the last unlink.
+    #[test]
+    fn hardlink_lifecycle() {
+        let dir = tmp("hl");
+        let db = tmp("hl-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.dat"), vec![1u8; 4096]).unwrap();
+        scan_into(&dir, &db);
+
+        let mut store = Store::open_rw(&db).unwrap();
+        let fid = id_of(&dir.join("a.dat"));
+        let did = id_of(&dir);
+        let base = rbytes(&store, did.0, did.1);
+
+        // add a hardlink -> a second dirent, but the inode is counted once
+        std::fs::hard_link(dir.join("a.dat"), dir.join("b.dat")).unwrap();
+        let mut p = HashMap::new();
+        p.insert(dir.join("b.dat"), Op::Upsert);
+        flush(&mut store, &mut p, &db).unwrap();
+        assert_eq!(count_dirents(&store, fid.0, fid.1), 2, "both paths indexed");
+        assert_eq!(inode_rows(&store, fid.0, fid.1), 1, "one inode row");
+        assert_eq!(
+            rbytes(&store, did.0, did.1),
+            base,
+            "hardlink must not change the dir total (counted once)"
+        );
+
+        // remove the original (prime) link: inode survives via the other link
+        std::fs::remove_file(dir.join("a.dat")).unwrap();
+        let mut p = HashMap::new();
+        p.insert(dir.join("a.dat"), Op::Delete);
+        flush(&mut store, &mut p, &db).unwrap();
+        assert_eq!(count_dirents(&store, fid.0, fid.1), 1, "one link remains");
+        assert_eq!(inode_rows(&store, fid.0, fid.1), 1, "inode survives");
+        assert_eq!(rbytes(&store, did.0, did.1), base, "total unchanged");
+
+        // remove the last link: inode and its blocks are gone
+        std::fs::remove_file(dir.join("b.dat")).unwrap();
+        let mut p = HashMap::new();
+        p.insert(dir.join("b.dat"), Op::Delete);
+        flush(&mut store, &mut p, &db).unwrap();
+        assert_eq!(
+            inode_rows(&store, fid.0, fid.1),
+            0,
+            "inode removed on last link"
+        );
+        assert!(
+            rbytes(&store, did.0, did.1) < base,
+            "blocks subtracted on last unlink"
+        );
+
+        drop(store);
+        cleanup(&dir, &db);
+    }
+
+    // A name reused by a DIFFERENT inode (a missed delete + recreate) must not
+    // leave two inodes at one path: the stale occupant is dropped, UNIQUE holds.
+    #[test]
+    fn duplicate_path_prevented() {
+        let dir = tmp("dup");
+        let db = tmp("dup-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("x"), vec![1u8; 4096]).unwrap();
+        scan_into(&dir, &db);
+        let mut store = Store::open_rw(&db).unwrap();
+        let did = id_of(&dir);
+
+        // replace x with a brand-new inode, but only deliver the upsert (the delete
+        // event was "missed").
+        std::fs::remove_file(dir.join("x")).unwrap();
+        std::fs::write(dir.join("x"), vec![2u8; 8192]).unwrap();
+        let newid = id_of(&dir.join("x"));
+        let mut p = HashMap::new();
+        p.insert(dir.join("x"), Op::Upsert);
+        flush(&mut store, &mut p, &db).unwrap();
+
+        let n: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![did.0, did.1, b"x".to_vec()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "exactly one inode occupies the path");
+        let target: (i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT dev_id, inode FROM dirents WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![did.0, did.1, b"x".to_vec()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(target, newid, "path points at the NEW inode");
+        drop(store);
+        cleanup(&dir, &db);
+    }
+
+    // Two filenames with different invalid-UTF-8 bytes must remain distinct rows
+    // (the old lossy-String storage collapsed both to one replacement string).
+    #[test]
+    fn non_utf8_names_distinct() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tmp("nu");
+        let db = tmp("nu-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        let n1 = std::ffi::OsStr::from_bytes(b"bad\xff\x01");
+        let n2 = std::ffi::OsStr::from_bytes(b"bad\xfe\x02");
+        std::fs::write(dir.join(n1), b"x").unwrap();
+        std::fs::write(dir.join(n2), b"y").unwrap();
+        scan_into(&dir, &db);
+        let store = Store::open_rw(&db).unwrap();
+        let did = id_of(&dir);
+        let n: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE parent_dev=?1 AND parent_inode=?2
+                 AND NOT (dev_id=?1 AND inode=?2)",
+                params![did.0, did.1],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 2, "distinct non-UTF-8 names must not collapse");
+        let names: Vec<Vec<u8>> = {
+            let mut st = store
+                .conn
+                .prepare(
+                    "SELECT name FROM dirents WHERE parent_dev=?1 AND parent_inode=?2
+                     AND NOT (dev_id=?1 AND inode=?2)",
+                )
+                .unwrap();
+            st.query_map(params![did.0, did.1], |r| r.get::<_, Vec<u8>>(0))
+                .unwrap()
+                .filter_map(|x| x.ok())
+                .collect()
+        };
+        assert!(names.iter().any(|b| b.as_slice() == b"bad\xff\x01"));
+        assert!(names.iter().any(|b| b.as_slice() == b"bad\xfe\x02"));
+        drop(store);
+        cleanup(&dir, &db);
+    }
 }
