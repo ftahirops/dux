@@ -134,7 +134,9 @@ pub fn run_daemon(
     // tree → missing parents, wrong totals). Rebuild atomically in either case;
     // a no-op when the index is current AND already rooted here.
     if Store::needs_rebuild(db) || !root_matches(db, &root_canon) {
-        tracing::info!("index missing, schema-incompatible, or rooted elsewhere — rebuilding before watching");
+        tracing::info!(
+            "index missing, schema-incompatible, or rooted elsewhere — rebuilding before watching"
+        );
         let opts = crate::scan::ScanOptions {
             one_file_system,
             progress: false,
@@ -151,6 +153,7 @@ pub fn run_daemon(
     // /home, /var, /boot, etc. We mark each, keyed by fsid, and keep a dir fd
     // per filesystem for open_by_handle_at (the event carries its fsid).
     let mut fsfds: HashMap<(i32, i32), RawFd> = HashMap::new();
+    let mut mark_failures = 0u32;
     for mp in real_mounts(&root_canon, one_file_system) {
         let fsid = match statfs_fsid(&mp) {
             Some(f) => f,
@@ -161,10 +164,23 @@ pub fn run_daemon(
                 Ok(fd) if mark_fs(fan, &mp).is_ok() => {
                     e.insert(fd);
                 }
-                Ok(fd) => unsafe {
-                    libc::close(fd);
-                },
-                Err(_) => {}
+                Ok(fd) => {
+                    // mark failed: this filesystem won't be watched. Don't pretend
+                    // full coverage — count it and mark the index degraded below.
+                    tracing::warn!(
+                        "could not fanotify-mark {} — its changes will be missed",
+                        mp.display()
+                    );
+                    mark_failures += 1;
+                    unsafe { libc::close(fd) };
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "could not open {} — its changes will be missed",
+                        mp.display()
+                    );
+                    mark_failures += 1;
+                }
             }
         }
     }
@@ -174,6 +190,11 @@ pub fn run_daemon(
             "no watchable filesystem found under {}",
             root_canon.display()
         );
+    }
+    if mark_failures > 0 {
+        // partial coverage is a known-incomplete watch — surface it via dirty
+        // state so status/TUI stop claiming the index is trustworthy.
+        store.set_meta("dirty_since", &now_secs().to_string()).ok();
     }
     tracing::info!(
         "dux daemon watching {} ({} filesystem(s), FID mode: create/delete/rename/modify, flush {}ms)",
@@ -206,6 +227,7 @@ pub fn run_daemon(
     let mut last_flush = Instant::now();
     let mut last_ckpt = Instant::now();
     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
+    let mut alert_children: Vec<std::process::Child> = Vec::new();
     let mut pending: HashMap<PathBuf, Op> = HashMap::new();
     let mut buf = [0u8; 1 << 15];
 
@@ -213,7 +235,9 @@ pub fn run_daemon(
         if SHUTDOWN.load(Ordering::SeqCst) {
             if !pending.is_empty() {
                 if let Err(e) = flush(&mut store, &mut pending, db) {
-                    tracing::warn!("final flush on shutdown failed (events retried on restart): {e}");
+                    tracing::warn!(
+                        "final flush on shutdown failed (events retried on restart): {e}"
+                    );
                 }
             }
             tracing::info!("dux daemon: received SIGTERM/SIGINT — flushed pending, exiting");
@@ -244,7 +268,8 @@ pub fn run_daemon(
                     tracing::warn!("flush error: {e}");
                 }
                 if let Some(cfg) = &alert {
-                    if let Err(e) = check_alerts(&store, cfg, &mut last_alert) {
+                    if let Err(e) = check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
+                    {
                         tracing::warn!("alert check error: {e}");
                     }
                 }
@@ -1115,12 +1140,24 @@ fn stat_id(path: &Path) -> Option<(i64, i64)> {
 }
 
 /// Fire the alert command for paths whose growth in the window exceeds threshold.
+/// Max alert subprocesses allowed to be running at once. Beyond this, new alerts
+/// are logged but not spawned, so an event storm can't fork-bomb the host.
+const MAX_ALERT_CHILDREN: usize = 16;
+
 fn check_alerts(
     store: &Store,
     cfg: &AlertConfig,
     last: &mut HashMap<(i64, i64), i64>,
+    children: &mut Vec<std::process::Child>,
 ) -> Result<()> {
     let now = now_secs();
+    // Reap any finished alert children (avoid zombies) and drop them from the set.
+    children.retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+    // Bound the debounce map: forget entries older than 2× the alert window so it
+    // can't grow without limit across the daemon's lifetime.
+    let stale_before = now - (cfg.window * 2).max(3600);
+    last.retain(|_, &mut t| t >= stale_before);
+
     // bucket granularity means the window is rounded up to the next 5 min
     let cutoff = (now - cfg.window) / crate::store::GROWTH_BUCKET_SECS;
     let mut stmt = store.conn.prepare(
@@ -1147,19 +1184,29 @@ fn check_alerts(
             .unwrap_or_else(|_| format!("inode:{inode}"));
         tracing::warn!(
             "ALERT: {} grew {} in {}s",
-            path,
+            crate::util::display_path(&path),
             crate::util::human(delta),
             cfg.window
         );
         if let Some(cmd) = &cfg.exec {
-            let _ = std::process::Command::new("sh")
+            if children.len() >= MAX_ALERT_CHILDREN {
+                tracing::warn!(
+                    "alert exec skipped ({} already running) — raise the threshold or debounce",
+                    children.len()
+                );
+                continue;
+            }
+            if let Ok(child) = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(cmd)
                 .env("DUX_PATH", &path)
                 .env("DUX_DELTA", delta.to_string())
                 .env("DUX_DELTA_HUMAN", crate::util::human(delta))
                 .env("DUX_WINDOW", cfg.window.to_string())
-                .spawn();
+                .spawn()
+            {
+                children.push(child); // tracked + reaped next pass
+            }
         }
     }
     Ok(())

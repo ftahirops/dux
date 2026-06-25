@@ -84,11 +84,22 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
             .ok();
         s
     }; // store dropped here -> connection closed, -wal/-shm removed
+       // fsync the finished file before the rename: the rename is namespace-atomic
+       // but a crash could otherwise expose a rename to not-yet-durable contents.
+    if let Ok(f) = std::fs::File::open(&db_new) {
+        let _ = f.sync_all();
+    }
     for suf in ["-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suf}", db.display()));
     }
     std::fs::rename(&db_new, db)
         .with_context(|| format!("installing new index at {}", db.display()))?;
+    // fsync the parent directory so the rename itself survives a crash.
+    if let Some(parent) = db.parent() {
+        if let Ok(d) = std::fs::File::open(parent) {
+            let _ = d.sync_all();
+        }
+    }
     Ok(stats)
 }
 
