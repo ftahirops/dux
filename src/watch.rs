@@ -254,6 +254,24 @@ pub fn run_daemon(
 
     loop {
         if SHUTDOWN.load(Ordering::SeqCst) {
+            // Final best-effort DRAIN of the kernel queue first, so events that
+            // landed in the brief window before SIGTERM (a file created right as
+            // `systemctl stop` ran) aren't lost — then flush everything once.
+            loop {
+                let m =
+                    unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                if m > 0 {
+                    parse_events(
+                        &buf[..m as usize],
+                        &fsfds,
+                        &root_canon,
+                        &mut pending,
+                        &mut store,
+                    );
+                } else {
+                    break; // EAGAIN/empty (FAN_NONBLOCK) — queue drained
+                }
+            }
             if !pending.is_empty() {
                 if let Err(e) = flush(&mut store, &mut pending, db) {
                     tracing::warn!(
@@ -261,7 +279,7 @@ pub fn run_daemon(
                     );
                 }
             }
-            tracing::info!("dux daemon: received SIGTERM/SIGINT — flushed pending, exiting");
+            tracing::info!("dux daemon: received SIGTERM/SIGINT — drained + flushed, exiting");
             unsafe { libc::close(fan) };
             return Ok(());
         }
