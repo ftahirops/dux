@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,6 +54,13 @@ fi
 exit 0
 
 %changelog
+* Thu Jun 26 2026 dux maintainers <root@localhost> - 0.2.1-1
+- UX: `dux scan` against a live daemon now triggers an in-place atomic rescan
+  (SIGHUP) instead of telling the user to stop/start by hand; no downtime.
+- TUI: stop labeling a live index "N old" (it's maintained in realtime); the
+  age-as-staleness text only shows for an off-daemon snapshot.
+- Daemon drains the fanotify queue on SIGTERM before the final flush.
+
 * Thu Jun 26 2026 dux maintainers <root@localhost> - 0.2.0-1
 - Schema v4: separate inode/dirent tables; hardlink-aware search (every path
   findable, inode counted once); raw-byte (non-UTF-8) filename support.
