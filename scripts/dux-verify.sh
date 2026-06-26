@@ -52,13 +52,19 @@ human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || echo "$1"; }
 
 LIVE=0  # set in audit(): is the daemon writing concurrently?
 
-# Daemon liveness for THIS db: the heartbeat is "<secs> <dbpath>"; require it to
-# be fresh AND to name the same database we're auditing (a daemon on a different
-# index must not make us think this one is live).
+# Daemon liveness for THIS db: the heartbeat is "<secs> <pid> <dbpath>" (older
+# builds wrote "<secs> <dbpath>"); require it fresh AND naming the same database
+# we're auditing (a daemon on a different index must not look live here).
 daemon_live() {
-  local line secs hbdb want
+  local line secs rest hbdb want
   line="$(cat /run/dux/heartbeat 2>/dev/null)" || return 1
-  secs="${line%% *}"; hbdb="${line#* }"
+  secs="${line%% *}"; rest="${line#* }"
+  # if the 2nd field is a bare pid, the db path is the remainder; else it's the rest
+  if [ "${rest%% *}" -eq "${rest%% *}" ] 2>/dev/null && [ "${rest}" != "${rest#* }" ]; then
+    hbdb="${rest#* }"
+  else
+    hbdb="$rest"
+  fi
   [ -n "$secs" ] || return 1
   [ $(( $(date +%s) - secs )) -le 15 ] || return 1
   want="$(readlink -f "$DB" 2>/dev/null || echo "$DB")"

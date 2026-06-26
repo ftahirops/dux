@@ -819,21 +819,26 @@ fn draw(f: &mut Frame, app: &mut App) {
             &app.root_path,
             Style::default().add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            format!("   index {} old   ", ago(app.last_scan)),
-            Style::default().fg(Color::DarkGray),
-        ),
+        // Freshness. IMPORTANT: when the daemon is live the index is maintained
+        // in realtime, so the time since the last FULL scan is NOT staleness —
+        // showing "index 2m old" there wrongly nudges users to rescan. Only a
+        // snapshot (daemon off) actually ages; a dirty index is the real warning.
         if let Some(since) = app.dirty_since {
-            // known event loss trumps "live": the index is no longer trustworthy
             Span::styled(
-                format!("⚠ DIRTY {} — rescan needed", ago(since)),
+                format!("   ⚠ DIRTY {} — rescan recommended", ago(since)),
                 Style::default().fg(CRIT_COLOR).add_modifier(Modifier::BOLD),
             )
         } else if app.daemon_live {
-            Span::styled("● live", Style::default().fg(Color::DarkGray))
+            Span::styled(
+                "   ● live — maintained in realtime",
+                Style::default().fg(Color::DarkGray),
+            )
         } else {
             Span::styled(
-                "○ snapshot (daemon off — growth/ETA need the daemon)",
+                format!(
+                    "   ○ snapshot · {} old (daemon off; growth/ETA need it)",
+                    ago(app.last_scan)
+                ),
                 Style::default().fg(Color::DarkGray),
             )
         },

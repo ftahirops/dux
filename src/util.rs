@@ -140,8 +140,10 @@ pub fn now_secs() -> i64 {
 /// daemon dies — no stale "live" reading.
 pub const HEARTBEAT_PATH: &str = "/run/dux/heartbeat";
 
-/// Stamp the heartbeat file with the current epoch seconds and the absolute
-/// path of the DB the daemon is writing (best-effort). Format: "<secs> <db>".
+/// Stamp the heartbeat file with the current epoch seconds, the daemon's PID,
+/// and the absolute path of the DB it's writing (best-effort). The PID lets
+/// `dux scan` signal the daemon to rescan itself instead of telling the user to
+/// stop/start it by hand. Format: "<secs> <pid> <db>".
 pub fn write_heartbeat(db: &std::path::Path) {
     let _ = std::fs::create_dir_all("/run/dux");
     let db = db
@@ -149,17 +151,33 @@ pub fn write_heartbeat(db: &std::path::Path) {
         .unwrap_or_else(|_| db.to_path_buf())
         .to_string_lossy()
         .into_owned();
-    let _ = std::fs::write(HEARTBEAT_PATH, format!("{} {db}", now_secs()));
+    let _ = std::fs::write(
+        HEARTBEAT_PATH,
+        format!("{} {} {db}", now_secs(), std::process::id()),
+    );
+}
+
+/// (epoch, pid, db_path) of the last heartbeat. Tolerates the older "<secs> <db>"
+/// format (pid = 0) so an upgrade-in-place still reads cleanly.
+pub fn read_heartbeat_full() -> Option<(i64, i32, String)> {
+    let s = std::fs::read_to_string(HEARTBEAT_PATH).ok()?;
+    let s = s.trim();
+    // first token = secs; if the second token is a bare integer it's the pid and
+    // the remainder is the db path; otherwise the remainder (old format) is the db.
+    let (secs_str, rest) = s.split_once(' ')?;
+    let secs: i64 = secs_str.trim().parse().ok()?;
+    match rest.split_once(' ') {
+        Some((pid_str, db)) if pid_str.parse::<i32>().is_ok() => {
+            Some((secs, pid_str.parse().unwrap_or(0), db.trim().to_string()))
+        }
+        _ => Some((secs, 0, rest.trim().to_string())), // legacy "<secs> <db>"
+    }
 }
 
 /// (epoch, db_path) of the last heartbeat — lets a scan tell whether the daemon
 /// is writing the SAME db it's about to rebuild (per-db guard, not global).
 pub fn read_heartbeat_db() -> Option<(i64, String)> {
-    let s = std::fs::read_to_string(HEARTBEAT_PATH).ok()?;
-    let mut it = s.splitn(2, ' ');
-    let secs: i64 = it.next()?.trim().parse().ok()?;
-    let db = it.next().unwrap_or("").trim().to_string();
-    Some((secs, db))
+    read_heartbeat_full().map(|(secs, _pid, db)| (secs, db))
 }
 
 /// True only when a daemon heartbeat is FRESH (≤30s) AND belongs to THIS db.

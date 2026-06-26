@@ -17,6 +17,15 @@ extern "C" fn on_term(_sig: libc::c_int) {
     SHUTDOWN.store(true, Ordering::SeqCst);
 }
 
+/// Set by the SIGHUP handler: a `dux scan` against a live daemon asks the daemon
+/// to rebuild its own index in place (atomic, single-writer, no downtime) rather
+/// than making the user stop and restart the service by hand.
+static RESCAN: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_hup(_sig: libc::c_int) {
+    RESCAN.store(true, Ordering::SeqCst);
+}
+
 /// Pause index writes when the index's filesystem drops below this much free
 /// space, so the daemon can never be the process that fills the disk to 0.
 const MIN_FREE_BYTES: i64 = 256 * 1024 * 1024;
@@ -230,6 +239,8 @@ pub fn run_daemon(
         let h = on_term as *const () as libc::sighandler_t;
         libc::signal(libc::SIGTERM, h);
         libc::signal(libc::SIGINT, h);
+        // SIGHUP = "rescan now" (sent by `dux scan` when the daemon is live).
+        libc::signal(libc::SIGHUP, on_hup as *const () as libc::sighandler_t);
     }
 
     crate::util::write_heartbeat(db);
@@ -253,6 +264,43 @@ pub fn run_daemon(
             tracing::info!("dux daemon: received SIGTERM/SIGINT — flushed pending, exiting");
             unsafe { libc::close(fan) };
             return Ok(());
+        }
+        if RESCAN.swap(false, Ordering::SeqCst) {
+            // `dux scan` asked us to rebuild in place. We are the single writer
+            // (we hold the db lock), so the atomic rescan is safe with no stop/
+            // start and no two-writer risk; the fresh scan also reconciles any
+            // drift/downtime gap, so we drop the now-superseded pending events.
+            tracing::info!(
+                "rescan requested (SIGHUP) — atomic full rebuild of {}",
+                root_canon.display()
+            );
+            let opts = crate::scan::ScanOptions {
+                one_file_system,
+                progress: false,
+                ..Default::default()
+            };
+            match crate::scan::rebuild_atomic(db, &root_canon, &opts) {
+                Ok(s) => {
+                    // the on-disk db was replaced by rename — reopen on the new file
+                    match Store::open_rw(db) {
+                        Ok(ns) => store = ns,
+                        Err(e) => tracing::error!("rescan: reopen failed: {e}"),
+                    }
+                    pending.clear();
+                    crate::util::write_heartbeat(db);
+                    tracing::info!(
+                        "rescan complete: {} files, {} dirs, {} ({} errors)",
+                        s.files,
+                        s.dirs,
+                        crate::util::human(s.bytes),
+                        s.errors
+                    );
+                }
+                Err(e) => tracing::warn!("rescan failed (keeping existing index): {e}"),
+            }
+            last_flush = Instant::now();
+            last_ckpt = Instant::now();
+            continue;
         }
         let n = unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
         if n > 0 {

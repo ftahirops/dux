@@ -167,28 +167,26 @@ fn real_main() -> Result<()> {
             quiet,
             force,
         }) => {
-            // Refuse to scan while the daemon is writing THIS db — two
-            // concurrent SQLite writers corrupt the tree (orphans/drift). The
-            // guard is per-db: a daemon on a different index doesn't block us.
+            // If the daemon is live for THIS db, it holds the exclusive lock and
+            // is the only writer — so instead of making the user stop/scan/start
+            // by hand, ask the daemon to rebuild its own index in place (atomic,
+            // no downtime). This also reconciles any drift/downtime gap.
             let scanned_db = db.canonicalize().unwrap_or_else(|_| db.clone());
-            let daemon_live = match util::read_heartbeat_db() {
-                Some((secs, hbdb)) => {
+            let hb = util::read_heartbeat_full();
+            let daemon_live = match &hb {
+                Some((secs, _pid, hbdb)) => {
                     (util::now_secs() - secs) <= 30
-                        && std::path::Path::new(&hbdb) == scanned_db.as_path()
+                        && std::path::Path::new(hbdb) == scanned_db.as_path()
                 }
                 None => false,
             };
-            if !force && daemon_live {
-                anyhow::bail!(
-                    "the dux daemon is running and writing this index.\n\
-                     Stop it first:  sudo systemctl stop dux   (then scan, then start)\n\
-                     or pass --force to override (may corrupt the index)."
-                );
+            if daemon_live && !force {
+                request_daemon_rescan(&db, &path, &hb)?;
+                return Ok(());
             }
-            // Exclusive per-db lock for the whole scan: blocks a second scan or a
-            // daemon from writing the same index concurrently (the heartbeat check
-            // above is only advisory; this is the hard guard). Held until `_lock`
-            // drops at the end of this arm.
+            // No live daemon (or --force): scan directly. The exclusive per-db
+            // lock is the hard guard — if something really is writing this index,
+            // lock_db fails with a clear message rather than corrupting it.
             let _lock = util::lock_db(&db)?;
             let opts = scan::ScanOptions {
                 one_file_system,
@@ -373,6 +371,84 @@ fn real_main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Last-scan timestamp stored in the index (0 if unreadable). Used to detect
+/// when a daemon-driven rescan has finished (the daemon writes a fresh value).
+fn read_last_scan_ts(db: &std::path::Path) -> i64 {
+    Store::open_ro(db)
+        .ok()
+        .and_then(|s| s.get_meta("last_scan_ts").ok().flatten())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Ask the running daemon to rebuild its index in place (SIGHUP), then wait for
+/// it to finish. Keeps the user out of the stop/scan/start dance and avoids the
+/// two-writer corruption the lock would otherwise reject.
+fn request_daemon_rescan(
+    db: &std::path::Path,
+    requested: &std::path::Path,
+    hb: &Option<(i64, i32, String)>,
+) -> Result<()> {
+    // The daemon rescans the tree IT indexes; warn if that's not what was asked.
+    if let Ok(store) = Store::open_ro(db) {
+        if let Ok(Some(root)) = store.get_meta("last_scan_root") {
+            let want = requested
+                .canonicalize()
+                .unwrap_or_else(|_| requested.to_path_buf());
+            if std::path::Path::new(&root) != want {
+                eprintln!(
+                    "dux: note — the daemon indexes {root}; it will rescan THAT tree.\n\
+                     \x20     To index a different tree, stop the daemon first \
+                     (sudo systemctl stop dux), then scan."
+                );
+            }
+        }
+    }
+
+    let pid = hb.as_ref().map(|(_, p, _)| *p).unwrap_or(0);
+    if pid <= 0 {
+        anyhow::bail!(
+            "the daemon is running but did not report its PID (older build?).\n\
+             Restart it once (sudo systemctl restart dux) so scans can drive it, \
+             or stop it, scan, and start it."
+        );
+    }
+
+    let prev_ts = read_last_scan_ts(db);
+    // SIGHUP = "rescan now"; the daemon picks it up at the top of its loop.
+    let rc = unsafe { libc::kill(pid, libc::SIGHUP) };
+    if rc != 0 {
+        let e = std::io::Error::last_os_error();
+        anyhow::bail!(
+            "could not signal the daemon (pid {pid}): {e}\n\
+             Stop it, scan, and start it manually if this persists."
+        );
+    }
+    eprintln!("dux: daemon is live — triggering an in-place atomic rescan (no downtime)…");
+
+    // Wait for the daemon's last_scan_ts to advance past the old value. prev_ts is
+    // the PREVIOUS scan (seconds/minutes ago), so the fresh one is strictly newer.
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(1800);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if read_last_scan_ts(db) > prev_ts {
+            eprintln!(
+                "dux: rescan complete — index rebuilt in {:.0}s.",
+                start.elapsed().as_secs_f64()
+            );
+            return Ok(());
+        }
+        if start.elapsed() > timeout {
+            eprintln!(
+                "dux: rescan still running in the daemon after {}s — check `dux status`.",
+                timeout.as_secs()
+            );
+            return Ok(());
+        }
+    }
 }
 
 /// Resolve a TUI start path to a (dev,inode) start node, or None for the root.
