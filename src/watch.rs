@@ -5,7 +5,27 @@ use rusqlite::params;
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+/// Set by the SIGTERM/SIGINT handler so the daemon loop can flush pending events
+/// and exit cleanly (systemd sends SIGTERM on stop). Async-signal-safe: the
+/// handler only stores to this flag.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_term(_sig: libc::c_int) {
+    SHUTDOWN.store(true, Ordering::SeqCst);
+}
+
+/// Pause index writes when the index's filesystem drops below this much free
+/// space, so the daemon can never be the process that fills the disk to 0.
+const MIN_FREE_BYTES: i64 = 256 * 1024 * 1024;
+
+/// Hard cap on un-flushed pending events. If SQLite is wedged or an event storm
+/// outruns flushing, the map would otherwise grow without bound (logical OOM).
+/// Past this we drop the backlog and mark the index dirty (reconcile via rescan)
+/// — bounded memory beats an OOM kill that loses everything anyway.
+const MAX_PENDING: usize = 500_000;
 
 // ---- fanotify constants (FID / dirent-event mode) ----
 const FAN_CLASS_NOTIF: libc::c_uint = 0x0000_0000;
@@ -18,6 +38,7 @@ const FAN_MARK_FILESYSTEM: libc::c_uint = 0x0000_0100;
 
 // event mask bits
 const FAN_MODIFY: u64 = 0x0000_0002;
+const FAN_ATTRIB: u64 = 0x0000_0004; // metadata change (owner, mode, mtime, nlink)
 const FAN_CLOSE_WRITE: u64 = 0x0000_0008;
 const FAN_MOVED_FROM: u64 = 0x0000_0040;
 const FAN_MOVED_TO: u64 = 0x0000_0080;
@@ -73,6 +94,36 @@ pub struct AlertConfig {
     pub debounce: i64,
 }
 
+/// True if the index at `db` is already rooted at `root_canon` (its stored
+/// root_dev/root_inode match). Returns true when it can't tell (missing meta /
+/// unreadable / unstattable root) so we don't trigger a spurious rebuild — the
+/// needs_rebuild check handles the genuinely-broken cases.
+fn root_matches(db: &Path, root_canon: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let want = match std::fs::symlink_metadata(root_canon) {
+        Ok(m) => (m.dev() as i64, m.ino() as i64),
+        Err(_) => return true,
+    };
+    let store = match Store::open_ro(db) {
+        Ok(s) => s,
+        Err(_) => return true,
+    };
+    let rdev: Option<i64> = store
+        .get_meta("root_dev")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    let rino: Option<i64> = store
+        .get_meta("root_inode")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    match (rdev, rino) {
+        (Some(d), Some(i)) => (d, i) == want,
+        _ => true,
+    }
+}
+
 /// Run the watch daemon. Uses fanotify FID mode so creates, deletes, renames,
 /// and size-growth are all tracked live — no rescan needed for normal activity.
 pub fn run_daemon(
@@ -82,10 +133,20 @@ pub fn run_daemon(
     one_file_system: bool,
     alert: Option<AlertConfig>,
 ) -> Result<()> {
-    // Never start on a missing or schema-incompatible index and silently present
-    // an empty/wrong tree. Rebuild atomically first (a no-op for a current index).
-    if Store::needs_rebuild(db) {
-        tracing::info!("index missing or schema-incompatible — rebuilding before watching");
+    // Exclusive per-db lock for the daemon's whole lifetime — no second daemon or
+    // concurrent scan can write this index (the heartbeat is only advisory). Held
+    // until `_lock` drops when run_daemon returns.
+    let _lock = crate::util::lock_db(db).context("acquiring daemon db lock")?;
+    let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+    // Never start on a missing/incompatible index, OR one indexed for a DIFFERENT
+    // root than we're told to watch (that would attach live events to the wrong
+    // tree → missing parents, wrong totals). Rebuild atomically in either case;
+    // a no-op when the index is current AND already rooted here.
+    if Store::needs_rebuild(db) || !root_matches(db, &root_canon) {
+        tracing::info!(
+            "index missing, schema-incompatible, or rooted elsewhere — rebuilding before watching"
+        );
         let opts = crate::scan::ScanOptions {
             one_file_system,
             progress: false,
@@ -94,7 +155,6 @@ pub fn run_daemon(
         crate::scan::rebuild_atomic(db, root, &opts).context("rebuilding index before watch")?;
     }
     let mut store = Store::open_rw(db)?;
-    let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
     let fan = init_fanotify().context("fanotify_init (need CAP_SYS_ADMIN, kernel >= 5.9)")?;
 
@@ -103,6 +163,7 @@ pub fn run_daemon(
     // /home, /var, /boot, etc. We mark each, keyed by fsid, and keep a dir fd
     // per filesystem for open_by_handle_at (the event carries its fsid).
     let mut fsfds: HashMap<(i32, i32), RawFd> = HashMap::new();
+    let mut mark_failures = 0u32;
     for mp in real_mounts(&root_canon, one_file_system) {
         let fsid = match statfs_fsid(&mp) {
             Some(f) => f,
@@ -113,10 +174,23 @@ pub fn run_daemon(
                 Ok(fd) if mark_fs(fan, &mp).is_ok() => {
                     e.insert(fd);
                 }
-                Ok(fd) => unsafe {
-                    libc::close(fd);
-                },
-                Err(_) => {}
+                Ok(fd) => {
+                    // mark failed: this filesystem won't be watched. Don't pretend
+                    // full coverage — count it and mark the index degraded below.
+                    tracing::warn!(
+                        "could not fanotify-mark {} — its changes will be missed",
+                        mp.display()
+                    );
+                    mark_failures += 1;
+                    unsafe { libc::close(fd) };
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "could not open {} — its changes will be missed",
+                        mp.display()
+                    );
+                    mark_failures += 1;
+                }
             }
         }
     }
@@ -126,6 +200,11 @@ pub fn run_daemon(
             "no watchable filesystem found under {}",
             root_canon.display()
         );
+    }
+    if mark_failures > 0 {
+        // partial coverage is a known-incomplete watch — surface it via dirty
+        // state so status/TUI stop claiming the index is trustworthy.
+        store.set_meta("dirty_since", &now_secs().to_string()).ok();
     }
     tracing::info!(
         "dux daemon watching {} ({} filesystem(s), FID mode: create/delete/rename/modify, flush {}ms)",
@@ -145,15 +224,36 @@ pub fn run_daemon(
         );
     }
 
+    // Flush pending events on SIGTERM/SIGINT instead of dropping up to a full
+    // flush window on shutdown (systemd stops the daemon with SIGTERM).
+    unsafe {
+        let h = on_term as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGTERM, h);
+        libc::signal(libc::SIGINT, h);
+    }
+
     crate::util::write_heartbeat(db);
     let flush_every = Duration::from_millis(flush_ms);
     let mut last_flush = Instant::now();
     let mut last_ckpt = Instant::now();
     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
+    let mut alert_children: Vec<std::process::Child> = Vec::new();
     let mut pending: HashMap<PathBuf, Op> = HashMap::new();
     let mut buf = [0u8; 1 << 15];
 
     loop {
+        if SHUTDOWN.load(Ordering::SeqCst) {
+            if !pending.is_empty() {
+                if let Err(e) = flush(&mut store, &mut pending, db) {
+                    tracing::warn!(
+                        "final flush on shutdown failed (events retried on restart): {e}"
+                    );
+                }
+            }
+            tracing::info!("dux daemon: received SIGTERM/SIGINT — flushed pending, exiting");
+            unsafe { libc::close(fan) };
+            return Ok(());
+        }
         let n = unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
         if n > 0 {
             parse_events(
@@ -163,6 +263,17 @@ pub fn run_daemon(
                 &mut pending,
                 &mut store,
             );
+            // Overload backstop: if flushing can't keep up (SQLite wedged, or a
+            // genuine storm), don't let pending grow until the daemon is OOM-killed.
+            // Drop the backlog and mark dirty so a reconcile rescan repairs it.
+            if pending.len() > MAX_PENDING {
+                tracing::warn!(
+                    "pending backlog exceeded {MAX_PENDING} — dropping it to bound memory; \
+                     index marked dirty (rescan to reconcile)"
+                );
+                store.set_meta("dirty_since", &now_secs().to_string()).ok();
+                pending.clear();
+            }
         } else if n < 0 {
             let err = std::io::Error::last_os_error();
             match err.raw_os_error() {
@@ -178,7 +289,8 @@ pub fn run_daemon(
                     tracing::warn!("flush error: {e}");
                 }
                 if let Some(cfg) = &alert {
-                    if let Err(e) = check_alerts(&store, cfg, &mut last_alert) {
+                    if let Err(e) = check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
+                    {
                         tracing::warn!("alert check error: {e}");
                     }
                 }
@@ -307,6 +419,7 @@ fn mark_fs(fan: RawFd, root: &Path) -> Result<()> {
         | FAN_MOVED_FROM
         | FAN_MOVED_TO
         | FAN_MODIFY
+        | FAN_ATTRIB
         | FAN_CLOSE_WRITE
         | FAN_ONDIR;
     let rc = unsafe {
@@ -448,16 +561,395 @@ fn resolve_handle(payload: &[u8], fsfds: &HashMap<(i32, i32), RawFd>) -> Option<
     dir.map(|d| (d, name))
 }
 
+/// Prime parent of an inode = the parent dir of its block-bearing (prime) dirent.
+/// Directory totals roll up this single chain, so the walk is unambiguous.
+fn prime_parent(tx: &rusqlite::Transaction, dev: i64, ino: i64) -> Option<(i64, i64)> {
+    tx.query_row(
+        "SELECT parent_dev, parent_inode FROM dirents
+         WHERE dev_id=?1 AND inode=?2 AND prime=1 LIMIT 1",
+        params![dev, ino],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .ok()
+}
+
+/// Accumulate a (bytes,inodes) delta into every ancestor inode, starting at
+/// `(sdev,sino)` and walking prime parents. Coalesced in `anc` and written once
+/// at the end of the flush. Depth-guarded against corrupt cycles.
+fn accrue(
+    tx: &rusqlite::Transaction,
+    anc: &mut HashMap<(i64, i64), (i64, i64)>,
+    sdev: i64,
+    sino: i64,
+    dbytes: i64,
+    dinodes: i64,
+) {
+    let (mut cd, mut ci) = (sdev, sino);
+    let mut guard = 0;
+    loop {
+        guard += 1;
+        if guard > 4096 {
+            break;
+        }
+        let e = anc.entry((cd, ci)).or_insert((0, 0));
+        e.0 += dbytes;
+        e.1 += dinodes;
+        match prime_parent(tx, cd, ci) {
+            Some((pd, pi)) if !(pd == cd && pi == ci) => {
+                cd = pd;
+                ci = pi;
+            }
+            _ => break,
+        }
+    }
+}
+
+/// Every inode at/under (d,i) following dirent parent→child edges (UNION dedups
+/// hardlinks/cycles; depth-guarded).
+fn collect_descendants(tx: &rusqlite::Transaction, d: i64, i: i64) -> Result<Vec<(i64, i64)>> {
+    let mut stmt = tx.prepare_cached(
+        "WITH RECURSIVE sub(d,i,depth) AS (
+            SELECT ?1,?2,0
+            UNION
+            SELECT de.dev_id,de.inode,sub.depth+1 FROM dirents de
+            JOIN sub ON de.parent_dev=sub.d AND de.parent_inode=sub.i
+            WHERE NOT (de.dev_id=de.parent_dev AND de.inode=de.parent_inode) AND sub.depth<4096
+         ) SELECT d,i FROM sub",
+    )?;
+    let v = stmt
+        .query_map(params![d, i], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .filter_map(|x| x.ok())
+        .collect();
+    Ok(v)
+}
+
+/// Delete a whole subtree: every inode at/under (d,i) plus every dirent within or
+/// pointing into it. FTS rows follow via the AFTER DELETE trigger.
+fn del_subtree(tx: &rusqlite::Transaction, d: i64, i: i64) -> Result<()> {
+    for (dd, ii) in collect_descendants(tx, d, i)? {
+        tx.execute(
+            "DELETE FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![dd, ii],
+        )?;
+        tx.execute(
+            "DELETE FROM dirents WHERE dev_id=?1 AND inode=?2",
+            params![dd, ii],
+        )?;
+        tx.execute(
+            "DELETE FROM dirents WHERE parent_dev=?1 AND parent_inode=?2",
+            params![dd, ii],
+        )?;
+    }
+    Ok(())
+}
+
+/// Remove one directory entry (a single link/path). Handles the three cases:
+/// last link → drop the inode + its subtree; prime link with others remaining →
+/// promote a sibling dirent and move the block attribution; non-prime link →
+/// just unlink. Returns the (bytes,inodes) the subtree carried, for growth.
+fn unlink_dirent(
+    tx: &rusqlite::Transaction,
+    anc: &mut HashMap<(i64, i64), (i64, i64)>,
+    bucket: i64,
+    pdev: i64,
+    pino: i64,
+    name: &[u8],
+) -> Result<()> {
+    let de: Option<(i64, i64, i64)> = tx
+        .query_row(
+            "SELECT dev_id, inode, prime FROM dirents
+             WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 LIMIT 1",
+            params![pdev, pino, name],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .ok();
+    let (cdev, cino, was_prime) = match de {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+    let (crb, cri): (i64, i64) = tx
+        .query_row(
+            "SELECT recursive_bytes, recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![cdev, cino],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((0, 0));
+    let adj = anc.get(&(cdev, cino)).copied().unwrap_or((0, 0));
+    let (eff_rb, eff_ri) = (crb + adj.0, cri + adj.1);
+
+    tx.execute(
+        "DELETE FROM dirents WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+        params![pdev, pino, name],
+    )?;
+    let remaining: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM dirents WHERE dev_id=?1 AND inode=?2",
+            params![cdev, cino],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    if remaining == 0 {
+        // last link gone: remove the inode (and any subtree) and subtract totals
+        // from this (prime) parent chain.
+        del_subtree(tx, cdev, cino)?;
+        accrue(tx, anc, pdev, pino, -eff_rb, -eff_ri);
+        if eff_rb != 0 {
+            tx.execute(
+                "INSERT INTO growth(bucket,dev_id,inode,delta) VALUES(?1,?2,?3,?4)
+                 ON CONFLICT(bucket,dev_id,inode) DO UPDATE SET delta=delta+excluded.delta",
+                params![bucket, cdev, cino, -eff_rb],
+            )?;
+        }
+    } else if was_prime != 0 {
+        // the block-bearing link was removed but the inode lives on through another
+        // link: promote a sibling dirent and MOVE the attribution to its chain.
+        if let Ok((opdev, opino, oname)) = tx.query_row(
+            "SELECT parent_dev, parent_inode, name FROM dirents
+                 WHERE dev_id=?1 AND inode=?2 ORDER BY rowid LIMIT 1",
+            params![cdev, cino],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                ))
+            },
+        ) {
+            tx.execute(
+                "UPDATE dirents SET prime=1 WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![opdev, opino, oname],
+            )?;
+            accrue(tx, anc, pdev, pino, -eff_rb, -eff_ri);
+            accrue(tx, anc, opdev, opino, eff_rb, eff_ri);
+        }
+    }
+    // non-prime link with others remaining: the dirent delete above is all there is.
+    Ok(())
+}
+
+/// Growth-history bucket upsert (delta of allocated blocks for an inode).
+fn gro(tx: &rusqlite::Transaction, bucket: i64, dev: i64, ino: i64, delta: i64) -> Result<()> {
+    if delta == 0 {
+        return Ok(());
+    }
+    tx.execute(
+        "INSERT INTO growth(bucket,dev_id,inode,delta) VALUES(?1,?2,?3,?4)
+         ON CONFLICT(bucket,dev_id,inode) DO UPDATE SET delta=delta+excluded.delta",
+        params![bucket, dev, ino, delta],
+    )?;
+    Ok(())
+}
+
+/// True if making (npdev,npino) the parent of inode (dev,ino) would create a
+/// cycle (the proposed new parent is at or under the node being moved).
+fn would_cycle(tx: &rusqlite::Transaction, dev: i64, ino: i64, npdev: i64, npino: i64) -> bool {
+    let (mut cd, mut ci) = (npdev, npino);
+    let mut g = 0;
+    loop {
+        if cd == dev && ci == ino {
+            return true;
+        }
+        g += 1;
+        if g > 4096 {
+            return false;
+        }
+        match prime_parent(tx, cd, ci) {
+            Some((pd, pi)) if !(pd == cd && pi == ci) => {
+                cd = pd;
+                ci = pi;
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// Create / modify / hardlink a single path, maintaining both tables with prime-
+/// dirent block attribution (an inode's blocks are counted exactly once).
+#[allow(clippy::too_many_arguments)]
+fn upsert_path(
+    tx: &rusqlite::Transaction,
+    anc: &mut HashMap<(i64, i64), (i64, i64)>,
+    bucket: i64,
+    m: &std::fs::Metadata,
+    dev: i64,
+    ino: i64,
+    pdev: i64,
+    pino: i64,
+    name: &[u8],
+) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let blocks = (m.blocks() as i64) * 512;
+    let mtime = m.mtime();
+    let uid = m.uid() as i64;
+    let is_dir = m.is_dir();
+    let kind = kind_of(m);
+
+    let existing: Option<(i64, i64)> = tx
+        .query_row(
+            "SELECT dev_id, inode FROM dirents
+             WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 LIMIT 1",
+            params![pdev, pino, name],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+
+    match existing {
+        Some((edev, eino)) if edev == dev && eino == ino => {
+            // same inode at the same path: a metadata/size change
+            let (eb, erb): (i64, i64) = tx
+                .query_row(
+                    "SELECT blocks, recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+                    params![dev, ino],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap_or((0, 0));
+            if is_dir {
+                // a directory's OWN allocation can change (entries added/removed);
+                // that delta flows into its recursive_bytes and its ancestors'.
+                let delta = blocks - eb;
+                tx.execute(
+                    "UPDATE inodes SET blocks=?3, uid=?4, mtime=?5 WHERE dev_id=?1 AND inode=?2",
+                    params![dev, ino, blocks, uid, mtime],
+                )?;
+                if delta != 0 {
+                    accrue(tx, anc, dev, ino, delta, 0);
+                    gro(tx, bucket, dev, ino, delta)?;
+                }
+            } else {
+                let delta = blocks - erb;
+                tx.execute(
+                    "UPDATE inodes SET blocks=?3, recursive_bytes=?3, uid=?4, mtime=?5
+                     WHERE dev_id=?1 AND inode=?2",
+                    params![dev, ino, blocks, uid, mtime],
+                )?;
+                if delta != 0 {
+                    accrue(tx, anc, pdev, pino, delta, 0);
+                    gro(tx, bucket, dev, ino, delta)?;
+                }
+            }
+        }
+        other => {
+            if other.is_some() {
+                // a DIFFERENT inode currently occupies this path (a missed delete):
+                // unlink the stale occupant before installing the new one.
+                unlink_dirent(tx, anc, bucket, pdev, pino, name)?;
+            }
+            let inode_exists = tx
+                .query_row(
+                    "SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2",
+                    params![dev, ino],
+                    |_| Ok(()),
+                )
+                .is_ok();
+            if inode_exists {
+                // additional HARDLINK: record the path (searchable) but count the
+                // inode's blocks only once -> a non-prime dirent, no attribution.
+                tx.execute(
+                    "INSERT OR REPLACE INTO dirents
+                     (parent_dev,parent_inode,name,dev_id,inode,prime) VALUES(?1,?2,?3,?4,?5,0)",
+                    params![pdev, pino, name, dev, ino],
+                )?;
+            } else {
+                // fresh inode + its first (prime) dirent
+                tx.execute(
+                    "INSERT OR REPLACE INTO inodes
+                     (dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+                     VALUES(?1,?2,?3,?4,?5,1,?6,?7)",
+                    params![dev, ino, kind, blocks, blocks, uid, mtime],
+                )?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO dirents
+                     (parent_dev,parent_inode,name,dev_id,inode,prime) VALUES(?1,?2,?3,?4,?5,1)",
+                    params![pdev, pino, name, dev, ino],
+                )?;
+                accrue(tx, anc, pdev, pino, blocks, 1);
+                gro(tx, bucket, dev, ino, blocks)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Index the existing contents of a directory that was moved INTO the tree — its
+/// descendants produced no per-file events, so a plain move-to would leave the
+/// subtree empty. Bounded breadth-first walk; marks the index dirty if the entry
+/// budget is exhausted (rather than silently indexing a partial subtree).
+fn reconcile_subtree(
+    tx: &rusqlite::Transaction,
+    anc: &mut HashMap<(i64, i64), (i64, i64)>,
+    bucket: i64,
+    dir_path: &Path,
+    dev: i64,
+    ino: i64,
+) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+    let mut queue: Vec<(PathBuf, i64, i64)> = vec![(dir_path.to_path_buf(), dev, ino)];
+    let mut budget = 1_000_000usize;
+    while let Some((dir, ddev, dino)) = queue.pop() {
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for ent in rd.flatten() {
+            if budget == 0 {
+                tracing::warn!(
+                    "reconcile_subtree: entry budget exhausted at {}",
+                    dir.display()
+                );
+                tx.execute(
+                    "INSERT INTO meta(key,value) VALUES('dirty_since',?1)
+                     ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    params![now_secs().to_string()],
+                )?;
+                return Ok(());
+            }
+            budget -= 1;
+            let p = ent.path();
+            let m = match std::fs::symlink_metadata(&p) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let cdev = m.dev() as i64;
+            let cino = m.ino() as i64;
+            let name = ent.file_name().as_bytes().to_vec();
+            upsert_path(tx, anc, bucket, &m, cdev, cino, ddev, dino, &name)?;
+            if m.is_dir() {
+                queue.push((p, cdev, cino));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Apply all pending ops in one transaction, in correctness-preserving phases:
-///   B. deletes (deep-first)            — remove subtree, subtract totals
-///   C. move-from                       — skip if the inode is relocating (move),
-///                                        else treat as moved-out-of-tree delete
-///   D. move-to                         — RELOCATE the inode in place (keep its
-///                                        subtree; children reference the inode),
-///                                        or insert if it's new to the tree
+///   B. deletes (deep-first)            — unlink path; drop inode only on last link
+///   C. move-from                       — record renames; else unlink (left tree)
+///   D. move-to                         — relocate the renamed dirent (keep subtree),
+///                                        else add a hardlink path / fresh inode
 ///   E. upserts (shallow-first)         — create / modify / hardlink
+///
+/// The whole transaction is ATOMIC: any operation error aborts it via `?`, so
+/// `pending` is left intact and retried next flush — a single failed op never
+/// commits partial drift.
 fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Result<()> {
     let now = now_secs();
+    // Low-disk protection: never let the index's own writes fill the host's last
+    // free space. Below the floor, pause writes (keep `pending` for retry) and
+    // mark the index dirty so status/TUI report degraded — the daemon must not be
+    // the process that takes the filesystem to 0 bytes.
+    let watch_dir = db.parent().unwrap_or_else(|| Path::new("/"));
+    if let Some(fs) = crate::util::fs_stat(watch_dir) {
+        if fs.avail < MIN_FREE_BYTES {
+            tracing::warn!(
+                "low disk space ({} free) — pausing index writes to protect the host",
+                crate::util::human(fs.avail)
+            );
+            store.set_meta("dirty_since", &now.to_string()).ok();
+            return Ok(()); // pending preserved; resumes when space frees
+        }
+    }
     // COPY, don't drain: if the transaction below fails (disk full, lock, I/O),
     // we return Err with `pending` intact so the events are retried next flush
     // instead of being lost. `pending` is only cleared after a durable commit.
@@ -497,356 +989,148 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
     );
 
     let tx = store.conn.transaction()?;
-    {
-        let mut find = tx.prepare(
-            "SELECT dev_id, inode, kind, recursive_bytes, recursive_inodes, blocks
-             FROM nodes WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 LIMIT 1",
-        )?;
-        let mut find_inode = tx.prepare(
-            "SELECT name, parent_dev, parent_inode, kind, recursive_bytes, recursive_inodes
-             FROM nodes WHERE dev_id=?1 AND inode=?2 LIMIT 1",
-        )?;
-        // FTS is maintained automatically by triggers on nodes (insert/delete/
-        // rename), so the daemon never touches names_fts directly.
-        let mut insert_node = tx.prepare(
-            "INSERT OR REPLACE INTO nodes
-             (dev_id,inode,parent_dev,parent_inode,name,kind,blocks,recursive_bytes,
-              recursive_inodes,uid,mtime)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-        )?;
-        let mut upd_file = tx.prepare(
-            "UPDATE nodes SET blocks=?3, recursive_bytes=?3, mtime=?4
-             WHERE dev_id=?1 AND inode=?2",
-        )?;
-        let mut relocate = tx.prepare(
-            "UPDATE nodes SET name=?3, parent_dev=?4, parent_inode=?5
-             WHERE dev_id=?1 AND inode=?2",
-        )?;
-        let mut bump = tx.prepare(
-            "UPDATE nodes SET recursive_bytes=recursive_bytes+?3, recursive_inodes=recursive_inodes+?4
-             WHERE dev_id=?1 AND inode=?2",
-        )?;
-        let mut get_parent =
-            tx.prepare("SELECT parent_dev, parent_inode FROM nodes WHERE dev_id=?1 AND inode=?2")?;
-        let mut descendants = tx.prepare(
-            "WITH RECURSIVE sub(d,i,depth) AS (
-                SELECT ?1,?2,0
-                UNION ALL
-                SELECT n.dev_id,n.inode,sub.depth+1 FROM nodes n
-                JOIN sub ON n.parent_dev=sub.d AND n.parent_inode=sub.i
-                WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND sub.depth<4096
-             ) SELECT d, i FROM sub",
-        )?;
-        let mut del_node = tx.prepare("DELETE FROM nodes WHERE dev_id=?1 AND inode=?2")?;
-        let bucket = now / crate::store::GROWTH_BUCKET_SECS;
-        let mut gro = tx.prepare(
-            "INSERT INTO growth(bucket,dev_id,inode,delta) VALUES(?1,?2,?3,?4)
-             ON CONFLICT(bucket,dev_id,inode) DO UPDATE SET delta=delta+excluded.delta",
-        )?;
+    let bucket = now / crate::store::GROWTH_BUCKET_SECS;
+    // Ancestor totals are COALESCED: each affected dir's delta is summed here and
+    // written ONCE at the end, instead of one UPDATE per changed file.
+    let mut anc: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
+    // Renames seen this flush: target inode -> the old (parent_dev,parent_inode,name).
+    let mut rename_src: HashMap<(i64, i64), (i64, i64, Vec<u8>)> = HashMap::new();
 
-        // delete a node's whole subtree; the FTS rows go with each node via the
-        // AFTER DELETE trigger. Caller subtracts totals from ancestors.
-        let del_subtree = |descendants: &mut rusqlite::Statement,
-                           del_node: &mut rusqlite::Statement,
-                           d: i64,
-                           i: i64|
-         -> Result<()> {
-            let sub: Vec<(i64, i64)> = descendants
-                .query_map(params![d, i], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .filter_map(|x| x.ok())
-                .collect();
-            for (dd, ii) in &sub {
-                del_node.execute(params![dd, ii])?;
-            }
-            Ok(())
+    // ---- Phase B: deletes (unlink one path; drop the inode only on last link) ----
+    for full in &deletes {
+        let (dir, name) = match split(full) {
+            Some(v) => v,
+            None => continue,
         };
-
-        // Ancestor totals are COALESCED: each affected dir's delta is summed in
-        // memory here and written ONCE at the end of the flush, instead of one
-        // UPDATE per changed file (which rewrote shared ancestors N times). The
-        // map is also the source of truth for a node's *effective* total mid-
-        // flush, so nested deletes in the same batch don't double-count.
-        let mut anc: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
-        let accrue = |anc: &mut HashMap<(i64, i64), (i64, i64)>,
-                      gp: &mut rusqlite::Statement,
-                      sdev: i64,
-                      sino: i64,
-                      dbytes: i64,
-                      dinodes: i64|
-         -> Result<()> {
-            let (mut cd, mut ci) = (sdev, sino);
-            let mut guard = 0;
-            loop {
-                guard += 1;
-                if guard > 4096 {
-                    break;
-                }
-                let e = anc.entry((cd, ci)).or_insert((0, 0));
-                e.0 += dbytes;
-                e.1 += dinodes;
-                match gp
-                    .query_row(params![cd, ci], |r| {
-                        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-                    })
-                    .ok()
-                {
-                    Some((pd, pi)) if !(pd == cd && pi == ci) => {
-                        cd = pd;
-                        ci = pi;
-                    }
-                    _ => break,
-                }
-            }
-            Ok(())
+        let (pdev, pino) = match stat_id(dir) {
+            Some(v) => v,
+            None => continue,
         };
+        unlink_dirent(&tx, &mut anc, bucket, pdev, pino, &name)?;
+    }
 
-        // ---- Phase B: deletes ----
-        for full in &deletes {
-            let r: Result<()> = (|| {
-                let (dir, name) = match split(full) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                let (pdev, pino) = match stat_id(dir) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                if let Ok((cdev, cino, _k, crb, cri, _b)) =
-                    find.query_row(params![pdev, pino, name], row6)
-                {
-                    // effective total = stored + any delta already pending for
-                    // this node this flush (e.g. a child deleted earlier).
-                    let adj = anc.get(&(cdev, cino)).copied().unwrap_or((0, 0));
-                    let (eff_rb, eff_ri) = (crb + adj.0, cri + adj.1);
-                    del_subtree(&mut descendants, &mut del_node, cdev, cino)?;
-                    accrue(&mut anc, &mut get_parent, pdev, pino, -eff_rb, -eff_ri)?;
-                    if eff_rb != 0 {
-                        gro.execute(params![bucket, cdev, cino, -eff_rb])?;
-                    }
-                }
-                Ok(())
-            })();
-            if let Err(e) = r {
-                tracing::debug!("delete {} failed: {e}", full.display());
+    // ---- Phase C: move-from (record renames; otherwise unlink the left path) ----
+    for full in &moved_from {
+        let (dir, name) = match split(full) {
+            Some(v) => v,
+            None => continue,
+        };
+        let (pdev, pino) = match stat_id(dir) {
+            Some(v) => v,
+            None => continue,
+        };
+        let de: Option<(i64, i64)> = tx
+            .query_row(
+                "SELECT dev_id, inode FROM dirents
+                 WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 LIMIT 1",
+                params![pdev, pino, &name],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+        if let Some((cdev, cino)) = de {
+            if moved_in.contains(&(cdev, cino)) {
+                rename_src.insert((cdev, cino), (pdev, pino, name)); // phase D relocates
+            } else {
+                unlink_dirent(&tx, &mut anc, bucket, pdev, pino, &name)?;
             }
         }
+    }
 
-        // ---- Phase C: move-from ----
-        for full in &moved_from {
-            let r: Result<()> = (|| {
-                let (dir, name) = match split(full) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                let (pdev, pino) = match stat_id(dir) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                if let Ok((cdev, cino, _k, crb, cri, _b)) =
-                    find.query_row(params![pdev, pino, name], row6)
-                {
-                    if moved_in.contains(&(cdev, cino)) {
-                        return Ok(()); // it's a rename — move-to will relocate it
-                    }
-                    // genuinely left the watched tree: remove it
-                    let adj = anc.get(&(cdev, cino)).copied().unwrap_or((0, 0));
-                    let (eff_rb, eff_ri) = (crb + adj.0, cri + adj.1);
-                    del_subtree(&mut descendants, &mut del_node, cdev, cino)?;
-                    accrue(&mut anc, &mut get_parent, pdev, pino, -eff_rb, -eff_ri)?;
-                    if eff_rb != 0 {
-                        gro.execute(params![bucket, cdev, cino, -eff_rb])?;
-                    }
-                }
-                Ok(())
-            })();
-            if let Err(e) = r {
-                tracing::debug!("move-from {} failed: {e}", full.display());
+    // ---- Phase D: move-to (relocate a renamed dirent; else add link / fresh) ----
+    for full in &moved_to {
+        use std::os::unix::fs::MetadataExt;
+        let m = match std::fs::symlink_metadata(full) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let (dir, name) = match split(full) {
+            Some(v) => v,
+            None => continue,
+        };
+        let (npdev, npino) = match stat_id(dir) {
+            Some(v) => v,
+            None => continue,
+        };
+        let dev = m.dev() as i64;
+        let ino = m.ino() as i64;
+
+        if let Some((opdev, opino, oldname)) = rename_src.remove(&(dev, ino)) {
+            // RENAME of an existing link. Cycle guard: never move a dir under its
+            // own subtree (a stale tree could install A→B→A and hang the CTEs).
+            if would_cycle(&tx, dev, ino, npdev, npino) {
+                tracing::debug!("skip move-to (would cycle): dev={dev} ino={ino}");
+                continue;
+            }
+            let prime: i64 = tx
+                .query_row(
+                    "SELECT prime FROM dirents
+                     WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 LIMIT 1",
+                    params![opdev, opino, &oldname],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            // relocate THIS specific dirent old->new; children keep pointing at
+            // the inode, so a directory's whole subtree follows for free.
+            tx.execute(
+                "UPDATE dirents SET parent_dev=?1, parent_inode=?2, name=?3
+                 WHERE parent_dev=?4 AND parent_inode=?5 AND name=?6",
+                params![npdev, npino, &name, opdev, opino, &oldname],
+            )?;
+            if prime != 0 {
+                // move the block attribution from the old parent chain to the new.
+                let (rb, ri): (i64, i64) = tx
+                    .query_row(
+                        "SELECT recursive_bytes, recursive_inodes FROM inodes
+                         WHERE dev_id=?1 AND inode=?2",
+                        params![dev, ino],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .unwrap_or((0, 0));
+                let adj = anc.get(&(dev, ino)).copied().unwrap_or((0, 0));
+                let (eff_rb, eff_ri) = (rb + adj.0, ri + adj.1);
+                accrue(&tx, &mut anc, opdev, opino, -eff_rb, -eff_ri);
+                accrue(&tx, &mut anc, npdev, npino, eff_rb, eff_ri);
+            }
+            // a rename has zero net byte delta -> no growth row
+        } else {
+            // not a rename: a path appeared (moved in from outside, or a new link)
+            upsert_path(&tx, &mut anc, bucket, &m, dev, ino, npdev, npino, &name)?;
+            // a populated directory moved in carries existing descendants that
+            // produced no per-file events — index its current contents.
+            if m.is_dir() {
+                reconcile_subtree(&tx, &mut anc, bucket, full, dev, ino)?;
             }
         }
+    }
 
-        // ---- Phase D: move-to (relocate the inode, keep its subtree) ----
-        for full in &moved_to {
-            let r: Result<()> = (|| {
-                use std::os::unix::fs::MetadataExt;
-                let m = match std::fs::symlink_metadata(full) {
-                    Ok(m) => m,
-                    Err(_) => return Ok(()),
-                };
-                let (dir, name) = match split(full) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                let (npdev, npino) = match stat_id(dir) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                let dev = m.dev() as i64;
-                let ino = m.ino() as i64;
-                let existing: Option<(String, i64, i64, String, i64, i64)> = find_inode
-                    .query_row(params![dev, ino], |r| {
-                        Ok((
-                            r.get(0)?,
-                            r.get(1)?,
-                            r.get(2)?,
-                            r.get(3)?,
-                            r.get(4)?,
-                            r.get(5)?,
-                        ))
-                    })
-                    .ok();
-                if let Some((_oldname, opdev, opino, _k, rb, ri)) = existing {
-                    // Cycle guard: never relocate a node under its OWN subtree
-                    // (a stale tree could otherwise install A→B→A and hang the
-                    // recursive CTEs). Walk up from the new parent looking for
-                    // the node being moved.
-                    let (mut cd, mut ci) = (npdev, npino);
-                    let mut g = 0;
-                    let mut cycle = false;
-                    loop {
-                        if cd == dev && ci == ino {
-                            cycle = true;
-                            break;
-                        }
-                        g += 1;
-                        if g > 4096 {
-                            break;
-                        }
-                        match get_parent
-                            .query_row(params![cd, ci], |r| {
-                                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-                            })
-                            .ok()
-                        {
-                            Some((pd, pi)) if !(pd == cd && pi == ci) => {
-                                cd = pd;
-                                ci = pi;
-                            }
-                            _ => break,
-                        }
-                    }
-                    if cycle {
-                        tracing::debug!("skip move-to (would cycle): dev={dev} ino={ino}");
-                        return Ok(());
-                    }
-                    // RELOCATE: move the row + its (unchanged) subtree to the new
-                    // parent. Children reference (dev,ino) so they follow for free.
-                    // The UPDATE-of-name trigger refreshes the FTS automatically.
-                    // Subtree total may already carry pending deltas this flush.
-                    let adj = anc.get(&(dev, ino)).copied().unwrap_or((0, 0));
-                    let (eff_rb, eff_ri) = (rb + adj.0, ri + adj.1);
-                    accrue(&mut anc, &mut get_parent, opdev, opino, -eff_rb, -eff_ri)?;
-                    relocate.execute(params![dev, ino, name, npdev, npino])?;
-                    accrue(&mut anc, &mut get_parent, npdev, npino, eff_rb, eff_ri)?;
-                    // a rename has zero net byte delta -> no growth row
-                } else {
-                    // moved in from outside the tree -> treat as a fresh create
-                    let blocks = (m.blocks() as i64) * 512;
-                    let kind = kind_of(&m);
-                    insert_node.execute(params![
-                        dev,
-                        ino,
-                        npdev,
-                        npino,
-                        name,
-                        kind,
-                        blocks,
-                        blocks,
-                        1i64,
-                        m.uid() as i64,
-                        m.mtime(),
-                    ])?;
-                    accrue(&mut anc, &mut get_parent, npdev, npino, blocks, 1)?;
-                    gro.execute(params![bucket, dev, ino, blocks])?;
-                }
-                Ok(())
-            })();
-            if let Err(e) = r {
-                tracing::debug!("move-to {} failed: {e}", full.display());
-            }
-        }
+    // ---- Phase E: upserts (create / modify / hardlink) ----
+    for full in &upserts {
+        use std::os::unix::fs::MetadataExt;
+        let m = match std::fs::symlink_metadata(full) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let (dir, name) = match split(full) {
+            Some(v) => v,
+            None => continue,
+        };
+        let (pdev, pino) = match stat_id(dir) {
+            Some(v) => v,
+            None => continue,
+        };
+        let dev = m.dev() as i64;
+        let ino = m.ino() as i64;
+        upsert_path(&tx, &mut anc, bucket, &m, dev, ino, pdev, pino, &name)?;
+    }
 
-        // ---- Phase E: upserts (create / modify / hardlink) ----
-        for full in &upserts {
-            let r: Result<()> = (|| {
-                use std::os::unix::fs::MetadataExt;
-                let m = match std::fs::symlink_metadata(full) {
-                    Ok(m) => m,
-                    Err(_) => return Ok(()),
-                };
-                let (dir, name) = match split(full) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                let (pdev, pino) = match stat_id(dir) {
-                    Some(v) => v,
-                    None => return Ok(()),
-                };
-                let dev = m.dev() as i64;
-                let ino = m.ino() as i64;
-                let blocks = (m.blocks() as i64) * 512;
-                let mtime = m.mtime();
-                let is_dir = m.is_dir();
-                let kind = kind_of(&m);
-
-                let existing: Option<(i64, i64, String, i64, i64, i64)> =
-                    find.query_row(params![pdev, pino, name], row6).ok();
-
-                match existing {
-                    Some((edev, eino, _ek, erb, _eri, _eb)) if edev == dev && eino == ino => {
-                        if is_dir {
-                            return Ok(()); // dir totals driven by children
-                        }
-                        let delta = blocks - erb;
-                        upd_file.execute(params![dev, ino, blocks, mtime])?;
-                        if delta != 0 {
-                            accrue(&mut anc, &mut get_parent, pdev, pino, delta, 0)?;
-                            gro.execute(params![bucket, dev, ino, delta])?;
-                        }
-                    }
-                    other => {
-                        if let Some((edev, eino, _ek, erb, eri, _eb)) = other {
-                            // name reused by a DIFFERENT inode: drop the stale occupant
-                            let adj = anc.get(&(edev, eino)).copied().unwrap_or((0, 0));
-                            let (eff_rb, eff_ri) = (erb + adj.0, eri + adj.1);
-                            del_subtree(&mut descendants, &mut del_node, edev, eino)?;
-                            accrue(&mut anc, &mut get_parent, pdev, pino, -eff_rb, -eff_ri)?;
-                        }
-                        // Skip if this inode is already indexed under another name
-                        // (a hardlink): count it once, and keep one FTS name per
-                        // inode so a search never resolves to a different path.
-                        let is_hardlink =
-                            find_inode.query_row(params![dev, ino], |_| Ok(())).is_ok();
-                        if !is_hardlink {
-                            insert_node.execute(params![
-                                dev,
-                                ino,
-                                pdev,
-                                pino,
-                                name,
-                                kind,
-                                blocks,
-                                blocks,
-                                1i64,
-                                m.uid() as i64,
-                                mtime,
-                            ])?;
-                            accrue(&mut anc, &mut get_parent, pdev, pino, blocks, 1)?;
-                            gro.execute(params![bucket, dev, ino, blocks])?;
-                        }
-                    }
-                }
-                Ok(())
-            })();
-            if let Err(e) = r {
-                tracing::debug!("upsert {} failed: {e}", full.display());
-            }
-        }
-
-        // ---- apply coalesced ancestor totals: ONE write per affected dir ----
-        for (&(d, i), &(db, di)) in &anc {
-            if db != 0 || di != 0 {
-                bump.execute(params![d, i, db, di])?;
-            }
+    // ---- apply coalesced ancestor totals: ONE write per affected dir ----
+    for (&(d, i), &(rb, ri)) in &anc {
+        if rb != 0 || ri != 0 {
+            tx.execute(
+                "UPDATE inodes SET recursive_bytes=recursive_bytes+?3,
+                 recursive_inodes=recursive_inodes+?4 WHERE dev_id=?1 AND inode=?2",
+                params![d, i, rb, ri],
+            )?;
         }
     }
     tx.commit()?;
@@ -863,10 +1147,11 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
     Ok(())
 }
 
-/// (parent_dir, file_name) from a full path.
-fn split(full: &Path) -> Option<(&Path, String)> {
+/// (parent_dir, file_name_bytes) from a full path — raw bytes, identity-safe.
+fn split(full: &Path) -> Option<(&Path, Vec<u8>)> {
+    use std::os::unix::ffi::OsStrExt;
     let dir = full.parent()?;
-    let name = full.file_name()?.to_string_lossy().into_owned();
+    let name = full.file_name()?.as_bytes().to_vec();
     Some((dir, name))
 }
 
@@ -882,18 +1167,6 @@ fn kind_of(m: &std::fs::Metadata) -> &'static str {
     }
 }
 
-/// row mapper: (dev, inode, kind, recursive_bytes, recursive_inodes, blocks)
-fn row6(r: &rusqlite::Row) -> rusqlite::Result<(i64, i64, String, i64, i64, i64)> {
-    Ok((
-        r.get(0)?,
-        r.get(1)?,
-        r.get(2)?,
-        r.get(3)?,
-        r.get(4)?,
-        r.get(5)?,
-    ))
-}
-
 /// Stat a path for its (dev, inode).
 fn stat_id(path: &Path) -> Option<(i64, i64)> {
     use std::os::unix::fs::MetadataExt;
@@ -903,12 +1176,24 @@ fn stat_id(path: &Path) -> Option<(i64, i64)> {
 }
 
 /// Fire the alert command for paths whose growth in the window exceeds threshold.
+/// Max alert subprocesses allowed to be running at once. Beyond this, new alerts
+/// are logged but not spawned, so an event storm can't fork-bomb the host.
+const MAX_ALERT_CHILDREN: usize = 16;
+
 fn check_alerts(
     store: &Store,
     cfg: &AlertConfig,
     last: &mut HashMap<(i64, i64), i64>,
+    children: &mut Vec<std::process::Child>,
 ) -> Result<()> {
     let now = now_secs();
+    // Reap any finished alert children (avoid zombies) and drop them from the set.
+    children.retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+    // Bound the debounce map: forget entries older than 2× the alert window so it
+    // can't grow without limit across the daemon's lifetime.
+    let stale_before = now - (cfg.window * 2).max(3600);
+    last.retain(|_, &mut t| t >= stale_before);
+
     // bucket granularity means the window is rounded up to the next 5 min
     let cutoff = (now - cfg.window) / crate::store::GROWTH_BUCKET_SECS;
     let mut stmt = store.conn.prepare(
@@ -935,20 +1220,241 @@ fn check_alerts(
             .unwrap_or_else(|_| format!("inode:{inode}"));
         tracing::warn!(
             "ALERT: {} grew {} in {}s",
-            path,
+            crate::util::display_path(&path),
             crate::util::human(delta),
             cfg.window
         );
         if let Some(cmd) = &cfg.exec {
-            let _ = std::process::Command::new("sh")
+            if children.len() >= MAX_ALERT_CHILDREN {
+                tracing::warn!(
+                    "alert exec skipped ({} already running) — raise the threshold or debounce",
+                    children.len()
+                );
+                continue;
+            }
+            if let Ok(child) = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(cmd)
                 .env("DUX_PATH", &path)
                 .env("DUX_DELTA", delta.to_string())
                 .env("DUX_DELTA_HUMAN", crate::util::human(delta))
                 .env("DUX_WINDOW", cfg.window.to_string())
-                .spawn();
+                .spawn()
+            {
+                children.push(child); // tracked + reaped next pass
+            }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scan::{self, ScanOptions};
+    use std::collections::HashMap;
+
+    fn tmp(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("dux-wt-{tag}-{}", std::process::id()))
+    }
+    fn cleanup(dir: &Path, db: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
+        for s in ["", "-wal", "-shm", ".lock"] {
+            let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+    }
+    fn id_of(p: &Path) -> (i64, i64) {
+        use std::os::unix::fs::MetadataExt;
+        let m = std::fs::symlink_metadata(p).unwrap();
+        (m.dev() as i64, m.ino() as i64)
+    }
+    fn count_dirents(store: &Store, dev: i64, ino: i64) -> i64 {
+        store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE dev_id=?1 AND inode=?2",
+                params![dev, ino],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    fn inode_rows(store: &Store, dev: i64, ino: i64) -> i64 {
+        store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM inodes WHERE dev_id=?1 AND inode=?2",
+                params![dev, ino],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    fn rbytes(store: &Store, dev: i64, ino: i64) -> i64 {
+        store
+            .conn
+            .query_row(
+                "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+                params![dev, ino],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+    }
+    fn scan_into(dir: &Path, db: &Path) {
+        let mut s = Store::open_rw(db).unwrap();
+        scan::scan(
+            &mut s,
+            dir,
+            &ScanOptions {
+                progress: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    // A hardlink is added, then both links are removed one at a time. The inode's
+    // blocks must be counted once, both paths must be searchable, the inode must
+    // survive while ANY link remains, and vanish only on the last unlink.
+    #[test]
+    fn hardlink_lifecycle() {
+        let dir = tmp("hl");
+        let db = tmp("hl-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.dat"), vec![1u8; 4096]).unwrap();
+        scan_into(&dir, &db);
+
+        let mut store = Store::open_rw(&db).unwrap();
+        let fid = id_of(&dir.join("a.dat"));
+        let did = id_of(&dir);
+        let base = rbytes(&store, did.0, did.1);
+
+        // add a hardlink -> a second dirent, but the inode is counted once
+        std::fs::hard_link(dir.join("a.dat"), dir.join("b.dat")).unwrap();
+        let mut p = HashMap::new();
+        p.insert(dir.join("b.dat"), Op::Upsert);
+        flush(&mut store, &mut p, &db).unwrap();
+        assert_eq!(count_dirents(&store, fid.0, fid.1), 2, "both paths indexed");
+        assert_eq!(inode_rows(&store, fid.0, fid.1), 1, "one inode row");
+        assert_eq!(
+            rbytes(&store, did.0, did.1),
+            base,
+            "hardlink must not change the dir total (counted once)"
+        );
+
+        // remove the original (prime) link: inode survives via the other link
+        std::fs::remove_file(dir.join("a.dat")).unwrap();
+        let mut p = HashMap::new();
+        p.insert(dir.join("a.dat"), Op::Delete);
+        flush(&mut store, &mut p, &db).unwrap();
+        assert_eq!(count_dirents(&store, fid.0, fid.1), 1, "one link remains");
+        assert_eq!(inode_rows(&store, fid.0, fid.1), 1, "inode survives");
+        assert_eq!(rbytes(&store, did.0, did.1), base, "total unchanged");
+
+        // remove the last link: inode and its blocks are gone
+        std::fs::remove_file(dir.join("b.dat")).unwrap();
+        let mut p = HashMap::new();
+        p.insert(dir.join("b.dat"), Op::Delete);
+        flush(&mut store, &mut p, &db).unwrap();
+        assert_eq!(
+            inode_rows(&store, fid.0, fid.1),
+            0,
+            "inode removed on last link"
+        );
+        assert!(
+            rbytes(&store, did.0, did.1) < base,
+            "blocks subtracted on last unlink"
+        );
+
+        drop(store);
+        cleanup(&dir, &db);
+    }
+
+    // A name reused by a DIFFERENT inode (a missed delete + recreate) must not
+    // leave two inodes at one path: the stale occupant is dropped, UNIQUE holds.
+    #[test]
+    fn duplicate_path_prevented() {
+        let dir = tmp("dup");
+        let db = tmp("dup-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("x"), vec![1u8; 4096]).unwrap();
+        scan_into(&dir, &db);
+        let mut store = Store::open_rw(&db).unwrap();
+        let did = id_of(&dir);
+
+        // replace x with a brand-new inode, but only deliver the upsert (the delete
+        // event was "missed").
+        std::fs::remove_file(dir.join("x")).unwrap();
+        std::fs::write(dir.join("x"), vec![2u8; 8192]).unwrap();
+        let newid = id_of(&dir.join("x"));
+        let mut p = HashMap::new();
+        p.insert(dir.join("x"), Op::Upsert);
+        flush(&mut store, &mut p, &db).unwrap();
+
+        let n: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![did.0, did.1, b"x".to_vec()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "exactly one inode occupies the path");
+        let target: (i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT dev_id, inode FROM dirents WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![did.0, did.1, b"x".to_vec()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(target, newid, "path points at the NEW inode");
+        drop(store);
+        cleanup(&dir, &db);
+    }
+
+    // Two filenames with different invalid-UTF-8 bytes must remain distinct rows
+    // (the old lossy-String storage collapsed both to one replacement string).
+    #[test]
+    fn non_utf8_names_distinct() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tmp("nu");
+        let db = tmp("nu-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        let n1 = std::ffi::OsStr::from_bytes(b"bad\xff\x01");
+        let n2 = std::ffi::OsStr::from_bytes(b"bad\xfe\x02");
+        std::fs::write(dir.join(n1), b"x").unwrap();
+        std::fs::write(dir.join(n2), b"y").unwrap();
+        scan_into(&dir, &db);
+        let store = Store::open_rw(&db).unwrap();
+        let did = id_of(&dir);
+        let n: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE parent_dev=?1 AND parent_inode=?2
+                 AND NOT (dev_id=?1 AND inode=?2)",
+                params![did.0, did.1],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 2, "distinct non-UTF-8 names must not collapse");
+        let names: Vec<Vec<u8>> = {
+            let mut st = store
+                .conn
+                .prepare(
+                    "SELECT name FROM dirents WHERE parent_dev=?1 AND parent_inode=?2
+                     AND NOT (dev_id=?1 AND inode=?2)",
+                )
+                .unwrap();
+            st.query_map(params![did.0, did.1], |r| r.get::<_, Vec<u8>>(0))
+                .unwrap()
+                .filter_map(|x| x.ok())
+                .collect()
+        };
+        assert!(names.iter().any(|b| b.as_slice() == b"bad\xff\x01"));
+        assert!(names.iter().any(|b| b.as_slice() == b"bad\xfe\x02"));
+        drop(store);
+        cleanup(&dir, &db);
+    }
 }

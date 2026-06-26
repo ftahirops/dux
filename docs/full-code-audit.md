@@ -392,3 +392,626 @@ target should be:
 
 Under overload, the daemon should preserve host stability first, stop claiming
 freshness, and recover through a controlled reconciliation process.
+
+---
+
+# Second Deep Audit of Current HEAD
+
+Date: June 25, 2026
+
+Audited commit: `b25a881`
+
+This second audit reviewed the fixes added after the original report and tested
+the current system database. No source-code fixes were made during this pass.
+
+## Updated verdict
+
+The latest code is improved, but it is still not production-safe under sustained
+filesystem churn, resource pressure, concurrent administration, or adversarial
+filenames.
+
+Several earlier defects were fixed:
+
+- TUI schema-v3 startup failure.
+- Destructive schema migration.
+- Loss of the complete pending batch after a failed SQLite commit.
+- Cross-database status heartbeat mismatch for the common single-daemon case.
+- Recursive path-resolution depth guard.
+- CLI limit integer overflow.
+- TUI column alignment.
+
+However, the live database is already inconsistent, and several architectural
+defects remain.
+
+## Critical confirmed findings
+
+### 1. The live index is already internally inconsistent
+
+The active `/var/lib/dux/dux.db` passed SQLite's structural integrity check:
+
+```text
+PRAGMA integrity_check = ok
+```
+
+But application-level invariants failed in one consistent SQLite read
+transaction:
+
+```text
+orphan nodes:                  49
+leaf recursive_bytes mismatch: 28
+root byte drift:              about -23 MiB
+root inode drift:             -2,286
+duplicate path groups:         52
+```
+
+One duplicated path was represented by 49 different inode rows. Two directory
+rows had invalid totals, including:
+
+```text
+recursive_bytes  = -12288
+recursive_inodes = -3
+```
+
+SQLite integrity validates database pages and indexes. It does not validate the
+filesystem-tree invariants required by this application.
+
+### 2. No exclusive scan or daemon ownership lock exists
+
+Two concurrent scans against the same database were reproduced. Both used the
+same `<db>.new` path. One failed with:
+
+```text
+no such table: nodes
+```
+
+The other scan completed, but success depended on timing.
+
+Relevant code:
+
+- `src/scan.rs:70`
+- `src/main.rs:170`
+- `src/watch.rs:78`
+
+The heartbeat is advisory and cannot provide mutual exclusion. Every scan and
+daemon needs a nonblocking per-database `flock` held for the complete operation.
+
+### 3. The schema allows multiple inodes to occupy one path
+
+The `nodes` table has:
+
+```sql
+PRIMARY KEY (dev_id, inode)
+```
+
+It does not have:
+
+```sql
+UNIQUE (parent_dev, parent_inode, name)
+```
+
+Relevant schema:
+
+- `src/store.rs:102`
+
+If a delete or replacement event is missed, a new inode can be inserted at the
+same parent/name while the stale row remains. The live database confirms this is
+already happening.
+
+### 4. Hardlink representation remains incorrect
+
+A test containing two hardlinks indexed only one arbitrary path. Searching for
+the other valid name returned no result.
+
+The watcher explicitly ignores additional links when the inode already exists:
+
+- `src/watch.rs:814`
+
+Consequences:
+
+- File search does not represent all valid paths.
+- Deleting the selected path can remove an inode that still exists through
+  another link.
+- Modifying through an unindexed link can be missed or attributed incorrectly.
+- Directory totals cannot correctly express where the shared inode is linked.
+
+Correct support requires separate inode metadata and directory-entry/path
+tables.
+
+### 5. Per-operation watcher failures are still silently committed
+
+The pending batch is now preserved if the whole SQLite transaction fails. That
+fix is valid.
+
+However, individual delete, move and upsert failures are caught inside the
+transaction, logged only at debug level, and processing continues. The
+transaction can then commit and the complete pending map is cleared.
+
+Examples:
+
+- `src/watch.rs:629`
+- `src/watch.rs:662`
+- `src/watch.rs:763`
+- `src/watch.rs:839`
+- `src/watch.rs:852`
+
+Therefore, one operation can fail while related ancestor updates or other
+operations commit. This can permanently create drift.
+
+### 6. Watcher startup and shutdown lose changes
+
+When an index is missing or schema-incompatible, the daemon performs the full
+scan before creating fanotify watches:
+
+- `src/watch.rs:85`
+
+Changes during that scan are invisible to the daemon.
+
+On SIGTERM or process termination, pending events are not flushed. Up to one
+flush window is lost. There is no startup reconciliation to repair downtime or
+shutdown gaps.
+
+### 7. Daemon root is not validated against the indexed root
+
+The daemon accepts a `root` argument independently of the database's
+`last_scan_root`, `root_dev`, and `root_inode`.
+
+A database indexed for one tree can therefore be watched using another tree.
+That can produce missing-parent rows, partial totals, or irrelevant events.
+
+The daemon must reject mismatched roots unless it performs a new atomic scan.
+
+## Security findings
+
+### Confirmed terminal escape injection
+
+Filenames are printed directly by CLI and TUI output:
+
+- `src/main.rs:393`
+- `src/tui.rs:948`
+
+Tests confirmed that filenames containing:
+
+- Newline characters.
+- ANSI/OSC control sequences.
+- OSC 52 clipboard-setting sequences.
+
+are emitted unchanged.
+
+A local user can create a filename that forges terminal output or attempts to
+modify the clipboard of an administrator running `dux`.
+
+All untrusted filenames must be escaped or rendered with control characters
+visibly encoded.
+
+### World-readable root filename index
+
+The active system files are:
+
+```text
+/var/lib/dux          mode 0755
+/var/lib/dux/dux.db   mode 0644
+```
+
+This permits every local user to read the complete filename index for the root
+filesystem, including filenames inside directories they could not normally
+traverse.
+
+This might be a deliberate product decision, but it is a significant
+information-disclosure policy and must be documented and configurable.
+
+### Privileged service hardening
+
+The service runs as root with:
+
+```text
+CAP_SYS_ADMIN
+CAP_DAC_READ_SEARCH
+```
+
+Relevant configuration:
+
+- `packaging/dux.service:33`
+
+`CAP_SYS_ADMIN` has broad security impact. The service also lacks several common
+hardening controls. Fanotify mount-namespace requirements limit some options,
+but the remaining security boundary should be reduced and explicitly analyzed.
+
+### Dependency advisory results
+
+The current `Cargo.lock` was checked against the current RustSec advisory
+database.
+
+No direct vulnerability caused audit failure, but two warnings were reported:
+
+1. `lru 0.12.5`
+   - RustSec: `RUSTSEC-2026-0002`
+   - Soundness issue involving `IterMut`.
+   - Patched in `>= 0.16.3`.
+
+2. `paste 1.0.15`
+   - RustSec: `RUSTSEC-2024-0436`
+   - Unmaintained.
+
+Both are transitive dependencies through `ratatui 0.28.1`.
+
+## Memory, process and stress risks
+
+### Scan memory remains unbounded
+
+The scanner:
+
+- Uses an unbounded channel.
+- Completes the walk before draining it.
+- Stores all raw nodes in memory.
+- Allocates additional hash maps, hash sets and vectors proportional to node
+  count.
+
+Relevant code:
+
+- `src/scan.rs:377`
+
+This can exceed the service's 4 GB limit on large filesystems.
+
+### Fanotify and pending operations are unbounded
+
+The daemon requests:
+
+```text
+FAN_UNLIMITED_QUEUE
+```
+
+and stores pending operations in an unbounded `HashMap`.
+
+If SQLite remains unavailable or slow, pending entries remain and new entries
+continue accumulating. This is logical unbounded memory growth even though Rust
+does not leak unreachable allocations.
+
+### Alert subprocess lifecycle is unbounded
+
+Alert commands are spawned without:
+
+- A concurrency limit.
+- A timeout.
+- Waiting/reaping logic.
+- A bounded work queue.
+
+Relevant code:
+
+- `src/watch.rs:942`
+
+The `last_alert` map also has no cleanup policy.
+
+### TUI growth query cost
+
+On the current 1.5-million-node database, the recursive one-hour growth query
+used approximately:
+
+```text
+0.5 CPU-seconds
+```
+
+It is refreshed approximately every three seconds while idle. Multiple TUI
+sessions can therefore add material CPU and temporary-database activity.
+
+### WAL and database growth
+
+At audit time:
+
+```text
+main database: about 201 MiB
+WAL:           about 57 MiB
+growth rows:   about 54,000
+```
+
+`journal_size_limit` does not strictly bound active WAL growth when checkpoints
+cannot progress.
+
+Growth retention deletes old rows but does not shrink the main database file
+automatically.
+
+## Additional correctness findings
+
+### Invalid UTF-8 filenames collapse
+
+Two distinct filenames containing different invalid UTF-8 bytes were scanned.
+Both were stored as the same replacement-character string.
+
+Relevant code:
+
+- `src/scan.rs:450`
+- `src/watch.rs:431`
+- `src/watch.rs:869`
+
+This destroys path identity and makes reliable lookup, delete, rename and search
+impossible.
+
+### Control characters are stored unchanged
+
+Newline, carriage-return and terminal-control characters are accepted into the
+database and later printed directly.
+
+### Populated directory moves remain incomplete
+
+A directory moved into the watched tree is inserted as one directory node.
+Existing descendants are not scanned:
+
+- `src/watch.rs:741`
+
+### Metadata changes are missed
+
+The fanotify mask does not include `FAN_ATTRIB`:
+
+- `src/watch.rs:305`
+
+Ownership and timestamp-only changes therefore remain stale.
+
+Directory allocation-block changes are also ignored because existing directory
+upserts return immediately:
+
+- `src/watch.rs:795`
+
+This contributes to recursive-byte drift.
+
+### Dirty state is not operational
+
+Fanotify queue overflow writes `dirty_since`:
+
+- `src/watch.rs:349`
+
+But:
+
+- Status does not display it.
+- The TUI does not display it.
+- The daemon continues reporting `live`.
+- No reconciliation is scheduled.
+
+### Partial watch coverage is hidden
+
+Failed filesystem marks are silently ignored if at least one filesystem was
+successfully marked:
+
+- `src/watch.rs:106`
+
+New mounts appearing after startup are not discovered.
+
+### Atomic rebuild durability is incomplete
+
+The atomic rebuild ignores checkpoint failure:
+
+- `src/scan.rs:80`
+
+It then removes the destination WAL/SHM files and renames the new main database.
+No explicit file or parent-directory `fsync` is performed.
+
+The rename is namespace-atomic but not fully crash-durable.
+
+### TUI scope is inconsistent
+
+When the TUI opens at a subtree:
+
+- The tree is scoped.
+- The largest-files panel remains global.
+- The fastest-growth panel remains global.
+
+Relevant queries:
+
+- `src/tui.rs:426`
+- `src/tui.rs:452`
+
+### TUI silently truncates large directories
+
+Only the first 5,000 children are loaded:
+
+- `src/tui.rs:289`
+
+A test directory with 5,100 children confirmed that the remaining entries are
+not shown and no truncation warning is displayed.
+
+### Older-schema read behavior is inconsistent
+
+Read-only commands do not validate schema version before executing:
+
+- Some queries work against an old schema.
+- Other commands fail with missing-table errors.
+- Status can report an old database as live if it owns the heartbeat.
+
+The CLI should perform one explicit schema compatibility check for every command.
+
+## Verification harness problems
+
+The supplied verification script overstates confidence.
+
+Problems include:
+
+- It treats orphan and leaf inconsistencies as potentially transient while the
+  daemon is live. SQLite transaction snapshots make committed tree invariants
+  atomic, so these are real inconsistencies.
+- It checks duplicate `(dev,inode)` rows, which the primary key already forbids,
+  but does not check duplicate `(parent_dev,parent_inode,name)` paths.
+- Its daemon liveness check still ignores database identity.
+- It contains a dead loop for one index-to-disk check.
+- It reconstructs paths using shell delimiters that filenames can contain.
+- It does not check negative totals.
+- It does not check `dirty_since`.
+- It can print `ROCK SOLID` after only sampled checks.
+
+Relevant sections:
+
+- `scripts/dux-verify.sh:109`
+- `scripts/dux-verify.sh:219`
+- `scripts/dux-verify.sh:325`
+- `scripts/dux-verify.sh:361`
+
+## Current build and test status
+
+### Passing
+
+- Debug test suite: 3 tests passed.
+- Release test suite: 3 tests passed.
+- `cargo fmt --check`: passed.
+- Basic CLI/TUI smoke tests passed after rebuilding the executable.
+- FTS integrity check passed on a SQLite backup of the live database.
+
+### Failing or insufficient
+
+Strict Clippy currently fails:
+
+```text
+function `read_heartbeat` is never used
+```
+
+Only three automated tests exist. They do not cover:
+
+- Daemon event processing.
+- Hardlink lifecycle.
+- Duplicate-path prevention.
+- Transaction partial failures.
+- Concurrent scans or daemons.
+- Queue overflow.
+- Dirty-state recovery.
+- Populated directory moves.
+- Startup/shutdown event gaps.
+- Terminal control characters.
+- Invalid UTF-8 filenames.
+- TUI scope.
+- Schema compatibility.
+- WAL/checkpoint failure.
+- Database-full behavior.
+
+## Updated remediation order
+
+### Immediate operational action
+
+1. Stop the daemon.
+2. Preserve a copy of the inconsistent database for diagnosis.
+3. Perform a fresh atomic scan.
+4. Do not advertise the index as trustworthy until drift is prevented.
+
+### Immediate code changes
+
+1. Add a per-database `flock` for every daemon and scan.
+2. Add `UNIQUE(parent_dev,parent_inode,name)`.
+3. Abort the whole flush transaction when any operation fails.
+4. Stop reporting live status when `dirty_since` exists.
+5. Validate daemon root and scan options against stored metadata.
+6. Escape all terminal output.
+7. Replace lossy filename storage with raw-byte-safe storage.
+8. Add graceful SIGTERM handling and final flush.
+9. Add startup reconciliation.
+
+### Required architectural changes
+
+1. Separate inode records from directory-entry/path records.
+2. Model all hardlinks explicitly.
+3. Stream scan processing instead of buffering the complete tree.
+4. Bound watcher state and define overload behavior.
+5. Reconcile moved-in directory trees.
+6. Track mount additions and watch failures.
+7. Add bounded alert workers.
+8. Make atomic rebuild crash-durable.
+
+## Final conclusion
+
+The project is not 100% complete and does not currently meet the stated goal of
+remaining harmless and correct under server stress.
+
+No classic reachable-memory leak was identified, but the application has:
+
+- Unbounded scan memory.
+- Unbounded watcher state.
+- Unbounded alert subprocess creation.
+- Unbounded debounce-map growth.
+- Potentially unbounded WAL/history storage.
+- Confirmed live-index correctness drift.
+- Confirmed terminal injection.
+- Confirmed path-identity loss.
+
+The next engineering milestone must prioritize invariant correctness, explicit
+degraded state, resource bounds and recovery before additional performance or
+UI work.
+
+## External references
+
+- Linux fanotify init:
+  <https://man7.org/linux/man-pages/man2/fanotify_init.2.html>
+- Linux fanotify overview:
+  <https://man7.org/linux/man-pages/man7/fanotify.7.html>
+- RustSec `lru` advisory:
+  <https://rustsec.org/advisories/RUSTSEC-2026-0002.html>
+- RustSec `paste` advisory:
+  <https://rustsec.org/advisories/RUSTSEC-2024-0436.html>
+
+---
+
+# Remediation — implemented 2026-06-25 (branch `audit-fixes-v4`)
+
+The findings above were addressed by a schema-breaking data-model rewrite
+(**schema v4**) plus correctness, security, and resource work. The on-disk
+schema bump triggers the existing atomic-rebuild path, so upgrading is safe.
+
+## Data model (schema v4)
+The single `nodes` table was split into:
+- **`inodes`** — one row per `(dev,inode)`: `kind`, allocated `blocks`, recursive
+  directory totals, `uid`, `mtime`.
+- **`dirents`** — one row per path/name: `BLOB` name, target `(dev,inode)`, a
+  `prime` flag, and `UNIQUE(parent_dev,parent_inode,name)`.
+
+This directly resolves the critical structural findings:
+- **Multiple inodes per path** → forbidden by `UNIQUE(parent,name)`.
+- **Hardlinks** → every link is its own `dirents` row (all paths searchable);
+  the inode's blocks are counted once, attributed to a single *prime* dirent
+  (`du` semantics). Deleting one link keeps the inode while any link remains.
+- **Non-UTF-8 filenames** → stored as raw `BLOB` bytes; distinct names never
+  collapse. (FTS search is best-effort lossy; identity is byte-exact.)
+
+## Fixed
+- TUI/queries/scan/daemon ported to v4; `find` returns every hardlink path.
+- Flush is **atomic**: any per-op error aborts the transaction (`?`), so pending
+  events are preserved and retried — no more silently-committed partial drift.
+- Per-database **`flock`** (`<db>.lock`, `LOCK_EX|LOCK_NB`) held for the lifetime
+  of every scan and the daemon — the real guard against concurrent writers.
+- **`dirty_since`** is operational: shown in `status` and the TUI (takes
+  precedence over "live"); set on queue overflow, partial watch, overload,
+  low-disk, and budget-exhausted reconcile.
+- Graceful **SIGTERM/SIGINT** flush before exit.
+- Daemon **root validation**: rebuilds if the index is rooted at a different tree.
+- `FAN_ATTRIB` tracked (owner/mtime + directory-block changes).
+- Populated **directories moved into** the tree are reconciled (subtree indexed).
+- **Terminal-escape injection** fixed: all CLI/TUI path output escapes control
+  characters (`util::display_path`/`display_name`).
+- **Alert subprocesses** bounded (≤16 concurrent), reaped; debounce map pruned.
+- **Atomic rebuild** is crash-durable (fsync of file + parent dir around rename).
+- **Mount-mark failures** warn and mark dirty (no silent partial coverage).
+- **Low-disk protection** (pause writes < 256 MiB free) and **bounded pending**
+  backlog (drop + dirty past 500k) — host stability under overload.
+- TUI: child-truncation marker, empty-dir indicator, subtree-scoped panels.
+- Scan no longer double-counts the root (dir count off-by-one fixed); root path
+  resolves correctly.
+- Removed dead `read_heartbeat` (Clippy); `cargo fmt`/`clippy -D warnings` clean.
+- Service hardening (`CapabilityBoundingSet`, `NoNewPrivileges`,
+  `MemoryDenyWriteExecute`, fanotify-compatible `Protect*`/`Restrict*`); index
+  exposure documented + made configurable; `SECURITY.md` added.
+- `dux-verify.sh` rewritten for v4 (duplicate-PATH check, negative totals,
+  `dirty_since`, per-db liveness, delimiter-safe hex path rebuild, dead loop
+  removed, hardlink selftest, dropped the overstated `ROCK SOLID` verdict).
+- Tests: hardlink lifecycle, duplicate-path prevention, non-UTF-8 identity
+  (drive `flush()` over real temp trees); the existing scan/scope/hardlink test
+  is green on v4.
+
+## Deferred (documented, not yet implemented)
+These remain larger efforts and are intentionally left for a follow-up rather
+than rushed:
+- **Streaming scan** — the walk still buffers all node metadata in RAM before
+  the bulk load (the in-code note explains why a bounded channel deadlocks the
+  current design; truly capping peak scan RAM needs a concurrent-consume
+  redesign). `MemoryHigh=2G`/`MemoryMax=4G` in the unit bound the blast radius.
+- **Mid-run mount detection** — filesystems mounted *after* daemon start are not
+  auto-marked yet (startup marks all current real mounts; a failed mark now
+  reports dirty).
+- **Incremental vacuum / periodic compaction** and a hard **bytes/rows budget**
+  for `growth` (currently 7-day time-based retention).
+- **Startup reconciliation / event journaling across the initial scan** — the
+  daemon rebuilds atomically on schema/root mismatch, flushes on SIGTERM, and
+  marks dirty on known loss, but does not yet auto-reconcile downtime gaps.
+- **RustSec `lru`/`paste`** — transitive via `ratatui 0.28`; unfixable without
+  an upstream bump (see `docs/SECURITY.md`). Low severity.

@@ -15,7 +15,7 @@ pub fn resolve_scope(store: &Store, path: &Path) -> Result<Option<(i64, i64)>> {
     let in_index = store
         .conn
         .query_row(
-            "SELECT 1 FROM nodes WHERE dev_id=?1 AND inode=?2",
+            "SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2",
             params![dev, ino],
             |_| Ok(()),
         )
@@ -35,19 +35,23 @@ pub fn resolve_scope(store: &Store, path: &Path) -> Result<Option<(i64, i64)>> {
     }
 }
 
-/// A SQL predicate restricting `nodes` rows to descendants of (dev,inode).
-/// Uses a recursive CTE over parent_inode. The two bind params are dev then inode.
-// `depth` bound mirrors the 4096 cycle-guard used by the Rust tree walkers — a
-// corrupt parent pointer (cycle) must not make this recursion run unbounded.
-const SCOPE_PREDICATE: &str = " AND (dev_id,inode) IN (
-    WITH RECURSIVE sub(d,i,depth) AS (
+/// Recursive CTE collecting every inode in the subtree rooted at (dev,inode),
+/// walking the `dirents` parent→child edges. UNION (not UNION ALL) dedups so a
+/// hardlink or a corrupt cycle terminates; the depth bound mirrors the 4096
+/// cycle-guard used by the Rust tree walkers. The two bind params are dev, inode.
+pub(crate) const SUBTREE_CTE: &str = "WITH RECURSIVE sub(d,i,depth) AS (
         SELECT ?,?,0
-        UNION ALL
-        SELECT n.dev_id, n.inode, sub.depth+1 FROM nodes n
-        JOIN sub ON n.parent_inode=sub.i AND n.parent_dev=sub.d
-        WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND sub.depth<4096
-    ) SELECT d,i FROM sub
-)";
+        UNION
+        SELECT de.dev_id, de.inode, sub.depth+1 FROM dirents de
+        JOIN sub ON de.parent_inode=sub.i AND de.parent_dev=sub.d
+        WHERE NOT (de.dev_id=de.parent_dev AND de.inode=de.parent_inode) AND sub.depth<4096
+    ) SELECT d,i FROM sub";
+
+/// Subtree filter for queries over the `inodes`/`growth` tables (their own
+/// columns are `dev_id`,`inode`).
+fn scope_predicate() -> String {
+    format!(" AND (dev_id,inode) IN ({SUBTREE_CTE})")
+}
 
 /// Clamp a usize LIMIT to a positive i64: a value past i64::MAX casts negative,
 /// and SQLite treats a negative LIMIT as "unlimited" (returns everything).
@@ -84,11 +88,11 @@ pub fn top(
     let kind_cmp = if dirs { "=" } else { "!=" };
     let mut sql = format!(
         "SELECT dev_id, inode, blocks, recursive_bytes, recursive_inodes, mtime, kind, {col} AS s
-         FROM nodes WHERE kind{kind_cmp}'d'"
+         FROM inodes WHERE kind{kind_cmp}'d'"
     );
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some((d, i)) = scope {
-        sql.push_str(SCOPE_PREDICATE);
+        sql.push_str(&scope_predicate());
         args.push(Box::new(d));
         args.push(Box::new(i));
     }
@@ -139,51 +143,57 @@ pub struct FindOpts {
     pub scope: Option<(i64, i64)>,
 }
 
-/// Ultra-fast search over the live index — the locate/find replacement.
+/// Ultra-fast search over the live index — the locate/find replacement. Returns
+/// one row per matching directory-entry, so EVERY hardlink path is findable (a
+/// search for any valid name resolves to that exact path).
 pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
-    // report allocated blocks (disk usage), consistent with `top`
-    let mut sql = String::from("SELECT dev_id, inode, blocks, mtime, kind FROM nodes WHERE 1=1");
+    // dirents carry the path; inodes carry blocks/mtime/uid (allocated blocks =
+    // disk usage, consistent with `top`).
+    let mut sql = String::from(
+        "SELECT d.dev_id, d.inode, i.blocks, i.mtime, i.kind, d.parent_dev, d.parent_inode, d.name
+         FROM dirents d JOIN inodes i ON i.dev_id=d.dev_id AND i.inode=d.inode WHERE 1=1",
+    );
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     if let Some(n) = &o.name {
         // GLOB natively supports * and ?; the trigram FTS accelerates it. The
-        // external-content FTS shares nodes.rowid, so we match on rowid.
+        // external-content FTS shares dirents.rowid, so we match on rowid.
         let pat = if n.contains('*') || n.contains('?') {
             n.clone()
         } else {
             format!("*{n}*") // bare term => substring match
         };
-        sql.push_str(" AND rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
+        sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
         args.push(Box::new(pat));
     }
     if let Some(e) = &o.ext {
         let e = e.trim_start_matches('.');
-        sql.push_str(" AND rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
+        sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
         args.push(Box::new(format!("*.{e}")));
     }
     if let Some(t) = o.newer_than {
         let cutoff = now_secs() - t;
-        sql.push_str(" AND mtime >= ?");
+        sql.push_str(" AND i.mtime >= ?");
         args.push(Box::new(cutoff));
     }
     if let Some(s) = o.larger_than {
-        sql.push_str(" AND blocks >= ?");
+        sql.push_str(" AND i.blocks >= ?");
         args.push(Box::new(s));
     }
     if let Some(u) = o.owner_uid {
-        sql.push_str(" AND uid = ?");
+        sql.push_str(" AND i.uid = ?");
         args.push(Box::new(u));
     }
     if let Some((d, i)) = o.scope {
-        sql.push_str(SCOPE_PREDICATE);
+        sql.push_str(&format!(" AND (d.dev_id,d.inode) IN ({SUBTREE_CTE})"));
         args.push(Box::new(d));
         args.push(Box::new(i));
     }
     // newest first when searching by recency, else biggest first
     if o.newer_than.is_some() {
-        sql.push_str(" ORDER BY mtime DESC");
+        sql.push_str(" ORDER BY i.mtime DESC");
     } else {
-        sql.push_str(" ORDER BY blocks DESC");
+        sql.push_str(" ORDER BY i.blocks DESC");
     }
     sql.push_str(" LIMIT ?");
     args.push(Box::new(lim(o.limit)));
@@ -191,20 +201,36 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
     let mut stmt = store.conn.prepare(&sql)?;
     let params_ref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(params_ref.as_slice(), |r| {
+        let name: Vec<u8> = r.get(7)?;
         Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, i64>(1)?,
-            r.get::<_, i64>(2)?,
-            r.get::<_, i64>(3)?,
-            r.get::<_, String>(4)?,
+            r.get::<_, i64>(0)?,    // dev
+            r.get::<_, i64>(1)?,    // inode
+            r.get::<_, i64>(2)?,    // blocks
+            r.get::<_, i64>(3)?,    // mtime
+            r.get::<_, String>(4)?, // kind
+            r.get::<_, i64>(5)?,    // parent_dev
+            r.get::<_, i64>(6)?,    // parent_inode
+            String::from_utf8_lossy(&name).into_owned(),
         ))
     })?;
     let mut out = Vec::new();
     let mut pr = PathResolver::new(&store.conn);
     for row in rows {
-        let (dev, inode, size, mtime, kind) = row?;
+        let (dev, inode, size, mtime, kind, pdev, pino, name) = row?;
+        // exact matched path = this entry's parent path + its own name (so the
+        // path shown is the link that matched, not an arbitrary other hardlink).
+        let path = if (pdev == dev && pino == inode) || pino == 0 {
+            name
+        } else {
+            let prefix = pr.resolve(pdev, pino);
+            if prefix.ends_with('/') {
+                format!("{prefix}{name}")
+            } else {
+                format!("{prefix}/{name}")
+            }
+        };
         out.push(Row {
-            path: pr.resolve(dev, inode),
+            path,
             size,
             inodes: 1,
             mtime,
@@ -233,7 +259,7 @@ pub fn growth(
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];
     if let Some((d, i)) = scope {
         // reuse the scope predicate against the growth rows
-        sql.push_str(SCOPE_PREDICATE);
+        sql.push_str(&scope_predicate());
         args.push(Box::new(d));
         args.push(Box::new(i));
     }
@@ -268,7 +294,7 @@ pub struct OwnerRow {
 
 pub fn by_owner(store: &Store, limit: usize) -> Result<Vec<OwnerRow>> {
     let mut stmt = store.conn.prepare(
-        "SELECT uid, SUM(blocks) AS s, COUNT(*) FROM nodes
+        "SELECT uid, SUM(blocks) AS s, COUNT(*) FROM inodes
          WHERE kind!='d'
          GROUP BY uid ORDER BY s DESC LIMIT ?1",
     )?;
@@ -289,15 +315,19 @@ pub struct ExtRow {
 }
 
 pub fn by_ext(store: &Store, limit: usize) -> Result<Vec<ExtRow>> {
-    // Extract extension in Rust to avoid brittle SQL string ops.
-    let mut stmt = store
-        .conn
-        .prepare("SELECT name, blocks FROM nodes WHERE kind='f'")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    // Extract extension in Rust to avoid brittle SQL string ops. Count each file
+    // inode once via its prime dirent (a hardlink's extra names don't re-count).
+    let mut stmt = store.conn.prepare(
+        "SELECT d.name, i.blocks FROM dirents d
+         JOIN inodes i ON i.dev_id=d.dev_id AND i.inode=d.inode
+         WHERE i.kind='f' AND d.prime=1",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?)))?;
     use std::collections::HashMap;
     let mut map: HashMap<String, (i64, i64)> = HashMap::new();
     for row in rows {
-        let (name, size) = row?;
+        let (name_bytes, size) = row?;
+        let name = String::from_utf8_lossy(&name_bytes).into_owned();
         let ext = match name.rsplit_once('.') {
             Some((_, e)) if !e.is_empty() && e.len() <= 16 => e.to_lowercase(),
             _ => "(none)".to_string(),
@@ -324,7 +354,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         .unwrap_or(0);
     let count: i64 = store
         .conn
-        .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
         .unwrap_or(0);
     let root_dev: Option<i64> = store.get_meta("root_dev")?.and_then(|s| s.parse().ok());
     let root_inode: Option<i64> = store.get_meta("root_inode")?.and_then(|s| s.parse().ok());
@@ -332,7 +362,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         (Some(d), Some(i)) => store
             .conn
             .query_row(
-                "SELECT recursive_bytes FROM nodes WHERE dev_id=?1 AND inode=?2",
+                "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
                 params![d, i],
                 |r| r.get(0),
             )
@@ -340,7 +370,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         _ => store
             .conn
             .query_row(
-                "SELECT recursive_bytes FROM nodes WHERE inode=parent_inode
+                "SELECT recursive_bytes FROM inodes WHERE kind='d'
                  ORDER BY recursive_bytes DESC LIMIT 1",
                 [],
                 |r| r.get(0),
@@ -415,7 +445,24 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
     }
+    // Known event loss (fanotify queue overflow) makes the index untrustworthy
+    // even while the daemon is "live"; surface it loudly and recommend a rescan.
+    if let Some(since) = store.get_meta("dirty_since")?.and_then(|s| s.parse().ok()) {
+        out.push_str(&format!(
+            "\nstate:      DIRTY since {} — missed events; rescan with `dux scan <root>`",
+            crate::util::ago(since)
+        ));
+    }
     Ok(out)
+}
+
+/// Epoch seconds the index was marked dirty (fanotify overflow), if set.
+pub fn dirty_since(store: &Store) -> Option<i64> {
+    store
+        .get_meta("dirty_since")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
 }
 
 /// True when a watch daemon for THIS db has heart-beaten within the last 30s.

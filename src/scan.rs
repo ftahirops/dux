@@ -84,11 +84,22 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
             .ok();
         s
     }; // store dropped here -> connection closed, -wal/-shm removed
+       // fsync the finished file before the rename: the rename is namespace-atomic
+       // but a crash could otherwise expose a rename to not-yet-durable contents.
+    if let Ok(f) = std::fs::File::open(&db_new) {
+        let _ = f.sync_all();
+    }
     for suf in ["-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suf}", db.display()));
     }
     std::fs::rename(&db_new, db)
         .with_context(|| format!("installing new index at {}", db.display()))?;
+    // fsync the parent directory so the rename itself survives a crash.
+    if let Some(parent) = db.parent() {
+        if let Ok(d) = std::fs::File::open(parent) {
+            let _ = d.sync_all();
+        }
+    }
     Ok(stats)
 }
 
@@ -207,7 +218,7 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         gid: meta.gid() as i64,
         mode: meta.mode() as i64,
         mtime: meta.mtime(),
-        name: root.to_string_lossy().into_owned(),
+        name: root.as_os_str().as_bytes().to_vec(),
         recursive: 0,
         rinodes: 1,
     });
@@ -273,37 +284,55 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         .unwrap_or(0);
 
     // ---- phase 3: batched bulk insert (no triggers/indexes yet — fast) ----
+    // One `inodes` row per PRIMARY node (the inode counted once); one `dirents`
+    // row per node INCLUDING extra hardlinks (every valid path is represented,
+    // prime=0 for the non-canonical links). FTS triggers don't exist yet, so the
+    // bulk load isn't slowed by per-row FTS writes — finalize_bulk rebuilds once.
     let mut idx = 0;
     while idx < nodes.len() {
         let end = (idx + 50_000).min(nodes.len());
         let tx = store.conn.transaction()?;
         {
-            // OR REPLACE dedups the root (emitted by both the manual push and the
-            // walk) and any repeated dir entry. Safe during bulk load: the FTS
-            // sync triggers don't exist yet, so REPLACE can't double-fire them.
-            let mut stmt = tx.prepare(
-                "INSERT OR REPLACE INTO nodes
-                 (dev_id,inode,parent_dev,parent_inode,name,kind,blocks,recursive_bytes,
-                  recursive_inodes,uid,mtime)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            let mut ino_stmt = tx.prepare(
+                "INSERT OR REPLACE INTO inodes
+                 (dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            )?;
+            let mut de_stmt = tx.prepare(
+                "INSERT OR REPLACE INTO dirents
+                 (parent_dev,parent_inode,name,dev_id,inode,prime)
+                 VALUES (?1,?2,?3,?4,?5,?6)",
             )?;
             for j in idx..end {
                 let n = &nodes[j];
-                if !primary[j] {
-                    continue; // extra hardlink: no row, no FTS name (one per inode)
+                if primary[j] {
+                    ino_stmt.execute(params![
+                        n.dev,
+                        n.inode,
+                        n.kind.to_string(),
+                        n.blocks,
+                        n.recursive,
+                        n.rinodes,
+                        n.uid,
+                        n.mtime,
+                    ])?;
                 }
-                stmt.execute(params![
-                    n.dev,
-                    n.inode,
+                // The walker also emits the scan root as a child of its real parent
+                // dir (parent=<real parent>, name=<basename>). The canonical root
+                // dirent is the SELF-parented one pushed manually (name=abspath);
+                // skip the walker's duplicate so the root resolves to its full path.
+                let is_root = n.dev == root_dev && n.inode == root_inode;
+                let self_parented = n.parent_dev == n.dev && n.parent_inode == n.inode;
+                if is_root && !self_parented {
+                    continue;
+                }
+                de_stmt.execute(params![
                     n.parent_dev,
                     n.parent_inode,
                     n.name,
-                    n.kind.to_string(),
-                    n.blocks,
-                    n.recursive,
-                    n.rinodes,
-                    n.uid,
-                    n.mtime,
+                    n.dev,
+                    n.inode,
+                    primary[j] as i64,
                 ])?;
             }
         }
@@ -353,7 +382,7 @@ struct RawNode {
     gid: i64,
     mode: i64,
     mtime: i64,
-    name: String,
+    name: Vec<u8>, // raw filename bytes — identity-preserving (no lossy UTF-8)
     recursive: i64,
     rinodes: i64,
 }
@@ -447,10 +476,18 @@ fn parallel_collect(
                     } else {
                         'o'
                     };
-                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let ino = m.ino() as i64;
+                    // The walker also surfaces the scan root as a child of its real
+                    // parent dir. Don't emit or count that duplicate (the canonical
+                    // self-parented root is added separately) — but still recurse
+                    // into it so the real subtree is walked.
+                    if dev == root_dev && ino == root_inode {
+                        return true;
+                    }
+                    let name = entry.file_name().as_bytes().to_vec();
                     let _ = tx.send(RawNode {
                         dev,
-                        inode: m.ino() as i64,
+                        inode: ino,
                         parent_dev: pdev,
                         parent_inode: pino,
                         depth: cdepth,
