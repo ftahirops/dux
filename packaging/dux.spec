@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,5 +54,13 @@ fi
 exit 0
 
 %changelog
+* Thu Jun 26 2026 dux maintainers <root@localhost> - 0.2.0-1
+- Schema v4: separate inode/dirent tables; hardlink-aware search (every path
+  findable, inode counted once); raw-byte (non-UTF-8) filename support.
+- Daemon: exclusive per-db lock, graceful SIGTERM flush, root validation,
+  low-disk write protection, bounded event backlog + alert workers, FAN_ATTRIB.
+- Terminal-safe output (control-char escaping); operational DIRTY state in
+  status/TUI; tightened systemd hardening; SECURITY.md.
+
 * Wed Jun 24 2026 dux maintainers <root@localhost> - 0.1.0-1
 - Initial RPM package.

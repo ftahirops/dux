@@ -61,18 +61,56 @@ the culprit — not just the symptom.**
 
 ---
 
+## New in 0.2.0
+
+A rebuilt, hardlink-aware index (schema **v4**) and a hardened daemon. New
+capabilities (the index format changed — upgrading rebuilds it automatically on
+first start):
+
+- **Hardlink-aware search** — `dux find` now returns **every** name a file is
+  linked under, so a search resolves to the exact path you typed. Disk usage
+  still counts the shared inode **once** (like `du`).
+- **Works with any filename** — non-UTF-8 byte names are preserved (distinct
+  names never collapse), and control/escape characters in filenames are safely
+  escaped in all CLI/TUI output, so a crafted name can't forge or hijack your
+  terminal.
+- **Knows when it's stale** — `dux status` and the TUI now show a **DIRTY**
+  banner when the index has missed events (fanotify overflow, a filesystem that
+  couldn't be watched, low disk, or overload) so you know to rescan instead of
+  trusting a degraded index.
+- **Safer, host-friendly daemon:**
+  - **Exclusive per-database lock** — two writers (a second scan or daemon) can
+    no longer race and corrupt the index; you get a clear error instead.
+  - **Graceful shutdown** — flushes pending changes on `systemctl stop` / SIGTERM
+    instead of dropping the last window.
+  - **Low-disk protection** — pauses index writes when the filesystem drops below
+    256 MiB free, so dux is never the process that fills your disk.
+  - **Bounded under stress** — caps the in-memory event backlog and the number of
+    concurrent `--alert-exec` processes (and reaps them), and tracks
+    metadata-only changes plus directories moved into the tree.
+  - **Root-validated** — refuses to attach live events to a tree it didn't index
+    (auto-rebuilds instead).
+- **Nicer TUI** — large directories show a "… more entries" marker instead of
+  silently truncating, empty directories no longer show a false expand arrow,
+  and the largest-files / fastest-growth panels scope to the subtree you opened.
+- **Hardened packaging** — tightened systemd unit (capability bounding,
+  `NoNewPrivileges`, `MemoryDenyWriteExecute`, …) and a documented security
+  posture in **[docs/SECURITY.md](docs/SECURITY.md)**.
+
+---
+
 ## Install
 
 **Debian / Ubuntu** — download the `.deb` from the [latest release](https://github.com/ftahirops/dux/releases/latest):
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.1.0_amd64.deb
-sudo dpkg -i dux_0.1.0_amd64.deb
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.2.0_amd64.deb
+sudo dpkg -i dux_0.2.0_amd64.deb
 ```
 
 **RHEL / Fedora / openSUSE**:
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.1.0-1.x86_64.rpm
-sudo rpm -i dux-0.1.0-1.x86_64.rpm
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.2.0-1.x86_64.rpm
+sudo rpm -i dux-0.2.0-1.x86_64.rpm
 ```
 
 Both packages install `/usr/bin/dux` and a systemd unit that builds the index on
@@ -142,7 +180,7 @@ The daemon uses fanotify **FID mode** (`open_by_handle_at`) to track
 filesystem.
 
 **Status & limitations** (disk usage = allocated blocks like `du`; live tracking
-needs the daemon running; one tree per index; hardlinks counted once) are
+needs the daemon running; one tree per index; hardlinks counted once for size but every path is searchable) are
 documented honestly in **[docs/architecture-analysis-and-roadmap.md](docs/architecture-analysis-and-roadmap.md)**.
 
 > Note: an old X11 tool named `xdu` exists in Debian/Ubuntu — this project is `dux`.
