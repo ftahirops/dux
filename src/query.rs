@@ -375,30 +375,33 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         .get_meta("last_scan_ts")?
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let count: i64 = store
-        .conn
-        .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
-        .unwrap_or(0);
     let root_dev: Option<i64> = store.get_meta("root_dev")?.and_then(|s| s.parse().ok());
     let root_inode: Option<i64> = store.get_meta("root_inode")?.and_then(|s| s.parse().ok());
-    let total: i64 = match (root_dev, root_inode) {
+    let (count, total): (i64, i64) = match (root_dev, root_inode) {
         (Some(d), Some(i)) => store
             .conn
             .query_row(
-                "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+                "SELECT recursive_inodes, recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
                 params![d, i],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .unwrap_or(0),
-        _ => store
-            .conn
-            .query_row(
-                "SELECT recursive_bytes FROM inodes WHERE kind='d'
-                 ORDER BY recursive_bytes DESC LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or(0),
+            .unwrap_or((0, 0)),
+        _ => {
+            let count = store
+                .conn
+                .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
+                .unwrap_or(0);
+            let total = store
+                .conn
+                .query_row(
+                    "SELECT recursive_bytes FROM inodes WHERE kind='d'
+                     ORDER BY recursive_bytes DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            (count, total)
+        }
     };
     // Phrase the freshness without the awkward "now ago" / "never ago".
     let age = if ts == 0 {
@@ -416,7 +419,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     // live filesystem capacity (df-style) for the scanned root
     if let Some(fs) = crate::util::fs_stat(std::path::Path::new(&root)) {
         out.push_str(&format!(
-            "filesystem: {} used / {} total  ({} free, {:.0}% used)\n",
+            "filesystem: root mount {} used / {} total  ({} free, {:.0}% used)\n",
             human(fs.used),
             human(fs.total),
             human(fs.avail),

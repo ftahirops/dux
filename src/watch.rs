@@ -159,7 +159,11 @@ pub fn run_daemon(
     flush_ms: u64,
     one_file_system: bool,
     alert: Option<AlertConfig>,
+    growth_days: i64,
 ) -> Result<()> {
+    // How long to keep per-inode growth history. Shorter = smaller index on a
+    // high-churn host. Clamp to >= 1 day so the growth/heat features still work.
+    let growth_keep_secs = growth_days.max(1) * 86400;
     // Exclusive per-db lock for the daemon's whole lifetime — no second daemon or
     // concurrent scan can write this index (the heartbeat is only advisory). Held
     // until `_lock` drops when run_daemon returns.
@@ -304,7 +308,13 @@ pub fn run_daemon(
                 }
             }
             if !pending.is_empty() {
-                if let Err(e) = flush(&mut store, &mut pending, &mut deferred_from, db) {
+                if let Err(e) = flush(
+                    &mut store,
+                    &mut pending,
+                    &mut deferred_from,
+                    db,
+                    growth_keep_secs,
+                ) {
                     tracing::warn!(
                         "final flush on shutdown failed (events retried on restart): {e}"
                     );
@@ -468,7 +478,13 @@ pub fn run_daemon(
             // Flush only when healthy AND there's work. Under Critical we keep
             // `pending` (bounded by the MAX_PENDING backstop) and lose nothing.
             if pressure != crate::guard::Pressure::Critical && !pending.is_empty() {
-                if let Err(e) = flush(&mut store, &mut pending, &mut deferred_from, db) {
+                if let Err(e) = flush(
+                    &mut store,
+                    &mut pending,
+                    &mut deferred_from,
+                    db,
+                    growth_keep_secs,
+                ) {
                     tracing::warn!("flush error: {e}");
                 }
                 // alert scanning is an extra query — skip it while Elevated.
@@ -1202,6 +1218,7 @@ fn flush(
     pending: &mut HashMap<PathBuf, Op>,
     deferred: &mut HashMap<(i64, i64), DeferredFrom>,
     db: &Path,
+    growth_keep_secs: i64,
 ) -> Result<()> {
     let now = now_secs();
     // (Low-disk protection lives in the daemon loop now, as a self-clearing
@@ -1448,9 +1465,11 @@ fn flush(
         deferred.remove(k); // committed — now safe to forget the expired renames
     }
     crate::util::write_heartbeat(db);
-    // keep ~7 days of growth buckets (cheap: ~288 rows/day per active inode).
-    // best-effort: a prune failure must not fail the (already committed) flush.
-    let keep_bucket = (now - 7 * 86400) / crate::store::GROWTH_BUCKET_SECS;
+    // Prune growth history beyond the retention window (configurable via
+    // `dux daemon --growth-days`). On a high-churn host this table dominates index
+    // size, so a shorter window keeps it small. Best-effort: a prune failure must
+    // not fail the (already committed) flush.
+    let keep_bucket = (now - growth_keep_secs) / crate::store::GROWTH_BUCKET_SECS;
     let _ = store
         .conn
         .execute("DELETE FROM growth WHERE bucket < ?1", params![keep_bucket]);
@@ -1663,6 +1682,7 @@ mod tests {
             &mut p,
             &mut std::collections::HashMap::new(),
             &db,
+            7 * 86400,
         )
         .unwrap();
         assert_eq!(count_dirents(&store, fid.0, fid.1), 2, "both paths indexed");
@@ -1682,6 +1702,7 @@ mod tests {
             &mut p,
             &mut std::collections::HashMap::new(),
             &db,
+            7 * 86400,
         )
         .unwrap();
         assert_eq!(count_dirents(&store, fid.0, fid.1), 1, "one link remains");
@@ -1697,6 +1718,7 @@ mod tests {
             &mut p,
             &mut std::collections::HashMap::new(),
             &db,
+            7 * 86400,
         )
         .unwrap();
         assert_eq!(
@@ -1738,6 +1760,7 @@ mod tests {
             &mut p,
             &mut std::collections::HashMap::new(),
             &db,
+            7 * 86400,
         )
         .unwrap();
 
@@ -1883,7 +1906,7 @@ mod tests {
         let mut deferred: HashMap<(i64, i64), DeferredFrom> = HashMap::new();
         let mut p1 = HashMap::new();
         p1.insert(dir.join("old"), Op::MovedFrom);
-        flush(&mut store, &mut p1, &mut deferred, &db).unwrap();
+        flush(&mut store, &mut p1, &mut deferred, &db, 7 * 86400).unwrap();
         // subtree must still be present (deferred, not deleted)
         assert!(
             dirent_exists(&store, d.0, d.1, b"old"),
@@ -1898,7 +1921,7 @@ mod tests {
         // deliver the MOVED_TO in flush 2 (same deferred map) → it's a rename
         let mut p2 = HashMap::new();
         p2.insert(dir.join("new"), Op::MovedTo);
-        flush(&mut store, &mut p2, &mut deferred, &db).unwrap();
+        flush(&mut store, &mut p2, &mut deferred, &db, 7 * 86400).unwrap();
         assert!(
             dirent_exists(&store, d.0, d.1, b"new"),
             "after the TO flush the dir is at its new name"
@@ -1944,7 +1967,7 @@ mod tests {
         std::fs::remove_dir_all(dir.join("sub")).unwrap();
         let mut p = HashMap::new();
         p.insert(dir.join("sub"), Op::Delete);
-        flush(&mut store, &mut p, &mut HashMap::new(), &db).unwrap();
+        flush(&mut store, &mut p, &mut HashMap::new(), &db, 7 * 86400).unwrap();
 
         assert_eq!(
             inode_rows(&store, fid.0, fid.1),

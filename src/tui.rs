@@ -787,9 +787,9 @@ fn event_loop<B: Backend>(
     request(app, snap_tx); // kick off the first background refresh
     let mut last_input = Instant::now() - Duration::from_secs(10);
     let mut last_request = Instant::now();
+    let mut needs_draw = true;
+    let mut last_clock_draw = Instant::now();
     loop {
-        term.draw(|f| draw(f, app))?;
-
         // Apply any background refresh results (panels/states always; tree rows
         // only if the structure hasn't changed since the request). Never blocks.
         let mut applied = false;
@@ -799,6 +799,16 @@ fn event_loop<B: Backend>(
         }
         if applied {
             app.update_detail(store);
+            needs_draw = true;
+        }
+
+        // Redraw only when something changed, plus a low-rate clock tick for
+        // "ago"/ETA labels. The old fixed 120ms repaint loop burned CPU in idle
+        // TUIs on large terminals even when no input or refresh result arrived.
+        if needs_draw || last_clock_draw.elapsed() >= Duration::from_secs(1) {
+            term.draw(|f| draw(f, app))?;
+            needs_draw = false;
+            last_clock_draw = Instant::now();
         }
 
         // Block up to 120ms for input. If keys arrive, drain the WHOLE burst and
@@ -815,6 +825,7 @@ fn event_loop<B: Backend>(
                 }
             }
             last_input = Instant::now();
+            needs_draw = true;
             continue; // redraw immediately
         }
 

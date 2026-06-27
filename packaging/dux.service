@@ -10,6 +10,8 @@ Type=simple
 # that keeps `systemctl restart dux` instant instead of blocking ~30-60s.
 # Force a fresh full scan any time with: dux scan /   (or systemctl start dux-scan).
 ExecStartPre=/bin/sh -c '[ -s /var/lib/dux/dux.db ] || /usr/bin/dux scan / --quiet --low-priority'
+# On a high-churn host the growth-history table dominates index size; shrink the
+# retention window if needed, e.g.: ExecStart=/usr/bin/dux daemon / --growth-days 2
 ExecStart=/usr/bin/dux daemon /
 Restart=on-failure
 RestartSec=5

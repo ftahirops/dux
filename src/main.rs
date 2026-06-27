@@ -141,6 +141,10 @@ enum Cmd {
         /// Seconds between repeat alerts for the same path
         #[arg(long, default_value_t = 300)]
         alert_debounce: i64,
+        /// Days of growth history to keep. Lower = smaller index on a high-churn
+        /// host (growth dominates index size). Min 1.
+        #[arg(long, default_value_t = 7)]
+        growth_days: i64,
     },
 }
 
@@ -353,6 +357,7 @@ fn real_main() -> Result<()> {
             alert_window,
             alert_exec,
             alert_debounce,
+            growth_days,
         }) => {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -369,7 +374,7 @@ fn real_main() -> Result<()> {
                 }),
                 None => None,
             };
-            watch::run_daemon(&db, &root, flush_ms, one_file_system, alert)?;
+            watch::run_daemon(&db, &root, flush_ms, one_file_system, alert, growth_days)?;
         }
         None => {
             // bare `dux` or `dux <path>` opens the TUI
@@ -443,14 +448,32 @@ fn request_daemon_rescan(
     // the PREVIOUS scan (seconds/minutes ago), so the fresh one is strictly newer.
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(1800);
+    let mut poll_store = Store::open_ro(db).ok();
+    let mut last_reopen = std::time::Instant::now();
     loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
-        if read_last_scan_ts(db) > prev_ts {
+        let cur_ts = match poll_store.as_ref() {
+            Some(s) => s
+                .get_meta("last_scan_ts")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            None => read_last_scan_ts(db),
+        };
+        if cur_ts > prev_ts {
             eprintln!(
                 "dux: rescan complete — index rebuilt in {:.0}s.",
                 start.elapsed().as_secs_f64()
             );
             return Ok(());
+        }
+        // The daemon swaps in a new DB by rename. A read connection can keep
+        // seeing the old inode, so reopen occasionally while still avoiding a
+        // twice-per-second open/schema check loop during long rescans.
+        if last_reopen.elapsed() >= std::time::Duration::from_secs(5) {
+            poll_store = Store::open_ro(db).ok();
+            last_reopen = std::time::Instant::now();
         }
         if start.elapsed() > timeout {
             eprintln!(
