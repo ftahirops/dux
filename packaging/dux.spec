@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,6 +54,13 @@ fi
 exit 0
 
 %changelog
+* Sat Jun 27 2026 dux maintainers <root@localhost> - 0.2.2-1
+- Code-review pass: pair renames split across a flush boundary (no vanished
+  subtree / spurious growth); proper dirty-state FSM (self-clearing low-disk
+  pause vs lossy DIRTY, cleared by rescan); mark_fs byte-safe; TUI guards
+  (restore-guard ordering, empty-row indexing) + per-row path cache; growth
+  --since honors the window; --ext is literal; prepare_cached children query.
+
 * Thu Jun 26 2026 dux maintainers <root@localhost> - 0.2.1-1
 - UX: `dux scan` against a live daemon now triggers an in-place atomic rescan
   (SIGHUP) instead of telling the user to stop/start by hand; no downtime.
