@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.4.0
+Version:        0.4.1
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,6 +54,12 @@ fi
 exit 0
 
 %changelog
+* Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.1-1
+- Throttled background scans (--low-priority caps threads; new --jobs N); the
+  service + daemon scans run gently by default.
+- Live scan progress in `dux status` (and a clear message before the first
+  index exists); status no longer does the ~18s dbstat walk.
+
 * Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.0-1
 - TUI: background-thread refresh so navigation never blocks on large indexes.
 - Correct hardlink deletes: a file hardlinked outside a deleted directory
