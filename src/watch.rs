@@ -803,15 +803,23 @@ fn accrue(
     }
 }
 
-/// Delete a whole subtree: every inode at/under (d,i) plus every dirent within or
-/// pointing into it. FTS rows follow via the AFTER DELETE trigger.
+/// Delete a whole subtree: every directory entry within it, and every inode whose
+/// LAST link was inside it. An inode that is also hardlinked OUTSIDE the subtree
+/// SURVIVES (the file still exists via the external link) — if its block-bearing
+/// (prime) link was the internal one, an external link is promoted to prime and
+/// the blocks re-attributed to the external parent chain (B8). FTS rows follow via
+/// the AFTER DELETE trigger.
 ///
-/// The descendant set is collected into a temp table once, then deleted SET-BASED
-/// (a handful of statements) rather than issuing 3 executes per descendant — for a
-/// directory with a million entries that's ~3 statements instead of ~3M FFI
-/// round-trips, keeping the delete transaction short. The walk must run BEFORE we
-/// delete any dirents (it follows dirent parent links), hence the staging table.
-fn del_subtree(tx: &rusqlite::Transaction, d: i64, i: i64) -> Result<()> {
+/// The descendant set is staged in a temp table once, then deleted SET-BASED (a
+/// few statements) instead of ~3 executes per descendant — a million-entry dir is
+/// a short transaction, not millions of round-trips. The walk must run BEFORE any
+/// dirent is deleted (it follows dirent parent links), hence the staging table.
+fn del_subtree(
+    tx: &rusqlite::Transaction,
+    anc: &mut HashMap<(i64, i64), (i64, i64)>,
+    d: i64,
+    i: i64,
+) -> Result<()> {
     tx.execute_batch(
         "CREATE TEMP TABLE IF NOT EXISTS _delset(d INTEGER, i INTEGER, PRIMARY KEY(d,i)) WITHOUT ROWID;
          DELETE FROM _delset;",
@@ -827,10 +835,71 @@ fn del_subtree(tx: &rusqlite::Transaction, d: i64, i: i64) -> Result<()> {
          ) SELECT d,i FROM sub",
         params![d, i],
     )?;
+
+    // RARE: descendant inodes hardlinked OUTSIDE the subtree must survive. Find
+    // them (a dirent whose parent is NOT in the set); if their prime link is
+    // internal (about to be deleted), promote an external link to prime and
+    // re-attribute the blocks to the external chain — the caller subtracts the
+    // whole subtree total, which counted these blocks under the deleted dir.
+    let mut st = tx.prepare(
+        "SELECT DISTINCT de.dev_id, de.inode FROM dirents de
+         WHERE (de.dev_id,de.inode) IN (SELECT d,i FROM _delset)
+           AND (de.parent_dev,de.parent_inode) NOT IN (SELECT d,i FROM _delset)",
+    )?;
+    let survivors: Vec<(i64, i64)> = st
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
+        .filter_map(|x| x.ok())
+        .collect();
+    drop(st);
+    for (sd, si) in survivors {
+        // is the current prime (block-bearing) dirent internal to the subtree?
+        let prime_internal = tx
+            .query_row(
+                "SELECT 1 FROM dirents WHERE dev_id=?1 AND inode=?2 AND prime=1
+                   AND (parent_dev,parent_inode) IN (SELECT d,i FROM _delset) LIMIT 1",
+                params![sd, si],
+                |_| Ok(()),
+            )
+            .is_ok();
+        if !prime_internal {
+            continue; // prime already external — blocks already counted there
+        }
+        if let Ok((opdev, opino, oname)) = tx.query_row(
+            "SELECT parent_dev, parent_inode, name FROM dirents
+             WHERE dev_id=?1 AND inode=?2
+               AND (parent_dev,parent_inode) NOT IN (SELECT d,i FROM _delset)
+             ORDER BY rowid LIMIT 1",
+            params![sd, si],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                ))
+            },
+        ) {
+            tx.execute(
+                "UPDATE dirents SET prime=1 WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![opdev, opino, &oname],
+            )?;
+            let (rb, ri): (i64, i64) = tx
+                .query_row(
+                    "SELECT recursive_bytes, recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
+                    params![sd, si],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap_or((0, 0));
+            let adj = anc.get(&(sd, si)).copied().unwrap_or((0, 0));
+            accrue(tx, anc, opdev, opino, rb + adj.0, ri + adj.1);
+        }
+    }
+
+    // Delete the directory ENTRIES within the subtree, then delete only inodes
+    // that NO LONGER have any dirent (survivors keep their external link).
     tx.execute_batch(
-        "DELETE FROM inodes  WHERE (dev_id,inode)         IN (SELECT d,i FROM _delset);
-         DELETE FROM dirents WHERE (dev_id,inode)         IN (SELECT d,i FROM _delset);
-         DELETE FROM dirents WHERE (parent_dev,parent_inode) IN (SELECT d,i FROM _delset);
+        "DELETE FROM dirents WHERE (parent_dev,parent_inode) IN (SELECT d,i FROM _delset);
+         DELETE FROM inodes WHERE (dev_id,inode) IN (SELECT d,i FROM _delset)
+            AND NOT EXISTS (SELECT 1 FROM dirents de WHERE de.dev_id=inodes.dev_id AND de.inode=inodes.inode);
          DELETE FROM _delset;",
     )?;
     Ok(())
@@ -885,7 +954,7 @@ fn unlink_dirent(
     if remaining == 0 {
         // last link gone: remove the inode (and any subtree) and subtract totals
         // from this (prime) parent chain.
-        del_subtree(tx, cdev, cino)?;
+        del_subtree(tx, anc, cdev, cino)?;
         accrue(tx, anc, pdev, pino, -eff_rb, -eff_ri);
         if eff_rb != 0 {
             tx.execute(
@@ -1850,5 +1919,55 @@ mod tests {
 
         drop(store);
         cleanup(&dir, &db);
+    }
+
+    // B8: a file hardlinked OUTSIDE a deleted subtree must survive the delete, and
+    // the daemon-maintained totals must equal a fresh scan of the post-delete tree.
+    #[test]
+    fn hardlink_outside_deleted_subtree_survives() {
+        let dir = tmp("b8");
+        let db = tmp("b8-db");
+        let db2 = tmp("b8-db2");
+        cleanup(&dir, &db);
+        cleanup(&dir, &db2);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/inside"), vec![7u8; 8192]).unwrap();
+        std::fs::hard_link(dir.join("sub/inside"), dir.join("outside")).unwrap();
+        scan_into(&dir, &db);
+        let mut store = Store::open_rw(&db).unwrap();
+        let fid = id_of(&dir.join("outside")); // shared inode
+        let did = id_of(&dir);
+
+        // delete the subtree on disk, then deliver the Delete event to the daemon
+        std::fs::remove_dir_all(dir.join("sub")).unwrap();
+        let mut p = HashMap::new();
+        p.insert(dir.join("sub"), Op::Delete);
+        flush(&mut store, &mut p, &mut HashMap::new(), &db).unwrap();
+
+        assert_eq!(
+            inode_rows(&store, fid.0, fid.1),
+            1,
+            "the inode hardlinked outside the subtree must survive the delete"
+        );
+        assert!(
+            dirent_exists(&store, did.0, did.1, b"outside"),
+            "the external link must remain findable"
+        );
+        assert!(!dirent_exists(&store, did.0, did.1, b"sub"), "sub is gone");
+
+        // gold standard: daemon-maintained total == fresh scan of the same tree
+        let live_total = rbytes(&store, did.0, did.1);
+        scan_into(&dir, &db2);
+        let store2 = Store::open_ro(&db2).unwrap();
+        let fresh_total = rbytes(&store2, did.0, did.1);
+        assert_eq!(
+            live_total, fresh_total,
+            "daemon delete with a surviving hardlink must match a fresh scan"
+        );
+
+        drop(store);
+        drop(store2);
+        cleanup(&dir, &db);
+        cleanup(&dir, &db2);
     }
 }
