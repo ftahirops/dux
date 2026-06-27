@@ -468,11 +468,17 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
     }
-    // Transient low-disk pause (self-clearing): updates are paused but nothing is
-    // lost — distinct from DIRTY.
+    // Transient pause (self-clearing): the resource guardian paused writes because
+    // the host is under pressure. Nothing is lost (pending is kept) — distinct from
+    // DIRTY; it resumes automatically when the host recovers.
     if let Some(since) = paused_since(store) {
+        let reason = store
+            .get_meta("pause_reason")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "system pressure".into());
         out.push_str(&format!(
-            "\nstate:      WRITES PAUSED (low disk) since {} — updates resume when space frees",
+            "\nstate:      WRITES PAUSED ({reason}) since {} — resumes when the host recovers",
             crate::util::ago(since)
         ));
     }

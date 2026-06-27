@@ -1,4 +1,5 @@
 mod deleted;
+mod guard;
 mod query;
 mod scan;
 mod store;
@@ -188,6 +189,9 @@ fn real_main() -> Result<()> {
             // lock is the hard guard — if something really is writing this index,
             // lock_db fails with a clear message rather than corrupting it.
             let _lock = util::lock_db(&db)?;
+            // A scan buffers node metadata in RAM; make dux the preferred OOM
+            // victim so a big scan can never get a real workload killed instead.
+            guard::oom_protect_self();
             let opts = scan::ScanOptions {
                 one_file_system,
                 exclude,

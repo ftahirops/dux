@@ -69,7 +69,8 @@ struct App {
     fs: crate::util::FsStat,
     daemon_live: bool,
     dirty_since: Option<i64>, // Some(epoch) if the index missed events (overflow)
-    paused_since: Option<i64>, // Some(epoch) if writes are paused for low disk
+    paused_since: Option<i64>, // Some(epoch) if writes are paused (host pressure)
+    pause_reason: String,     // why writes are paused (low disk / low memory / …)
     // recursive write-rate per node (bytes in the last hour), summed up the tree
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     growth_calc: Instant,
@@ -114,6 +115,7 @@ pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Re
         daemon_live: false,
         dirty_since: None,
         paused_since: None,
+        pause_reason: String::new(),
         growth_map: std::collections::HashMap::new(),
         growth_calc: Instant::now() - Duration::from_secs(60),
         items: 0,
@@ -494,6 +496,11 @@ impl App {
         self.daemon_live = crate::query::daemon_live(&self.db);
         self.dirty_since = crate::query::dirty_since(store);
         self.paused_since = crate::query::paused_since(store);
+        self.pause_reason = store
+            .get_meta("pause_reason")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "system pressure".into());
 
         // status-bar aggregates
         self.items = store
@@ -862,9 +869,9 @@ fn draw(f: &mut Frame, app: &mut App) {
                 Style::default().fg(CRIT_COLOR).add_modifier(Modifier::BOLD),
             )
         } else if let Some(since) = app.paused_since {
-            // transient: writes paused for low disk, nothing lost yet
+            // transient: guardian paused writes under host pressure, nothing lost
             Span::styled(
-                format!("   ⏸ writes paused {} (low disk)", ago(since)),
+                format!("   ⏸ writes paused {} ({})", ago(since), app.pause_reason),
                 Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
             )
         } else if app.daemon_live {

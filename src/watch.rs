@@ -160,6 +160,8 @@ pub fn run_daemon(
     // concurrent scan can write this index (the heartbeat is only advisory). Held
     // until `_lock` drops when run_daemon returns.
     let _lock = crate::util::lock_db(db).context("acquiring daemon db lock")?;
+    // The daemon must never get a real workload OOM-killed in its place.
+    crate::guard::oom_protect_self();
     let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
     // Never start on a missing/incompatible index, OR one indexed for a DIFFERENT
@@ -375,41 +377,49 @@ pub fn run_daemon(
         }
 
         if last_flush.elapsed() >= flush_every {
+            // RESOURCE GUARDIAN: dux must never be the cause of host trouble. Sample
+            // pressure (free RAM, disk, load, kernel PSI) and self-throttle:
+            //   Critical → PAUSE our own writes (keep `pending`, lose nothing) and
+            //              hand SQLite's caches back to the OS.
+            //   Elevated → still index, but skip the optional extra I/O/CPU
+            //              (WAL checkpoint + alert scan) so we don't add load.
+            //   Normal   → full operation.
+            let pressure = crate::guard::sample(&watch_dir).level(MIN_FREE_BYTES);
             if !pending.is_empty() {
-                // Low-disk protection: never let the index's own writes consume the
-                // host's last free space. A pause loses nothing (pending is kept),
-                // so it's a SELF-CLEARING transient state (`paused_since`), distinct
-                // from the lossy `dirty_since` that only a rescan resolves.
-                let healthy = crate::util::fs_stat(&watch_dir)
-                    .map(|fs| fs.avail >= MIN_FREE_BYTES)
-                    .unwrap_or(true);
-                if !healthy {
+                if pressure == crate::guard::Pressure::Critical {
                     if !writes_paused {
+                        let reason = crate::guard::sample(&watch_dir).reason(MIN_FREE_BYTES);
                         tracing::warn!(
-                            "low disk (< {} free) — pausing index writes to protect the host",
-                            crate::util::human(MIN_FREE_BYTES)
+                            "host under pressure ({reason}) — pausing index writes to protect it"
                         );
                         store.set_meta("paused_since", &now_secs().to_string()).ok();
+                        store.set_meta("pause_reason", reason).ok();
                         writes_paused = true;
                     }
+                    // give SQLite's page/heap caches back to the OS under pressure.
+                    let _ = store.conn.execute_batch("PRAGMA shrink_memory");
                     // keep `pending`; the MAX_PENDING backstop still bounds memory
                     // and escalates to `dirty_since` if the pause is long and busy.
                 } else {
                     if writes_paused {
-                        tracing::info!("disk recovered — resuming index writes");
-                        let _ = store
-                            .conn
-                            .execute("DELETE FROM meta WHERE key='paused_since'", []);
+                        tracing::info!("host recovered — resuming index writes");
+                        let _ = store.conn.execute(
+                            "DELETE FROM meta WHERE key IN ('paused_since','pause_reason')",
+                            [],
+                        );
                         writes_paused = false;
                     }
                     if let Err(e) = flush(&mut store, &mut pending, &mut deferred_from, db) {
                         tracing::warn!("flush error: {e}");
                     }
-                    if let Some(cfg) = &alert {
-                        if let Err(e) =
-                            check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
-                        {
-                            tracing::warn!("alert check error: {e}");
+                    // alert scanning is an extra query — skip it while Elevated.
+                    if pressure == crate::guard::Pressure::Normal {
+                        if let Some(cfg) = &alert {
+                            if let Err(e) =
+                                check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
+                            {
+                                tracing::warn!("alert check error: {e}");
+                            }
                         }
                     }
                 }
@@ -419,11 +429,12 @@ pub fn run_daemon(
             // concurrent `dux scan` corrupt the index). Written to tmpfs, so
             // an idle daemon makes no database/WAL writes at all.
             crate::util::write_heartbeat(db);
-            // Checkpoint the WAL occasionally with PASSIVE — never every flush and
-            // never TRUNCATE: TRUNCATE blocks on a live TUI reader (up to the busy
-            // timeout), which stalls the daemon, burns CPU and freezes the heartbeat.
-            // PASSIVE reclaims what it can without blocking; ~every 60s is plenty.
-            if last_ckpt.elapsed() >= Duration::from_secs(60) {
+            // Checkpoint the WAL occasionally with PASSIVE — but NOT while the host
+            // is under pressure (it's extra I/O the host may need). PASSIVE never
+            // blocks on a live TUI reader; ~every 60s when healthy is plenty.
+            if pressure == crate::guard::Pressure::Normal
+                && last_ckpt.elapsed() >= Duration::from_secs(60)
+            {
                 let _ = store.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
                 last_ckpt = Instant::now();
             }
