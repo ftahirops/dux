@@ -251,6 +251,12 @@ pub fn run_daemon(
     let mut alert_children: Vec<std::process::Child> = Vec::new();
     let mut pending: HashMap<PathBuf, Op> = HashMap::new();
     let mut buf = [0u8; 1 << 15];
+    // filesystem holding the index; checked each flush for low-disk protection.
+    let watch_dir = db
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let mut writes_paused = false; // transient low-disk pause (self-clearing)
 
     loop {
         if SHUTDOWN.load(Ordering::SeqCst) {
@@ -305,6 +311,7 @@ pub fn run_daemon(
                         Err(e) => tracing::error!("rescan: reopen failed: {e}"),
                     }
                     pending.clear();
+                    writes_paused = false; // fresh db; any pause/dirty is reconciled
                     crate::util::write_heartbeat(db);
                     tracing::info!(
                         "rescan complete: {} files, {} dirs, {} ({} errors)",
@@ -351,13 +358,41 @@ pub fn run_daemon(
 
         if last_flush.elapsed() >= flush_every {
             if !pending.is_empty() {
-                if let Err(e) = flush(&mut store, &mut pending, db) {
-                    tracing::warn!("flush error: {e}");
-                }
-                if let Some(cfg) = &alert {
-                    if let Err(e) = check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
-                    {
-                        tracing::warn!("alert check error: {e}");
+                // Low-disk protection: never let the index's own writes consume the
+                // host's last free space. A pause loses nothing (pending is kept),
+                // so it's a SELF-CLEARING transient state (`paused_since`), distinct
+                // from the lossy `dirty_since` that only a rescan resolves.
+                let healthy = crate::util::fs_stat(&watch_dir)
+                    .map(|fs| fs.avail >= MIN_FREE_BYTES)
+                    .unwrap_or(true);
+                if !healthy {
+                    if !writes_paused {
+                        tracing::warn!(
+                            "low disk (< {} free) — pausing index writes to protect the host",
+                            crate::util::human(MIN_FREE_BYTES)
+                        );
+                        store.set_meta("paused_since", &now_secs().to_string()).ok();
+                        writes_paused = true;
+                    }
+                    // keep `pending`; the MAX_PENDING backstop still bounds memory
+                    // and escalates to `dirty_since` if the pause is long and busy.
+                } else {
+                    if writes_paused {
+                        tracing::info!("disk recovered — resuming index writes");
+                        let _ = store
+                            .conn
+                            .execute("DELETE FROM meta WHERE key='paused_since'", []);
+                        writes_paused = false;
+                    }
+                    if let Err(e) = flush(&mut store, &mut pending, db) {
+                        tracing::warn!("flush error: {e}");
+                    }
+                    if let Some(cfg) = &alert {
+                        if let Err(e) =
+                            check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
+                        {
+                            tracing::warn!("alert check error: {e}");
+                        }
                     }
                 }
             }
@@ -1004,21 +1039,9 @@ fn reconcile_subtree(
 /// commits partial drift.
 fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Result<()> {
     let now = now_secs();
-    // Low-disk protection: never let the index's own writes fill the host's last
-    // free space. Below the floor, pause writes (keep `pending` for retry) and
-    // mark the index dirty so status/TUI report degraded — the daemon must not be
-    // the process that takes the filesystem to 0 bytes.
-    let watch_dir = db.parent().unwrap_or_else(|| Path::new("/"));
-    if let Some(fs) = crate::util::fs_stat(watch_dir) {
-        if fs.avail < MIN_FREE_BYTES {
-            tracing::warn!(
-                "low disk space ({} free) — pausing index writes to protect the host",
-                crate::util::human(fs.avail)
-            );
-            store.set_meta("dirty_since", &now.to_string()).ok();
-            return Ok(()); // pending preserved; resumes when space frees
-        }
-    }
+    // (Low-disk protection lives in the daemon loop now, as a self-clearing
+    // `paused_since` state — NOT the lossy `dirty_since`, since a pause preserves
+    // `pending` and loses nothing.)
     // COPY, don't drain: if the transaction below fails (disk full, lock, I/O),
     // we return Err with `pending` intact so the events are retried next flush
     // instead of being lost. `pending` is only cleared after a durable commit.
@@ -1127,7 +1150,15 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
             // RENAME of an existing link. Cycle guard: never move a dir under its
             // own subtree (a stale tree could install A→B→A and hang the CTEs).
             if would_cycle(&tx, dev, ino, npdev, npino) {
-                tracing::debug!("skip move-to (would cycle): dev={dev} ino={ino}");
+                // We can't safely relocate (the index has a corrupt parent chain),
+                // so the rename on disk and the index now disagree. Flag dirty so a
+                // rescan is recommended instead of leaving silent inconsistency.
+                tracing::warn!("skip move-to (would cycle): dev={dev} ino={ino} — marking dirty");
+                tx.execute(
+                    "INSERT INTO meta(key,value) VALUES('dirty_since',?1)
+                     ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    params![now.to_string()],
+                )?;
                 continue;
             }
             let prime: i64 = tx
@@ -1524,6 +1555,49 @@ mod tests {
         assert!(names.iter().any(|b| b.as_slice() == b"bad\xff\x01"));
         assert!(names.iter().any(|b| b.as_slice() == b"bad\xfe\x02"));
         drop(store);
+        cleanup(&dir, &db);
+    }
+
+    // A rescan (atomic rebuild) reconciles everything, so it must CLEAR a stale
+    // dirty flag — otherwise the index would read "DIRTY" forever after one
+    // transient overflow (the dirty-state lifecycle the review flagged).
+    #[test]
+    fn rescan_clears_dirty() {
+        let dir = tmp("dirty");
+        let db = tmp("dirty-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("f"), b"x").unwrap();
+        scan_into(&dir, &db);
+        {
+            let s = Store::open_rw(&db).unwrap();
+            s.set_meta("dirty_since", "123").unwrap();
+        }
+        assert!(
+            Store::open_ro(&db)
+                .unwrap()
+                .get_meta("dirty_since")
+                .unwrap()
+                .is_some(),
+            "precondition: dirty flag is set"
+        );
+        scan::rebuild_atomic(
+            &db,
+            &dir,
+            &ScanOptions {
+                progress: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            Store::open_ro(&db)
+                .unwrap()
+                .get_meta("dirty_since")
+                .unwrap()
+                .is_none(),
+            "a rescan must clear dirty_since"
+        );
         cleanup(&dir, &db);
     }
 }

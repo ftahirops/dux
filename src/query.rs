@@ -275,8 +275,8 @@ pub fn growth(
     // Round the bucket cutoff UP so the window never exceeds what was asked: a
     // floor here would include the whole bucket containing (now-window), handing
     // back up to ~5 min more than requested (e.g. `--since 10m` → ~15m).
-    let cutoff =
-        (now_secs() - since_secs + crate::store::GROWTH_BUCKET_SECS - 1) / crate::store::GROWTH_BUCKET_SECS;
+    let cutoff = (now_secs() - since_secs + crate::store::GROWTH_BUCKET_SECS - 1)
+        / crate::store::GROWTH_BUCKET_SECS;
     let mut sql =
         String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];
@@ -468,8 +468,16 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
     }
-    // Known event loss (fanotify queue overflow) makes the index untrustworthy
-    // even while the daemon is "live"; surface it loudly and recommend a rescan.
+    // Transient low-disk pause (self-clearing): updates are paused but nothing is
+    // lost — distinct from DIRTY.
+    if let Some(since) = paused_since(store) {
+        out.push_str(&format!(
+            "\nstate:      WRITES PAUSED (low disk) since {} — updates resume when space frees",
+            crate::util::ago(since)
+        ));
+    }
+    // Known event loss (fanotify overflow / dropped backlog / partial watch) makes
+    // the index untrustworthy even while "live"; surface it and recommend a rescan.
     if let Some(since) = store.get_meta("dirty_since")?.and_then(|s| s.parse().ok()) {
         out.push_str(&format!(
             "\nstate:      DIRTY since {} — missed events; rescan with `dux scan <root>`",
@@ -477,6 +485,15 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         ));
     }
     Ok(out)
+}
+
+/// Epoch seconds the daemon paused writes for low disk (self-clearing), if set.
+pub fn paused_since(store: &Store) -> Option<i64> {
+    store
+        .get_meta("paused_since")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
 }
 
 /// Epoch seconds the index was marked dirty (fanotify overflow), if set.

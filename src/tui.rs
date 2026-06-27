@@ -68,6 +68,7 @@ struct App {
     fs: crate::util::FsStat,
     daemon_live: bool,
     dirty_since: Option<i64>, // Some(epoch) if the index missed events (overflow)
+    paused_since: Option<i64>, // Some(epoch) if writes are paused for low disk
     // recursive write-rate per node (bytes in the last hour), summed up the tree
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     growth_calc: Instant,
@@ -111,6 +112,7 @@ pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Re
         fs: crate::util::FsStat::default(),
         daemon_live: false,
         dirty_since: None,
+        paused_since: None,
         growth_map: std::collections::HashMap::new(),
         growth_calc: Instant::now() - Duration::from_secs(60),
         items: 0,
@@ -470,6 +472,7 @@ impl App {
         }
         self.daemon_live = crate::query::daemon_live(&self.db);
         self.dirty_since = crate::query::dirty_since(store);
+        self.paused_since = crate::query::paused_since(store);
 
         // status-bar aggregates
         self.items = store
@@ -680,17 +683,15 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                         }
                     }
                 }
-                KeyCode::Left | KeyCode::Char('h') => {
-                    match app.rows.get(app.sel) {
-                        Some(r) if r.expanded => {
-                            let id = (r.dev, r.inode);
-                            app.expanded.remove(&id);
-                            app.rebuild(store)?;
-                        }
-                        Some(_) => app.ascend(store)?,
-                        None => {}
+                KeyCode::Left | KeyCode::Char('h') => match app.rows.get(app.sel) {
+                    Some(r) if r.expanded => {
+                        let id = (r.dev, r.inode);
+                        app.expanded.remove(&id);
+                        app.rebuild(store)?;
                     }
-                }
+                    Some(_) => app.ascend(store)?,
+                    None => {}
+                },
                 KeyCode::Char('r') => {
                     app.refresh_panels(store).ok();
                     app.rebuild(store).ok();
@@ -841,6 +842,12 @@ fn draw(f: &mut Frame, app: &mut App) {
             Span::styled(
                 format!("   ⚠ DIRTY {} — rescan recommended", ago(since)),
                 Style::default().fg(CRIT_COLOR).add_modifier(Modifier::BOLD),
+            )
+        } else if let Some(since) = app.paused_since {
+            // transient: writes paused for low disk, nothing lost yet
+            Span::styled(
+                format!("   ⏸ writes paused {} (low disk)", ago(since)),
+                Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
             )
         } else if app.daemon_live {
             Span::styled(
