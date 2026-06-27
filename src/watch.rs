@@ -346,15 +346,44 @@ pub fn run_daemon(
             last_ckpt = Instant::now();
             continue;
         }
-        let n = unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-        if n > 0 {
-            parse_events(
-                &buf[..n as usize],
-                &fsfds,
-                &root_canon,
-                &mut pending,
-                &mut store,
-            );
+        // BLOCK (not busy-poll) until an event arrives OR the next flush is due —
+        // whichever first. poll() is interrupted by SIGTERM/SIGHUP (EINTR), so the
+        // signal flags above are still checked promptly. Idle ⇒ ~one wakeup per
+        // flush window instead of 20/s, and active ⇒ sub-ms event latency.
+        let wait_ms = flush_every
+            .saturating_sub(last_flush.elapsed())
+            .as_millis()
+            .min(i32::MAX as u128) as i32;
+        let mut pfd = libc::pollfd {
+            fd: fan,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let pr = unsafe { libc::poll(&mut pfd, 1, wait_ms.max(0)) };
+        if pr > 0 {
+            // drain every event currently queued (non-blocking via FAN_NONBLOCK)
+            loop {
+                let n =
+                    unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                if n > 0 {
+                    parse_events(
+                        &buf[..n as usize],
+                        &fsfds,
+                        &root_canon,
+                        &mut pending,
+                        &mut store,
+                    );
+                } else {
+                    if n < 0 {
+                        let err = std::io::Error::last_os_error();
+                        match err.raw_os_error() {
+                            Some(libc::EAGAIN) | Some(libc::EINTR) => {}
+                            _ => tracing::warn!("fanotify read error: {err}"),
+                        }
+                    }
+                    break;
+                }
+            }
             // Overload backstop: if flushing can't keep up (SQLite wedged, or a
             // genuine storm), don't let pending grow until the daemon is OOM-killed.
             // Drop the backlog and mark dirty so a reconcile rescan repairs it.
@@ -367,13 +396,6 @@ pub fn run_daemon(
                 pending.clear();
                 deferred_from.clear(); // backlog dropped; a rescan will reconcile
             }
-        } else if n < 0 {
-            let err = std::io::Error::last_os_error();
-            match err.raw_os_error() {
-                Some(libc::EAGAIN) | Some(libc::EINTR) => {}
-                _ => tracing::warn!("fanotify read error: {err}"),
-            }
-            std::thread::sleep(Duration::from_millis(50));
         }
 
         if last_flush.elapsed() >= flush_every {
@@ -737,42 +759,36 @@ fn accrue(
     }
 }
 
-/// Every inode at/under (d,i) following dirent parent→child edges (UNION dedups
-/// hardlinks/cycles; depth-guarded).
-fn collect_descendants(tx: &rusqlite::Transaction, d: i64, i: i64) -> Result<Vec<(i64, i64)>> {
-    let mut stmt = tx.prepare_cached(
-        "WITH RECURSIVE sub(d,i,depth) AS (
+/// Delete a whole subtree: every inode at/under (d,i) plus every dirent within or
+/// pointing into it. FTS rows follow via the AFTER DELETE trigger.
+///
+/// The descendant set is collected into a temp table once, then deleted SET-BASED
+/// (a handful of statements) rather than issuing 3 executes per descendant — for a
+/// directory with a million entries that's ~3 statements instead of ~3M FFI
+/// round-trips, keeping the delete transaction short. The walk must run BEFORE we
+/// delete any dirents (it follows dirent parent links), hence the staging table.
+fn del_subtree(tx: &rusqlite::Transaction, d: i64, i: i64) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS _delset(d INTEGER, i INTEGER, PRIMARY KEY(d,i)) WITHOUT ROWID;
+         DELETE FROM _delset;",
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO _delset(d,i)
+         WITH RECURSIVE sub(d,i,depth) AS (
             SELECT ?1,?2,0
             UNION
             SELECT de.dev_id,de.inode,sub.depth+1 FROM dirents de
             JOIN sub ON de.parent_dev=sub.d AND de.parent_inode=sub.i
             WHERE NOT (de.dev_id=de.parent_dev AND de.inode=de.parent_inode) AND sub.depth<4096
          ) SELECT d,i FROM sub",
+        params![d, i],
     )?;
-    let v = stmt
-        .query_map(params![d, i], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .filter_map(|x| x.ok())
-        .collect();
-    Ok(v)
-}
-
-/// Delete a whole subtree: every inode at/under (d,i) plus every dirent within or
-/// pointing into it. FTS rows follow via the AFTER DELETE trigger.
-fn del_subtree(tx: &rusqlite::Transaction, d: i64, i: i64) -> Result<()> {
-    for (dd, ii) in collect_descendants(tx, d, i)? {
-        tx.execute(
-            "DELETE FROM inodes WHERE dev_id=?1 AND inode=?2",
-            params![dd, ii],
-        )?;
-        tx.execute(
-            "DELETE FROM dirents WHERE dev_id=?1 AND inode=?2",
-            params![dd, ii],
-        )?;
-        tx.execute(
-            "DELETE FROM dirents WHERE parent_dev=?1 AND parent_inode=?2",
-            params![dd, ii],
-        )?;
-    }
+    tx.execute_batch(
+        "DELETE FROM inodes  WHERE (dev_id,inode)         IN (SELECT d,i FROM _delset);
+         DELETE FROM dirents WHERE (dev_id,inode)         IN (SELECT d,i FROM _delset);
+         DELETE FROM dirents WHERE (parent_dev,parent_inode) IN (SELECT d,i FROM _delset);
+         DELETE FROM _delset;",
+    )?;
     Ok(())
 }
 

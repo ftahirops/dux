@@ -800,15 +800,32 @@ fn count_human(n: i64) -> String {
     }
 }
 
-/// Pad OR CLIP `s` to exactly `w` columns. Tree/table columns must be fixed
-/// width: a value wider than its slot (e.g. a big "▲130.0 MiB/h" rate) would
-/// otherwise push the indent + path right and scatter the whole tree.
+/// Pad OR CLIP `s` to exactly `w` terminal COLUMNS. Measured by display width
+/// (UnicodeWidthStr), not char count — a CJK/emoji char is 2 columns, so counting
+/// chars would let wide filenames push the indent + path right and scatter the
+/// tree (exactly what fixed columns must prevent).
 fn fixw(s: &str, w: usize, right: bool) -> String {
-    let n = s.chars().count();
-    if n >= w {
-        return s.chars().take(w).collect();
+    use unicode_width::UnicodeWidthChar;
+    let width = display_width(s);
+    if width >= w {
+        // clip by accumulating display columns (keep wide chars whole)
+        let mut acc = 0;
+        let mut out = String::new();
+        for c in s.chars() {
+            let cw = c.width().unwrap_or(0);
+            if acc + cw > w {
+                break;
+            }
+            acc += cw;
+            out.push(c);
+        }
+        // pad if we stopped just short of w because the next char was wide
+        if acc < w {
+            out.push_str(&" ".repeat(w - acc));
+        }
+        return out;
     }
-    let pad = " ".repeat(w - n);
+    let pad = " ".repeat(w - width);
     if right {
         format!("{pad}{s}")
     } else {
@@ -816,20 +833,32 @@ fn fixw(s: &str, w: usize, right: bool) -> String {
     }
 }
 
+/// Display width of a string in terminal columns.
+fn display_width(s: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    UnicodeWidthStr::width(s)
+}
+
 fn short(p: &str, max: usize) -> String {
-    if p.chars().count() <= max {
-        p.to_string()
-    } else {
-        let tail: String = p
-            .chars()
-            .rev()
-            .take(max - 1)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        format!("…{tail}")
+    use unicode_width::UnicodeWidthChar;
+    if display_width(p) <= max {
+        return p.to_string();
     }
+    // keep the last (max-1) columns, prefixed with an ellipsis
+    let budget = max.saturating_sub(1);
+    let mut acc = 0;
+    let mut tail: Vec<char> = Vec::new();
+    for c in p.chars().rev() {
+        let cw = c.width().unwrap_or(0);
+        if acc + cw > budget {
+            break;
+        }
+        acc += cw;
+        tail.push(c);
+    }
+    tail.reverse();
+    let tail: String = tail.into_iter().collect();
+    format!("…{tail}")
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
