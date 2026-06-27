@@ -95,13 +95,17 @@ enum Op {
     MovedTo,   // rename dest                   -> relocate the inode here, keep subtree
 }
 
-/// A FAN_MOVED_FROM whose matching FAN_MOVED_TO hasn't been seen yet. fanotify
-/// (unlike inotify) carries NO cookie to pair the two halves of a rename, so we
-/// pair by inode identity. When the halves land in different flushes, an
-/// unmatched FROM is held here for ONE extra flush: if the TO arrives we relocate
-/// (zero-delta rename); if not, it was a real move-out and we unlink it then.
-/// Without this, a directory rename across the flush boundary drops the whole
-/// subtree for up to one window and writes spurious -bytes/+bytes growth rows.
+/// A FAN_MOVED_FROM whose matching FAN_MOVED_TO hasn't been seen yet.
+///
+/// NOTE (verified against /usr/include/linux/fanotify.h): `fanotify_event_metadata`
+/// has fields {event_len, vers, reserved, metadata_len, mask, fd, pid} and NO
+/// `cookie` — that is an *inotify* field (`struct inotify_event.cookie`). fanotify
+/// could not pair a rename's two halves at all until `FAN_RENAME` (Linux 5.13),
+/// which we don't require. So we pair by INODE IDENTITY instead: when the halves
+/// land in different flushes, an unmatched FROM is held here for ONE extra flush —
+/// if the TO arrives we relocate (zero-delta rename); if not, it was a real
+/// move-out and we unlink it then. Without this, a directory rename across the
+/// flush boundary drops the whole subtree for a window and writes spurious growth.
 struct DeferredFrom {
     pdev: i64,
     pino: i64,
@@ -275,6 +279,8 @@ pub fn run_daemon(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("/"));
     let mut writes_paused = false; // transient low-disk pause (self-clearing)
+    let (mut ev_seen, mut ev_resolved) = (0u64, 0u64); // capability self-check (C3)
+    let mut resolve_warned = false;
 
     loop {
         if SHUTDOWN.load(Ordering::SeqCst) {
@@ -285,7 +291,7 @@ pub fn run_daemon(
                 let m =
                     unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
                 if m > 0 {
-                    parse_events(
+                    let _ = parse_events(
                         &buf[..m as usize],
                         &fsfds,
                         &root_canon,
@@ -360,19 +366,30 @@ pub fn run_daemon(
             revents: 0,
         };
         let pr = unsafe { libc::poll(&mut pfd, 1, wait_ms.max(0)) };
-        if pr > 0 {
+        if pr < 0 {
+            // EINTR (a signal) is expected — loop and the flags above handle it.
+            // Any OTHER poll error must not turn into a silent busy-spin; log it
+            // and back off briefly (defense-in-depth — not reachable in practice).
+            let err = std::io::Error::last_os_error();
+            if !matches!(err.raw_os_error(), Some(libc::EINTR) | Some(libc::EAGAIN)) {
+                tracing::warn!("fanotify poll error: {err}");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        } else if pr > 0 {
             // drain every event currently queued (non-blocking via FAN_NONBLOCK)
             loop {
                 let n =
                     unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
                 if n > 0 {
-                    parse_events(
+                    let (seen, resolved) = parse_events(
                         &buf[..n as usize],
                         &fsfds,
                         &root_canon,
                         &mut pending,
                         &mut store,
                     );
+                    ev_seen += seen;
+                    ev_resolved += resolved;
                 } else {
                     if n < 0 {
                         let err = std::io::Error::last_os_error();
@@ -383,6 +400,20 @@ pub fn run_daemon(
                     }
                     break;
                 }
+            }
+            // C3: a daemon with CAP_SYS_ADMIN but NOT CAP_DAC_READ_SEARCH receives
+            // events but open_by_handle_at EPERMs on every one, so NONE resolve and
+            // the index silently never updates. If we've seen a meaningful number of
+            // events and resolved zero, say so loudly (once) and mark dirty.
+            if !resolve_warned && ev_seen >= 64 && ev_resolved == 0 {
+                tracing::error!(
+                    "received {ev_seen} fanotify events but resolved 0 paths — the daemon \
+                     likely lacks CAP_DAC_READ_SEARCH (open_by_handle_at is failing). Live \
+                     updates are NOT being recorded; the index is marked dirty. Grant \
+                     CAP_DAC_READ_SEARCH (the packaged dux.service does) and restart."
+                );
+                store.set_meta("dirty_since", &now_secs().to_string()).ok();
+                resolve_warned = true;
             }
             // Overload backstop: if flushing can't keep up (SQLite wedged, or a
             // genuine storm), don't let pending grow until the daemon is OOM-killed.
@@ -406,42 +437,45 @@ pub fn run_daemon(
             //   Elevated → still index, but skip the optional extra I/O/CPU
             //              (WAL checkpoint + alert scan) so we don't add load.
             //   Normal   → full operation.
-            let pressure = crate::guard::sample(&watch_dir).level(MIN_FREE_BYTES);
-            if !pending.is_empty() {
-                if pressure == crate::guard::Pressure::Critical {
-                    if !writes_paused {
-                        let reason = crate::guard::sample(&watch_dir).reason(MIN_FREE_BYTES);
-                        tracing::warn!(
-                            "host under pressure ({reason}) — pausing index writes to protect it"
-                        );
-                        store.set_meta("paused_since", &now_secs().to_string()).ok();
-                        store.set_meta("pause_reason", reason).ok();
-                        writes_paused = true;
-                    }
-                    // give SQLite's page/heap caches back to the OS under pressure.
-                    let _ = store.conn.execute_batch("PRAGMA shrink_memory");
-                    // keep `pending`; the MAX_PENDING backstop still bounds memory
-                    // and escalates to `dirty_since` if the pause is long and busy.
-                } else {
-                    if writes_paused {
-                        tracing::info!("host recovered — resuming index writes");
-                        let _ = store.conn.execute(
-                            "DELETE FROM meta WHERE key IN ('paused_since','pause_reason')",
-                            [],
-                        );
-                        writes_paused = false;
-                    }
-                    if let Err(e) = flush(&mut store, &mut pending, &mut deferred_from, db) {
-                        tracing::warn!("flush error: {e}");
-                    }
-                    // alert scanning is an extra query — skip it while Elevated.
-                    if pressure == crate::guard::Pressure::Normal {
-                        if let Some(cfg) = &alert {
-                            if let Err(e) =
-                                check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
-                            {
-                                tracing::warn!("alert check error: {e}");
-                            }
+            let health = crate::guard::sample(&watch_dir);
+            let pressure = health.level(MIN_FREE_BYTES);
+            // Pause/resume state transitions are evaluated EVERY cycle, independent
+            // of whether there's pending work, so `status`/TUI never get stuck
+            // showing PAUSED after the host recovers while idle (B6). The reason
+            // reuses the single sample above (no second /proc read, B5).
+            if pressure == crate::guard::Pressure::Critical {
+                if !writes_paused {
+                    let reason = health.reason(MIN_FREE_BYTES);
+                    tracing::warn!(
+                        "host under pressure ({reason}) — pausing index writes to protect it"
+                    );
+                    store.set_meta("paused_since", &now_secs().to_string()).ok();
+                    store.set_meta("pause_reason", reason).ok();
+                    writes_paused = true;
+                }
+                // give SQLite's page/heap caches back to the OS under pressure.
+                let _ = store.conn.execute_batch("PRAGMA shrink_memory");
+            } else if writes_paused {
+                tracing::info!("host recovered — resuming index writes");
+                let _ = store.conn.execute(
+                    "DELETE FROM meta WHERE key IN ('paused_since','pause_reason')",
+                    [],
+                );
+                writes_paused = false;
+            }
+            // Flush only when healthy AND there's work. Under Critical we keep
+            // `pending` (bounded by the MAX_PENDING backstop) and lose nothing.
+            if pressure != crate::guard::Pressure::Critical && !pending.is_empty() {
+                if let Err(e) = flush(&mut store, &mut pending, &mut deferred_from, db) {
+                    tracing::warn!("flush error: {e}");
+                }
+                // alert scanning is an extra query — skip it while Elevated.
+                if pressure == crate::guard::Pressure::Normal {
+                    if let Some(cfg) = &alert {
+                        if let Err(e) =
+                            check_alerts(&store, cfg, &mut last_alert, &mut alert_children)
+                        {
+                            tracing::warn!("alert check error: {e}");
                         }
                     }
                 }
@@ -593,13 +627,18 @@ fn mark_fs(fan: RawFd, root: &Path) -> Result<()> {
 }
 
 /// Parse a buffer of fanotify events into pending ops keyed by full path.
+/// Parse a buffer of fanotify events into `pending`. Returns (seen, resolved):
+/// non-overflow events seen, and how many had their handle resolved to a path.
+/// A run of `seen > 0, resolved == 0` is the signature of a missing
+/// CAP_DAC_READ_SEARCH (open_by_handle_at EPERMs on every event) — see the caller.
 fn parse_events(
     mut buf: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
     root: &Path,
     pending: &mut HashMap<PathBuf, Op>,
     store: &mut Store,
-) {
+) -> (u64, u64) {
+    let (mut seen, mut resolved) = (0u64, 0u64);
     while buf.len() >= FAN_EVENT_METADATA_LEN {
         let meta: FanotifyEventMetadata =
             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
@@ -618,28 +657,33 @@ fn parse_events(
             // queue overflowed (rare with UNLIMITED_QUEUE) — mark index dirty
             tracing::warn!("fanotify queue overflow — index may have missed events");
             store.set_meta("dirty_since", &now_secs().to_string()).ok();
-        } else if let Some((dir, name)) = resolve_record(event, meta.metadata_len as usize, fsfds) {
-            let full = if name.is_empty() || name == "." {
-                dir
-            } else {
-                dir.join(&name)
-            };
-            if full.starts_with(root) {
-                let op = if meta.mask & FAN_DELETE != 0 {
-                    Op::Delete
-                } else if meta.mask & FAN_MOVED_FROM != 0 {
-                    Op::MovedFrom
-                } else if meta.mask & FAN_MOVED_TO != 0 {
-                    Op::MovedTo
+        } else {
+            seen += 1;
+            if let Some((dir, name)) = resolve_record(event, meta.metadata_len as usize, fsfds) {
+                resolved += 1;
+                let full = if name.is_empty() || name == "." {
+                    dir
                 } else {
-                    Op::Upsert
+                    dir.join(&name)
                 };
-                pending.insert(full, op);
+                if full.starts_with(root) {
+                    let op = if meta.mask & FAN_DELETE != 0 {
+                        Op::Delete
+                    } else if meta.mask & FAN_MOVED_FROM != 0 {
+                        Op::MovedFrom
+                    } else if meta.mask & FAN_MOVED_TO != 0 {
+                        Op::MovedTo
+                    } else {
+                        Op::Upsert
+                    };
+                    pending.insert(full, op);
+                }
             }
         }
 
         buf = &buf[len..];
     }
+    (seen, resolved)
 }
 
 /// Find the DFID_NAME info record, resolve the directory via open_by_handle_at,
@@ -1180,12 +1224,18 @@ fn flush(
                 // No matching TO in THIS batch. Don't unlink yet — the TO may land
                 // next flush (rename across the boundary). Defer one flush; if no
                 // TO arrives it's expired (unlinked) at the end of the next flush.
-                deferred.entry((cdev, cino)).or_insert(DeferredFrom {
-                    pdev,
-                    pino,
-                    name,
-                    age: 0,
-                });
+                // last-wins: if this inode already has a deferred FROM (a rapid
+                // second rename of the same inode), the NEWER source path is the
+                // one its eventual MOVED_TO should pair with.
+                deferred.insert(
+                    (cdev, cino),
+                    DeferredFrom {
+                        pdev,
+                        pino,
+                        name,
+                        age: 0,
+                    },
+                );
             }
         }
     }
@@ -1294,15 +1344,18 @@ fn flush(
 
     // ---- Phase F: expire deferred FROMs (a rename whose TO never came) ----
     // Anything still here that has waited a full flush was a genuine move-out of
-    // the tree (or a delete) — unlink it now (subtree + totals).
+    // the tree (or a delete) — unlink it now (subtree + totals). DO NOT remove the
+    // entries from `deferred` yet: if this tx later rolls back (a `?` errors), the
+    // map must stay in sync with the un-applied DB so the unlink retries next flush
+    // (idempotent). They're dropped only AFTER a durable commit (B1).
     let expired: Vec<(i64, i64)> = deferred
         .iter()
         .filter(|(_, d)| d.age >= 1)
         .map(|(k, _)| *k)
         .collect();
-    for k in expired {
-        if let Some(d) = deferred.remove(&k) {
-            unlink_dirent(&tx, &mut anc, bucket, d.pdev, d.pino, &d.name)?;
+    for k in &expired {
+        if let Some(d) = deferred.get(k) {
+            unlink_dirent(&tx, &mut anc, bucket, d.pdev, d.pino, &d.name.clone())?;
         }
     }
 
@@ -1320,6 +1373,9 @@ fn flush(
     // Events are now durably applied — safe to drop them. (Clearing BEFORE the
     // best-effort prune below ensures a prune error can't trigger a re-apply.)
     pending.clear();
+    for k in &expired {
+        deferred.remove(k); // committed — now safe to forget the expired renames
+    }
     crate::util::write_heartbeat(db);
     // keep ~7 days of growth buckets (cheap: ~288 rows/day per active inode).
     // best-effort: a prune failure must not fail the (already committed) flush.
@@ -1415,15 +1471,31 @@ fn check_alerts(
                 );
                 continue;
             }
-            if let Ok(child) = std::process::Command::new("sh")
+            use std::os::unix::process::CommandExt;
+            let mut command = std::process::Command::new("sh");
+            command
                 .arg("-c")
                 .arg(cmd)
                 .env("DUX_PATH", &path)
                 .env("DUX_DELTA", delta.to_string())
                 .env("DUX_DELTA_HUMAN", crate::util::human(delta))
-                .env("DUX_WINDOW", cfg.window.to_string())
-                .spawn()
-            {
+                .env("DUX_WINDOW", cfg.window.to_string());
+            // Reset the child's OOM score to default BEFORE exec — a user alert
+            // script must not inherit dux's preferred-OOM-victim boost (B3). Raw
+            // syscalls only (async-signal-safe in the post-fork/pre-exec child).
+            unsafe {
+                command.pre_exec(|| {
+                    let p = b"/proc/self/oom_score_adj\0";
+                    let fd = libc::open(p.as_ptr() as *const libc::c_char, libc::O_WRONLY);
+                    if fd >= 0 {
+                        let v = b"0\n";
+                        let _ = libc::write(fd, v.as_ptr() as *const libc::c_void, v.len());
+                        libc::close(fd);
+                    }
+                    Ok(())
+                });
+            }
+            if let Ok(child) = command.spawn() {
                 children.push(child); // tracked + reaped next pass
             }
         }

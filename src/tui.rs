@@ -1171,21 +1171,10 @@ fn draw(f: &mut Frame, app: &mut App) {
     // (long/truncated panel names are always fully readable here).
     let foot = rows[4];
     let legend = " Tab section · ↑↓ move · →/⏎ expand · i size⇄inodes · q quit │ ";
-    let avail = (foot.width as usize).saturating_sub(legend.chars().count() + 1);
-    let path = &app.detail;
-    let shown = if path.chars().count() > avail && avail > 1 {
-        let tail: String = path
-            .chars()
-            .rev()
-            .take(avail - 1)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        format!("…{tail}")
-    } else {
-        path.clone()
-    };
+    // measure in terminal COLUMNS (display width), and truncate via the same
+    // width-aware helper as the tree, so a CJK/emoji path can't overflow the line.
+    let avail = (foot.width as usize).saturating_sub(display_width(legend) + 1);
+    let shown = short(&app.detail, avail);
     let footer = Line::from(vec![
         Span::styled(legend, Style::default().fg(Color::DarkGray)),
         Span::styled(

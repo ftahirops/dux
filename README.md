@@ -207,7 +207,11 @@ dux CLI / TUI  ──reads──►  SQLite WAL index  ◄──writes──  du
 
 The daemon uses fanotify **FID mode** (`open_by_handle_at`) to track
 **create / delete / rename / dir-creation / growth** live across every mounted
-filesystem.
+filesystem. It therefore needs **two capabilities**: `CAP_SYS_ADMIN` (fanotify)
+and `CAP_DAC_READ_SEARCH` (resolve event file-handles to paths). The packaged
+`dux.service` grants both; if you run the daemon under a custom unit that drops
+`CAP_DAC_READ_SEARCH`, it can receive events but resolves none — dux now detects
+this, logs a clear error, and marks the index dirty rather than failing silently.
 
 **Status & limitations** (disk usage = allocated blocks like `du`; live tracking
 needs the daemon running; one tree per index; hardlinks counted once for size but every path is searchable) are
