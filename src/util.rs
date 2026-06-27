@@ -140,6 +140,63 @@ pub fn now_secs() -> i64 {
 /// daemon dies — no stale "live" reading.
 pub const HEARTBEAT_PATH: &str = "/run/dux/heartbeat";
 
+/// Runtime scan-progress file (tmpfs). The scanner publishes live counts here so
+/// `dux status` (or a user who runs `dux` mid-scan) can SEE the initial scan's
+/// progress even when it runs in the background with stderr suppressed.
+pub const SCAN_PROGRESS_PATH: &str = "/run/dux/scan.progress";
+
+/// Live progress of an in-flight scan.
+pub struct ScanProgress {
+    pub started: i64, // epoch seconds the scan began
+    pub files: u64,
+    pub dirs: u64,
+    pub bytes: i64,
+    pub indexing: bool, // false = still walking, true = building the index
+}
+
+/// Publish scan progress (best-effort; format: "<started> <files> <dirs> <bytes> <indexing>").
+pub fn write_scan_progress(started: i64, files: u64, dirs: u64, bytes: i64, indexing: bool) {
+    let _ = std::fs::create_dir_all("/run/dux");
+    let _ = std::fs::write(
+        SCAN_PROGRESS_PATH,
+        format!("{started} {files} {dirs} {bytes} {}", indexing as u8),
+    );
+}
+
+/// Remove the scan-progress file (scan finished).
+pub fn clear_scan_progress() {
+    let _ = std::fs::remove_file(SCAN_PROGRESS_PATH);
+}
+
+/// Read in-flight scan progress, if a scan is running and the file is FRESH
+/// (updated within 10s — a crashed scan leaves a stale file we should ignore).
+pub fn read_scan_progress() -> Option<ScanProgress> {
+    let meta = std::fs::metadata(SCAN_PROGRESS_PATH).ok()?;
+    let age = meta
+        .modified()
+        .ok()
+        .and_then(|m| m.elapsed().ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if age > 10 {
+        return None; // stale (scan died) — don't report a phantom scan
+    }
+    let s = std::fs::read_to_string(SCAN_PROGRESS_PATH).ok()?;
+    let mut it = s.trim().split(' ');
+    let started: i64 = it.next()?.parse().ok()?;
+    let files: u64 = it.next()?.parse().ok()?;
+    let dirs: u64 = it.next()?.parse().ok()?;
+    let bytes: i64 = it.next()?.parse().ok()?;
+    let indexing = it.next()? == "1";
+    Some(ScanProgress {
+        started,
+        files,
+        dirs,
+        bytes,
+        indexing,
+    })
+}
+
 /// Stamp the heartbeat file with the current epoch seconds, the daemon's PID,
 /// and the absolute path of the DB it's writing (best-effort). The PID lets
 /// `dux scan` signal the daemon to rescan itself instead of telling the user to

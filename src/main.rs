@@ -38,8 +38,13 @@ enum Cmd {
         one_file_system: bool,
         #[arg(long)]
         exclude: Vec<PathBuf>,
+        /// Run gently in the background: low CPU/IO priority AND fewer walker
+        /// threads (~¼ of cores) so a production box keeps headroom.
         #[arg(long)]
         low_priority: bool,
+        /// Cap walker threads (overrides the default / --low-priority). e.g. 2.
+        #[arg(long)]
+        jobs: Option<usize>,
         /// Include pseudo-filesystems (/proc, /sys, cgroup, …)
         #[arg(long)]
         include_pseudo: bool,
@@ -164,6 +169,7 @@ fn real_main() -> Result<()> {
             one_file_system,
             exclude,
             low_priority,
+            jobs,
             include_pseudo,
             quiet,
             force,
@@ -198,6 +204,7 @@ fn real_main() -> Result<()> {
                 low_priority,
                 include_pseudo,
                 progress: !quiet,
+                jobs,
             };
             // Atomic rebuild: scan into a sibling file, then rename over the live
             // index — fragmentation-free, never a half-built or empty index.

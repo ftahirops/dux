@@ -179,6 +179,7 @@ pub fn run_daemon(
         let opts = crate::scan::ScanOptions {
             one_file_system,
             progress: false,
+            low_priority: true, // background service scan — keep the host responsive
             ..Default::default()
         };
         crate::scan::rebuild_atomic(db, root, &opts).context("rebuilding index before watch")?;
@@ -325,6 +326,7 @@ pub fn run_daemon(
             let opts = crate::scan::ScanOptions {
                 one_file_system,
                 progress: false,
+                low_priority: true, // background service rescan — stay gentle
                 ..Default::default()
             };
             match crate::scan::rebuild_atomic(db, &root_canon, &opts) {

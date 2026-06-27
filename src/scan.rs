@@ -20,6 +20,26 @@ pub struct ScanOptions {
     pub include_pseudo: bool,
     /// Print live progress to stderr.
     pub progress: bool,
+    /// Cap walker threads. None = auto (all cores, capped 16; or cores/4 under
+    /// low_priority so a production box keeps headroom). Some(n) forces n.
+    pub jobs: Option<usize>,
+}
+
+/// Resolve the walker thread count from options + host. Fewer threads = less CPU
+/// burned by the (CPU-heavy) parallel stat walk, so a production scan can be told
+/// to run slowly in the background.
+fn scan_threads(opts: &ScanOptions) -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    if let Some(n) = opts.jobs {
+        return n.max(1);
+    }
+    if opts.low_priority {
+        (cores / 4).max(1) // leave most of the box for real work
+    } else {
+        cores.min(16)
+    }
 }
 
 /// True if `path` sits on a virtual/pseudo filesystem whose "sizes" are not real
@@ -147,7 +167,10 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         }
     }
 
-    let progress_thread = if opts.progress {
+    // The progress thread ALWAYS runs and publishes a tmpfs progress file (so a
+    // background/--quiet scan is still observable via `dux status`); the stderr
+    // spinner is only drawn for an interactive scan (opts.progress).
+    let progress_thread = {
         let (f, d, b, dn, ix) = (
             n_files.clone(),
             n_dirs.clone(),
@@ -155,31 +178,46 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
             done.clone(),
             indexing.clone(),
         );
+        let show_stderr = opts.progress;
+        let started_epoch = now_secs();
         Some(std::thread::spawn(move || {
             let spin = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
             let mut i = 0usize;
+            let mut last_pub = Instant::now() - Duration::from_secs(2);
             while !dn.load(Ordering::Relaxed) {
-                let verb = if ix.load(Ordering::Relaxed) {
-                    "building index…"
-                } else {
-                    "scanning…      "
-                };
-                eprint!(
-                    "\r\x1b[K {} {}  {} files  {} dirs  {}  {:.0}s",
-                    spin[i % spin.len()],
-                    verb,
+                let (fc, dc, bc) = (
                     f.load(Ordering::Relaxed),
                     d.load(Ordering::Relaxed),
-                    crate::util::human(b.load(Ordering::Relaxed)),
-                    started.elapsed().as_secs_f64(),
+                    b.load(Ordering::Relaxed),
                 );
-                std::io::stderr().flush().ok();
+                let indexing = ix.load(Ordering::Relaxed);
+                // publish to tmpfs ~1×/s so a concurrent `dux status` can show it
+                if last_pub.elapsed() >= Duration::from_millis(1000) {
+                    crate::util::write_scan_progress(started_epoch, fc, dc, bc, indexing);
+                    last_pub = Instant::now();
+                }
+                if show_stderr {
+                    let verb = if indexing {
+                        "building index…"
+                    } else {
+                        "scanning…      "
+                    };
+                    eprint!(
+                        "\r\x1b[K {} {}  {} files  {} dirs  {}  {:.0}s",
+                        spin[i % spin.len()],
+                        verb,
+                        fc,
+                        dc,
+                        crate::util::human(bc),
+                        started.elapsed().as_secs_f64(),
+                    );
+                    std::io::stderr().flush().ok();
+                }
                 i += 1;
                 std::thread::sleep(Duration::from_millis(120));
             }
+            crate::util::clear_scan_progress(); // scan finished — remove the file
         }))
-    } else {
-        None
     };
     let progress_guard = ProgressGuard {
         done: done.clone(),
@@ -421,10 +459,7 @@ fn parallel_collect(
     let nb = n_bytes.clone();
     let ne = n_errors.clone();
 
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let threads = scan_threads(opts);
 
     {
         let walk = WalkDirGeneric::<((), ())>::new(root)

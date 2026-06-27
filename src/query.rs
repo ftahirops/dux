@@ -447,19 +447,13 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         .conn
         .query_row("PRAGMA freelist_count", [], |r| r.get(0))
         .unwrap_or(0);
-    let fts: i64 = store
-        .conn
-        .query_row(
-            "SELECT COALESCE(SUM(pgsize),0) FROM dbstat WHERE name LIKE 'names_fts%'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
+    // NB: the per-table FTS size used to come from `dbstat`, which visits EVERY
+    // page of the database — ~18s cold on a multi-hundred-MB index. Dropped: the
+    // db/WAL file sizes + reclaimable (freelist) are all O(1) PRAGMA/stat calls.
     out.push_str(&format!(
-        "index size: {} db + {} WAL  ({} search, {} reclaimable)\n",
+        "index size: {} db + {} WAL  ({} reclaimable)\n",
         human(dbsz),
         human(walsz),
-        human(fts),
         human(free * psize),
     ));
     // daemon liveness — only "live" if the heartbeat belongs to THIS db
@@ -488,6 +482,23 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         out.push_str(&format!(
             "\nstate:      DIRTY since {} — missed events; rescan with `dux scan <root>`",
             crate::util::ago(since)
+        ));
+    }
+    // A scan running RIGHT NOW (initial build or rescan) publishes live progress —
+    // surface it so the user knows to wait rather than trusting a stale snapshot.
+    if let Some(p) = crate::util::read_scan_progress() {
+        let elapsed = (crate::util::now_secs() - p.started).max(0);
+        let phase = if p.indexing {
+            "building index"
+        } else {
+            "scanning"
+        };
+        out.push_str(&format!(
+            "\nscan:       IN PROGRESS ({phase}) — {} files, {} dirs, {} so far, {}s elapsed",
+            p.files,
+            p.dirs,
+            human(p.bytes),
+            elapsed,
         ));
     }
     Ok(out)

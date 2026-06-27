@@ -184,6 +184,19 @@ impl Store {
     /// Open read-only for queries. Falls back to RW open if the DB needs creating.
     pub fn open_ro(path: &Path) -> Result<Self> {
         if !path.exists() {
+            // If the FIRST scan is building the index right now, say so (with live
+            // progress) rather than "no index" — the user just needs to wait.
+            if let Some(p) = crate::util::read_scan_progress() {
+                let elapsed = (crate::util::now_secs() - p.started).max(0);
+                anyhow::bail!(
+                    "initial scan in progress — {} files, {} dirs scanned, {}s elapsed. \
+                     The index will be ready when it finishes; re-run then \
+                     (watch with `dux status`).",
+                    p.files,
+                    p.dirs,
+                    elapsed
+                );
+            }
             anyhow::bail!(
                 "no index at {} — run `dux scan <PATH>` first",
                 path.display()
