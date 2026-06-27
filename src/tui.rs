@@ -38,6 +38,7 @@ struct Row {
     dev: i64,
     inode: i64,
     name: String,
+    path: String, // full, terminal-escaped path (cached so detail needs no query)
     kind: char,
     size: i64,   // recursive bytes for dirs, own for files
     inodes: i64, // recursive inode count for dirs, 1 for files
@@ -249,7 +250,8 @@ impl App {
         out.push(Row {
             dev: self.root_dev,
             inode: self.root_inode,
-            name,
+            name: name.clone(),
+            path: name,
             kind: 'd',
             size,
             inodes,
@@ -265,7 +267,15 @@ impl App {
                 .unwrap_or(0),
         });
         if root_expanded {
-            self.append_children(store, &mut out, self.root_dev, self.root_inode, 1)?;
+            let root_path = self.root_path.clone();
+            self.append_children(
+                store,
+                &mut out,
+                self.root_dev,
+                self.root_inode,
+                1,
+                &root_path,
+            )?;
         }
 
         self.rows = out;
@@ -285,6 +295,7 @@ impl App {
 
     /// Recursively append a directory's children (and any expanded descendants)
     /// to `out`, computing per-sibling-group ratios and growth.
+    #[allow(clippy::too_many_arguments)]
     fn append_children(
         &self,
         store: &Store,
@@ -292,6 +303,7 @@ impl App {
         dev: i64,
         inode: i64,
         depth: usize,
+        parent_path: &str, // real (unescaped) path of this parent, for joining
     ) -> Result<()> {
         let order = if self.metric == Metric::Inodes {
             "recursive_inodes"
@@ -324,13 +336,14 @@ impl App {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
-                crate::util::display_name(&nb),
+                crate::util::display_name(&nb), // escaped, for the tree
+                String::from_utf8_lossy(&nb).into_owned(), // lossy, for path joins
                 k,
                 size,
                 inodes,
             ))
         })?;
-        let mut kids: Vec<(i64, i64, String, char, i64, i64)> = Vec::new();
+        let mut kids: Vec<(i64, i64, String, String, char, i64, i64)> = Vec::new();
         for row in rows {
             kids.push(row?);
         }
@@ -342,18 +355,25 @@ impl App {
         if truncated {
             kids.truncate(CHILD_LIMIT);
         }
-        let maxs = kids.iter().map(|k| k.4).max().unwrap_or(1).max(1);
-        let maxi = kids.iter().map(|k| k.5).max().unwrap_or(1).max(1);
+        let maxs = kids.iter().map(|k| k.5).max().unwrap_or(1).max(1);
+        let maxi = kids.iter().map(|k| k.6).max().unwrap_or(1).max(1);
 
-        for (cdev, cino, name, kind, size, inodes) in kids {
+        for (cdev, cino, name, raw_name, kind, size, inodes) in kids {
             let is_expanded = kind == 'd' && self.expanded.contains(&(cdev, cino));
             // a directory is only collapsible/expandable if it actually has
             // descendants (recursive_inodes counts itself, so >1 means non-empty).
             let has_children = kind == 'd' && inodes > 1;
+            // join this entry onto its parent's real path; escape only for display.
+            let real_path = if parent_path.ends_with('/') {
+                format!("{parent_path}{raw_name}")
+            } else {
+                format!("{parent_path}/{raw_name}")
+            };
             out.push(Row {
                 dev: cdev,
                 inode: cino,
                 name,
+                path: crate::util::display_path(&real_path),
                 kind,
                 size,
                 inodes,
@@ -366,7 +386,7 @@ impl App {
                 growth: self.growth_map.get(&(cdev, cino)).copied().unwrap_or(0),
             });
             if is_expanded {
-                self.append_children(store, out, cdev, cino, depth + 1)?;
+                self.append_children(store, out, cdev, cino, depth + 1, &real_path)?;
             }
         }
         if truncated {
@@ -375,6 +395,7 @@ impl App {
                 dev: 0,
                 inode: 0,
                 name: format!("… more than {CHILD_LIMIT} entries — narrow with `dux find`"),
+                path: String::new(),
                 kind: 'o',
                 size: 0,
                 inodes: 0,
@@ -564,16 +585,13 @@ impl App {
 
     /// Full path of the current selection (focused section) — shown in the footer
     /// so long/truncated names are always fully visible.
-    fn update_detail(&mut self, store: &Store) {
+    fn update_detail(&mut self, _store: &Store) {
         self.detail = match self.focus {
+            // path is cached on each Row during rebuild — no per-keypress query.
             Focus::Tree => self
                 .rows
                 .get(self.sel)
-                .map(|r| {
-                    store
-                        .path_of(r.dev, r.inode)
-                        .unwrap_or_else(|_| r.name.clone())
-                })
+                .map(|r| r.path.clone())
                 .unwrap_or_default(),
             Focus::Growth => self
                 .top_growth
