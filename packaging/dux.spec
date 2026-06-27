@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.4.1
+Version:        0.4.2
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,6 +54,10 @@ fi
 exit 0
 
 %changelog
+* Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.2-1
+- TUI opens instantly on huge high-churn indexes (bounded growth-heat query,
+  async startup, slower worker cadence) — was ~30s to first paint.
+
 * Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.1-1
 - Throttled background scans (--low-priority caps threads; new --jobs N); the
   service + daemon scans run gently by default.

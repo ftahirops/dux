@@ -1,6 +1,6 @@
 [package]
 name = "dux"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 description = "Persistent realtime disk usage + file search. du/ncdu/locate/find, but indexed and live."
 license = "MIT"
