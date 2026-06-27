@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.3.1
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,6 +54,11 @@ fi
 exit 0
 
 %changelog
+* Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.0-1
+- TUI: background-thread refresh so navigation never blocks on large indexes.
+- Correct hardlink deletes: a file hardlinked outside a deleted directory
+  survives, with exact totals (matches a fresh scan).
+
 * Sat Jun 27 2026 dux maintainers <root@localhost> - 0.3.1-1
 - Verification-audit follow-up: capability self-check (warns + marks dirty if
   CAP_DAC_READ_SEARCH is missing); alert-exec children no longer inherit the

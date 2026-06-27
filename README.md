@@ -61,6 +61,19 @@ the culprit — not just the symptom.**
 
 ---
 
+## New in 0.4.0
+
+- **Buttery-smooth TUI on huge filesystems.** The live tree's expensive periodic
+  recompute (recursive growth aggregation, panels, path resolution) now runs on a
+  **background thread**, so keyboard navigation never stalls — even on
+  multi-million-file indexes. Results are applied as they arrive; the tree stays
+  responsive while data refreshes behind it.
+- **Correct hardlink deletes.** Deleting a directory that contained one link of a
+  file hardlinked **elsewhere** now keeps the file (it still exists via the other
+  link) and keeps directory totals exact — verified against a fresh scan.
+
+---
+
 ## New in 0.3.0
 
 **A resource guardian so dux always yields to the host.** dux is a background
@@ -133,14 +146,14 @@ first start):
 
 **Debian / Ubuntu** — download the `.deb` from the [latest release](https://github.com/ftahirops/dux/releases/latest):
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.3.1_amd64.deb
-sudo dpkg -i dux_0.3.1_amd64.deb
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.4.0_amd64.deb
+sudo dpkg -i dux_0.4.0_amd64.deb
 ```
 
 **RHEL / Fedora / openSUSE**:
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.3.1-1.x86_64.rpm
-sudo rpm -i dux-0.3.1-1.x86_64.rpm
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.4.0-1.x86_64.rpm
+sudo rpm -i dux-0.4.0-1.x86_64.rpm
 ```
 
 Both packages install `/usr/bin/dux` and a systemd unit that builds the index on
