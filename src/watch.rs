@@ -95,6 +95,20 @@ enum Op {
     MovedTo,   // rename dest                   -> relocate the inode here, keep subtree
 }
 
+/// A FAN_MOVED_FROM whose matching FAN_MOVED_TO hasn't been seen yet. fanotify
+/// (unlike inotify) carries NO cookie to pair the two halves of a rename, so we
+/// pair by inode identity. When the halves land in different flushes, an
+/// unmatched FROM is held here for ONE extra flush: if the TO arrives we relocate
+/// (zero-delta rename); if not, it was a real move-out and we unlink it then.
+/// Without this, a directory rename across the flush boundary drops the whole
+/// subtree for up to one window and writes spurious -bytes/+bytes growth rows.
+struct DeferredFrom {
+    pdev: i64,
+    pino: i64,
+    name: Vec<u8>,
+    age: u32, // flushes waited; expires (unlinks) at age >= 1
+}
+
 /// Growth-alert configuration.
 pub struct AlertConfig {
     pub threshold: i64,
@@ -250,6 +264,8 @@ pub fn run_daemon(
     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
     let mut alert_children: Vec<std::process::Child> = Vec::new();
     let mut pending: HashMap<PathBuf, Op> = HashMap::new();
+    // Unmatched FAN_MOVED_FROMs awaiting their MOVED_TO (rename across a flush).
+    let mut deferred_from: HashMap<(i64, i64), DeferredFrom> = HashMap::new();
     let mut buf = [0u8; 1 << 15];
     // filesystem holding the index; checked each flush for low-disk protection.
     let watch_dir = db
@@ -279,7 +295,7 @@ pub fn run_daemon(
                 }
             }
             if !pending.is_empty() {
-                if let Err(e) = flush(&mut store, &mut pending, db) {
+                if let Err(e) = flush(&mut store, &mut pending, &mut deferred_from, db) {
                     tracing::warn!(
                         "final flush on shutdown failed (events retried on restart): {e}"
                     );
@@ -311,6 +327,7 @@ pub fn run_daemon(
                         Err(e) => tracing::error!("rescan: reopen failed: {e}"),
                     }
                     pending.clear();
+                    deferred_from.clear(); // fresh db supersedes any pending renames
                     writes_paused = false; // fresh db; any pause/dirty is reconciled
                     crate::util::write_heartbeat(db);
                     tracing::info!(
@@ -346,6 +363,7 @@ pub fn run_daemon(
                 );
                 store.set_meta("dirty_since", &now_secs().to_string()).ok();
                 pending.clear();
+                deferred_from.clear(); // backlog dropped; a rescan will reconcile
             }
         } else if n < 0 {
             let err = std::io::Error::last_os_error();
@@ -384,7 +402,7 @@ pub fn run_daemon(
                             .execute("DELETE FROM meta WHERE key='paused_since'", []);
                         writes_paused = false;
                     }
-                    if let Err(e) = flush(&mut store, &mut pending, db) {
+                    if let Err(e) = flush(&mut store, &mut pending, &mut deferred_from, db) {
                         tracing::warn!("flush error: {e}");
                     }
                     if let Some(cfg) = &alert {
@@ -1037,7 +1055,12 @@ fn reconcile_subtree(
 /// The whole transaction is ATOMIC: any operation error aborts it via `?`, so
 /// `pending` is left intact and retried next flush — a single failed op never
 /// commits partial drift.
-fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Result<()> {
+fn flush(
+    store: &mut Store,
+    pending: &mut HashMap<PathBuf, Op>,
+    deferred: &mut HashMap<(i64, i64), DeferredFrom>,
+    db: &Path,
+) -> Result<()> {
     let now = now_secs();
     // (Low-disk protection lives in the daemon loop now, as a self-clearing
     // `paused_since` state — NOT the lossy `dirty_since`, since a pause preserves
@@ -1087,6 +1110,10 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
     let mut anc: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
     // Renames seen this flush: target inode -> the old (parent_dev,parent_inode,name).
     let mut rename_src: HashMap<(i64, i64), (i64, i64, Vec<u8>)> = HashMap::new();
+    // Age carried-over deferred FROMs: anything still here after Phase D had no TO.
+    for d in deferred.values_mut() {
+        d.age += 1;
+    }
 
     // ---- Phase B: deletes (unlink one path; drop the inode only on last link) ----
     for full in &deletes {
@@ -1123,7 +1150,15 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
             if moved_in.contains(&(cdev, cino)) {
                 rename_src.insert((cdev, cino), (pdev, pino, name)); // phase D relocates
             } else {
-                unlink_dirent(&tx, &mut anc, bucket, pdev, pino, &name)?;
+                // No matching TO in THIS batch. Don't unlink yet — the TO may land
+                // next flush (rename across the boundary). Defer one flush; if no
+                // TO arrives it's expired (unlinked) at the end of the next flush.
+                deferred.entry((cdev, cino)).or_insert(DeferredFrom {
+                    pdev,
+                    pino,
+                    name,
+                    age: 0,
+                });
             }
         }
     }
@@ -1146,7 +1181,14 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
         let dev = m.dev() as i64;
         let ino = m.ino() as i64;
 
-        if let Some((opdev, opino, oldname)) = rename_src.remove(&(dev, ino)) {
+        // Pair this TO with a FROM from THIS flush, or a FROM deferred from the
+        // PREVIOUS flush (rename split across the boundary).
+        let old_loc = rename_src.remove(&(dev, ino)).or_else(|| {
+            deferred
+                .remove(&(dev, ino))
+                .map(|d| (d.pdev, d.pino, d.name))
+        });
+        if let Some((opdev, opino, oldname)) = old_loc {
             // RENAME of an existing link. Cycle guard: never move a dir under its
             // own subtree (a stale tree could install A→B→A and hang the CTEs).
             if would_cycle(&tx, dev, ino, npdev, npino) {
@@ -1221,6 +1263,20 @@ fn flush(store: &mut Store, pending: &mut HashMap<PathBuf, Op>, db: &Path) -> Re
         let dev = m.dev() as i64;
         let ino = m.ino() as i64;
         upsert_path(&tx, &mut anc, bucket, &m, dev, ino, pdev, pino, &name)?;
+    }
+
+    // ---- Phase F: expire deferred FROMs (a rename whose TO never came) ----
+    // Anything still here that has waited a full flush was a genuine move-out of
+    // the tree (or a delete) — unlink it now (subtree + totals).
+    let expired: Vec<(i64, i64)> = deferred
+        .iter()
+        .filter(|(_, d)| d.age >= 1)
+        .map(|(k, _)| *k)
+        .collect();
+    for k in expired {
+        if let Some(d) = deferred.remove(&k) {
+            unlink_dirent(&tx, &mut anc, bucket, d.pdev, d.pino, &d.name)?;
+        }
     }
 
     // ---- apply coalesced ancestor totals: ONE write per affected dir ----
@@ -1432,7 +1488,13 @@ mod tests {
         std::fs::hard_link(dir.join("a.dat"), dir.join("b.dat")).unwrap();
         let mut p = HashMap::new();
         p.insert(dir.join("b.dat"), Op::Upsert);
-        flush(&mut store, &mut p, &db).unwrap();
+        flush(
+            &mut store,
+            &mut p,
+            &mut std::collections::HashMap::new(),
+            &db,
+        )
+        .unwrap();
         assert_eq!(count_dirents(&store, fid.0, fid.1), 2, "both paths indexed");
         assert_eq!(inode_rows(&store, fid.0, fid.1), 1, "one inode row");
         assert_eq!(
@@ -1445,7 +1507,13 @@ mod tests {
         std::fs::remove_file(dir.join("a.dat")).unwrap();
         let mut p = HashMap::new();
         p.insert(dir.join("a.dat"), Op::Delete);
-        flush(&mut store, &mut p, &db).unwrap();
+        flush(
+            &mut store,
+            &mut p,
+            &mut std::collections::HashMap::new(),
+            &db,
+        )
+        .unwrap();
         assert_eq!(count_dirents(&store, fid.0, fid.1), 1, "one link remains");
         assert_eq!(inode_rows(&store, fid.0, fid.1), 1, "inode survives");
         assert_eq!(rbytes(&store, did.0, did.1), base, "total unchanged");
@@ -1454,7 +1522,13 @@ mod tests {
         std::fs::remove_file(dir.join("b.dat")).unwrap();
         let mut p = HashMap::new();
         p.insert(dir.join("b.dat"), Op::Delete);
-        flush(&mut store, &mut p, &db).unwrap();
+        flush(
+            &mut store,
+            &mut p,
+            &mut std::collections::HashMap::new(),
+            &db,
+        )
+        .unwrap();
         assert_eq!(
             inode_rows(&store, fid.0, fid.1),
             0,
@@ -1489,7 +1563,13 @@ mod tests {
         let newid = id_of(&dir.join("x"));
         let mut p = HashMap::new();
         p.insert(dir.join("x"), Op::Upsert);
-        flush(&mut store, &mut p, &db).unwrap();
+        flush(
+            &mut store,
+            &mut p,
+            &mut std::collections::HashMap::new(),
+            &db,
+        )
+        .unwrap();
 
         let n: i64 = store
             .conn
@@ -1598,6 +1678,78 @@ mod tests {
                 .is_none(),
             "a rescan must clear dirty_since"
         );
+        cleanup(&dir, &db);
+    }
+
+    fn dirent_exists(store: &Store, pdev: i64, pino: i64, name: &[u8]) -> bool {
+        store
+            .conn
+            .query_row(
+                "SELECT 1 FROM dirents WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![pdev, pino, name],
+                |_| Ok(()),
+            )
+            .is_ok()
+    }
+
+    // C1: a directory rename whose MOVED_FROM and MOVED_TO land in DIFFERENT
+    // flushes must still be treated as a rename — the subtree must NOT vanish
+    // between flushes, and no spurious growth rows are written.
+    #[test]
+    fn rename_split_across_flushes() {
+        let dir = tmp("rmv");
+        let db = tmp("rmv-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(dir.join("old")).unwrap();
+        std::fs::write(dir.join("old/f.bin"), vec![1u8; 4096]).unwrap();
+        scan_into(&dir, &db);
+        let mut store = Store::open_rw(&db).unwrap();
+        let d = id_of(&dir); // parent of old/new
+        let old_ino = id_of(&dir.join("old"));
+        let inodes_before = inode_rows(&store, old_ino.0, old_ino.1);
+
+        // rename on disk, then deliver ONLY the MOVED_FROM in flush 1
+        std::fs::rename(dir.join("old"), dir.join("new")).unwrap();
+        let mut deferred: HashMap<(i64, i64), DeferredFrom> = HashMap::new();
+        let mut p1 = HashMap::new();
+        p1.insert(dir.join("old"), Op::MovedFrom);
+        flush(&mut store, &mut p1, &mut deferred, &db).unwrap();
+        // subtree must still be present (deferred, not deleted)
+        assert!(
+            dirent_exists(&store, d.0, d.1, b"old"),
+            "FROM-only flush must NOT drop the renamed dir (deferred)"
+        );
+        assert_eq!(
+            inode_rows(&store, old_ino.0, old_ino.1),
+            inodes_before,
+            "the moved inode must survive the FROM-only flush"
+        );
+
+        // deliver the MOVED_TO in flush 2 (same deferred map) → it's a rename
+        let mut p2 = HashMap::new();
+        p2.insert(dir.join("new"), Op::MovedTo);
+        flush(&mut store, &mut p2, &mut deferred, &db).unwrap();
+        assert!(
+            dirent_exists(&store, d.0, d.1, b"new"),
+            "after the TO flush the dir is at its new name"
+        );
+        assert!(
+            !dirent_exists(&store, d.0, d.1, b"old"),
+            "old name is gone after the rename completes"
+        );
+        // the child followed the inode (subtree intact)
+        assert!(
+            dirent_exists(&store, old_ino.0, old_ino.1, b"f.bin"),
+            "the subtree (f.bin) must follow the renamed directory"
+        );
+        // a rename is zero-delta: no growth rows written
+        let growth_rows: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM growth", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(growth_rows, 0, "a rename must not write growth rows");
+
+        drop(store);
         cleanup(&dir, &db);
     }
 }
