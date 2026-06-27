@@ -146,14 +146,14 @@ first start):
 
 **Debian / Ubuntu** — download the `.deb` from the [latest release](https://github.com/ftahirops/dux/releases/latest):
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.4.2_amd64.deb
-sudo dpkg -i dux_0.4.2_amd64.deb
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.4.3_amd64.deb
+sudo dpkg -i dux_0.4.3_amd64.deb
 ```
 
 **RHEL / Fedora / openSUSE**:
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.4.2-1.x86_64.rpm
-sudo rpm -i dux-0.4.2-1.x86_64.rpm
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.4.3-1.x86_64.rpm
+sudo rpm -i dux-0.4.3-1.x86_64.rpm
 ```
 
 Both packages install `/usr/bin/dux` and a systemd unit that builds the index on

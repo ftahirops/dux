@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.4.2
+Version:        0.4.3
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,6 +54,11 @@ fi
 exit 0
 
 %changelog
+* Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.3-1
+- O(1) status node count, lower idle TUI CPU, leaner rescan polling, and a
+  configurable growth-history retention (--growth-days) to shrink the index on
+  high-churn hosts.
+
 * Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.2-1
 - TUI opens instantly on huge high-churn indexes (bounded growth-heat query,
   async startup, slower worker cadence) — was ~30s to first paint.
