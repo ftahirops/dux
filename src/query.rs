@@ -59,6 +59,23 @@ fn lim(n: usize) -> i64 {
     n.min(i64::MAX as usize) as i64
 }
 
+/// Escape SQLite GLOB metacharacters (`*`, `?`, `[`) by wrapping each in a
+/// one-char class (`[*]` etc.), so a value meant to be literal isn't a pattern.
+fn glob_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '*' | '?' | '[' => {
+                out.push('[');
+                out.push(c);
+                out.push(']');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 pub struct Row {
     pub path: String,
     pub size: i64,
@@ -167,7 +184,9 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
         args.push(Box::new(pat));
     }
     if let Some(e) = &o.ext {
-        let e = e.trim_start_matches('.');
+        // an extension is LITERAL — escape GLOB metacharacters so `--ext c++` or
+        // `--ext d]` match the real extension instead of being treated as a glob.
+        let e = glob_escape(e.trim_start_matches('.'));
         sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
         args.push(Box::new(format!("*.{e}")));
     }
@@ -253,7 +272,11 @@ pub fn growth(
     scope: Option<(i64, i64)>,
 ) -> Result<Vec<GrowthRow>> {
     // growth history is bucketed (5-min); the window is rounded to the bucket
-    let cutoff = (now_secs() - since_secs) / crate::store::GROWTH_BUCKET_SECS;
+    // Round the bucket cutoff UP so the window never exceeds what was asked: a
+    // floor here would include the whole bucket containing (now-window), handing
+    // back up to ~5 min more than requested (e.g. `--since 10m` → ~15m).
+    let cutoff =
+        (now_secs() - since_secs + crate::store::GROWTH_BUCKET_SECS - 1) / crate::store::GROWTH_BUCKET_SECS;
     let mut sql =
         String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];

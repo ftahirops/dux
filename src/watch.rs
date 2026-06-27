@@ -479,7 +479,10 @@ fn init_fanotify() -> Result<RawFd> {
 }
 
 fn mark_fs(fan: RawFd, root: &Path) -> Result<()> {
-    let cpath = std::ffi::CString::new(root.as_os_str().to_string_lossy().as_bytes())?;
+    use std::os::unix::ffi::OsStrExt;
+    // raw bytes, not to_string_lossy: a non-UTF-8 mountpoint must be marked at its
+    // real path (matches open_dir/statfs_fsid), or its events are silently lost.
+    let cpath = std::ffi::CString::new(root.as_os_str().as_bytes())?;
     let mask = FAN_CREATE
         | FAN_DELETE
         | FAN_MOVED_FROM

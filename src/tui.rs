@@ -140,9 +140,12 @@ pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Re
         }
     }
 
+    // Arm the restore guard BEFORE touching the terminal: if EnterAlternateScreen
+    // fails after raw mode is enabled, the guard's Drop still disables raw mode
+    // (disable when not raw is a harmless no-op) so the shell isn't left wedged.
+    let _guard = TermGuard;
     enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen)?;
-    let _guard = TermGuard;
     let mut term = Terminal::new(CrosstermBackend::new(stdout()))?;
     let res = event_loop(&mut term, &mut app, store);
     term.show_cursor().ok();
@@ -303,7 +306,9 @@ impl App {
              ORDER BY {order} DESC LIMIT {}",
             CHILD_LIMIT + 1
         );
-        let mut stmt = store.conn.prepare(&sql)?;
+        // prepare_cached: only 2 distinct SQL strings (size vs inode order), so
+        // expanding/refreshing many dirs every cycle reuses the compiled plan.
+        let mut stmt = store.conn.prepare_cached(&sql)?;
         let rows = stmt.query_map(params![dev, inode], |r| {
             let kind: String = r.get(3)?;
             let k = kind.chars().next().unwrap_or('?');
@@ -383,7 +388,10 @@ impl App {
     }
 
     fn toggle(&mut self, store: &Store) -> Result<()> {
-        let r = &self.rows[self.sel];
+        let r = match self.rows.get(self.sel) {
+            Some(r) => r,
+            None => return Ok(()), // defensive: never index an empty/short row list
+        };
         if r.kind != 'd' {
             return Ok(());
         }
@@ -396,7 +404,10 @@ impl App {
 
     /// Move to the parent of the selection and collapse it.
     fn ascend(&mut self, store: &Store) -> Result<()> {
-        let depth = self.rows[self.sel].depth;
+        let depth = match self.rows.get(self.sel) {
+            Some(r) => r.depth,
+            None => return Ok(()),
+        };
         if depth == 0 {
             return Ok(());
         }
@@ -659,22 +670,25 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                 KeyCode::Up | KeyCode::Char('k') => app.sel = app.sel.saturating_sub(1),
                 KeyCode::Enter | KeyCode::Char(' ') => app.toggle(store)?,
                 KeyCode::Right | KeyCode::Char('l') => {
-                    let r = &app.rows[app.sel];
-                    if r.kind == 'd' && !r.expanded {
-                        app.expanded.insert((r.dev, r.inode));
-                        app.rebuild(store)?;
-                    }
-                    if app.sel + 1 < app.rows.len() {
-                        app.sel += 1;
+                    if let Some(r) = app.rows.get(app.sel) {
+                        if r.kind == 'd' && !r.expanded {
+                            app.expanded.insert((r.dev, r.inode));
+                            app.rebuild(store)?;
+                        }
+                        if app.sel + 1 < app.rows.len() {
+                            app.sel += 1;
+                        }
                     }
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
-                    if app.rows[app.sel].expanded {
-                        let id = (app.rows[app.sel].dev, app.rows[app.sel].inode);
-                        app.expanded.remove(&id);
-                        app.rebuild(store)?;
-                    } else {
-                        app.ascend(store)?;
+                    match app.rows.get(app.sel) {
+                        Some(r) if r.expanded => {
+                            let id = (r.dev, r.inode);
+                            app.expanded.remove(&id);
+                            app.rebuild(store)?;
+                        }
+                        Some(_) => app.ascend(store)?,
+                        None => {}
                     }
                 }
                 KeyCode::Char('r') => {
