@@ -61,6 +61,36 @@ the culprit — not just the symptom.**
 
 ---
 
+## New in 0.3.0
+
+**A resource guardian so dux always yields to the host.** dux is a background
+tool — it must never be the thing that takes your server down. The daemon now
+continuously watches host pressure (free RAM, free disk, load average, and
+kernel PSI for memory/io/cpu) and self-throttles:
+
+- **Critical** (low RAM, low disk, high load, or a PSI spike) → it **pauses its
+  own index writes** (keeping pending changes, losing nothing) and hands SQLite's
+  caches back to the OS. `dux status` and the TUI show `WRITES PAUSED (<reason>)`.
+- **Elevated** → it keeps indexing but drops the optional extra work (WAL
+  checkpoint, alert scan) so it adds no load.
+- **Normal** → full speed; it resumes automatically when the host recovers.
+- It also marks itself the **preferred OOM victim** (`oom_score_adj`), so if the
+  kernel ever must reclaim memory it kills dux — never your real workload.
+
+Plus performance work for very large filesystems:
+- Daemon uses `poll(2)` instead of a 50 ms busy-loop — **~0.5 idle wakeups/s**
+  (was ~20/s) and sub-millisecond event latency when active.
+- Deleting a huge directory is now a **set-based** operation (a few SQL
+  statements, not millions of round-trips) — a short transaction even for
+  million-entry trees.
+- TUI columns measure true terminal width, so **CJK/emoji filenames** no longer
+  scatter the tree; full paths are cached per row (no per-keystroke lookups).
+
+(Also rolls up the 0.2.1 / 0.2.2 fixes: seamless live-daemon rescan, rename
+pairing across flush boundaries, and the dirty-state lifecycle.)
+
+---
+
 ## New in 0.2.0
 
 A rebuilt, hardlink-aware index (schema **v4**) and a hardened daemon. New
@@ -103,14 +133,14 @@ first start):
 
 **Debian / Ubuntu** — download the `.deb` from the [latest release](https://github.com/ftahirops/dux/releases/latest):
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.2.0_amd64.deb
-sudo dpkg -i dux_0.2.0_amd64.deb
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.3.0_amd64.deb
+sudo dpkg -i dux_0.3.0_amd64.deb
 ```
 
 **RHEL / Fedora / openSUSE**:
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.2.0-1.x86_64.rpm
-sudo rpm -i dux-0.2.0-1.x86_64.rpm
+curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.3.0-1.x86_64.rpm
+sudo rpm -i dux-0.3.0-1.x86_64.rpm
 ```
 
 Both packages install `/usr/bin/dux` and a systemd unit that builds the index on
