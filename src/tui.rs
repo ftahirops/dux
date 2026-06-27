@@ -187,9 +187,11 @@ pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Re
     };
 
     let mut app = App::new(store, db, dev, inode);
-    app.refresh_growth_map(store); // one sync growth pass so the first frame has heat
+    // First frame = the TREE only (cheap, indexed per-dir queries). The expensive
+    // growth-heat + panels are computed by the background worker and applied when
+    // ready — so the TUI opens INSTANTLY even on a huge, high-churn index instead
+    // of blocking ~30s on the recursive growth query.
     app.init_root(store)?;
-    app.refresh_panels(store)?;
     app.update_detail(store);
 
     // Spawn the background refresh worker — it recomputes the heavy view data off
@@ -346,10 +348,16 @@ impl App {
         }
         let cutoff = (crate::util::now_secs() - 3600) / crate::store::GROWTH_BUCKET_SECS;
         let mut map = std::collections::HashMap::new();
+        // Bound the recursive ancestor walk to the HOTTEST changed inodes. On a
+        // high-churn host (e.g. a busy mail store) the last hour can have hundreds
+        // of thousands of changed inodes; walking every one to the root took tens
+        // of seconds. The heat bar is dominated by the top contributors, so cap
+        // the leaves — the long tail is visually negligible.
         if let Ok(mut stmt) = store.conn.prepare(
             "WITH RECURSIVE
                chg(dev,ino,d) AS (
-                 SELECT dev_id,inode,SUM(delta) FROM growth WHERE bucket>=?1 GROUP BY dev_id,inode
+                 SELECT dev_id,inode,SUM(delta) s FROM growth WHERE bucket>=?1
+                 GROUP BY dev_id,inode ORDER BY s DESC LIMIT 3000
                ),
                anc(dev,ino,d,depth) AS (
                  SELECT dev,ino,d,0 FROM chg
@@ -812,8 +820,10 @@ fn event_loop<B: Backend>(
 
         // Idle: ask the worker to recompute live data periodically. The recompute
         // happens off this thread, so the next keypress is never delayed by it.
+        // ~4s cadence (not 1.2s): on a high-churn index the recompute is not free,
+        // and the worker would otherwise be busy continuously, burning a core.
         if last_input.elapsed() >= Duration::from_millis(250)
-            && last_request.elapsed() >= Duration::from_millis(1200)
+            && last_request.elapsed() >= Duration::from_secs(4)
         {
             request(app, snap_tx);
             last_request = Instant::now();
