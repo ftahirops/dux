@@ -303,6 +303,10 @@ pub fn run_daemon(
                         &mut pending,
                         &mut store,
                     );
+                } else if m < 0
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR)
+                {
+                    continue; // interrupted by another signal — retry, don't abandon the queue
                 } else {
                     break; // EAGAIN/empty (FAN_NONBLOCK) — queue drained
                 }
@@ -322,6 +326,9 @@ pub fn run_daemon(
             }
             tracing::info!("dux daemon: received SIGTERM/SIGINT — drained + flushed, exiting");
             unsafe { libc::close(fan) };
+            for fd in fsfds.values() {
+                unsafe { libc::close(*fd) }; // release the per-filesystem mount fds
+            }
             return Ok(());
         }
         if RESCAN.swap(false, Ordering::SeqCst) {
@@ -679,7 +686,7 @@ fn parse_events(
             seen += 1;
             if let Some((dir, name)) = resolve_record(event, meta.metadata_len as usize, fsfds) {
                 resolved += 1;
-                let full = if name.is_empty() || name == "." {
+                let full = if name.is_empty() || name.as_os_str() == std::ffi::OsStr::new(".") {
                     dir
                 } else {
                     dir.join(&name)
@@ -710,7 +717,7 @@ fn resolve_record(
     event: &[u8],
     meta_len: usize,
     fsfds: &HashMap<(i32, i32), RawFd>,
-) -> Option<(PathBuf, String)> {
+) -> Option<(PathBuf, std::ffi::OsString)> {
     let mut off = meta_len;
     while off + 4 <= event.len() {
         let hdr: InfoHeader =
@@ -728,7 +735,10 @@ fn resolve_record(
     None
 }
 
-fn resolve_handle(payload: &[u8], fsfds: &HashMap<(i32, i32), RawFd>) -> Option<(PathBuf, String)> {
+fn resolve_handle(
+    payload: &[u8],
+    fsfds: &HashMap<(i32, i32), RawFd>,
+) -> Option<(PathBuf, std::ffi::OsString)> {
     if payload.len() < 16 {
         return None;
     }
@@ -758,7 +768,11 @@ fn resolve_handle(payload: &[u8], fsfds: &HashMap<(i32, i32), RawFd>) -> Option<
         .iter()
         .position(|&b| b == 0)
         .unwrap_or(name_bytes.len());
-    let name = String::from_utf8_lossy(&name_bytes[..name_end]).into_owned();
+    // Keep the name as raw bytes (OsString), NOT a lossy UTF-8 String: a filename
+    // with non-UTF-8 bytes would otherwise be mangled into replacement chars and
+    // never match its real dirent, silently dropping the event (permanent drift).
+    use std::os::unix::ffi::OsStrExt;
+    let name = std::ffi::OsStr::from_bytes(&name_bytes[..name_end]).to_owned();
 
     let dfd = unsafe {
         libc::syscall(
@@ -1269,6 +1283,12 @@ fn flush(
     let mut anc: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
     // Renames seen this flush: target inode -> the old (parent_dev,parent_inode,name).
     let mut rename_src: HashMap<(i64, i64), (i64, i64, Vec<u8>)> = HashMap::new();
+    // Deferred FROMs (from a PREVIOUS flush) that got paired with a TO this flush.
+    // Like Phase F's `expired`, these are removed from `deferred` only AFTER a
+    // durable commit, so a tx rollback leaves the map in sync with the un-applied
+    // DB and the pairing retries next flush (idempotent).
+    let mut paired_deferred: std::collections::HashSet<(i64, i64)> =
+        std::collections::HashSet::new();
     // Age carried-over deferred FROMs: anything still here after Phase D had no TO.
     for d in deferred.values_mut() {
         d.age += 1;
@@ -1348,15 +1368,23 @@ fn flush(
 
         // Pair this TO with a FROM from THIS flush, or a FROM deferred from the
         // PREVIOUS flush (rename split across the boundary).
+        // Pair with a same-flush FROM (rename_src, local — safe to consume) or a
+        // FROM deferred from the PREVIOUS flush. Do NOT remove the deferred entry
+        // yet: mutating the persistent map before commit loses the rename if the
+        // tx later rolls back. Just peek; forget it after commit (see paired set).
+        let mut from_deferred = false;
         let old_loc = rename_src.remove(&(dev, ino)).or_else(|| {
-            deferred
-                .remove(&(dev, ino))
-                .map(|d| (d.pdev, d.pino, d.name))
+            deferred.get(&(dev, ino)).map(|d| {
+                from_deferred = true;
+                (d.pdev, d.pino, d.name.clone())
+            })
         });
         if let Some((opdev, opino, oldname)) = old_loc {
             // RENAME of an existing link. Cycle guard: never move a dir under its
             // own subtree (a stale tree could install A→B→A and hang the CTEs).
             if would_cycle(&tx, dev, ino, npdev, npino) {
+                // Leave any deferred FROM in place: the rename didn't apply, so the
+                // old path genuinely left — Phase F expiry will unlink it later.
                 // We can't safely relocate (the index has a corrupt parent chain),
                 // so the rename on disk and the index now disagree. Flag dirty so a
                 // rescan is recommended instead of leaving silent inconsistency.
@@ -1367,6 +1395,11 @@ fn flush(
                     params![now.to_string()],
                 )?;
                 continue;
+            }
+            // The relocation WILL be applied in this tx. If it paired a FROM that
+            // was deferred from a previous flush, mark it to forget AFTER commit.
+            if from_deferred {
+                paired_deferred.insert((dev, ino));
             }
             let prime: i64 = tx
                 .query_row(
@@ -1438,7 +1471,7 @@ fn flush(
     // (idempotent). They're dropped only AFTER a durable commit (B1).
     let expired: Vec<(i64, i64)> = deferred
         .iter()
-        .filter(|(_, d)| d.age >= 1)
+        .filter(|(k, d)| d.age >= 1 && !paired_deferred.contains(k))
         .map(|(k, _)| *k)
         .collect();
     for k in &expired {
@@ -1463,6 +1496,9 @@ fn flush(
     pending.clear();
     for k in &expired {
         deferred.remove(k); // committed — now safe to forget the expired renames
+    }
+    for k in &paired_deferred {
+        deferred.remove(k); // committed — the paired rename is durably applied
     }
     crate::util::write_heartbeat(db);
     // Prune growth history beyond the retention window (configurable via
@@ -1935,6 +1971,25 @@ mod tests {
             dirent_exists(&store, old_ino.0, old_ino.1, b"f.bin"),
             "the subtree (f.bin) must follow the renamed directory"
         );
+        // the paired deferred FROM must be forgotten only AFTER the commit — and it
+        // must indeed be forgotten, else a later flush's Phase F would expire it and
+        // wrongly unlink the just-renamed dir. (Regression guard for the rename
+        // rollback-safety fix: peek-not-remove + post-commit cleanup.)
+        assert!(
+            deferred.is_empty(),
+            "deferred map must be empty after the rename pairs"
+        );
+        let mut p3 = HashMap::new();
+        flush(&mut store, &mut p3, &mut deferred, &db, 7 * 86400).unwrap();
+        assert!(
+            dirent_exists(&store, d.0, d.1, b"new"),
+            "a subsequent (empty) flush must not disturb the renamed dir"
+        );
+        assert!(
+            !dirent_exists(&store, d.0, d.1, b"old"),
+            "old name stays gone across later flushes"
+        );
+
         // a rename is zero-delta: no growth rows written
         let growth_rows: i64 = store
             .conn

@@ -1,6 +1,6 @@
 [package]
 name = "dux"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 description = "Persistent realtime disk usage + file search. du/ncdu/locate/find, but indexed and live."
 license = "MIT"
@@ -24,6 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 humansize = "2"
 unicode-width = "0.2"
+serde_json = "1"
 
 [profile.release]
 opt-level = 3

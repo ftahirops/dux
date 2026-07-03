@@ -209,6 +209,23 @@ impl Store {
         .with_context(|| format!("open ro {}", path.display()))?;
         // WAL readers are fine read-only; set busy timeout so we don't fail under the daemon.
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let ver: i64 = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if ver != SCHEMA_VERSION {
+            anyhow::bail!(
+                "index schema is v{ver} but this dux build needs v{}; \
+                 rebuild it with `dux scan <root>` (or start `dux daemon <root>` \
+                 and let it rebuild automatically). The existing index was left untouched.",
+                SCHEMA_VERSION
+            );
+        }
         Ok(Store { conn })
     }
 
@@ -392,6 +409,9 @@ impl Store {
             }
         }
         parts.reverse();
+        if parts.is_empty() {
+            return Ok(format!("inode:{inode}"));
+        }
         if parts.len() == 1 {
             return Ok(parts.remove(0));
         }
@@ -402,6 +422,53 @@ impl Store {
             Ok(format!("{root}{rest}"))
         } else {
             Ok(format!("{root}/{rest}"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("dux-store-{tag}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn path_of_unresolved_inode_does_not_panic() {
+        let db = tmp("path-of");
+        for s in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+        let store = Store::create_fresh(&db).unwrap();
+        assert_eq!(store.path_of(1, 42).unwrap(), "inode:42");
+        drop(store);
+        for s in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+    }
+
+    #[test]
+    fn open_ro_rejects_incompatible_schema() {
+        let db = tmp("old-schema");
+        for s in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO meta(key,value) VALUES('schema_version','3');",
+            )
+            .unwrap();
+        }
+        let err = match Store::open_ro(&db) {
+            Ok(_) => panic!("old schema should be rejected"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("schema is v3"));
+        for s in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{s}", db.display()));
         }
     }
 }

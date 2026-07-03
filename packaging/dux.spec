@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.4.3
+Version:        0.4.4
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -54,6 +54,28 @@ fi
 exit 0
 
 %changelog
+* Fri Jul 03 2026 dux maintainers <root@localhost> - 0.4.4-1
+- New TUI "Apps/OS Heatmap" panel: groups disk usage by application/OS profile
+  (OS, Docker, nginx, Apache, Postgres, MySQL, Redis, Elasticsearch, Mongo,
+  journald, logs, cache, users), with docker data-root autodetection.
+- Index schema-version guard: an incompatible index is rejected with a clear
+  rebuild hint instead of misreading it; path_of no longer panics on an
+  unresolved inode.
+- Correctness fixes:
+  * find --name with a literal '[' no longer silently returns nothing.
+  * scan terminates on directory cycles (bind mounts / dir hardlinks) instead
+    of looping until OOM; per-directory sizes are now deterministic across runs
+    for cross-directory hardlinks.
+  * daemon: rename pairing is rollback-safe; non-UTF-8 filenames in live events
+    are handled by raw bytes (no dropped deletes / index drift); mount fds are
+    closed and the shutdown drain retries on EINTR.
+  * deleted-open no longer false-positives on files literally named "(deleted)".
+  * parse_size accepts scientific notation; TUI groups panel scrolls its
+    selection into view; manual 'r' refresh no longer blocks the UI on a hung
+    mount; a few smaller guards.
+- Perf: statfs only at mount boundaries during scan (far fewer syscalls on deep
+  trees).
+
 * Sat Jun 27 2026 dux maintainers <root@localhost> - 0.4.3-1
 - O(1) status node count, lower idle TUI CPU, leaner rescan polling, and a
   configurable growth-history retention (--growth-days) to shrink the index on

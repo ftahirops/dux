@@ -305,6 +305,7 @@ fn real_main() -> Result<()> {
             let rows = deleted::deleted_open()?;
             if rows.is_empty() {
                 println!("no deleted-but-open files found (run as root to see all processes)");
+                return Ok(());
             }
             println!(
                 "{:<8} {:<16} {:<8} {:<12} PATH",
@@ -531,10 +532,15 @@ fn print_rows(rows: &[query::Row]) {
 /// Parse sizes like 1G, 500M, 10K, 1024.
 fn parse_size(s: &str) -> Result<i64> {
     let s = s.trim();
-    let (num, unit) = match s.find(|c: char| c.is_alphabetic()) {
-        Some(i) => s.split_at(i),
-        None => (s, ""),
-    };
+    // Split the trailing UNIT letters from the number. Splitting on the FIRST
+    // alpha char mishandles scientific notation ("1e3" would break at the 'e');
+    // instead take the unit as the trailing run of ASCII letters so the number
+    // keeps its exponent.
+    let unit_start = s
+        .rfind(|c: char| !c.is_ascii_alphabetic())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let (num, unit) = s.split_at(unit_start);
     let n: f64 = num
         .trim()
         .parse()
@@ -582,6 +588,12 @@ mod tests {
         assert_eq!(parse_size("1M").unwrap(), 1024 * 1024);
         assert_eq!(parse_size("1G").unwrap(), 1024 * 1024 * 1024);
         assert!(parse_size("1Z").is_err());
+        // scientific notation must not be mis-split at the 'e' (regression: the
+        // old first-alpha split turned "1e3" into num="1", unit="e3" -> error).
+        assert_eq!(parse_size("1e3").unwrap(), 1000);
+        assert_eq!(parse_size("1.5K").unwrap(), 1536);
+        assert_eq!(parse_size("2KiB").unwrap(), 2048);
+        assert!(parse_size("abc").is_err());
     }
 
     // Scan a temp tree and assert: sparse files count 0 blocks, disk usage uses

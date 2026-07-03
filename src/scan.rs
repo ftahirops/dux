@@ -272,21 +272,46 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
             dir_idx.insert(key(n.dev, n.inode), i);
         }
     }
-    let mut seen_file: std::collections::HashSet<i128> =
-        std::collections::HashSet::with_capacity(nodes.len());
     let mut bytes_sub = vec![0i64; nodes.len()];
     let mut inode_sub = vec![0i64; nodes.len()];
     // `primary[i]` = this is the single canonical row/name for its inode (a dir,
-    // or the first-seen link of a file). Only primaries get a node row + FTS
-    // name, so a search never resolves to a different hardlink's path.
+    // or the canonical link of a file). Only primaries get a node row + FTS name,
+    // so a search never resolves to a different hardlink's path.
     let mut primary = vec![false; nodes.len()];
+    // Pick the canonical link per file inode DETERMINISTICALLY. The parallel walk
+    // yields nodes in a nondeterministic order, so "first-seen wins" would
+    // attribute a cross-directory hardlink's blocks to a DIFFERENT directory on
+    // each scan, making per-dir totals flap between runs. Canonical = the link
+    // with the smallest (parent_dev, parent_inode, name).
+    let mut canon: std::collections::HashMap<i128, usize> =
+        std::collections::HashMap::with_capacity(nodes.len());
+    for (i, n) in nodes.iter().enumerate() {
+        if n.kind == 'd' {
+            continue;
+        }
+        let k = key(n.dev, n.inode);
+        match canon.get(&k) {
+            None => {
+                canon.insert(k, i);
+            }
+            Some(&j) => {
+                let a = &nodes[i];
+                let b = &nodes[j];
+                if (a.parent_dev, a.parent_inode, &a.name)
+                    < (b.parent_dev, b.parent_inode, &b.name)
+                {
+                    canon.insert(k, i);
+                }
+            }
+        }
+    }
     for (i, n) in nodes.iter().enumerate() {
         if n.kind == 'd' {
             bytes_sub[i] = n.blocks;
             inode_sub[i] = 1;
             primary[i] = true;
-        } else if seen_file.insert(key(n.dev, n.inode)) {
-            // first link to this inode: count its blocks and the inode once
+        } else if canon.get(&key(n.dev, n.inode)) == Some(&i) {
+            // the single canonical link for this inode: count blocks + inode once
             bytes_sub[i] = n.blocks;
             inode_sub[i] = 1;
             primary[i] = true;
@@ -450,7 +475,21 @@ fn parallel_collect(
     let exclude: Vec<PathBuf> = opts
         .exclude
         .iter()
-        .map(|p| p.canonicalize().unwrap_or_else(|_| p.clone()))
+        .map(|p| {
+            p.canonicalize().unwrap_or_else(|_| {
+                // A nonexistent or relative exclude can't be canonicalized. Still
+                // absolutize it against cwd so it can prefix-match the absolute
+                // entry paths — a raw relative path never would, silently
+                // excluding nothing.
+                if p.is_absolute() {
+                    p.clone()
+                } else {
+                    std::env::current_dir()
+                        .map(|c| c.join(p))
+                        .unwrap_or_else(|_| p.clone())
+                }
+            })
+        })
         .collect();
     let include_pseudo = opts.include_pseudo;
     let one_fs = opts.one_file_system;
@@ -461,6 +500,18 @@ fn parallel_collect(
 
     let threads = scan_threads(opts);
 
+    // Cycle guard: bind mounts / directory hardlinks can make a directory
+    // reachable from WITHIN its own subtree. follow_links(false) stops symlink
+    // loops but not these real path cycles — without a visited set the walk would
+    // recurse forever and exhaust memory. Track already-walked directory
+    // (dev,inode)s and prune on a repeat.
+    let visited: Arc<std::sync::Mutex<std::collections::HashSet<(i64, i64)>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    // For the pseudo-fs check below: normally we only statfs at a mount boundary
+    // (child dev != parent dev), but if the scan root is ITSELF a pseudo fs we
+    // must check every subdir to preserve the "exclude pseudo contents" behavior.
+    let root_pseudo = is_pseudo_fs(root);
+
     {
         let walk = WalkDirGeneric::<((), ())>::new(root)
             .skip_hidden(false)
@@ -469,10 +520,20 @@ fn parallel_collect(
             .process_read_dir(move |_depth, dir_path, _state, children| {
                 // stat the directory once to learn the parent (dev,inode); all of
                 // these children share it. depth is the dir's depth + 1.
-                let (pdev, pino) = match std::fs::symlink_metadata(dir_path) {
-                    Ok(m) => (m.dev() as i64, m.ino() as i64),
-                    Err(_) => (root_dev, root_inode),
-                };
+                let pinfo = std::fs::symlink_metadata(dir_path)
+                    .ok()
+                    .map(|m| (m.dev() as i64, m.ino() as i64));
+                // cycle guard: if this exact directory was already walked, a
+                // bind-mount / dir-hardlink cycle is sending us back through it —
+                // prune so the walk terminates. Only guard on a successful stat so
+                // a stat failure doesn't collide with the root's fallback key.
+                if let Some(id) = pinfo {
+                    if !visited.lock().unwrap().insert(id) {
+                        children.clear();
+                        return;
+                    }
+                }
+                let (pdev, pino) = pinfo.unwrap_or((root_dev, root_inode));
                 let cdepth = dir_path.components().count() as u32 + 1;
                 children.retain(|res| {
                     let entry = match res {
@@ -498,7 +559,16 @@ fn parallel_collect(
                         return false;
                     }
                     let is_dir = m.is_dir();
-                    if is_dir && !include_pseudo && is_pseudo_fs(&path) {
+                    // Only statfs at a MOUNT boundary (child dev != parent dev) —
+                    // pseudo filesystems are always mounts, so this skips a statfs
+                    // syscall on every ordinary subdir (millions on a deep tree)
+                    // with no loss of coverage. `root_pseudo` forces the check when
+                    // the scan root itself is a pseudo fs.
+                    if is_dir
+                        && !include_pseudo
+                        && (dev != pdev || root_pseudo)
+                        && is_pseudo_fs(&path)
+                    {
                         return false;
                     }
                     let blocks = (m.blocks() as i64) * 512;

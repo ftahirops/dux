@@ -52,10 +52,24 @@ pub fn deleted_open() -> Result<Vec<DeletedOpen>> {
             }
             let ino = meta.ino();
             let dev = meta.dev();
+            // Guard against a false positive: a STILL-PRESENT file whose name
+            // literally ends in " (deleted)" produces the identical link text (the
+            // kernel only APPENDS the suffix for truly-unlinked fds, it doesn't add
+            // one here). The disambiguator: for a present file the FULL link target
+            // (`link`, suffix included) is its real path and still resolves to THIS
+            // inode; for a genuine deletion that path no longer exists.
+            if let Ok(m2) = fs::symlink_metadata(&link) {
+                if m2.ino() == ino && m2.dev() == dev {
+                    continue;
+                }
+            }
+            // Strip exactly ONE trailing " (deleted)" (the kernel's suffix), not a
+            // repeated run — a genuinely-deleted file literally named `x (deleted)`
+            // links as `x (deleted) (deleted)` and must display as `x (deleted)`.
+            let clean = s.strip_suffix(" (deleted)").unwrap_or(&s).to_string();
             // report ALLOCATED disk (blocks*512), not apparent size — a sparse
             // deleted file doesn't pin its apparent size on disk.
             let size = (meta.blocks() as i64) * 512;
-            let clean = s.trim_end_matches(" (deleted)").to_string();
             seen.entry((pid, dev, ino)).or_insert(DeletedOpen {
                 pid,
                 process: process.clone(),

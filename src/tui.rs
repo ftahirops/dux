@@ -29,8 +29,35 @@ enum Metric {
 #[derive(Clone, Copy, PartialEq)]
 enum Focus {
     Tree,
+    Groups,
     Growth,
     Files,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Screen {
+    Main,
+    Apps,
+}
+
+#[derive(Clone)]
+struct GroupTarget {
+    path: String,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum GroupView {
+    Top,
+    Detail(&'static str),
+}
+
+#[derive(Clone)]
+struct GroupRow {
+    name: &'static str,
+    size: i64,
+    growth: i64,
+    targets: Vec<GroupTarget>,
+    drill: Option<&'static str>,
 }
 
 /// One visible row in the expandable tree.
@@ -58,6 +85,7 @@ struct App {
     root_inode: i64,
     top_growth: Vec<(String, i64)>,
     top_files: Vec<(String, i64, i64, i64)>, // path, blocks, mtime, recent growth/h
+    groups: Vec<GroupRow>,
     total_size: i64,
     last_scan: i64,
     window_secs: i64,
@@ -65,6 +93,8 @@ struct App {
     metric: Metric,
     root_path: String,
     db: std::path::PathBuf,
+    docker_paths: Vec<String>,
+    group_view: GroupView,
     fs: crate::util::FsStat,
     daemon_live: bool,
     dirty_since: Option<i64>, // Some(epoch) if the index missed events (overflow)
@@ -75,7 +105,9 @@ struct App {
     growth_calc: Instant,
     items: i64,          // total indexed nodes (files + dirs)
     growth_per_day: i64, // extrapolated from the last hour of change log
+    screen: Screen,      // full-screen mode vs normal TUI
     focus: Focus,        // which section the keyboard drives
+    asel: usize,         // selected row in the App/OS groups panel
     gsel: usize,         // selected row in the Fastest-Growth panel
     fsel: usize,         // selected row in the Largest-Files panel
     detail: String,      // full path of the current selection (shown in footer)
@@ -100,6 +132,7 @@ struct RefreshResult {
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     top_growth: Vec<(String, i64)>,
     top_files: Vec<(String, i64, i64, i64)>,
+    groups: Vec<GroupRow>,
     total_size: i64,
     items: i64,
     growth_per_day: i64,
@@ -157,6 +190,7 @@ fn refresh_worker(
             growth_map: shadow.growth_map.clone(),
             top_growth: std::mem::take(&mut shadow.top_growth),
             top_files: std::mem::take(&mut shadow.top_files),
+            groups: std::mem::take(&mut shadow.groups),
             total_size: shadow.total_size,
             items: shadow.items,
             growth_per_day: shadow.growth_per_day,
@@ -271,6 +305,7 @@ impl App {
             root_inode: inode,
             top_growth: Vec::new(),
             top_files: Vec::new(),
+            groups: Vec::new(),
             total_size: 0,
             last_scan: 0,
             window_secs: 3600,
@@ -278,6 +313,8 @@ impl App {
             metric: Metric::Size,
             root_path: store.path_of(dev, inode).unwrap_or_else(|_| "/".into()),
             db: db.to_path_buf(),
+            docker_paths: docker_paths(),
+            group_view: GroupView::Top,
             fs: crate::util::FsStat::default(),
             daemon_live: false,
             dirty_since: None,
@@ -287,7 +324,9 @@ impl App {
             growth_calc: Instant::now() - Duration::from_secs(60),
             items: 0,
             growth_per_day: 0,
+            screen: Screen::Main,
             focus: Focus::Tree,
+            asel: 0,
             gsel: 0,
             fsel: 0,
             detail: String::new(),
@@ -303,6 +342,7 @@ impl App {
         self.growth_map = r.growth_map;
         self.top_growth = r.top_growth;
         self.top_files = r.top_files;
+        self.groups = r.groups;
         self.total_size = r.total_size;
         self.items = r.items;
         self.growth_per_day = r.growth_per_day;
@@ -324,6 +364,7 @@ impl App {
                 self.sel = self.rows.len().saturating_sub(1);
             }
         }
+        self.asel = self.asel.min(self.groups.len().saturating_sub(1));
         self.gsel = self.gsel.min(self.top_growth.len().saturating_sub(1));
         self.fsel = self.fsel.min(self.top_files.len().saturating_sub(1));
     }
@@ -446,6 +487,20 @@ impl App {
             self.sel = self.rows.len().saturating_sub(1);
         }
         Ok(())
+    }
+
+    fn refresh_groups(&mut self, store: &Store) {
+        self.groups = compute_groups(
+            store,
+            &self.root_path,
+            self.root_dev,
+            self.root_inode,
+            self.total_size,
+            &self.docker_paths,
+            self.group_view,
+            &self.growth_map,
+        );
+        self.asel = self.asel.min(self.groups.len().saturating_sub(1));
     }
 
     /// Recursively append a directory's children (and any expanded descendants)
@@ -739,7 +794,9 @@ impl App {
                 )
             })
             .collect();
+        self.refresh_groups(store);
         // keep panel selections in range as panels change
+        self.asel = self.asel.min(self.groups.len().saturating_sub(1));
         self.gsel = self.gsel.min(self.top_growth.len().saturating_sub(1));
         self.fsel = self.fsel.min(self.top_files.len().saturating_sub(1));
         Ok(())
@@ -755,6 +812,11 @@ impl App {
                 .get(self.sel)
                 .map(|r| r.path.clone())
                 .unwrap_or_default(),
+            Focus::Groups => self
+                .groups
+                .get(self.asel)
+                .map(group_detail)
+                .unwrap_or_default(),
             Focus::Growth => self
                 .top_growth
                 .get(self.gsel)
@@ -767,6 +829,669 @@ impl App {
                 .unwrap_or_default(),
         };
     }
+}
+
+struct GroupDef {
+    name: &'static str,
+    paths: &'static [&'static str],
+}
+
+struct AppProfile {
+    id: &'static str,
+    name: &'static str,
+    segments: &'static [GroupDef],
+}
+
+const DOCKER_PATHS: &[&str] = &[
+    "/var/lib/docker",
+    "/var/lib/containerd",
+    "/var/lib/kubelet",
+    "/var/lib/containers",
+    "/var/lib/crio",
+    "/var/snap/docker/common/var-lib-docker",
+];
+const LOG_PATHS: &[&str] = &["/var/log", "/run/log"];
+const APP_PATHS: &[&str] = &[
+    "/var/lib",
+    "/srv",
+    "/opt",
+    "/usr/local",
+    "/var/www",
+    "/var/lib/flatpak",
+    "/var/snap",
+    "/snap",
+];
+const CACHE_PATHS: &[&str] = &["/var/cache", "/tmp", "/var/tmp"];
+const USER_PATHS: &[&str] = &["/home", "/root"];
+
+const OS_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "kernel/boot",
+        paths: &["/boot", "/usr/lib/modules"],
+    },
+    GroupDef {
+        name: "libraries",
+        paths: &["/usr/lib", "/usr/lib64", "/lib", "/lib64"],
+    },
+    GroupDef {
+        name: "binaries",
+        paths: &["/usr/bin", "/usr/sbin", "/bin", "/sbin"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc"],
+    },
+    GroupDef {
+        name: "package db/cache",
+        paths: &["/var/lib/dpkg", "/var/lib/apt", "/var/cache/apt"],
+    },
+    GroupDef {
+        name: "system logs",
+        paths: &[
+            "/var/log/journal",
+            "/run/log/journal",
+            "/var/log/syslog",
+            "/var/log/kern.log",
+        ],
+    },
+];
+
+const DOCKER_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "images/layers",
+        paths: &[
+            "/var/lib/docker/overlay2",
+            "/var/lib/docker/image",
+            "/var/lib/containers/storage/overlay",
+        ],
+    },
+    GroupDef {
+        name: "volumes",
+        paths: &[
+            "/var/lib/docker/volumes",
+            "/var/lib/containers/storage/volumes",
+        ],
+    },
+    GroupDef {
+        name: "container logs",
+        paths: &[
+            "/var/lib/docker/containers",
+            "/var/log/containers",
+            "/var/log/pods",
+        ],
+    },
+    GroupDef {
+        name: "build cache",
+        paths: &["/var/lib/docker/buildkit", "/var/lib/docker/buildx"],
+    },
+    GroupDef {
+        name: "containerd/kubelet",
+        paths: &["/var/lib/containerd", "/var/lib/kubelet", "/var/lib/crio"],
+    },
+    GroupDef {
+        name: "other docker",
+        paths: DOCKER_PATHS,
+    },
+];
+
+const NGINX_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "logs",
+        paths: &["/var/log/nginx"],
+    },
+    GroupDef {
+        name: "web roots",
+        paths: &["/var/www", "/srv/www", "/srv/http"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc/nginx"],
+    },
+    GroupDef {
+        name: "cache",
+        paths: &["/var/cache/nginx"],
+    },
+    GroupDef {
+        name: "runtime/data",
+        paths: &["/var/lib/nginx", "/run/nginx"],
+    },
+    GroupDef {
+        name: "binary",
+        paths: &["/usr/sbin/nginx"],
+    },
+];
+
+const APACHE_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "logs",
+        paths: &["/var/log/apache2", "/var/log/httpd"],
+    },
+    GroupDef {
+        name: "web roots",
+        paths: &["/var/www", "/srv/www", "/srv/http"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc/apache2", "/etc/httpd"],
+    },
+    GroupDef {
+        name: "cache",
+        paths: &["/var/cache/apache2", "/var/cache/httpd"],
+    },
+];
+
+const POSTGRES_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "data",
+        paths: &["/var/lib/postgresql"],
+    },
+    GroupDef {
+        name: "logs",
+        paths: &["/var/log/postgresql"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc/postgresql"],
+    },
+    GroupDef {
+        name: "runtime",
+        paths: &["/run/postgresql"],
+    },
+];
+
+const MYSQL_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "data",
+        paths: &["/var/lib/mysql"],
+    },
+    GroupDef {
+        name: "logs",
+        paths: &["/var/log/mysql", "/var/log/mariadb"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc/mysql", "/etc/my.cnf", "/etc/mysql.conf.d"],
+    },
+    GroupDef {
+        name: "runtime",
+        paths: &["/run/mysqld", "/run/mariadb"],
+    },
+];
+
+const REDIS_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "data",
+        paths: &["/var/lib/redis"],
+    },
+    GroupDef {
+        name: "logs",
+        paths: &["/var/log/redis"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc/redis"],
+    },
+    GroupDef {
+        name: "runtime",
+        paths: &["/run/redis"],
+    },
+];
+
+const ELASTIC_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "data",
+        paths: &["/var/lib/elasticsearch"],
+    },
+    GroupDef {
+        name: "logs",
+        paths: &["/var/log/elasticsearch"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc/elasticsearch"],
+    },
+];
+
+const MONGO_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "data",
+        paths: &["/var/lib/mongodb", "/var/lib/mongo"],
+    },
+    GroupDef {
+        name: "logs",
+        paths: &["/var/log/mongodb", "/var/log/mongo"],
+    },
+    GroupDef {
+        name: "config",
+        paths: &["/etc/mongod.conf", "/etc/mongodb.conf"],
+    },
+];
+
+const JOURNAL_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "persistent",
+        paths: &["/var/log/journal"],
+    },
+    GroupDef {
+        name: "runtime",
+        paths: &["/run/log/journal"],
+    },
+    GroupDef {
+        name: "syslog/kernel",
+        paths: &["/var/log/syslog", "/var/log/kern.log", "/var/log/messages"],
+    },
+];
+
+const TOP_PROFILES: &[AppProfile] = &[
+    AppProfile {
+        id: "os",
+        name: "OS",
+        segments: OS_SEGMENTS,
+    },
+    AppProfile {
+        id: "docker",
+        name: "Docker/Containers",
+        segments: DOCKER_SEGMENTS,
+    },
+    AppProfile {
+        id: "nginx",
+        name: "nginx",
+        segments: NGINX_SEGMENTS,
+    },
+    AppProfile {
+        id: "apache",
+        name: "apache",
+        segments: APACHE_SEGMENTS,
+    },
+    AppProfile {
+        id: "postgres",
+        name: "PostgreSQL",
+        segments: POSTGRES_SEGMENTS,
+    },
+    AppProfile {
+        id: "mysql",
+        name: "MySQL/MariaDB",
+        segments: MYSQL_SEGMENTS,
+    },
+    AppProfile {
+        id: "redis",
+        name: "Redis",
+        segments: REDIS_SEGMENTS,
+    },
+    AppProfile {
+        id: "elastic",
+        name: "Elasticsearch",
+        segments: ELASTIC_SEGMENTS,
+    },
+    AppProfile {
+        id: "mongo",
+        name: "MongoDB",
+        segments: MONGO_SEGMENTS,
+    },
+    AppProfile {
+        id: "journal",
+        name: "system logs",
+        segments: JOURNAL_SEGMENTS,
+    },
+];
+
+const FALLBACK_GROUPS: &[GroupDef] = &[
+    GroupDef {
+        name: "Logs",
+        paths: LOG_PATHS,
+    },
+    GroupDef {
+        name: "App Data",
+        paths: APP_PATHS,
+    },
+    GroupDef {
+        name: "Caches/Temp",
+        paths: CACHE_PATHS,
+    },
+    GroupDef {
+        name: "Users",
+        paths: USER_PATHS,
+    },
+];
+
+fn docker_paths() -> Vec<String> {
+    let mut paths = DOCKER_PATHS
+        .iter()
+        .map(|p| (*p).to_string())
+        .collect::<Vec<_>>();
+    if let Ok(cfg) = std::fs::read_to_string("/etc/docker/daemon.json") {
+        if let Some(root) = parse_docker_data_root(&cfg) {
+            if !paths.iter().any(|p| p == &root) {
+                paths.insert(0, root);
+            }
+        }
+    }
+    paths
+}
+
+fn parse_docker_data_root(cfg: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(cfg).ok()?;
+    let root = v.get("data-root")?.as_str()?;
+    root.starts_with('/').then(|| root.to_string())
+}
+
+#[derive(Clone)]
+struct ResolvedTarget {
+    path: String,
+    cmp_path: String,
+    dev: i64,
+    inode: i64,
+    size: i64,
+    growth: i64,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_groups(
+    store: &Store,
+    root_path: &str,
+    root_dev: i64,
+    root_inode: i64,
+    total_size: i64,
+    docker_paths: &[String],
+    view: GroupView,
+    growth_map: &std::collections::HashMap<(i64, i64), i64>,
+) -> Vec<GroupRow> {
+    let mut assigned: Vec<ResolvedTarget> = Vec::new();
+    let mut groups = Vec::new();
+    let root_cmp_path = canonical_path_string(root_path);
+    let root_growth = growth_map
+        .get(&(root_dev, root_inode))
+        .copied()
+        .unwrap_or(0);
+
+    match view {
+        GroupView::Top => {
+            for profile in TOP_PROFILES {
+                add_profile_group(
+                    store,
+                    &root_cmp_path,
+                    root_dev,
+                    root_inode,
+                    docker_paths,
+                    growth_map,
+                    &mut assigned,
+                    &mut groups,
+                    profile,
+                );
+            }
+            for def in FALLBACK_GROUPS {
+                add_def_group(
+                    store,
+                    &root_cmp_path,
+                    root_dev,
+                    root_inode,
+                    docker_paths,
+                    growth_map,
+                    &mut assigned,
+                    &mut groups,
+                    def,
+                    None,
+                );
+            }
+        }
+        GroupView::Detail(id) => {
+            let Some(profile) = TOP_PROFILES.iter().find(|p| p.id == id) else {
+                return vec![GroupRow {
+                    name: "Other",
+                    size: total_size,
+                    growth: root_growth,
+                    targets: Vec::new(),
+                    drill: None,
+                }];
+            };
+            for def in profile.segments {
+                add_def_group(
+                    store,
+                    &root_cmp_path,
+                    root_dev,
+                    root_inode,
+                    docker_paths,
+                    growth_map,
+                    &mut assigned,
+                    &mut groups,
+                    def,
+                    None,
+                );
+            }
+        }
+    }
+
+    if view == GroupView::Top {
+        let assigned_size: i64 = groups.iter().map(|g| g.size.max(0)).sum();
+        let other_size = total_size.saturating_sub(assigned_size);
+        let assigned_growth: i64 = groups.iter().map(|g| g.growth).sum();
+        let other_growth = root_growth - assigned_growth;
+        if other_size > 0 || other_growth != 0 || groups.is_empty() {
+            groups.push(GroupRow {
+                name: "Other",
+                size: other_size,
+                growth: other_growth,
+                targets: Vec::new(),
+                drill: None,
+            });
+        }
+    }
+
+    groups.sort_by_key(|g| std::cmp::Reverse(g.size.max(0)));
+    groups.truncate(12);
+    groups
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_profile_group(
+    store: &Store,
+    root_cmp_path: &str,
+    root_dev: i64,
+    root_inode: i64,
+    docker_paths: &[String],
+    growth_map: &std::collections::HashMap<(i64, i64), i64>,
+    assigned: &mut Vec<ResolvedTarget>,
+    groups: &mut Vec<GroupRow>,
+    profile: &AppProfile,
+) {
+    let mut row = GroupRow {
+        name: profile.name,
+        size: 0,
+        growth: 0,
+        targets: Vec::new(),
+        drill: Some(profile.id),
+    };
+    for def in profile.segments {
+        add_targets(
+            store,
+            root_cmp_path,
+            root_dev,
+            root_inode,
+            docker_paths,
+            growth_map,
+            assigned,
+            &mut row,
+            def,
+        );
+    }
+    if row.size > 0 || row.growth != 0 {
+        groups.push(row);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_def_group(
+    store: &Store,
+    root_cmp_path: &str,
+    root_dev: i64,
+    root_inode: i64,
+    docker_paths: &[String],
+    growth_map: &std::collections::HashMap<(i64, i64), i64>,
+    assigned: &mut Vec<ResolvedTarget>,
+    groups: &mut Vec<GroupRow>,
+    def: &GroupDef,
+    drill: Option<&'static str>,
+) {
+    let mut row = GroupRow {
+        name: def.name,
+        size: 0,
+        growth: 0,
+        targets: Vec::new(),
+        drill,
+    };
+    add_targets(
+        store,
+        root_cmp_path,
+        root_dev,
+        root_inode,
+        docker_paths,
+        growth_map,
+        assigned,
+        &mut row,
+        def,
+    );
+    if row.size > 0 || row.growth != 0 {
+        groups.push(row);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_targets(
+    store: &Store,
+    root_cmp_path: &str,
+    root_dev: i64,
+    root_inode: i64,
+    docker_paths: &[String],
+    growth_map: &std::collections::HashMap<(i64, i64), i64>,
+    assigned: &mut Vec<ResolvedTarget>,
+    row: &mut GroupRow,
+    def: &GroupDef,
+) {
+    let paths = if def.name == "Docker/Containers" || def.name == "other docker" {
+        docker_paths.to_vec()
+    } else {
+        def.paths.iter().map(|p| (*p).to_string()).collect()
+    };
+    for path in paths {
+        let Some(mut target) = resolve_group_target(
+            store,
+            root_cmp_path,
+            root_dev,
+            root_inode,
+            &path,
+            growth_map,
+        ) else {
+            continue;
+        };
+        let mut covered_by_existing = false;
+        for prev in assigned.iter() {
+            if path_contains(&prev.cmp_path, &target.cmp_path) {
+                covered_by_existing = true;
+                break;
+            }
+            if path_contains(&target.cmp_path, &prev.cmp_path)
+                && (target.dev, target.inode) != (prev.dev, prev.inode)
+            {
+                target.size = target.size.saturating_sub(prev.size);
+                target.growth -= prev.growth;
+            }
+        }
+        if covered_by_existing || (target.size <= 0 && target.growth == 0) {
+            continue;
+        }
+        row.size += target.size;
+        row.growth += target.growth;
+        row.targets.push(GroupTarget {
+            path: target.path.clone(),
+        });
+        assigned.push(target);
+    }
+}
+
+fn resolve_group_target(
+    store: &Store,
+    root_cmp_path: &str,
+    root_dev: i64,
+    root_inode: i64,
+    target_path: &str,
+    growth_map: &std::collections::HashMap<(i64, i64), i64>,
+) -> Option<ResolvedTarget> {
+    let target_cmp_path = canonical_path_string(target_path);
+    // If the TUI is already scoped inside a known category, charge the whole
+    // scoped tree to that category without resolving the ancestor directory.
+    if path_contains(&target_cmp_path, root_cmp_path) {
+        let (size, _) = node_totals(store, root_dev, root_inode)?;
+        return Some(ResolvedTarget {
+            path: target_path.to_string(),
+            cmp_path: target_cmp_path,
+            dev: root_dev,
+            inode: root_inode,
+            size,
+            growth: growth_map
+                .get(&(root_dev, root_inode))
+                .copied()
+                .unwrap_or(0),
+        });
+    }
+    if !path_contains(root_cmp_path, &target_cmp_path) {
+        return None;
+    }
+    let m = std::fs::metadata(target_path).ok()?;
+    use std::os::unix::fs::MetadataExt;
+    let dev = m.dev() as i64;
+    let inode = m.ino() as i64;
+    let (size, _) = node_totals(store, dev, inode)?;
+    Some(ResolvedTarget {
+        path: target_path.to_string(),
+        cmp_path: target_cmp_path,
+        dev,
+        inode,
+        size,
+        growth: growth_map.get(&(dev, inode)).copied().unwrap_or(0),
+    })
+}
+
+fn canonical_path_string(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn node_totals(store: &Store, dev: i64, inode: i64) -> Option<(i64, i64)> {
+    store
+        .conn
+        .query_row(
+            "SELECT CASE WHEN kind='d' THEN recursive_bytes ELSE blocks END,
+                    recursive_inodes
+             FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![dev, inode],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
+}
+
+fn path_contains(parent: &str, child: &str) -> bool {
+    if parent == "/" {
+        return child.starts_with('/');
+    }
+    child == parent
+        || child
+            .strip_prefix(parent)
+            .is_some_and(|s| s.starts_with('/'))
+}
+
+fn group_detail(g: &GroupRow) -> String {
+    if g.targets.is_empty() {
+        return g.name.to_string();
+    }
+    let mut paths = g
+        .targets
+        .iter()
+        .map(|t| t.path.as_str())
+        .collect::<Vec<_>>();
+    paths.sort_unstable();
+    format!("{}: {}", g.name, paths.join(", "))
 }
 
 fn event_loop<B: Backend>(
@@ -816,8 +1541,19 @@ fn event_loop<B: Backend>(
         if event::poll(Duration::from_millis(120))? {
             loop {
                 if let Event::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press && handle_key(app, store, k.code)? {
-                        return Ok(()); // quit
+                    if k.kind == KeyEventKind::Press {
+                        if k.code == KeyCode::Char('r') {
+                            // Manual refresh: rebuild the tree from the DB (cheap,
+                            // no fs I/O) and ask the background WORKER to recompute
+                            // panels off this thread. Refreshing panels inline here
+                            // would block the UI on fs::metadata() of a hung mount
+                            // (autofs/NFS) — even 'q' would stop responding.
+                            app.rebuild(store).ok();
+                            request(app, snap_tx);
+                            last_request = Instant::now();
+                        } else if handle_key(app, store, k.code)? {
+                            return Ok(()); // quit
+                        }
                     }
                 }
                 if !event::poll(Duration::from_millis(0))? {
@@ -847,9 +1583,28 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
     // Global keys
     match code {
         KeyCode::Char('q') => return Ok(true),
+        KeyCode::Char('a') => {
+            app.screen = if app.screen == Screen::Apps {
+                Screen::Main
+            } else {
+                app.focus = Focus::Groups;
+                Screen::Apps
+            };
+            app.update_detail(store);
+            return Ok(false);
+        }
+        KeyCode::Esc if app.screen == Screen::Apps => {
+            app.screen = Screen::Main;
+            app.update_detail(store);
+            return Ok(false);
+        }
         KeyCode::Tab => {
+            if app.screen == Screen::Apps {
+                return Ok(false);
+            }
             app.focus = match app.focus {
-                Focus::Tree => Focus::Growth,
+                Focus::Tree => Focus::Groups,
+                Focus::Groups => Focus::Growth,
                 Focus::Growth => Focus::Files,
                 Focus::Files => Focus::Tree,
             };
@@ -859,24 +1614,60 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
         _ => {}
     }
 
+    if app.screen == Screen::Apps {
+        match code {
+            KeyCode::Down | KeyCode::Char('j') if app.asel + 1 < app.groups.len() => app.asel += 1,
+            KeyCode::Up | KeyCode::Char('k') => app.asel = app.asel.saturating_sub(1),
+            KeyCode::Home | KeyCode::Char('g') => app.asel = 0,
+            KeyCode::End | KeyCode::Char('G') => app.asel = app.groups.len().saturating_sub(1),
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                if let Some(id) = app.groups.get(app.asel).and_then(|g| g.drill) {
+                    app.group_view = GroupView::Detail(id);
+                    app.asel = 0;
+                    app.refresh_groups(store);
+                }
+            }
+            KeyCode::Left | KeyCode::Char('h') if app.group_view != GroupView::Top => {
+                app.group_view = GroupView::Top;
+                app.asel = 0;
+                app.refresh_groups(store);
+            }
+            _ => {}
+        }
+        app.update_detail(store);
+        return Ok(false);
+    }
+
     match app.focus {
         // ---- panels: ↑↓ select; the footer shows the full path ----
-        Focus::Growth | Focus::Files => {
-            let len = if app.focus == Focus::Growth {
-                app.top_growth.len()
-            } else {
-                app.top_files.len()
-            };
-            let sel = if app.focus == Focus::Growth {
-                &mut app.gsel
-            } else {
-                &mut app.fsel
+        Focus::Groups | Focus::Growth | Focus::Files => {
+            let (len, sel) = match app.focus {
+                Focus::Groups => (app.groups.len(), &mut app.asel),
+                Focus::Growth => (app.top_growth.len(), &mut app.gsel),
+                Focus::Files => (app.top_files.len(), &mut app.fsel),
+                Focus::Tree => unreachable!(),
             };
             match code {
                 KeyCode::Down | KeyCode::Char('j') if *sel + 1 < len => *sel += 1,
                 KeyCode::Up | KeyCode::Char('k') => *sel = sel.saturating_sub(1),
                 KeyCode::Home | KeyCode::Char('g') => *sel = 0,
                 KeyCode::End | KeyCode::Char('G') => *sel = len.saturating_sub(1),
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l')
+                    if app.focus == Focus::Groups =>
+                {
+                    if let Some(id) = app.groups.get(app.asel).and_then(|g| g.drill) {
+                        app.group_view = GroupView::Detail(id);
+                        app.asel = 0;
+                        app.refresh_groups(store);
+                    }
+                }
+                KeyCode::Left | KeyCode::Esc | KeyCode::Char('h')
+                    if app.focus == Focus::Groups && app.group_view != GroupView::Top =>
+                {
+                    app.group_view = GroupView::Top;
+                    app.asel = 0;
+                    app.refresh_groups(store);
+                }
                 _ => {}
             }
             app.update_detail(store);
@@ -909,10 +1700,8 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                     Some(_) => app.ascend(store)?,
                     None => {}
                 },
-                KeyCode::Char('r') => {
-                    app.refresh_panels(store).ok();
-                    app.rebuild(store).ok();
-                }
+                // 'r' (manual refresh) is handled in the event loop, which owns
+                // the worker channel, so the panel recompute stays off this thread.
                 KeyCode::Char('i') => {
                     app.metric = if app.metric == Metric::Size {
                         Metric::Inodes
@@ -957,7 +1746,7 @@ fn rate_str(per_h: i64) -> String {
         return "stable".to_string();
     }
     let arrow = if per_h > 0 { '▲' } else { '▼' };
-    let a = per_h.abs();
+    let a = per_h.saturating_abs(); // saturating: plain abs() panics on i64::MIN
     const MIB: i64 = 1024 * 1024;
     if a >= MIB {
         format!("{arrow}{}/h", human(a))
@@ -1054,7 +1843,174 @@ fn short(p: &str, max: usize) -> String {
     format!("…{tail}")
 }
 
+fn group_view_total(app: &App) -> i64 {
+    if app.group_view == GroupView::Top {
+        app.total_size
+    } else {
+        app.groups.iter().map(|g| g.size.max(0)).sum()
+    }
+}
+
+fn draw_apps(f: &mut Frame, app: &mut App) {
+    let area = f.area();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(8),
+            Constraint::Length(5),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+    let title = match app.group_view {
+        GroupView::Top => "Apps/OS Distribution",
+        GroupView::Detail(id) => TOP_PROFILES
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.name)
+            .unwrap_or("Details"),
+    };
+    let header = vec![
+        Line::from(vec![
+            Span::styled(
+                " dux ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("   {}", app.root_path),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "Size       Share  Distribution                         Growth       Name",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    f.render_widget(Paragraph::new(header), rows[0]);
+
+    let total = group_view_total(app).max(1);
+    let max_group = app
+        .groups
+        .iter()
+        .map(|g| g.size.max(0))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let body_h = rows[1].height.saturating_sub(2) as usize;
+    let start = app.asel.saturating_sub(body_h.saturating_sub(1));
+    let end = (start + body_h).min(app.groups.len());
+    let mut lines = Vec::new();
+    for (idx, g) in app.groups.iter().enumerate().take(end).skip(start) {
+        let share = g.size.max(0) as f64 / total as f64 * 100.0;
+        let ratio = g.size.max(0) as f64 / max_group as f64;
+        let mut line = Line::from(vec![
+            Span::styled(
+                format!("{} ", fixw(&human(g.size.max(0)), 10, true)),
+                Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:>5.1}% ", share),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(
+                format!("{} ", bar(ratio, 36)),
+                Style::default().fg(SIZE_COLOR),
+            ),
+            Span::styled(
+                format!("{} ", fixw(&rate_str(g.growth), 12, false)),
+                Style::default().fg(RATE_COLOR),
+            ),
+            Span::styled(
+                if g.drill.is_some() {
+                    format!("{} >", g.name)
+                } else {
+                    g.name.to_string()
+                },
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        if idx == app.asel {
+            line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
+        }
+        lines.push(line);
+    }
+    f.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(focus_style(true))
+                .title(Span::styled(
+                    " Distribution ",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        rows[1],
+    );
+
+    let detail = app
+        .groups
+        .get(app.asel)
+        .map(group_detail)
+        .unwrap_or_default();
+    let selected = app
+        .groups
+        .get(app.asel)
+        .map(|g| {
+            format!(
+                "{}  {}  {}",
+                g.name,
+                human(g.size.max(0)),
+                rate_str(g.growth)
+            )
+        })
+        .unwrap_or_default();
+    let details = vec![
+        Line::from(Span::styled(
+            selected,
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::raw(short(
+            &detail,
+            rows[2].width.saturating_sub(4) as usize,
+        ))),
+    ];
+    f.render_widget(
+        Paragraph::new(details).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray))
+                .title(" Paths "),
+        ),
+        rows[2],
+    );
+
+    let legend = if app.group_view == GroupView::Top {
+        " a close · ↑↓ move · Enter/→ drill down · q quit"
+    } else {
+        " a close · ←/Esc back · ↑↓ move · q quit"
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            legend,
+            Style::default().fg(Color::DarkGray),
+        ))),
+        rows[3],
+    );
+}
+
 fn draw(f: &mut Frame, app: &mut App) {
+    if app.screen == Screen::Apps {
+        draw_apps(f, app);
+        return;
+    }
     let area = f.area();
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -1179,8 +2135,88 @@ fn draw(f: &mut Frame, app: &mut App) {
     // top panels
     let top = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
         .split(rows[3]);
+    let max_group = app
+        .groups
+        .iter()
+        .map(|g| g.size.max(0))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let group_total = group_view_total(app);
+    let group_title = match app.group_view {
+        GroupView::Top => " Apps/OS Heatmap ",
+        GroupView::Detail(id) => TOP_PROFILES
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.name)
+            .unwrap_or("Details"),
+    };
+    // The panel shows only `gvis` inner rows but compute_groups can return up to
+    // 12 groups. Scroll the window so the selected row is always visible instead
+    // of moving an invisible cursor off the bottom edge.
+    let gvis = (top[0].height as usize).saturating_sub(2).max(1);
+    let gstart = if app.asel >= gvis {
+        app.asel + 1 - gvis
+    } else {
+        0
+    };
+    let group_items: Vec<Line> = app
+        .groups
+        .iter()
+        .enumerate()
+        .skip(gstart)
+        .take(gvis)
+        .map(|(idx, g)| {
+            let ratio = g.size.max(0) as f64 / max_group as f64;
+            let pct = if group_total > 0 {
+                g.size.max(0) as f64 / group_total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let mut line = Line::from(vec![
+                Span::styled(
+                    format!(" {} ", fixw(&human(g.size.max(0)), 8, true)),
+                    Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:>4.0}% ", pct),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} ", bar(ratio, 8)),
+                    Style::default().fg(SIZE_COLOR),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(&rate_str(g.growth), 10, false)),
+                    Style::default().fg(RATE_COLOR),
+                ),
+                Span::raw(short(g.name, 18)),
+            ]);
+            if app.focus == Focus::Groups && idx == app.asel {
+                line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
+            }
+            line
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(group_items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(focus_style(app.focus == Focus::Groups))
+                .title(Span::styled(
+                    format!(" {group_title} "),
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        top[0],
+    );
     let growth_items: Vec<Line> = if app.top_growth.is_empty() {
         vec![Line::from(Span::styled(
             "  (no growth yet — run the daemon)",
@@ -1216,7 +2252,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 )),
         ),
-        top[0],
+        top[1],
     );
     let file_items: Vec<Line> = app
         .top_files
@@ -1254,7 +2290,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 )),
         ),
-        top[1],
+        top[2],
     );
 
     // tree body
@@ -1363,7 +2399,7 @@ fn draw(f: &mut Frame, app: &mut App) {
     // footer: compact key legend + the FULL path of the current selection
     // (long/truncated panel names are always fully readable here).
     let foot = rows[4];
-    let legend = " Tab section · ↑↓ move · →/⏎ expand · i size⇄inodes · q quit │ ";
+    let legend = " a apps · Tab section · ↑↓ move · →/⏎ expand · i size⇄inodes · q quit │ ";
     // measure in terminal COLUMNS (display width), and truncate via the same
     // width-aware helper as the tree, so a CJK/emoji path can't overflow the line.
     let avail = (foot.width as usize).saturating_sub(display_width(legend) + 1);
@@ -1482,6 +2518,7 @@ mod tests {
             growth_map: std::collections::HashMap::new(),
             top_growth: Vec::new(),
             top_files: Vec::new(),
+            groups: Vec::new(),
             total_size: total,
             items: 0,
             growth_per_day: 0,
@@ -1508,6 +2545,7 @@ mod tests {
             root_inode: 1,
             top_growth: Vec::new(),
             top_files: Vec::new(),
+            groups: Vec::new(),
             total_size: 0,
             last_scan: 0,
             window_secs: 3600,
@@ -1515,6 +2553,8 @@ mod tests {
             metric: Metric::Size,
             root_path: "/".into(),
             db,
+            docker_paths: Vec::new(),
+            group_view: GroupView::Top,
             fs: crate::util::FsStat::default(),
             daemon_live: false,
             dirty_since: None,
@@ -1524,7 +2564,9 @@ mod tests {
             growth_calc: Instant::now(),
             items: 0,
             growth_per_day: 0,
+            screen: Screen::Main,
             focus: Focus::Tree,
+            asel: 0,
             gsel: 0,
             fsel: 0,
             detail: String::new(),
@@ -1544,5 +2586,45 @@ mod tests {
         app.apply_refresh(result(4, vec![mkrow(7, 7)], 222));
         assert_eq!(app.rows.len(), 3, "stale gen must NOT replace rows");
         assert_eq!(app.total_size, 222, "panels/total apply regardless of gen");
+    }
+
+    #[test]
+    fn parses_docker_data_root() {
+        assert_eq!(
+            parse_docker_data_root(r#"{ "debug": true, "data-root": "/mnt/docker-data" }"#)
+                .as_deref(),
+            Some("/mnt/docker-data")
+        );
+        assert_eq!(
+            parse_docker_data_root("{\"data-root\":\"/mnt/docker\\u002ddata\"}").as_deref(),
+            Some("/mnt/docker-data")
+        );
+        assert_eq!(
+            parse_docker_data_root(r#"{ "data-root": "relative/path" }"#),
+            None
+        );
+        assert_eq!(parse_docker_data_root(r#"{ "data-root": 42 }"#), None);
+        assert_eq!(parse_docker_data_root(r#"{ "log-level": "warn" }"#), None);
+    }
+
+    #[test]
+    fn path_contains_is_component_aware() {
+        assert!(path_contains("/var/lib", "/var/lib/docker"));
+        assert!(path_contains("/var/lib", "/var/lib"));
+        assert!(!path_contains("/var/lib", "/var/lib2"));
+        assert!(path_contains("/", "/var/lib"));
+    }
+
+    #[test]
+    fn app_profiles_expose_drillable_segments() {
+        let nginx = TOP_PROFILES.iter().find(|p| p.id == "nginx").unwrap();
+        assert!(nginx.segments.iter().any(|s| s.name == "logs"));
+        assert!(nginx.segments.iter().any(|s| s.name == "config"));
+        assert!(nginx.segments.iter().any(|s| s.name == "web roots"));
+
+        let os = TOP_PROFILES.iter().find(|p| p.id == "os").unwrap();
+        assert!(os.segments.iter().any(|s| s.name == "kernel/boot"));
+        assert!(os.segments.iter().any(|s| s.name == "libraries"));
+        assert!(os.segments.iter().any(|s| s.name == "package db/cache"));
     }
 }

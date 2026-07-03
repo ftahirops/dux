@@ -176,9 +176,13 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
         // GLOB natively supports * and ?; the trigram FTS accelerates it. The
         // external-content FTS shares dirents.rowid, so we match on rowid.
         let pat = if n.contains('*') || n.contains('?') {
-            n.clone()
+            n.clone() // user typed a glob — honor their * and ? (and [ ] classes)
         } else {
-            format!("*{n}*") // bare term => substring match
+            // bare term => substring match. Escape GLOB metacharacters (`*`, `?`,
+            // `[`) so a literal name like `report[final]` matches the real file
+            // instead of being read as an unterminated character class — which
+            // GLOB silently matches against nothing. Mirrors the `--ext` path.
+            format!("*{}*", glob_escape(n))
         };
         sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
         args.push(Box::new(pat));
