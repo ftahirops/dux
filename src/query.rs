@@ -372,6 +372,169 @@ pub fn by_ext(store: &Store, limit: usize) -> Result<Vec<ExtRow>> {
     Ok(v)
 }
 
+/// Net change per path within a window (`dux diff`), ranked by MAGNITUDE so the
+/// biggest fills AND the biggest frees both surface — the "what changed the disk"
+/// question. Same bucketed-growth source as `growth`, but signed and abs-ordered.
+pub fn changed(
+    store: &Store,
+    since_secs: i64,
+    limit: usize,
+    scope: Option<(i64, i64)>,
+) -> Result<Vec<GrowthRow>> {
+    let cutoff = (now_secs() - since_secs + crate::store::GROWTH_BUCKET_SECS - 1)
+        / crate::store::GROWTH_BUCKET_SECS;
+    let mut sql =
+        String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];
+    if let Some((d, i)) = scope {
+        sql.push_str(&scope_predicate());
+        args.push(Box::new(d));
+        args.push(Box::new(i));
+    }
+    // abs(d) DESC: rank by magnitude of change, sign preserved in the value.
+    sql.push_str(" GROUP BY dev_id, inode HAVING d != 0 ORDER BY abs(d) DESC LIMIT ?");
+    args.push(Box::new(lim(limit)));
+    let mut stmt = store.conn.prepare(&sql)?;
+    let pref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
+    let rows = stmt.query_map(pref.as_slice(), |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+    })?;
+    let mut out = Vec::new();
+    let mut pr = PathResolver::new(&store.conn);
+    for row in rows {
+        let (dev, inode, delta) = row?;
+        out.push(GrowthRow {
+            path: pr.resolve(dev, inode),
+            delta,
+        });
+    }
+    Ok(out)
+}
+
+/// (indexed node count, indexed bytes) — the root's recursive totals, or a
+/// whole-table fallback when the root marker is missing. Shared by status/metrics.
+pub fn index_totals(store: &Store) -> (i64, i64) {
+    let rd: Option<i64> = store
+        .get_meta("root_dev")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    let ri: Option<i64> = store
+        .get_meta("root_inode")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    if let (Some(d), Some(i)) = (rd, ri) {
+        if let Ok(t) = store.conn.query_row(
+            "SELECT recursive_inodes, recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![d, i],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ) {
+            return t;
+        }
+    }
+    let count = store
+        .conn
+        .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
+        .unwrap_or(0);
+    let bytes = store
+        .conn
+        .query_row(
+            "SELECT recursive_bytes FROM inodes WHERE kind='d' ORDER BY recursive_bytes DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    (count, bytes)
+}
+
+pub struct DuRow {
+    pub path: String,
+    pub bytes: i64, // allocated (blocks*512) — matches `du` default, not apparent
+    pub is_dir: bool,
+    pub mtime: i64,
+}
+
+/// `du`-equivalent listing from the index: every directory in the subtree (and
+/// files too when `all`) with its allocated size. Directories carry their
+/// recursive total; files their own blocks — exactly what `du` reports.
+pub fn du(store: &Store, scope: Option<(i64, i64)>, all: bool) -> Result<Vec<DuRow>> {
+    // Resolve the subtree root: explicit scope, else the index root marker.
+    let root = match scope {
+        Some(x) => Some(x),
+        None => {
+            let rd: Option<i64> = store
+                .get_meta("root_dev")?
+                .and_then(|s| s.parse().ok());
+            let ri: Option<i64> = store
+                .get_meta("root_inode")?
+                .and_then(|s| s.parse().ok());
+            rd.zip(ri)
+        }
+    };
+    let kind_filter = if all { "" } else { " AND kind='d'" };
+    let (sql, use_scope) = match root {
+        Some(_) => (
+            format!(
+                "SELECT dev_id, inode, kind, recursive_bytes, blocks, mtime FROM inodes
+                 WHERE (dev_id,inode) IN ({SUBTREE_CTE}){kind_filter}"
+            ),
+            true,
+        ),
+        None => (
+            format!(
+                "SELECT dev_id, inode, kind, recursive_bytes, blocks, mtime FROM inodes
+                 WHERE 1=1{kind_filter}"
+            ),
+            false,
+        ),
+    };
+    let mut stmt = store.conn.prepare(&sql)?;
+    let mut pr = PathResolver::new(&store.conn);
+    let map = |r: &rusqlite::Row| -> rusqlite::Result<(i64, i64, String, i64, i64, i64)> {
+        Ok((
+            r.get(0)?,
+            r.get(1)?,
+            r.get::<_, String>(2)?,
+            r.get(3)?,
+            r.get(4)?,
+            r.get(5)?,
+        ))
+    };
+    let collected: Vec<(i64, i64, String, i64, i64, i64)> = if use_scope {
+        let (d, i) = root.unwrap();
+        stmt.query_map(params![d, i], map)?
+            .collect::<std::result::Result<_, _>>()?
+    } else {
+        stmt.query_map([], map)?
+            .collect::<std::result::Result<_, _>>()?
+    };
+    let mut out = Vec::with_capacity(collected.len());
+    for (dev, inode, kind, rbytes, blocks, mtime) in collected {
+        let is_dir = kind == "d";
+        out.push(DuRow {
+            path: pr.resolve(dev, inode),
+            bytes: if is_dir { rbytes } else { blocks },
+            is_dir,
+            mtime,
+        });
+    }
+    Ok(out)
+}
+
+/// Sum of allocated bytes of the subtree rooted at (dev,inode) — used to size a
+/// container's writable layer / volume from paths, without re-walking the fs.
+pub fn subtree_bytes(store: &Store, dev: i64, inode: i64) -> i64 {
+    store
+        .conn
+        .query_row(
+            "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![dev, inode],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+}
+
 /// Index status summary.
 pub fn status(store: &Store, db: &Path) -> Result<String> {
     let root = store.get_meta("last_scan_root")?.unwrap_or_default();

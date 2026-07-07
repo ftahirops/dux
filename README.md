@@ -178,9 +178,34 @@ dux top /var --dirs       # biggest directories
 dux top --inodes          # dirs with the MOST files (inode exhaustion)
 dux find /home --name '*.log' --larger 1G
 dux growth /data --since 1h
+dux diff --since 8h       # what FILLED (or freed) the disk in the last 8h
+dux du -sh /var/log       # byte-exact du, but instant (no re-walk)
+dux containers            # disk usage per Docker/Podman container
 dux deleted-open          # space held by deleted-but-open files
 dux status                # capacity + index freshness
 ```
+
+### Automate & integrate (SRE/DevOps)
+
+```bash
+# JSON on every read command → pipe to jq / dashboards
+dux top --dirs --json | jq '.[] | {path, bytes}'
+
+# Prometheus metrics for the node_exporter textfile collector
+dux metrics > /var/lib/node_exporter/textfile_collector/dux.prom
+#   exposes dux_fs_bytes_used, dux_index_bytes, dux_daemon_up,
+#   dux_last_scan_timestamp_seconds, and dux_path_bytes{path=...}
+
+# "what changed the disk overnight?" (needs the daemon running for history)
+dux diff --since 12h
+
+# per-container writable-layer / log / volume usage (Docker & Podman;
+# works with the classic overlay2 driver AND the containerd snapshotter)
+dux containers --json
+```
+
+All read commands accept `--json`; every query above is served from the index
+(no filesystem re-walk), so it stays instant and adds no daemon overhead.
 
 ### Run it live (systemd)
 

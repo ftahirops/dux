@@ -1,4 +1,6 @@
+mod containers;
 mod deleted;
+mod emit;
 mod guard;
 mod query;
 mod scan;
@@ -24,6 +26,10 @@ struct Cli {
     /// Override index DB path
     #[arg(long, global = true)]
     db: Option<PathBuf>,
+
+    /// Emit machine-readable JSON instead of a table (read commands).
+    #[arg(long, global = true)]
+    json: bool,
 
     #[command(subcommand)]
     cmd: Option<Cmd>,
@@ -99,6 +105,49 @@ enum Cmd {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// What changed the disk within a window (net growth AND frees), ranked by
+    /// magnitude — the "what filled/freed the disk?" query.
+    #[command(alias = "since")]
+    Diff {
+        /// Restrict to this path subtree (default: whole index)
+        path: Option<PathBuf>,
+        /// Window to compare over, e.g. 1h, 8h, 24h
+        #[arg(long, default_value = "24h")]
+        since: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// du-compatible disk usage from the index (fast, no re-walk)
+    Du {
+        /// Path to summarize (default: whole index)
+        path: Option<PathBuf>,
+        /// Display only a total for the path (du -s)
+        #[arg(short = 's', long)]
+        summarize: bool,
+        /// Include files, not just directories (du -a)
+        #[arg(short = 'a', long)]
+        all: bool,
+        /// Human-readable sizes (du -h)
+        #[arg(short = 'h', long)]
+        human: bool,
+        /// Size in megabytes (du -m). Default unit is 1 KiB blocks (du/-k).
+        #[arg(short = 'm', long = "megabytes")]
+        megabytes: bool,
+        /// Only show entries up to N levels below the path (du --max-depth=N)
+        #[arg(long)]
+        max_depth: Option<usize>,
+    },
+    /// Prometheus text-exposition metrics (for the node_exporter textfile collector)
+    Metrics {
+        /// Include the top-N largest directories as dux_path_bytes series
+        #[arg(long, default_value_t = 20)]
+        top: usize,
+    },
+    /// Disk usage by container (Docker/Podman): writable layer, logs, volumes
+    Containers {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
     /// Deleted-but-open files still consuming disk
     DeletedOpen,
     /// Disk usage by owner
@@ -166,6 +215,7 @@ fn real_main() -> Result<()> {
         Some(p) => p.clone(),
         None => util::db_path()?,
     };
+    let json = cli.json;
 
     match cli.cmd {
         Some(Cmd::Scan {
@@ -237,7 +287,9 @@ fn real_main() -> Result<()> {
             };
             let want_dirs = dirs || !files; // default: dirs
             let rows = query::top(&store, want_dirs, limit, scope, inodes)?;
-            if inodes {
+            if json {
+                emit::rows(&rows);
+            } else if inodes {
                 println!("{:<12} {:<6} PATH", "INODES", "AGE");
                 for r in &rows {
                     let suffix = if r.kind == 'd' && !r.path.ends_with('/') {
@@ -281,7 +333,11 @@ fn real_main() -> Result<()> {
                 scope,
             };
             let rows = query::find(&store, &o)?;
-            print_rows(&rows);
+            if json {
+                emit::rows(&rows);
+            } else {
+                print_rows(&rows);
+            }
         }
         Some(Cmd::Growth { path, since, limit }) => {
             let store = Store::open_ro(&db)?;
@@ -291,6 +347,10 @@ fn real_main() -> Result<()> {
             };
             let secs = util::parse_duration(&since)?;
             let rows = query::growth(&store, secs, limit, scope)?;
+            if json {
+                emit::growth(&rows);
+                return Ok(());
+            }
             println!("{:<14} PATH", "GROWTH");
             for r in rows {
                 let sign = if r.delta >= 0 { "+" } else { "-" };
@@ -303,6 +363,10 @@ fn real_main() -> Result<()> {
         }
         Some(Cmd::DeletedOpen) => {
             let rows = deleted::deleted_open()?;
+            if json {
+                emit::deleted_open(&rows);
+                return Ok(());
+            }
             if rows.is_empty() {
                 println!("no deleted-but-open files found (run as root to see all processes)");
                 return Ok(());
@@ -324,20 +388,144 @@ fn real_main() -> Result<()> {
         }
         Some(Cmd::ByOwner { limit }) => {
             let store = Store::open_ro(&db)?;
+            let rows = query::by_owner(&store, limit)?;
+            if json {
+                emit::owners(&rows);
+                return Ok(());
+            }
             println!("{:<10} {:<12} FILES", "UID", "SIZE");
-            for r in query::by_owner(&store, limit)? {
+            for r in rows {
                 println!("{:<10} {:<12} {}", r.uid, human(r.bytes), r.files);
             }
         }
         Some(Cmd::ByExt { limit }) => {
             let store = Store::open_ro(&db)?;
+            let exts = query::by_ext(&store, limit)?;
+            if json {
+                emit::exts(&exts);
+                return Ok(());
+            }
             println!("{:<14} {:<12} FILES", "EXT", "SIZE");
-            for r in query::by_ext(&store, limit)? {
+            for r in exts {
                 println!(
                     "{:<14} {:<12} {}",
                     util::display_path(&r.ext),
                     human(r.bytes),
                     r.files
+                );
+            }
+        }
+        Some(Cmd::Diff { path, since, limit }) => {
+            let store = Store::open_ro(&db)?;
+            let scope = match path {
+                Some(p) => query::resolve_scope(&store, &p)?,
+                None => None,
+            };
+            let secs = util::parse_duration(&since)?;
+            let rows = query::changed(&store, secs, limit, scope)?;
+            if json {
+                emit::growth(&rows);
+                return Ok(());
+            }
+            if rows.is_empty() {
+                println!("no changes recorded in that window (needs a running daemon for history)");
+                return Ok(());
+            }
+            println!("{:<14} PATH", "CHANGE");
+            for r in rows {
+                let sign = if r.delta >= 0 { "+" } else { "-" };
+                println!(
+                    "{:<14} {}",
+                    format!("{sign}{}", human(r.delta.abs())),
+                    util::display_path(&r.path)
+                );
+            }
+        }
+        Some(Cmd::Du {
+            path,
+            summarize,
+            all,
+            human: h,
+            megabytes,
+            max_depth,
+        }) => {
+            let store = Store::open_ro(&db)?;
+            let scope = match &path {
+                Some(p) => query::resolve_scope(&store, p)?,
+                None => None,
+            };
+            // du size formatting: default 1 KiB blocks (rounded up, like du/-k),
+            // -m megabytes (rounded up), -h human. All from ALLOCATED bytes.
+            let fmt = |b: i64| -> String {
+                if h {
+                    human(b)
+                } else if megabytes {
+                    format!("{}", (b + (1 << 20) - 1) / (1 << 20))
+                } else {
+                    format!("{}", (b + 1023) / 1024)
+                }
+            };
+            let mut rows = query::du(&store, scope, all)?;
+            // du order: a directory prints AFTER its descendants (post-order); a
+            // reverse-lexicographic sort puts deeper paths first and the root last.
+            rows.sort_by(|a, b| b.path.cmp(&a.path));
+            // depth relative to the deepest common root (the queried path's root):
+            // the shortest path in the set is the subtree root.
+            let root_depth = rows
+                .iter()
+                .map(|r| r.path.trim_end_matches('/').matches('/').count())
+                .min()
+                .unwrap_or(0);
+            if summarize || max_depth.is_some() {
+                let maxd = if summarize { Some(0) } else { max_depth };
+                if let Some(md) = maxd {
+                    rows.retain(|r| {
+                        r.path.trim_end_matches('/').matches('/').count() - root_depth <= md
+                    });
+                }
+            }
+            if json {
+                emit::du(&rows);
+                return Ok(());
+            }
+            for r in &rows {
+                // du format: SIZE<TAB>PATH
+                println!("{}\t{}", fmt(r.bytes), util::display_path(&r.path));
+            }
+        }
+        Some(Cmd::Metrics { top }) => {
+            let store = Store::open_ro(&db)?;
+            print!("{}", metrics_text(&store, &db, top)?);
+        }
+        Some(Cmd::Containers { limit }) => {
+            let store = Store::open_ro(&db)?;
+            let mut rows = containers::list(&store)?;
+            rows.truncate(limit);
+            if json {
+                emit::containers(&rows);
+                return Ok(());
+            }
+            if rows.is_empty() {
+                println!(
+                    "no containers found — Docker/Podman not present, or their storage dir \
+                     isn't indexed yet (scan a path that includes /var/lib/docker)."
+                );
+                return Ok(());
+            }
+            println!(
+                "{:<7} {:<20} {:<26} {:>10} {:>9} {:>9} {:>10}",
+                "RUNTIME", "NAME", "IMAGE", "WRITABLE", "LOGS", "VOLUMES", "TOTAL"
+            );
+            for c in &rows {
+                println!(
+                    "{:<7} {:<20} {:<26} {:>10} {:>9} {:>9} {:>10}",
+                    c.runtime,
+                    trunc(&util::display_path(&c.name), 20),
+                    trunc(&util::display_path(&c.image), 26),
+                    human(c.writable_bytes),
+                    human(c.log_bytes),
+                    human(c.volume_bytes),
+                    human(c.total()),
                 );
             }
         }
@@ -487,6 +675,110 @@ fn request_daemon_rescan(
 }
 
 /// Resolve a TUI start path to a (dev,inode) start node, or None for the root.
+/// Truncate a display string to `n` columns (char-approx), ellipsizing.
+fn trunc(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let t: String = s.chars().take(n.saturating_sub(1)).collect();
+        format!("{t}…")
+    }
+}
+
+/// Escape a Prometheus label value: backslash, double-quote and newline per the
+/// exposition format; any other control char becomes a space so a crafted path
+/// can't break the line format.
+fn prom_label(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => o.push_str("\\\\"),
+            '"' => o.push_str("\\\""),
+            '\n' => o.push_str("\\n"),
+            c if (c as u32) < 0x20 => o.push(' '),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+/// Prometheus text-exposition output for the node_exporter textfile collector.
+fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<String> {
+    let root = store.get_meta("last_scan_root")?.unwrap_or_default();
+    let ts: i64 = store
+        .get_meta("last_scan_ts")?
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let (nodes, bytes) = query::index_totals(store);
+    let daemon = util::daemon_live_for(db) as i32;
+
+    let mut s = String::new();
+    let mut g = |name: &str, help: &str, val: String| {
+        s.push_str(&format!(
+            "# HELP {name} {help}\n# TYPE {name} gauge\n{name} {val}\n"
+        ));
+    };
+    g("dux_up", "1 if the dux index is readable.", "1".into());
+    g("dux_index_nodes", "Inodes tracked in the index.", nodes.to_string());
+    g(
+        "dux_index_bytes",
+        "Allocated bytes tracked by the index.",
+        bytes.to_string(),
+    );
+    g(
+        "dux_last_scan_timestamp_seconds",
+        "Unix time of the last full scan.",
+        ts.to_string(),
+    );
+    g(
+        "dux_daemon_up",
+        "1 if the live watch daemon is running.",
+        daemon.to_string(),
+    );
+    if let Some(fs) = util::fs_stat(std::path::Path::new(&root)) {
+        g(
+            "dux_fs_bytes_total",
+            "Total bytes of the scanned filesystem.",
+            fs.total.to_string(),
+        );
+        g(
+            "dux_fs_bytes_used",
+            "Used bytes of the scanned filesystem.",
+            fs.used.to_string(),
+        );
+        g(
+            "dux_fs_bytes_avail",
+            "Bytes available to unprivileged users.",
+            fs.avail.to_string(),
+        );
+        g(
+            "dux_fs_inodes_total",
+            "Total inodes of the scanned filesystem.",
+            fs.inodes_total.to_string(),
+        );
+        g(
+            "dux_fs_inodes_used",
+            "Used inodes of the scanned filesystem.",
+            fs.inodes_used.to_string(),
+        );
+    }
+    if topn > 0 {
+        let rows = query::top(store, true, topn, None, false)?;
+        s.push_str(
+            "# HELP dux_path_bytes Allocated bytes of a top directory.\n\
+             # TYPE dux_path_bytes gauge\n",
+        );
+        for r in rows {
+            s.push_str(&format!(
+                "dux_path_bytes{{path=\"{}\"}} {}\n",
+                prom_label(&r.path),
+                r.size
+            ));
+        }
+    }
+    Ok(s)
+}
+
 fn resolve_start(store: &Store, path: &std::path::Path) -> Result<Option<(i64, i64)>> {
     use std::os::unix::fs::MetadataExt;
     let m = std::fs::symlink_metadata(path)
@@ -594,6 +886,15 @@ mod tests {
         assert_eq!(parse_size("1.5K").unwrap(), 1536);
         assert_eq!(parse_size("2KiB").unwrap(), 2048);
         assert!(parse_size("abc").is_err());
+    }
+
+    #[test]
+    fn prom_label_escapes_injection() {
+        // a crafted path must not break the exposition line format.
+        assert_eq!(prom_label(r#"/a/b"#), r#"/a/b"#);
+        assert_eq!(prom_label("/a\"b\\c"), "/a\\\"b\\\\c");
+        assert_eq!(prom_label("/a\nb"), "/a\\nb");
+        assert_eq!(prom_label("/a\tb"), "/a b"); // other control -> space
     }
 
     // Scan a temp tree and assert: sparse files count 0 blocks, disk usage uses
