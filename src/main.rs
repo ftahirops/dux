@@ -235,9 +235,15 @@ fn real_main() -> Result<()> {
             let scanned_db = db.canonicalize().unwrap_or_else(|_| db.clone());
             let hb = util::read_heartbeat_full();
             let daemon_live = match &hb {
-                Some((secs, _pid, hbdb)) => {
+                Some((secs, pid, hbdb)) => {
+                    // Heartbeat can stay "fresh" (≤30s) for a while AFTER a crash;
+                    // verify the PID is actually alive (kill(pid,0)) so a post-crash
+                    // `dux scan` reconciles directly instead of trying to SIGHUP a
+                    // dead process and failing exactly when it's needed most.
+                    let alive = *pid > 0 && unsafe { libc::kill(*pid, 0) } == 0;
                     (util::now_secs() - secs) <= 30
                         && std::path::Path::new(hbdb) == scanned_db.as_path()
+                        && alive
                 }
                 None => false,
             };
@@ -826,12 +832,16 @@ fn parse_size(s: &str) -> Result<i64> {
     let s = s.trim();
     // Split the trailing UNIT letters from the number. Splitting on the FIRST
     // alpha char mishandles scientific notation ("1e3" would break at the 'e');
-    // instead take the unit as the trailing run of ASCII letters so the number
-    // keeps its exponent.
+    // instead take the unit as the trailing run of ASCII-alphabetic chars. Use
+    // char_indices (NOT `rfind(..)+1`, which lands mid-char on a multibyte input
+    // like "б" and panics in split_at) so the split is always on a char boundary.
     let unit_start = s
-        .rfind(|c: char| !c.is_ascii_alphabetic())
-        .map(|i| i + 1)
-        .unwrap_or(0);
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_ascii_alphabetic())
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
     let (num, unit) = s.split_at(unit_start);
     let n: f64 = num
         .trim()
@@ -886,6 +896,11 @@ mod tests {
         assert_eq!(parse_size("1.5K").unwrap(), 1536);
         assert_eq!(parse_size("2KiB").unwrap(), 2048);
         assert!(parse_size("abc").is_err());
+        // multibyte / non-ASCII input must ERROR, never panic in split_at (fuzz
+        // regression: "б"/"ε"/"⚡" made the old rfind()+1 split land mid-char).
+        for bad in ["б", "ε", "⚡", "1б", "б1", "1.5и", "M⚡K", " ", ""] {
+            assert!(parse_size(bad).is_err(), "expected Err for {bad:?}");
+        }
     }
 
     #[test]

@@ -342,7 +342,13 @@ impl App {
         self.growth_map = r.growth_map;
         self.top_growth = r.top_growth;
         self.top_files = r.top_files;
-        self.groups = r.groups;
+        // The worker's shadow always computes TOP-level groups (Snapshot carries
+        // no group_view). Only adopt them while we're actually showing the top
+        // view — otherwise a refresh would clobber the drilled-in Detail groups
+        // (computed synchronously on drill) back to top-level every ~4s.
+        if self.group_view == GroupView::Top {
+            self.groups = r.groups;
+        }
         self.total_size = r.total_size;
         self.items = r.items;
         self.growth_per_day = r.growth_per_day;

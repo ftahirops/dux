@@ -71,6 +71,10 @@ struct FanotifyEventMetadata {
     fd: i32,
     pid: i32,
 }
+// The read_unaligned of this struct is bounds-checked against FAN_EVENT_METADATA_LEN,
+// so that constant MUST equal the real struct size — else the guard under-protects
+// the read. Assert it at compile time so editing the struct can't silently drift.
+const _: () = assert!(std::mem::size_of::<FanotifyEventMetadata>() == FAN_EVENT_METADATA_LEN);
 
 #[repr(C)]
 struct InfoHeader {
@@ -176,7 +180,8 @@ pub fn run_daemon(
     // root than we're told to watch (that would attach live events to the wrong
     // tree → missing parents, wrong totals). Rebuild atomically in either case;
     // a no-op when the index is current AND already rooted here.
-    if Store::needs_rebuild(db) || !root_matches(db, &root_canon) {
+    let rebuilt = Store::needs_rebuild(db) || !root_matches(db, &root_canon);
+    if rebuilt {
         tracing::info!(
             "index missing, schema-incompatible, or rooted elsewhere — rebuilding before watching"
         );
@@ -189,6 +194,32 @@ pub fn run_daemon(
         crate::scan::rebuild_atomic(db, root, &opts).context("rebuilding index before watch")?;
     }
     let mut store = Store::open_rw(db)?;
+
+    // H1 — drift on resume: if we're RESUMING an existing index (not a fresh
+    // rebuild), the daemon was not watching for some interval (crash, reboot, or
+    // a clean stop/start), and fanotify only queues events while the mark is live
+    // — so any change during that gap was never observed. Flag the index dirty so
+    // status/TUI recommend a reconciling `dux scan` instead of silently trusting
+    // possibly-drifted totals. A rescan (or the SIGHUP in-place rescan) clears it.
+    if !rebuilt {
+        let downtime = crate::util::read_heartbeat_full()
+            .filter(|(_, _, hbdb)| {
+                let want = db.canonicalize().unwrap_or_else(|_| db.to_path_buf());
+                std::path::Path::new(hbdb) == want.as_path()
+            })
+            .map(|(secs, _, _)| (now_secs() - secs).max(0));
+        match downtime {
+            Some(gap) => tracing::warn!(
+                "resuming after ~{gap}s not watching — changes during the gap were not tracked; \
+                 marking index dirty (run `dux scan` to reconcile)"
+            ),
+            None => tracing::warn!(
+                "resuming a pre-existing index this daemon didn't build — marking dirty; \
+                 run `dux scan` to reconcile"
+            ),
+        }
+        store.set_meta("dirty_since", &now_secs().to_string()).ok();
+    }
 
     let fan = init_fanotify().context("fanotify_init (need CAP_SYS_ADMIN, kernel >= 5.9)")?;
 
@@ -510,12 +541,22 @@ pub fn run_daemon(
             // concurrent `dux scan` corrupt the index). Written to tmpfs, so
             // an idle daemon makes no database/WAL writes at all.
             crate::util::write_heartbeat(db);
-            // Checkpoint the WAL occasionally with PASSIVE — but NOT while the host
-            // is under pressure (it's extra I/O the host may need). PASSIVE never
-            // blocks on a live TUI reader; ~every 60s when healthy is plenty.
-            if pressure == crate::guard::Pressure::Normal
-                && last_ckpt.elapsed() >= Duration::from_secs(60)
-            {
+            // Reap any finished alert children EVERY cycle (cheap try_wait) so a
+            // stopped alert script never lingers as a zombie under sustained
+            // Elevated pressure or while idle (check_alerts only reaps at Normal).
+            alert_children.retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+            // Checkpoint the WAL with PASSIVE (never blocks a live TUI reader).
+            // Run it under Normal AND Elevated — skipping it under Elevated let the
+            // WAL grow unbounded on a busy high-churn host (writes keep flowing but
+            // never checkpoint). Only Critical (writes already paused) skips the
+            // periodic checkpoint; a hard WAL-size backstop then forces one anyway,
+            // since an unbounded -wal is worse than the one-off checkpoint I/O.
+            let wal_kb = std::fs::metadata(format!("{}-wal", db.display()))
+                .map(|m| m.len() / 1024)
+                .unwrap_or(0);
+            let due = last_ckpt.elapsed() >= Duration::from_secs(60);
+            let oversized = wal_kb > 256 * 1024; // 256 MiB backstop
+            if (pressure != crate::guard::Pressure::Critical && due) || oversized {
                 let _ = store.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
                 last_ckpt = Instant::now();
             }
@@ -718,7 +759,11 @@ fn resolve_record(
     meta_len: usize,
     fsfds: &HashMap<(i32, i32), RawFd>,
 ) -> Option<(PathBuf, std::ffi::OsString)> {
-    let mut off = meta_len;
+    // Info records begin AFTER the fixed metadata header. Floor the start offset
+    // at the header size so a bogus small `metadata_len` can't make the scan begin
+    // inside the header and misparse (memory-safe either way — every read below is
+    // bounds-checked — but this keeps the parse honest).
+    let mut off = meta_len.max(FAN_EVENT_METADATA_LEN);
     while off + 4 <= event.len() {
         let hdr: InfoHeader =
             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
@@ -1118,7 +1163,14 @@ fn upsert_path(
                     params![dev, ino, blocks, uid, mtime],
                 )?;
                 if delta != 0 {
-                    accrue(tx, anc, pdev, pino, delta, 0);
+                    // Route the delta up the PRIME chain (the block-bearing link),
+                    // NOT the event's parent: a hardlinked file modified via a
+                    // NON-prime link would otherwise credit the wrong ancestors and,
+                    // when its last link is later removed, `unlink_dirent` subtracts
+                    // the grown recursive_bytes from the prime chain that never
+                    // received the delta — driving those totals negative (H2).
+                    let (ppd, ppi) = prime_parent(tx, dev, ino).unwrap_or((pdev, pino));
+                    accrue(tx, anc, ppd, ppi, delta, 0);
                     gro(tx, bucket, dev, ino, delta)?;
                 }
             }
@@ -1481,11 +1533,16 @@ fn flush(
     }
 
     // ---- apply coalesced ancestor totals: ONE write per affected dir ----
+    // MAX(0, …): a directory can never hold negative bytes/inodes. If a prior
+    // missed event (downtime, queue overflow) left a stored total too small, a
+    // later subtraction could otherwise drive it negative and display nonsense;
+    // clamp at zero. (Real drift is still surfaced via the dirty flag + a rescan
+    // reconciles exact totals — this only prevents an absurd displayed value.)
     for (&(d, i), &(rb, ri)) in &anc {
         if rb != 0 || ri != 0 {
             tx.execute(
-                "UPDATE inodes SET recursive_bytes=recursive_bytes+?3,
-                 recursive_inodes=recursive_inodes+?4 WHERE dev_id=?1 AND inode=?2",
+                "UPDATE inodes SET recursive_bytes=MAX(0, recursive_bytes+?3),
+                 recursive_inodes=MAX(0, recursive_inodes+?4) WHERE dev_id=?1 AND inode=?2",
                 params![d, i, rb, ri],
             )?;
         }
