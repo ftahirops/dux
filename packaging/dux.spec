@@ -6,7 +6,10 @@ Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, in
 License:        MIT
 URL:            https://github.com/ftahirops/dux
 BuildArch:      x86_64
-Requires:       glibc
+# The shipped binary is a static musl build with NO shared-library deps, so it
+# runs on any x86_64 Linux regardless of the host glibc. Don't let rpm synthesize
+# a glibc requirement from the binary.
+AutoReqProv:    no
 
 %description
 dux is an indexed, persistent du/ncdu with fast trigram file-name search and an

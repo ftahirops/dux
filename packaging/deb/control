@@ -3,7 +3,6 @@ Version: 0.4.4
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libc6 (>= 2.34)
 Maintainer: dux maintainers <root@localhost>
 Description: persistent realtime disk usage + file search
  dux is an indexed, persistent du/ncdu with fast trigram file-name search
