@@ -536,9 +536,14 @@ fn real_main() -> Result<()> {
             }
         }
         Some(Cmd::Tui { path }) => {
-            let store = Store::open_ro(&db)?;
-            let start = resolve_start(&store, &path)?;
-            tui::run(&store, &db, start)?;
+            // Resolve the start node, then DROP this connection before the TUI runs
+            // — run() owns its own reopenable store, so we must not pin this one for
+            // the whole session (it would hold a deleted inode open after a rescan).
+            let start = {
+                let store = Store::open_ro(&db)?;
+                resolve_start(&store, &path)?
+            };
+            tui::run(&db, start)?;
         }
         Some(Cmd::Status) => {
             let store = Store::open_ro(&db)?;
@@ -572,13 +577,16 @@ fn real_main() -> Result<()> {
             watch::run_daemon(&db, &root, flush_ms, one_file_system, alert, growth_days)?;
         }
         None => {
-            // bare `dux` or `dux <path>` opens the TUI
-            let store = Store::open_ro(&db)?;
-            let start = match &cli.path {
-                Some(p) => resolve_start(&store, p)?,
-                None => None,
+            // bare `dux` or `dux <path>` opens the TUI. Drop this connection before
+            // the TUI runs (run() owns its own reopenable store — see above).
+            let start = {
+                let store = Store::open_ro(&db)?;
+                match &cli.path {
+                    Some(p) => resolve_start(&store, p)?,
+                    None => None,
+                }
             };
-            tui::run(&store, &db, start)?;
+            tui::run(&db, start)?;
         }
     }
     Ok(())

@@ -377,13 +377,20 @@ pub fn run_daemon(
                 low_priority: true, // background service rescan — stay gentle
                 ..Default::default()
             };
-            match crate::scan::rebuild_atomic(db, &root_canon, &opts) {
+            // M3: CLOSE our writer connection before the atomic rebuild. rebuild_atomic
+            // unlinks the live db's -wal/-shm and renames a new inode over it; doing
+            // that under an open connection is fragile (and can flash SQLITE_BUSY at a
+            // concurrent TUI reader). The two-writer guard is the `_lock` flock (held
+            // for the whole process), NOT this connection, so dropping it is safe.
+            let _ = store.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+            drop(store);
+            let result = crate::scan::rebuild_atomic(db, &root_canon, &opts);
+            // Reopen regardless of outcome: on success it's the freshly built db, on
+            // failure the untouched old one. A reopen failure is unrecoverable for a
+            // writer daemon — propagate so systemd restarts us cleanly.
+            store = Store::open_rw(db).context("reopening index after rescan")?;
+            match result {
                 Ok(s) => {
-                    // the on-disk db was replaced by rename — reopen on the new file
-                    match Store::open_rw(db) {
-                        Ok(ns) => store = ns,
-                        Err(e) => tracing::error!("rescan: reopen failed: {e}"),
-                    }
                     pending.clear();
                     deferred_from.clear(); // fresh db supersedes any pending renames
                     writes_paused = false; // fresh db; any pause/dirty is reconciled

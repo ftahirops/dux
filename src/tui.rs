@@ -160,11 +160,22 @@ fn refresh_worker(
         Ok(s) => s,
         Err(_) => return,
     };
+    let mut open_ino = db_inode(&db);
     let mut shadow = App::new(&store, &db, dev, inode);
     while let Ok(mut snap) = rx.recv() {
         // coalesce: skip to the most recent queued request
         while let Ok(s) = rx.try_recv() {
             snap = s;
+        }
+        // Reopen if a rescan swapped the db inode: a connection on the old unlinked
+        // inode serves stale panels with no error, so the reopen-on-error path below
+        // would never trigger for a clean swap.
+        let cur_ino = db_inode(&db);
+        if cur_ino != 0 && cur_ino != open_ino {
+            if let Ok(s) = Store::open_ro(&db) {
+                store = s;
+                open_ino = cur_ino;
+            }
         }
         shadow.expanded = snap.expanded;
         shadow.metric = snap.metric;
@@ -210,23 +221,31 @@ fn refresh_worker(
 /// WinDirStat-style live tree: folders expand inline beneath their parent (the
 /// parent stays visible), indented, with a per-row heat bar (RED = hot). Opens
 /// at `start` (dev,inode) — the scoped path or the index root.
-pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Result<()> {
-    let root = start.or_else(|| root_node(store));
-    let (dev, inode) = match root {
-        Some(v) => v,
-        None => {
-            println!("empty index — run `dux scan <PATH>` first");
-            return Ok(());
-        }
+pub fn run(db: &std::path::Path, start: Option<(i64, i64)>) -> Result<()> {
+    // Own the store lifecycle here (don't hold a caller's connection across the
+    // whole session): the setup store is used only for the first frame and dropped
+    // before the event loop, which opens its OWN reopenable connection. Otherwise a
+    // long-open TUI would pin the old (deleted) index inode after a rescan — the
+    // very deleted-but-open leak dux is built to find.
+    let (dev, inode, mut app) = {
+        let store = Store::open_ro(db)?;
+        let root = start.or_else(|| root_node(&store));
+        let (dev, inode) = match root {
+            Some(v) => v,
+            None => {
+                println!("empty index — run `dux scan <PATH>` first");
+                return Ok(());
+            }
+        };
+        let mut app = App::new(&store, db, dev, inode);
+        // First frame = the TREE only (cheap, indexed per-dir queries). The
+        // expensive growth-heat + panels are computed by the background worker and
+        // applied when ready — so the TUI opens INSTANTLY even on a huge, high-churn
+        // index instead of blocking ~30s on the recursive growth query.
+        app.init_root(&store)?;
+        app.update_detail(&store);
+        (dev, inode, app)
     };
-
-    let mut app = App::new(store, db, dev, inode);
-    // First frame = the TREE only (cheap, indexed per-dir queries). The expensive
-    // growth-heat + panels are computed by the background worker and applied when
-    // ready — so the TUI opens INSTANTLY even on a huge, high-churn index instead
-    // of blocking ~30s on the recursive growth query.
-    app.init_root(store)?;
-    app.update_detail(store);
 
     // Spawn the background refresh worker — it recomputes the heavy view data off
     // the input thread so navigation never blocks (M4). Channels: snapshots out,
@@ -261,7 +280,7 @@ pub fn run(store: &Store, db: &std::path::Path, start: Option<(i64, i64)>) -> Re
     enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen)?;
     let mut term = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let res = event_loop(&mut term, &mut app, store, &snap_tx, &res_rx);
+    let res = event_loop(&mut term, &mut app, db, &snap_tx, &res_rx);
     term.show_cursor().ok();
     res
 }
@@ -1500,13 +1519,27 @@ fn group_detail(g: &GroupRow) -> String {
     format!("{}: {}", g.name, paths.join(", "))
 }
 
+/// Inode of the db file (0 if unreadable). A rescan renames a NEW inode over the
+/// db, so a change here means our open connection is now on the stale old inode.
+fn db_inode(db: &std::path::Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(db).map(|m| m.ino()).unwrap_or(0)
+}
+
 fn event_loop<B: Backend>(
     term: &mut Terminal<B>,
     app: &mut App,
-    store: &Store,
+    db: &std::path::Path,
     snap_tx: &crossbeam_channel::Sender<Snapshot>,
     res_rx: &crossbeam_channel::Receiver<RefreshResult>,
 ) -> Result<()> {
+    // Own a REOPENABLE read connection: an in-place rescan (daemon SIGHUP or a
+    // manual `dux scan`) renames a new db inode over the old one, and a connection
+    // bound to the old (now-unlinked) inode keeps serving STALE data with no error.
+    // We detect the inode change below and reopen, instead of freezing on the
+    // pre-rescan snapshot until the user quits.
+    let mut store = Store::open_ro(db)?;
+    let mut open_ino = db_inode(db);
     let request = |app: &App, tx: &crossbeam_channel::Sender<Snapshot>| {
         let _ = tx.send(Snapshot {
             expanded: app.expanded.clone(),
@@ -1521,6 +1554,20 @@ fn event_loop<B: Backend>(
     let mut needs_draw = true;
     let mut last_clock_draw = Instant::now();
     loop {
+        // Reopen if a rescan swapped the db inode, so the tree stops serving stale
+        // data (the worker does the same for panels). One stat per loop is cheap.
+        let cur_ino = db_inode(db);
+        if cur_ino != 0 && cur_ino != open_ino {
+            if let Ok(s) = Store::open_ro(db) {
+                store = s;
+                open_ino = cur_ino;
+                app.view_gen += 1;
+                let _ = app.rebuild(&store);
+                app.update_detail(&store);
+                request(app, snap_tx);
+                needs_draw = true;
+            }
+        }
         // Apply any background refresh results (panels/states always; tree rows
         // only if the structure hasn't changed since the request). Never blocks.
         let mut applied = false;
@@ -1529,7 +1576,7 @@ fn event_loop<B: Backend>(
             applied = true;
         }
         if applied {
-            app.update_detail(store);
+            app.update_detail(&store);
             needs_draw = true;
         }
 
@@ -1554,10 +1601,10 @@ fn event_loop<B: Backend>(
                             // panels off this thread. Refreshing panels inline here
                             // would block the UI on fs::metadata() of a hung mount
                             // (autofs/NFS) — even 'q' would stop responding.
-                            app.rebuild(store).ok();
+                            app.rebuild(&store).ok();
                             request(app, snap_tx);
                             last_request = Instant::now();
-                        } else if handle_key(app, store, k.code)? {
+                        } else if handle_key(app, &store, k.code)? {
                             return Ok(()); // quit
                         }
                     }

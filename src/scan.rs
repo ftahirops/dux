@@ -528,7 +528,16 @@ fn parallel_collect(
                 // prune so the walk terminates. Only guard on a successful stat so
                 // a stat failure doesn't collide with the root's fallback key.
                 if let Some(id) = pinfo {
-                    if !visited.lock().unwrap().insert(id) {
+                    // poison-tolerant: the critical section is a single HashSet
+                    // insert (can't panic), but recover the guard rather than let
+                    // one walker's panic cascade into every other walker's unwrap.
+                    // Scope the guard to just the insert so it's NOT held across the
+                    // per-directory processing below (that would serialize walkers).
+                    let already_seen = {
+                        let mut vis = visited.lock().unwrap_or_else(|e| e.into_inner());
+                        !vis.insert(id)
+                    };
+                    if already_seen {
                         children.clear();
                         return;
                     }
