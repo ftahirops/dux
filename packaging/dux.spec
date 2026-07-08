@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.4.4
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -57,6 +57,43 @@ fi
 exit 0
 
 %changelog
+* Tue Jul 08 2026 dux maintainers <root@localhost> - 0.5.0-1
+- New SRE/DevOps commands (all served from the index — no fs re-walk, no daemon
+  cost):
+  * `--json` on every read command (top/find/growth/by-owner/by-ext/deleted-open/
+    diff/du/containers) for jq + automation.
+  * `dux metrics` — Prometheus text-exposition output for the node_exporter
+    textfile collector (fs bytes/inodes, index size, daemon_up, last-scan ts,
+    dux_path_bytes{path=…}); label values are injection-escaped.
+  * `dux diff --since <win>` (alias `since`) — net per-path change over a window,
+    ranked by magnitude (surfaces both fills and frees).
+  * `dux du` — byte-exact du-compatible output from the index (-s/-a/-h/-m/
+    --max-depth), verified block-for-block against GNU du.
+  * `dux containers` — per-container writable-layer + log + volume usage for
+    Docker and Podman, resolved from on-disk metadata (no socket/CLI). Writable
+    layer read from the running container's overlay upperdir via
+    /proc/<pid>/mountinfo — works with the classic overlay2 driver AND the
+    containerd snapshotter (Docker's default image store since v25).
+- Portability: ship a STATIC musl binary (no shared-lib deps) so the .deb/.rpm run
+  on any x86_64 Linux regardless of host glibc (0.4.4 hard-pinned GLIBC_2.39 and
+  failed on Debian 12 / RHEL 9 / Ubuntu 22.04). Reproducible via
+  scripts/build-release.sh.
+- Production hardening (audit: races, leaks, unsafe/FFI, crash-safety, fuzz):
+  * fix a fuzz-found panic in parse_size on multibyte input.
+  * daemon flags the index dirty on resume after a crash/downtime gap (missed
+    events are no longer silent); a post-crash `dux scan` verifies the heartbeat
+    PID is alive so it reconciles directly instead of failing.
+  * hardlink counter drift fixed (modify via a non-prime link no longer drives
+    totals negative); MAX(0,…) floor on ancestor totals.
+  * WAL checkpoints under Elevated pressure (+256 MiB backstop) — no unbounded
+    -wal on a busy host; alert children reaped every loop.
+  * in-place SIGHUP rescan closes the writer connection before the atomic swap;
+    the TUI reopens on the inode swap and no longer pins the old deleted index.
+  * fanotify parser hardening (compile-time struct-size assert, info-record
+    offset floor); poison-tolerant scan cycle-guard lock.
+- Verified: 21 unit tests, thousands of fuzz inputs (0 panics), repeated SIGKILL
+  mid-flush (integrity ok + exact reconcile), and a churn soak (no RSS/fd leak).
+
 * Fri Jul 03 2026 dux maintainers <root@localhost> - 0.4.4-1
 - New TUI "Apps/OS Heatmap" panel: groups disk usage by application/OS profile
   (OS, Docker, nginx, Apache, Postgres, MySQL, Redis, Elasticsearch, Mongo,

@@ -55,9 +55,67 @@ structurally cannot.
 | Out of inodes, not bytes | **Inode-usage mode** — rank directories by *file count*, not size |
 | Disk fills silently | **Growth alerts** — run a webhook/script when any path grows past a threshold |
 | "Is it safe to delete?" guesswork | **WinDirStat-style live tree** — see the hot spots at a glance |
+| "What filled the disk overnight?" | **`dux diff --since 8h`** — net per-path change (fills *and* frees), from the index |
+| Which container is bloating? | **`dux containers`** — writable-layer/log/volume usage per Docker/Podman container |
+| Feed dashboards / automation | **`--json` on every command** + **`dux metrics`** (Prometheus exposition) |
+| Drop-in for scripts | **`dux du`** — byte-exact `du`-compatible output, but instant (no re-walk) |
 
 It's the tool you wish you'd had at 2 a.m.: **realtime, indexed, and it shows you
 the culprit — not just the symptom.**
+
+---
+
+## New in 0.5.0
+
+**SRE/DevOps integration — everything scriptable, everything from the index (no
+filesystem re-walk, no added daemon cost):**
+
+- **`--json` on every read command** (`top`, `find`, `growth`, `by-owner`,
+  `by-ext`, `deleted-open`, `diff`, `du`, `containers`) — pipe straight to `jq`.
+- **`dux metrics`** — Prometheus text-exposition output for the node_exporter
+  textfile collector: `dux_fs_bytes_used`, `dux_fs_inodes_used`,
+  `dux_index_bytes`, `dux_daemon_up`, `dux_last_scan_timestamp_seconds`, and
+  `dux_path_bytes{path=…}` for the top directories (label values injection-safe).
+- **`dux diff --since <window>`** (alias `since`) — the *"what filled or freed the
+  disk?"* query: net per-path change over a window, ranked by magnitude.
+- **`dux du`** — byte-exact `du`-compatible output (`-s`/`-a`/`-h`/`-m`/
+  `--max-depth`) served from the index; verified block-for-block against GNU `du`.
+- **`dux containers`** — per-container **writable-layer + log + volume** usage for
+  **Docker and Podman**, resolved from on-disk metadata (no daemon socket, no
+  `docker` CLI). The writable layer is read from the running container's overlay
+  `upperdir` via `/proc/<pid>/mountinfo`, so it works with both the classic
+  `overlay2` driver **and** the containerd snapshotter (Docker's default image
+  store since v25).
+
+**Portability:** the `.deb`/`.rpm` now ship a **static musl binary** with no
+shared-library dependencies, so they run on **any x86-64 Linux** regardless of
+host glibc (0.4.x hard-pinned a recent glibc and failed on Debian 12 / RHEL 9 /
+Ubuntu 22.04). Reproducible via `scripts/build-release.sh`.
+
+**Production hardening** (from a full audit — races, leaks, unsafe/FFI,
+crash-safety — plus fuzzing, chaos, and soak testing):
+
+- **Crash/downtime drift is no longer silent.** A daemon resuming after a crash,
+  reboot, or clean stop/start flags the index **dirty** (with the downtime gap in
+  the log), because fanotify can't see changes while it wasn't running — so
+  `status`/TUI now recommend a reconciling `dux scan`. A post-crash scan also
+  verifies the heartbeat PID is alive, so it reconciles directly instead of
+  failing on a stale heartbeat.
+- **Hardlink counter correctness.** Modifying a file through a *non-prime*
+  hardlink no longer mis-attributes the byte delta or drives directory totals
+  negative; a `MAX(0, …)` floor guarantees no total ever displays negative.
+- **Bounded WAL under load.** The daemon now checkpoints under *Elevated* host
+  pressure too (plus a 256 MiB forced-checkpoint backstop), so the write-ahead
+  log can't grow without bound on a busy high-churn host.
+- **Fuzz-hardened parsers** (a multibyte-input panic in size parsing is fixed;
+  **0 panics** across thousands of adversarial inputs), fanotify parser
+  compile-time guards, and a poison-tolerant scan cycle-guard lock.
+- **TUI stays fresh across a rescan** — it reopens on the index swap instead of
+  showing stale data, and no longer pins the old (deleted) index inode.
+
+Verified: 21 unit tests, thousands of fuzz inputs (0 panics), repeated SIGKILL
+mid-flush (`integrity_check` ok + exact reconcile every time), and a continuous
+create/rename/delete soak (stable RSS, constant fd count — no leak).
 
 ---
 

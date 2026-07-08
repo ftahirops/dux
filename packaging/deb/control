@@ -1,5 +1,5 @@
 Package: dux
-Version: 0.4.4
+Version: 0.5.0
 Section: utils
 Priority: optional
 Architecture: amd64
