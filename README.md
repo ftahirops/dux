@@ -196,7 +196,7 @@ first start):
   and the largest-files / fastest-growth panels scope to the subtree you opened.
 - **Hardened packaging** — tightened systemd unit (capability bounding,
   `NoNewPrivileges`, `MemoryDenyWriteExecute`, …) and a documented security
-  posture in **[docs/SECURITY.md](docs/SECURITY.md)**.
+  posture.
 
 ---
 
@@ -309,9 +309,9 @@ and `CAP_DAC_READ_SEARCH` (resolve event file-handles to paths). The packaged
 `CAP_DAC_READ_SEARCH`, it can receive events but resolves none — dux now detects
 this, logs a clear error, and marks the index dirty rather than failing silently.
 
-**Status & limitations** (disk usage = allocated blocks like `du`; live tracking
-needs the daemon running; one tree per index; hardlinks counted once for size but every path is searchable) are
-documented honestly in **[docs/architecture-analysis-and-roadmap.md](docs/architecture-analysis-and-roadmap.md)**.
+**Status & limitations**: disk usage = allocated blocks like `du`; live tracking
+needs the daemon running; one tree per index; hardlinks counted once for size but
+every path is searchable.
 
 > Note: an old X11 tool named `xdu` exists in Debian/Ubuntu — this project is `dux`.
 
