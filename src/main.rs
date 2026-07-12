@@ -471,6 +471,29 @@ fn real_main() -> Result<()> {
                     format!("{}", (b + 1023) / 1024)
                 }
             };
+            // -s (summarize): the total for the path ONLY — a single index lookup,
+            // not a whole-subtree enumeration (which times out on a big tree like
+            // /home). Short-circuit before the full du walk below.
+            if summarize {
+                let (rd, ri) = match scope {
+                    Some(x) => x,
+                    None => query::index_root(&store)
+                        .ok_or_else(|| anyhow::anyhow!("no index root — run `dux scan` first"))?,
+                };
+                let bytes = query::subtree_bytes(&store, rd, ri);
+                let p = store.path_of(rd, ri).unwrap_or_else(|_| "/".into());
+                if json {
+                    emit::du(&[query::DuRow {
+                        path: p,
+                        bytes,
+                        is_dir: true,
+                        mtime: 0,
+                    }]);
+                } else {
+                    println!("{}\t{}", fmt(bytes), util::display_path(&p));
+                }
+                return Ok(());
+            }
             let mut rows = query::du(&store, scope, all)?;
             // du order: a directory prints AFTER its descendants (post-order); a
             // reverse-lexicographic sort puts deeper paths first and the root last.
@@ -482,13 +505,10 @@ fn real_main() -> Result<()> {
                 .map(|r| r.path.trim_end_matches('/').matches('/').count())
                 .min()
                 .unwrap_or(0);
-            if summarize || max_depth.is_some() {
-                let maxd = if summarize { Some(0) } else { max_depth };
-                if let Some(md) = maxd {
-                    rows.retain(|r| {
-                        r.path.trim_end_matches('/').matches('/').count() - root_depth <= md
-                    });
-                }
+            if let Some(md) = max_depth {
+                rows.retain(|r| {
+                    r.path.trim_end_matches('/').matches('/').count() - root_depth <= md
+                });
             }
             if json {
                 emit::du(&rows);

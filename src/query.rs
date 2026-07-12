@@ -522,6 +522,21 @@ pub fn du(store: &Store, scope: Option<(i64, i64)>, all: bool) -> Result<Vec<DuR
     Ok(out)
 }
 
+/// (dev,inode) of the index root, from the scan-time meta markers.
+pub fn index_root(store: &Store) -> Option<(i64, i64)> {
+    let d: Option<i64> = store
+        .get_meta("root_dev")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    let i: Option<i64> = store
+        .get_meta("root_inode")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok());
+    d.zip(i)
+}
+
 /// Sum of allocated bytes of the subtree rooted at (dev,inode) — used to size a
 /// container's writable layer / volume from paths, without re-walking the fs.
 pub fn subtree_bytes(store: &Store, dev: i64, inode: i64) -> i64 {
