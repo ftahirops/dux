@@ -202,21 +202,35 @@ first start):
 
 ## Install
 
-**Debian / Ubuntu** — download the `.deb` from the [latest release](https://github.com/ftahirops/dux/releases/latest):
+The packages ship a **static musl binary** with no shared-library dependencies,
+so they run on **any x86-64 Linux** regardless of host glibc. The commands below
+resolve the newest release automatically, so they never go stale between versions.
+
+**Debian / Ubuntu**:
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux_0.4.3_amd64.deb
-sudo dpkg -i dux_0.4.3_amd64.deb
+curl -s https://api.github.com/repos/ftahirops/dux/releases/latest \
+  | grep -o 'https://[^"]*_amd64\.deb' | xargs curl -LO
+sudo dpkg -i dux_*_amd64.deb
 ```
 
-**RHEL / Fedora / openSUSE**:
+**RHEL / Fedora / Rocky / openSUSE**:
 ```bash
-curl -LO https://github.com/ftahirops/dux/releases/latest/download/dux-0.4.3-1.x86_64.rpm
-sudo rpm -i dux-0.4.3-1.x86_64.rpm
+curl -s https://api.github.com/repos/ftahirops/dux/releases/latest \
+  | grep -o 'https://[^"]*\.x86_64\.rpm' | xargs curl -LO
+sudo rpm -i dux-*.x86_64.rpm
 ```
 
-Both packages install `/usr/bin/dux` and a systemd unit that builds the index on
-first start and then runs the realtime daemon — so after install you can go
-straight to `dux`.
+**Standalone binary** (no package manager, any distro):
+```bash
+curl -s https://api.github.com/repos/ftahirops/dux/releases/latest \
+  | grep -o 'https://[^"]*-x86_64-linux-static' | xargs curl -L -o dux
+sudo install -m755 dux /usr/local/bin/dux
+```
+
+The `.deb`/`.rpm` install `/usr/bin/dux` and a systemd unit that builds the index
+on first start and then runs the realtime daemon — so after install you can go
+straight to `dux`. (Browse all downloads on the
+[latest release page](https://github.com/ftahirops/dux/releases/latest).)
 
 **From source** (Rust toolchain):
 ```bash
