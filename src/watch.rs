@@ -91,7 +91,7 @@ struct FileHandle {
 }
 
 /// What happened to a path within the flush window (latest event wins).
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Op {
     Upsert,    // create / modify / close-write -> (re)stat and insert/update
     Delete,    // unlink / rmdir                -> remove node + subtree
@@ -306,6 +306,10 @@ pub fn run_daemon(
     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
     let mut alert_children: Vec<std::process::Child> = Vec::new();
     let mut pending: HashMap<PathBuf, Op> = HashMap::new();
+    // Paths CREATEd since the last flush — lets a same-window delete cancel a
+    // transient file before it does any index work (see parse_events). Cleared
+    // whenever `pending` is cleared, so it only ever spans one flush window.
+    let mut born: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     // Unmatched FAN_MOVED_FROMs awaiting their MOVED_TO (rename across a flush).
     let mut deferred_from: HashMap<(i64, i64), DeferredFrom> = HashMap::new();
     let mut buf = [0u8; 1 << 15];
@@ -332,6 +336,7 @@ pub fn run_daemon(
                         &fsfds,
                         &root_canon,
                         &mut pending,
+                        &mut born,
                         &mut store,
                     );
                 } else if m < 0
@@ -392,6 +397,7 @@ pub fn run_daemon(
             match result {
                 Ok(s) => {
                     pending.clear();
+                    born.clear();
                     deferred_from.clear(); // fresh db supersedes any pending renames
                     writes_paused = false; // fresh db; any pause/dirty is reconciled
                     crate::util::write_heartbeat(db);
@@ -443,6 +449,7 @@ pub fn run_daemon(
                         &fsfds,
                         &root_canon,
                         &mut pending,
+                        &mut born,
                         &mut store,
                     );
                     ev_seen += seen;
@@ -482,6 +489,7 @@ pub fn run_daemon(
                 );
                 store.set_meta("dirty_since", &now_secs().to_string()).ok();
                 pending.clear();
+                born.clear();
                 deferred_from.clear(); // backlog dropped; a rescan will reconcile
             }
         }
@@ -523,14 +531,17 @@ pub fn run_daemon(
             // Flush only when healthy AND there's work. Under Critical we keep
             // `pending` (bounded by the MAX_PENDING backstop) and lose nothing.
             if pressure != crate::guard::Pressure::Critical && !pending.is_empty() {
-                if let Err(e) = flush(
+                match flush(
                     &mut store,
                     &mut pending,
                     &mut deferred_from,
                     db,
                     growth_keep_secs,
                 ) {
-                    tracing::warn!("flush error: {e}");
+                    // flush cleared `pending` on success → the current born-set has
+                    // been applied/coalesced; reset it for the next window.
+                    Ok(()) => born.clear(),
+                    Err(e) => tracing::warn!("flush error: {e}"),
                 }
                 // alert scanning is an extra query — skip it while Elevated.
                 if pressure == crate::guard::Pressure::Normal {
@@ -704,11 +715,48 @@ fn mark_fs(fan: RawFd, root: &Path) -> Result<()> {
 /// non-overflow events seen, and how many had their handle resolved to a path.
 /// A run of `seen > 0, resolved == 0` is the signature of a missing
 /// CAP_DAC_READ_SEARCH (open_by_handle_at EPERMs on every event) — see the caller.
+/// Fold one fanotify event into the pending set, with born-and-died coalescing:
+/// a path CREATEd and then DELETEd within the same flush window is a transient
+/// file (build temp, editor swap, …) that was never flushed to the index and
+/// never needs to be — so drop both events instead of doing an lstat + DB probe
+/// per event. This collapses a high-churn /tmp storm to ~zero work automatically,
+/// with no configuration. A delete of a path that existed BEFORE this window (not
+/// in `born`) is a real delete and is kept.
+fn ingest_event(
+    pending: &mut HashMap<PathBuf, Op>,
+    born: &mut std::collections::HashSet<PathBuf>,
+    full: PathBuf,
+    mask: u64,
+) {
+    if mask & FAN_DELETE != 0 {
+        if born.remove(&full) {
+            pending.remove(&full); // born AND died this window → never index it
+        } else {
+            pending.insert(full, Op::Delete);
+        }
+    } else {
+        let op = if mask & FAN_MOVED_FROM != 0 {
+            Op::MovedFrom
+        } else if mask & FAN_MOVED_TO != 0 {
+            Op::MovedTo
+        } else {
+            Op::Upsert
+        };
+        // Remember brand-new paths so a same-window delete can cancel them out.
+        // (CREATE is distinct from MODIFY in the mask.)
+        if mask & FAN_CREATE != 0 {
+            born.insert(full.clone());
+        }
+        pending.insert(full, op);
+    }
+}
+
 fn parse_events(
     mut buf: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
     root: &Path,
     pending: &mut HashMap<PathBuf, Op>,
+    born: &mut std::collections::HashSet<PathBuf>,
     store: &mut Store,
 ) -> (u64, u64) {
     let (mut seen, mut resolved) = (0u64, 0u64);
@@ -740,16 +788,7 @@ fn parse_events(
                     dir.join(&name)
                 };
                 if full.starts_with(root) {
-                    let op = if meta.mask & FAN_DELETE != 0 {
-                        Op::Delete
-                    } else if meta.mask & FAN_MOVED_FROM != 0 {
-                        Op::MovedFrom
-                    } else if meta.mask & FAN_MOVED_TO != 0 {
-                        Op::MovedTo
-                    } else {
-                        Op::Upsert
-                    };
-                    pending.insert(full, op);
+                    ingest_event(pending, born, full, meta.mask);
                 }
             }
         }
@@ -1697,7 +1736,33 @@ fn check_alerts(
 mod tests {
     use super::*;
     use crate::scan::{self, ScanOptions};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn born_and_died_coalesces_to_nothing() {
+        let mut pending: HashMap<PathBuf, Op> = HashMap::new();
+        let mut born: HashSet<PathBuf> = HashSet::new();
+        let p = PathBuf::from("/tmp/go-build123/x");
+
+        // CREATE then MODIFY then DELETE within one window → dropped entirely.
+        ingest_event(&mut pending, &mut born, p.clone(), FAN_CREATE);
+        ingest_event(&mut pending, &mut born, p.clone(), FAN_MODIFY);
+        ingest_event(&mut pending, &mut born, p.clone(), FAN_DELETE);
+        assert!(pending.is_empty(), "transient create+delete must leave no work");
+        assert!(born.is_empty(), "born entry consumed by the matching delete");
+
+        // A delete of a PRE-EXISTING path (never created this window) is a real
+        // delete and must be kept.
+        let q = PathBuf::from("/data/real.log");
+        ingest_event(&mut pending, &mut born, q.clone(), FAN_DELETE);
+        assert_eq!(pending.get(&q), Some(&Op::Delete), "real delete is preserved");
+
+        // A create that SURVIVES the window (no delete) stays as an upsert.
+        let s = PathBuf::from("/data/survivor");
+        ingest_event(&mut pending, &mut born, s.clone(), FAN_CREATE);
+        assert_eq!(pending.get(&s), Some(&Op::Upsert), "surviving create is indexed");
+        assert!(born.contains(&s), "still born until the window flushes");
+    }
 
     fn tmp(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!("dux-wt-{tag}-{}", std::process::id()))

@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -57,6 +57,20 @@ fi
 exit 0
 
 %changelog
+* Sun Jul 12 2026 dux maintainers <root@localhost> - 0.5.1-1
+- Perf (daemon CPU): born-and-died event coalescing. A file created AND deleted
+  within the same flush window (build temp files, editor swap files — e.g. a Go
+  build churning thousands of /tmp/go-build* entries) is now dropped before any
+  lstat/DB work, instead of doing an lstat-per-event. Collapses a high-churn /tmp
+  storm from ~8% steady CPU (90% spikes) to near-zero — automatically, no config,
+  with exact correctness preserved (persistent creates still index; real deletes
+  still apply; totals match a fresh scan).
+- Perf: `dux du -s` (summarize) now does a single index lookup instead of
+  enumerating the whole subtree, so `du -sh /home` and friends return instantly
+  on large trees (was a timeout). Byte-exact vs GNU du unchanged.
+- Docs: version-agnostic install commands (resolve the newest release via the
+  GitHub API) so the instructions never go stale between versions.
+
 * Tue Jul 08 2026 dux maintainers <root@localhost> - 0.5.0-1
 - New SRE/DevOps commands (all served from the index — no fs re-walk, no daemon
   cost):
