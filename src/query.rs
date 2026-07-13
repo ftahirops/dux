@@ -647,6 +647,22 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
     }
+    // Throttled/behind: the CPU/IO governor is deliberately holding the daemon back
+    // under sustained event load so it never disturbs the host. The index is LIVE
+    // but intentionally stale — explain why, and how stale, so the numbers aren't
+    // mistaken for real-time. Self-clears when the daemon catches up.
+    if let Some(since) = store
+        .get_meta("throttled_since")?
+        .and_then(|s| s.parse::<i64>().ok())
+    {
+        out.push_str(&format!(
+            "\nstate:      THROTTLED (protecting host) — capping its own CPU/I/O under heavy \
+             filesystem activity, so live updates are delayed. Data is ~{} stale and \
+             catches up automatically when load eases. Raise the ceiling with \
+             `dux daemon --max-cpu N` for faster updates.",
+            crate::util::ago(since)
+        ));
+    }
     // Transient pause (self-clearing): the resource guardian paused writes because
     // the host is under pressure. Nothing is lost (pending is kept) — distinct from
     // DIRTY; it resumes automatically when the host recovers.
@@ -693,6 +709,16 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
 pub fn paused_since(store: &Store) -> Option<i64> {
     store
         .get_meta("paused_since")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+}
+
+/// Epoch seconds the daemon fell behind under CPU/IO governing (self-clearing).
+/// While set, the index is LIVE but intentionally stale to protect the host.
+pub fn throttled_since(store: &Store) -> Option<i64> {
+    store
+        .get_meta("throttled_since")
         .ok()
         .flatten()
         .and_then(|s| s.parse().ok())

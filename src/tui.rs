@@ -100,6 +100,7 @@ struct App {
     dirty_since: Option<i64>, // Some(epoch) if the index missed events (overflow)
     paused_since: Option<i64>, // Some(epoch) if writes are paused (host pressure)
     pause_reason: String,     // why writes are paused (low disk / low memory / …)
+    throttled_since: Option<i64>, // Some(epoch) if governing keeps the index stale
     // recursive write-rate per node (bytes in the last hour), summed up the tree
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     growth_calc: Instant,
@@ -142,6 +143,7 @@ struct RefreshResult {
     dirty_since: Option<i64>,
     paused_since: Option<i64>,
     pause_reason: String,
+    throttled_since: Option<i64>,
 }
 
 /// Background refresh worker: owns its OWN read-only connection and a shadow App
@@ -208,6 +210,7 @@ fn refresh_worker(
             last_scan: shadow.last_scan,
             fs: shadow.fs,
             daemon_live: shadow.daemon_live,
+            throttled_since: shadow.throttled_since,
             dirty_since: shadow.dirty_since,
             paused_since: shadow.paused_since,
             pause_reason: std::mem::take(&mut shadow.pause_reason),
@@ -339,6 +342,7 @@ impl App {
             dirty_since: None,
             paused_since: None,
             pause_reason: String::new(),
+            throttled_since: None,
             growth_map: std::collections::HashMap::new(),
             growth_calc: Instant::now() - Duration::from_secs(60),
             items: 0,
@@ -374,6 +378,7 @@ impl App {
         self.last_scan = r.last_scan;
         self.fs = r.fs;
         self.daemon_live = r.daemon_live;
+        self.throttled_since = r.throttled_since;
         self.dirty_since = r.dirty_since;
         self.paused_since = r.paused_since;
         self.pause_reason = r.pause_reason;
@@ -731,6 +736,7 @@ impl App {
         self.daemon_live = crate::query::daemon_live(&self.db);
         self.dirty_since = crate::query::dirty_since(store);
         self.paused_since = crate::query::paused_since(store);
+        self.throttled_since = crate::query::throttled_since(store);
         self.pause_reason = store
             .get_meta("pause_reason")
             .ok()
@@ -2105,6 +2111,16 @@ fn draw(f: &mut Frame, app: &mut App) {
                 format!("   ⏸ writes paused {} ({})", ago(since), app.pause_reason),
                 Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
             )
+        } else if let Some(since) = app.throttled_since {
+            // live but intentionally behind: the CPU/IO governor is protecting the
+            // host under heavy fs activity, so the numbers are ~this stale.
+            Span::styled(
+                format!(
+                    "   ◐ throttled {} stale — capping CPU/IO to protect the host; catches up when load eases",
+                    ago(since)
+                ),
+                Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
+            )
         } else if app.daemon_live {
             Span::styled(
                 "   ● live — maintained in realtime",
@@ -2581,6 +2597,7 @@ mod tests {
             dirty_since: None,
             paused_since: None,
             pause_reason: String::new(),
+            throttled_since: None,
         }
     }
 
@@ -2613,6 +2630,7 @@ mod tests {
             dirty_since: None,
             paused_since: None,
             pause_reason: String::new(),
+            throttled_since: None,
             growth_map: std::collections::HashMap::new(),
             growth_calc: Instant::now(),
             items: 0,

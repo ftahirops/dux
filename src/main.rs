@@ -194,6 +194,13 @@ enum Cmd {
         /// host (growth dominates index size). Min 1.
         #[arg(long, default_value_t = 7)]
         growth_days: i64,
+        /// Hard cap on the daemon's own CPU, as a percent of ONE core. Under a
+        /// filesystem event storm it self-throttles to stay under this; the backlog
+        /// buffers in the kernel queue (and, if that overflows, reconciles via a
+        /// later scan). Lower = more silent. The daemon also runs at idle I/O
+        /// priority so it never contends with production for disk.
+        #[arg(long, default_value_t = 25)]
+        max_cpu: u32,
     },
 }
 
@@ -578,6 +585,7 @@ fn real_main() -> Result<()> {
             alert_exec,
             alert_debounce,
             growth_days,
+            max_cpu,
         }) => {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -594,7 +602,15 @@ fn real_main() -> Result<()> {
                 }),
                 None => None,
             };
-            watch::run_daemon(&db, &root, flush_ms, one_file_system, alert, growth_days)?;
+            watch::run_daemon(
+                &db,
+                &root,
+                flush_ms,
+                one_file_system,
+                alert,
+                growth_days,
+                max_cpu as f64 / 100.0,
+            )?;
         }
         None => {
             // bare `dux` or `dux <path>` opens the TUI. Drop this connection before

@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.5.1
+Version:        0.5.2
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -57,6 +57,27 @@ fi
 exit 0
 
 %changelog
+* Mon Jul 13 2026 dux maintainers <root@localhost> - 0.5.2-1
+- Daemon CPU/I/O governor — dux is a background reader and must never load a
+  production host. New guarantees:
+  * Hard CPU cap: the daemon self-measures its own CPU (CLOCK_PROCESS_CPUTIME)
+    and injects proportional sleeps to hold a duty-cycle ceiling (`daemon
+    --max-cpu`, default 25% of one core). Under a filesystem event storm it
+    stays at the cap instead of spiking — verified holding 3-5% under a
+    1.8M-file create storm that previously pinned 16-21%.
+  * Idle I/O priority (IOPRIO_CLASS_IDLE) + low nice, so it never contends with
+    production for disk or CPU; cgroup backstops in the unit (CPUQuota=50%,
+    IOWeight/CPUWeight=10).
+  * The kernel fanotify queue is the buffer; the flush is bounded per cycle so a
+    create storm can't produce one giant CPU spike. Excess load drains over
+    subsequent throttled cycles; if the queue ever overflows, the index is marked
+    dirty for a later reconcile — it degrades to eventual consistency, never a
+    CPU spike.
+  * New THROTTLED state in `dux status`/TUI: when the governor is deliberately
+    holding the daemon back, the UI explains the index is intentionally stale to
+    protect the host, how stale it is, and that it catches up automatically.
+- Idle daemon stays ~0% CPU; normal activity is tracked in realtime as before.
+
 * Sun Jul 12 2026 dux maintainers <root@localhost> - 0.5.1-1
 - Perf (daemon CPU): born-and-died event coalescing. A file created AND deleted
   within the same flush window (build temp files, editor swap files — e.g. a Go

@@ -23,10 +23,19 @@ RuntimeDirectoryMode=0755
 # First-time scan can take a while on big/slow disks; give it room.
 TimeoutStartSec=3600
 
-# Stay out of the way of real workloads.
+# Stay out of the way of real workloads. dux self-governs its CPU in-process
+# (`daemon --max-cpu`, default 25% of one core) and runs at idle I/O priority so
+# it never contends for disk; the cgroup limits below are a kernel-enforced
+# backstop in case the in-process governor is ever bypassed.
 Nice=10
 IOSchedulingClass=idle
-CPUWeight=20
+IOSchedulingPriority=7
+# cgroup-v2 weights: give dux the least CPU/IO share under contention.
+CPUWeight=10
+IOWeight=10
+# Hard ceiling (kernel-enforced). Sits ABOVE the in-process --max-cpu target so
+# the governor is the primary limiter and this only catches a runaway.
+CPUQuota=50%
 # The scan buffers all node metadata in memory; budget generously and prefer a
 # soft limit so very large filesystems don't OOM mid-scan.
 MemoryHigh=2G

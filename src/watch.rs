@@ -36,6 +36,120 @@ const MIN_FREE_BYTES: i64 = 256 * 1024 * 1024;
 /// — bounded memory beats an OOM kill that loses everything anyway.
 const MAX_PENDING: usize = 500_000;
 
+/// Max fanotify read()s drained per loop tick before the CPU governor gets to run.
+/// Bounds the size of a single CPU burst under a storm so throttling stays smooth
+/// (the rest of the backlog waits in the kernel's fanotify queue until next tick).
+const MAX_READS_PER_TICK: u32 = 48;
+
+/// If the daemon hasn't emptied the kernel fanotify queue in this long, it's
+/// persistently behind (the CPU/IO governor is holding it back under sustained
+/// load) — surface a "throttled, data is stale" state to status/TUI.
+const STALE_BEHIND_SECS: i64 = 15;
+
+/// Max `pending` entries indexed in one flush. Bounds the per-flush CPU burst so
+/// the governor can hold a low `--max-cpu` target under a create storm (a giant
+/// single flush would be a multi-second spike it can't offset). The remainder
+/// drains over the next, throttled cycles.
+const FLUSH_BATCH: usize = 4096;
+
+/// Max a single throttle can sleep. Must be large enough that even a big work
+/// burst (e.g. one flush indexing thousands of new files) can be paid down to a
+/// low `--max-cpu` target in one go — otherwise the achieved duty cycle floors at
+/// burst/(burst+cap) and the cap is silently exceeded. Bounded so a pathological
+/// burst can't stall forever; the heartbeat is refreshed mid-sleep so a long
+/// throttle never makes the daemon look dead.
+const MAX_THROTTLE_SLEEP_SECS: f64 = 30.0;
+
+/// Make the daemon a true background citizen: IDLE I/O-priority class (the block
+/// scheduler only serves it when nothing else wants the disk — so it can never
+/// cause I/O contention for production) plus a low CPU nice (it yields the CPU it
+/// does use). Lowering one's own priority never requires privilege. Best-effort.
+fn set_background_priority() {
+    unsafe {
+        // nice +10 — production threads always win the CPU.
+        libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+    }
+    #[cfg(target_os = "linux")]
+    unsafe {
+        // ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IDLE, 0)).
+        const IOPRIO_WHO_PROCESS: libc::c_int = 1;
+        const IOPRIO_CLASS_IDLE: libc::c_int = 3;
+        let ioprio = IOPRIO_CLASS_IDLE << 13; // class in the high bits, level 0
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0, ioprio);
+    }
+}
+
+/// Total process CPU time (user+sys) in seconds — the daemon is single-threaded,
+/// so this is its whole CPU footprint. Used by the governor to self-throttle.
+fn proc_cpu_secs() -> f64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut ts) };
+    ts.tv_sec as f64 + ts.tv_nsec as f64 / 1e9
+}
+
+/// CPU governor: keeps the daemon's CPU duty cycle at or below `target` (a
+/// fraction of ONE core). `throttle()` is called once per loop iteration; if the
+/// CPU burned since the last call exceeds the budget for the wall time elapsed, it
+/// sleeps the difference so the average stays under target. Under a churn storm
+/// the daemon therefore does a bounded slice of work, then sleeps — bursts buffer
+/// in the kernel's fanotify queue (our "message queue"), and if that ever
+/// overflows the existing FAN_Q_OVERFLOW path marks the index dirty for a later
+/// reconcile. Net effect: the daemon can never spike CPU and take a box down; it
+/// degrades to eventual consistency instead. Idle iterations (poll blocked, ~no
+/// CPU) never sleep here, so an idle daemon stays at ~0%.
+struct CpuGovernor {
+    target: f64,
+    cpu_ref: f64,
+    wall_ref: Instant,
+}
+
+impl CpuGovernor {
+    fn new(target_frac: f64) -> Self {
+        Self {
+            target: target_frac.clamp(0.01, 1.0),
+            cpu_ref: proc_cpu_secs(),
+            wall_ref: Instant::now(),
+        }
+    }
+
+    fn throttle(&mut self, db: &Path) {
+        let dcpu = (proc_cpu_secs() - self.cpu_ref).max(0.0);
+        let dwall = self.wall_ref.elapsed().as_secs_f64();
+        // Sleep the WHOLE shortfall (so even a big burst is paid down to target),
+        // in small chunks so a SIGTERM/SIGHUP is handled within ~50ms, and refresh
+        // the heartbeat every ~2s so a long throttle never makes the daemon look
+        // dead to `status`/`dux scan`.
+        let mut remaining = throttle_sleep_secs(dcpu, dwall, self.target);
+        let mut hb = Instant::now();
+        while remaining > 0.0
+            && !SHUTDOWN.load(Ordering::SeqCst)
+            && !RESCAN.load(Ordering::SeqCst)
+        {
+            let chunk = remaining.min(0.05);
+            std::thread::sleep(Duration::from_secs_f64(chunk));
+            remaining -= chunk;
+            if hb.elapsed() >= Duration::from_secs(2) {
+                crate::util::write_heartbeat(db);
+                hb = Instant::now();
+            }
+        }
+        self.cpu_ref = proc_cpu_secs();
+        self.wall_ref = Instant::now();
+    }
+}
+
+/// How long to sleep to hold a `target` duty cycle, given the CPU and wall time
+/// spent since the last checkpoint. Pure (testable): to keep cpu/wall ≤ target,
+/// the work must span at least `dcpu/target` wall seconds; sleep the shortfall,
+/// bounded by MAX_THROTTLE_SLEEP_SECS so a pathological burst can't stall forever.
+fn throttle_sleep_secs(dcpu: f64, dwall: f64, target: f64) -> f64 {
+    let need_wall = dcpu / target.clamp(0.01, 1.0);
+    (need_wall - dwall).clamp(0.0, MAX_THROTTLE_SLEEP_SECS)
+}
+
 // ---- fanotify constants (FID / dirent-event mode) ----
 const FAN_CLASS_NOTIF: libc::c_uint = 0x0000_0000;
 const FAN_CLOEXEC: libc::c_uint = 0x0000_0001;
@@ -164,6 +278,7 @@ pub fn run_daemon(
     one_file_system: bool,
     alert: Option<AlertConfig>,
     growth_days: i64,
+    max_cpu_frac: f64,
 ) -> Result<()> {
     // How long to keep per-inode growth history. Shorter = smaller index on a
     // high-churn host. Clamp to >= 1 day so the growth/heat features still work.
@@ -174,6 +289,10 @@ pub fn run_daemon(
     let _lock = crate::util::lock_db(db).context("acquiring daemon db lock")?;
     // The daemon must never get a real workload OOM-killed in its place.
     crate::guard::oom_protect_self();
+    // Background reader: IDLE I/O class + low CPU nice so it never contends with
+    // production for disk or CPU (the kernel serves it only when the host is
+    // otherwise idle). The CPU governor below caps its duty cycle on top of this.
+    set_background_priority();
     let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
     // Never start on a missing/incompatible index, OR one indexed for a DIFFERENT
@@ -306,6 +425,11 @@ pub fn run_daemon(
     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
     let mut alert_children: Vec<std::process::Child> = Vec::new();
     let mut pending: HashMap<PathBuf, Op> = HashMap::new();
+    // CPU governor — hard-caps the daemon's own CPU duty cycle so a filesystem
+    // event storm (e.g. a build churning /tmp) can never spike CPU and disrupt the
+    // host. Excess load buffers in the kernel fanotify queue; if that overflows,
+    // the index is marked dirty and reconciled by a later scan.
+    let mut gov = CpuGovernor::new(max_cpu_frac);
     // Paths CREATEd since the last flush — lets a same-window delete cancel a
     // transient file before it does any index work (see parse_events). Cleared
     // whenever `pending` is cleared, so it only ever spans one flush window.
@@ -321,6 +445,16 @@ pub fn run_daemon(
     let mut writes_paused = false; // transient low-disk pause (self-clearing)
     let (mut ev_seen, mut ev_resolved) = (0u64, 0u64); // capability self-check (C3)
     let mut resolve_warned = false;
+    // "Throttled/behind" tracking for the UI. We're "caught up" only when BOTH the
+    // kernel fanotify queue is drained AND the indexing backlog (`pending`) is
+    // empty. When the governor can't keep up under a storm, one of those stays
+    // backed up, so `last_caught_up.elapsed()` = how far behind (hence how stale)
+    // the index is. Surfaced to status/TUI via a meta key so the user understands
+    // WHY data is stale: dux is deliberately yielding to the host instead of
+    // spiking CPU/IO. Cleared once we catch up.
+    let mut last_caught_up = Instant::now();
+    let mut kernel_empty = true; // did the last drain reach EAGAIN (queue empty)?
+    let mut throttled_since: Option<i64> = None;
 
     loop {
         if SHUTDOWN.load(Ordering::SeqCst) {
@@ -439,7 +573,11 @@ pub fn run_daemon(
                 std::thread::sleep(Duration::from_millis(50));
             }
         } else if pr > 0 {
-            // drain every event currently queued (non-blocking via FAN_NONBLOCK)
+            // Drain queued events — but only up to MAX_READS_PER_TICK per tick, so
+            // the CPU governor gets to run between bursts under a storm instead of
+            // us draining an unbounded flood in one uninterruptible spike. Anything
+            // left stays in the kernel fanotify queue for the next tick.
+            let mut reads = 0u32;
             loop {
                 let n =
                     unsafe { libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
@@ -454,6 +592,11 @@ pub fn run_daemon(
                     );
                     ev_seen += seen;
                     ev_resolved += resolved;
+                    reads += 1;
+                    if reads >= MAX_READS_PER_TICK {
+                        kernel_empty = false; // hit the cap → more events still queued
+                        break; // yield to the governor; rest waits in the kernel queue
+                    }
                 } else {
                     if n < 0 {
                         let err = std::io::Error::last_os_error();
@@ -462,6 +605,10 @@ pub fn run_daemon(
                             _ => tracing::warn!("fanotify read error: {err}"),
                         }
                     }
+                    // Reached EAGAIN → the kernel queue is fully drained right now.
+                    // (When we instead break at the read cap above, kernel_empty
+                    // was set false to reflect the remaining backlog.)
+                    kernel_empty = true;
                     break;
                 }
             }
@@ -531,16 +678,43 @@ pub fn run_daemon(
             // Flush only when healthy AND there's work. Under Critical we keep
             // `pending` (bounded by the MAX_PENDING backstop) and lose nothing.
             if pressure != crate::guard::Pressure::Critical && !pending.is_empty() {
-                match flush(
-                    &mut store,
-                    &mut pending,
-                    &mut deferred_from,
-                    db,
-                    growth_keep_secs,
-                ) {
-                    // flush cleared `pending` on success → the current born-set has
-                    // been applied/coalesced; reset it for the next window.
-                    Ok(()) => born.clear(),
+                // Bound the flush burst so the CPU governor can actually hold a low
+                // cap: a storm can pile tens of thousands of entries into `pending`,
+                // and indexing them all in ONE flush is a multi-second CPU spike the
+                // governor can't offset. Flush at most FLUSH_BATCH per cycle; the
+                // rest drains over subsequent (throttled) cycles. Splitting is safe:
+                // rename pairing across batches is handled by `deferred_from`.
+                let result = if pending.len() > FLUSH_BATCH {
+                    let keys: Vec<PathBuf> =
+                        pending.keys().take(FLUSH_BATCH).cloned().collect();
+                    let mut batch: HashMap<PathBuf, Op> =
+                        HashMap::with_capacity(keys.len());
+                    for k in &keys {
+                        if let Some(v) = pending.remove(k) {
+                            batch.insert(k.clone(), v);
+                        }
+                    }
+                    let r = flush(&mut store, &mut batch, &mut deferred_from, db, growth_keep_secs);
+                    // These paths are now committed (or retried): they're no longer
+                    // "born this window", so a later delete of them is a REAL delete.
+                    // Removing them also keeps `born` bounded under sustained load.
+                    if r.is_ok() {
+                        for k in &keys {
+                            born.remove(k);
+                        }
+                    }
+                    r
+                } else {
+                    flush(&mut store, &mut pending, &mut deferred_from, db, growth_keep_secs)
+                };
+                match result {
+                    // Fully drained → the born-set is done; reset it for the next
+                    // window. (Partial batches prune born per-key above.)
+                    Ok(()) => {
+                        if pending.is_empty() {
+                            born.clear();
+                        }
+                    }
                     Err(e) => tracing::warn!("flush error: {e}"),
                 }
                 // alert scanning is an extra query — skip it while Elevated.
@@ -559,6 +733,34 @@ pub fn run_daemon(
             // concurrent `dux scan` corrupt the index). Written to tmpfs, so
             // an idle daemon makes no database/WAL writes at all.
             crate::util::write_heartbeat(db);
+            // Caught up = kernel queue drained AND nothing left to index. Update the
+            // timestamp here (post-flush) so a persistent `pending` backlog counts
+            // as "behind" too, not just a full kernel queue.
+            if kernel_empty && pending.is_empty() {
+                last_caught_up = Instant::now();
+            }
+            // Throttled/behind detection for the UI: if we haven't been fully caught
+            // up in STALE_BEHIND_SECS, the governor is holding us back under
+            // sustained load, so the index is intentionally stale. Record WHEN we
+            // fell behind (once, on transition) so status/TUI can explain it; clear
+            // it the moment we catch up. Writes only on a transition, so this adds
+            // no steady-state I/O.
+            let behind = last_caught_up.elapsed().as_secs() as i64;
+            if behind >= STALE_BEHIND_SECS {
+                if throttled_since.is_none() {
+                    let since = now_secs() - behind;
+                    store.set_meta("throttled_since", &since.to_string()).ok();
+                    throttled_since = Some(since);
+                    tracing::info!(
+                        "capping CPU/I/O to protect the host — live updates delayed (~{behind}s behind)"
+                    );
+                }
+            } else if throttled_since.take().is_some() {
+                let _ = store
+                    .conn
+                    .execute("DELETE FROM meta WHERE key='throttled_since'", []);
+                tracing::info!("caught up — live updates resumed");
+            }
             // Reap any finished alert children EVERY cycle (cheap try_wait) so a
             // stopped alert script never lingers as a zombie under sustained
             // Elevated pressure or while idle (check_alerts only reaps at Normal).
@@ -580,6 +782,12 @@ pub fn run_daemon(
             }
             last_flush = Instant::now();
         }
+        // CPU GOVERNOR: hold the daemon's CPU duty cycle under the configured cap.
+        // If this iteration burned more CPU than its share of wall time allows,
+        // sleep the difference — the event backlog waits in the kernel fanotify
+        // queue. This is the hard guarantee that a churn storm can never spike the
+        // daemon's CPU and disturb production. Idle iterations don't sleep here.
+        gov.throttle(db);
     }
 }
 
@@ -1737,6 +1945,21 @@ mod tests {
     use super::*;
     use crate::scan::{self, ScanOptions};
     use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn governor_holds_target_duty_cycle() {
+        // 50ms CPU over 50ms wall = 100% duty; at a 25% target, work should span
+        // 200ms, so sleep 150ms.
+        assert!((throttle_sleep_secs(0.05, 0.05, 0.25) - 0.15).abs() < 1e-9);
+        // Idle iteration (no CPU) → never sleep, whatever the wall time.
+        assert_eq!(throttle_sleep_secs(0.0, 2.0, 0.10), 0.0);
+        // Already under target (10ms CPU over 1s wall at 25%) → no sleep.
+        assert_eq!(throttle_sleep_secs(0.01, 1.0, 0.25), 0.0);
+        // A huge spike's payback is bounded by the cap so it can't stall forever.
+        assert_eq!(throttle_sleep_secs(100.0, 0.0, 0.25), MAX_THROTTLE_SLEEP_SECS);
+        // Lower target ⇒ more sleep for the same work (10ms cpu, ~0 wall):
+        assert!(throttle_sleep_secs(0.01, 0.0, 0.05) > throttle_sleep_secs(0.01, 0.0, 0.25));
+    }
 
     #[test]
     fn born_and_died_coalesces_to_nothing() {

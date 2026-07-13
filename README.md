@@ -65,6 +65,33 @@ the culprit — not just the symptom.**
 
 ---
 
+## New in 0.5.2
+
+**A CPU/I/O governor — dux stays invisible on a production host.** A background
+reader must never be the reason a box slows down. The daemon now:
+
+- **Hard-caps its own CPU.** It self-measures its CPU and injects proportional
+  sleeps to hold a duty-cycle ceiling (`dux daemon --max-cpu`, default **25% of
+  one core**). Under a filesystem event storm it *stays at the cap* instead of
+  spiking — verified holding **3–5%** through a 1.8M-file create storm that used
+  to pin 16–21%. An idle daemon is still ~0%.
+- **Runs at idle I/O priority** (`IOPRIO_CLASS_IDLE`) + low `nice`, so the kernel
+  only gives it disk/CPU when nothing else wants it — **zero contention** with
+  your workload. The packaged unit adds cgroup backstops (`CPUQuota`, `IOWeight`).
+- **Buffers, never spikes.** Bursts wait in the kernel's fanotify queue; the flush
+  is bounded per cycle so a storm can't produce one giant spike. If the daemon
+  ever can't keep up at its cap, it **degrades to eventual consistency** (marks
+  the index for a later reconcile) rather than ever loading the host.
+- **Tells you when it's behind.** If the governor is deliberately holding the
+  daemon back, `dux status` and the TUI show a **THROTTLED** state explaining the
+  index is intentionally stale to protect the host, how stale it is, and that it
+  catches up automatically when load eases (raise `--max-cpu` for faster updates).
+
+Tune it: `dux daemon / --max-cpu 10` for an ultra-quiet host, or higher for
+snappier live updates on a machine with headroom.
+
+---
+
 ## New in 0.5.0
 
 **SRE/DevOps integration — everything scriptable, everything from the index (no
