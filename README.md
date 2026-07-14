@@ -320,6 +320,48 @@ The daemon coalesces changes in memory and flushes batched updates — **~0% CPU
 idle, low single-digit % of one core under heavy write load, zero added read
 IOPS.**
 
+### Who can read the index
+
+The index lists **every filename on `/`** — including names inside directories a
+user could not otherwise traverse. It exposes no file *contents*, but reading it
+does bypass directory permissions, so the packaged service keeps it at **`0640
+root:dux`**, not world-readable.
+
+```bash
+sudo usermod -aG dux alice     # alice can now run `dux find` / `dux status`
+```
+
+Everyone else (and any unprivileged tooling) must go through `sudo` or a
+privileged wrapper. To lock it down to root-only, or to restore the old
+world-readable behaviour, see the `index exposure` notes at the bottom of
+`packaging/dux.service`.
+
+### Index states — and when to rescan
+
+`dux` never silently claims exact data. When it cannot guarantee the index
+matches the filesystem it says so, and `dux status` (and the TUI header) surface
+the state:
+
+| State | What it means | What to do |
+|---|---|---|
+| *(none shown)* | Index is live and believed exact. | Nothing. |
+| **DIRTY** | The daemon knows it **missed events** — fanotify queue overflow, a downtime gap, dropped backlog, missing capabilities, partial watch coverage, or a moved-in directory too large to reconcile. Totals may be stale or wrong. | **`sudo dux scan /`** — the only thing that clears it. |
+| **WRITES PAUSED** (*reason*) | Deliberate self-protection: low memory, low disk, high load, or kernel PSI pressure. The daemon stopped writing and shrank its caches to protect the host. Events keep coalescing in memory. | Nothing — it resumes automatically. Fix the underlying pressure. If it persists under sustained churn the backlog cap trips and the index goes **DIRTY**. |
+| **THROTTLED** | The CPU governor is intentionally holding dux back (default: 25% of one core), so the index is *knowingly behind*. `dux status` reports how stale. | Nothing. Raise `daemon --max-cpu` only if you want dux to catch up faster at the cost of host CPU. |
+
+```bash
+dux status              # index state, staleness, daemon liveness
+dux status --json       # same, for monitoring
+```
+
+Rule of thumb: **DIRTY is the only state that needs you.** Paused and throttled
+are dux choosing the host over its own freshness, and both self-recover.
+
+A `dux scan` is also warranted after bulk changes made while the daemon was
+stopped, and is safe to run any time — rebuilds are atomic (the live index is
+replaced only once the new one is complete, so a failed scan never leaves a
+half-built index).
+
 ---
 
 ## Trust it: independent verification

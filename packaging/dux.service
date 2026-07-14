@@ -20,6 +20,14 @@ RestartSec=5
 # so the heartbeat file vanishes when the daemon dies (no stale "live").
 RuntimeDirectory=dux
 RuntimeDirectoryMode=0755
+
+# Index ownership: runs as root (fanotify needs CAP_SYS_ADMIN) but with the `dux`
+# group, and a 0027 umask, so the index lands 0640 root:dux instead of 0644.
+# See "index exposure" at the bottom of this file.
+Group=dux
+UMask=0027
+StateDirectory=dux
+StateDirectoryMode=0750
 # First-time scan can take a while on big/slow disks; give it room.
 TimeoutStartSec=3600
 
@@ -69,14 +77,24 @@ SystemCallArchitectures=native
 # --- index exposure (READ THIS) -------------------------------------------
 # The index at /var/lib/dux/dux.db contains the FULL FILENAME LIST of the root
 # filesystem, including names inside directories a user could not otherwise
-# traverse. By default it is world-readable (0644) so unprivileged `dux find` /
-# `dux status` work (dux is a companion to user-facing tooling). This is an
-# information-disclosure tradeoff. To make the index ROOT-ONLY instead, set:
-#     StateDirectory=dux
+# traverse. Reading the index therefore bypasses directory permissions: it does
+# not expose file CONTENTS, but it does expose the existence and names of every
+# path on the box.
+#
+# The index is therefore 0640 root:dux (see Group=/UMask=/StateDirectory* above),
+# NOT world-readable. Grant a trusted user direct query access with:
+#     usermod -aG dux alice     # alice can now run `dux find` / `dux status`
+# Everyone else is denied and must go through a privileged wrapper.
+#
+# To go further and make the index ROOT-ONLY, drop `Group=dux` and set:
 #     StateDirectoryMode=0700
 #     UMask=0077
-# (the daemon then creates dux.db 0600); unprivileged users lose direct query
-# access and must go through a privileged wrapper.
+# (the daemon then creates dux.db 0600.)
+#
+# To restore the old world-readable behaviour (NOT recommended — any local user
+# can then enumerate every filename on /), drop `Group=dux` and set:
+#     StateDirectoryMode=0755
+#     UMask=0022
 
 [Install]
 WantedBy=multi-user.target

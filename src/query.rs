@@ -47,6 +47,33 @@ pub(crate) const SUBTREE_CTE: &str = "WITH RECURSIVE sub(d,i,depth) AS (
         WHERE NOT (de.dev_id=de.parent_dev AND de.inode=de.parent_inode) AND sub.depth<4096
     ) SELECT d,i FROM sub";
 
+/// The subtree CTE stopped at `max_depth` levels below the root (root = depth 0).
+///
+/// This PRUNES the recursion rather than filtering after the fact: `du --depth 1`
+/// on a huge tree reads the root's children instead of walking every descendant
+/// and discarding it in Rust. Pruning is sound because a directory's
+/// `recursive_bytes` is materialised at scan time, so a parent's total is already
+/// correct without visiting the descendants we skip.
+///
+/// `max_depth` is clamped to the same 4096 cycle-guard as [`SUBTREE_CTE`], so a
+/// corrupt cycle still terminates. It is a `usize` formatted into the SQL (never
+/// user text), so there is no injection surface.
+pub(crate) fn subtree_cte_depth(max_depth: Option<usize>) -> String {
+    match max_depth {
+        None => SUBTREE_CTE.to_string(),
+        Some(md) => format!(
+            "WITH RECURSIVE sub(d,i,depth) AS (
+        SELECT ?,?,0
+        UNION
+        SELECT de.dev_id, de.inode, sub.depth+1 FROM dirents de
+        JOIN sub ON de.parent_inode=sub.i AND de.parent_dev=sub.d
+        WHERE NOT (de.dev_id=de.parent_dev AND de.inode=de.parent_inode) AND sub.depth<{}
+    ) SELECT d,i FROM sub",
+            md.min(4096)
+        ),
+    }
+}
+
 /// Subtree filter for queries over the `inodes`/`growth` tables (their own
 /// columns are `dev_id`,`inode`).
 fn scope_predicate() -> String {
@@ -448,6 +475,7 @@ pub fn index_totals(store: &Store) -> (i64, i64) {
     (count, bytes)
 }
 
+#[derive(Debug)]
 pub struct DuRow {
     pub path: String,
     pub bytes: i64, // allocated (blocks*512) — matches `du` default, not apparent
@@ -458,7 +486,16 @@ pub struct DuRow {
 /// `du`-equivalent listing from the index: every directory in the subtree (and
 /// files too when `all`) with its allocated size. Directories carry their
 /// recursive total; files their own blocks — exactly what `du` reports.
-pub fn du(store: &Store, scope: Option<(i64, i64)>, all: bool) -> Result<Vec<DuRow>> {
+///
+/// `max_depth` (root = 0) is pushed down into the subtree walk, so a shallow
+/// `du --depth 1` over a huge tree never materialises the deep rows it would only
+/// discard. Callers get rows already depth-filtered — do not re-filter.
+pub fn du(
+    store: &Store,
+    scope: Option<(i64, i64)>,
+    all: bool,
+    max_depth: Option<usize>,
+) -> Result<Vec<DuRow>> {
     // Resolve the subtree root: explicit scope, else the index root marker.
     let root = match scope {
         Some(x) => Some(x),
@@ -473,14 +510,18 @@ pub fn du(store: &Store, scope: Option<(i64, i64)>, all: bool) -> Result<Vec<DuR
         }
     };
     let kind_filter = if all { "" } else { " AND kind='d'" };
+    let cte = subtree_cte_depth(max_depth);
     let (sql, use_scope) = match root {
         Some(_) => (
             format!(
                 "SELECT dev_id, inode, kind, recursive_bytes, blocks, mtime FROM inodes
-                 WHERE (dev_id,inode) IN ({SUBTREE_CTE}){kind_filter}"
+                 WHERE (dev_id,inode) IN ({cte}){kind_filter}"
             ),
             true,
         ),
+        // No root marker: a degenerate index (never scanned, or the markers were
+        // lost). There is no root to measure depth from, so the walk can't be
+        // pruned — fall back to the whole table and filter by path depth below.
         None => (
             format!(
                 "SELECT dev_id, inode, kind, recursive_bytes, blocks, mtime FROM inodes
@@ -490,6 +531,8 @@ pub fn du(store: &Store, scope: Option<(i64, i64)>, all: bool) -> Result<Vec<DuR
         ),
     };
     let mut stmt = store.conn.prepare(&sql)?;
+    // `stmt` and `pr` both borrow `conn` immutably, so rows can be resolved as they
+    // stream — no intermediate Vec of the whole subtree.
     let mut pr = PathResolver::new(&store.conn);
     let map = |r: &rusqlite::Row| -> rusqlite::Result<(i64, i64, String, i64, i64, i64)> {
         Ok((
@@ -501,16 +544,15 @@ pub fn du(store: &Store, scope: Option<(i64, i64)>, all: bool) -> Result<Vec<DuR
             r.get(5)?,
         ))
     };
-    let collected: Vec<(i64, i64, String, i64, i64, i64)> = if use_scope {
+    let rows = if use_scope {
         let (d, i) = root.unwrap();
         stmt.query_map(params![d, i], map)?
-            .collect::<std::result::Result<_, _>>()?
     } else {
         stmt.query_map([], map)?
-            .collect::<std::result::Result<_, _>>()?
     };
-    let mut out = Vec::with_capacity(collected.len());
-    for (dev, inode, kind, rbytes, blocks, mtime) in collected {
+    let mut out: Vec<DuRow> = Vec::new();
+    for row in rows {
+        let (dev, inode, kind, rbytes, blocks, mtime) = row?;
         let is_dir = kind == "d";
         out.push(DuRow {
             path: pr.resolve(dev, inode),
@@ -518,6 +560,20 @@ pub fn du(store: &Store, scope: Option<(i64, i64)>, all: bool) -> Result<Vec<DuR
             is_dir,
             mtime,
         });
+    }
+    // The pruned CTE already applied `max_depth`; only the rootless fallback above
+    // still needs it, measured from the shallowest path in the set.
+    if !use_scope {
+        if let Some(md) = max_depth {
+            let root_depth = out
+                .iter()
+                .map(|r| r.path.trim_end_matches('/').matches('/').count())
+                .min()
+                .unwrap_or(0);
+            out.retain(|r| {
+                r.path.trim_end_matches('/').matches('/').count() - root_depth <= md
+            });
+        }
     }
     Ok(out)
 }
@@ -736,4 +792,132 @@ pub fn dirty_since(store: &Store) -> Option<i64> {
 /// True when a watch daemon for THIS db has heart-beaten within the last 30s.
 pub fn daemon_live(db: &Path) -> bool {
     crate::util::daemon_live_for(db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("dux-query-{tag}-{}", std::process::id()))
+    }
+
+    fn rm(db: &std::path::Path) {
+        for s in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+    }
+
+    /// A linear tree: / -> a -> b -> c, each dir 4096 blocks, plus a file at /a/f.
+    /// Depth from the root: / =0, /a =1, /a/b =2, /a/b/c =3.
+    fn linear_tree(db: &std::path::Path) -> Store {
+        rm(db);
+        let store = Store::create_fresh(db).unwrap();
+        {
+            let c = &store.conn;
+            // (inode, kind, blocks, recursive_bytes)
+            for (ino, kind, blocks, rb) in [
+                (1i64, "d", 4096i64, 20480i64),
+                (2, "d", 4096, 16384),
+                (3, "d", 4096, 8192),
+                (4, "d", 4096, 4096),
+                (5, "f", 4096, 4096),
+            ] {
+                c.execute(
+                    "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+                     VALUES(1,?1,?2,?3,?4,1,0,0)",
+                    params![ino, kind, blocks, rb],
+                )
+                .unwrap();
+            }
+            // (parent_inode, name, inode) — root's dirent points at itself.
+            for (p, name, ino) in [
+                (1i64, "/", 1i64),
+                (1, "a", 2),
+                (2, "b", 3),
+                (3, "c", 4),
+                (2, "f", 5),
+            ] {
+                c.execute(
+                    "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                     VALUES(1,?1,?2,1,?3,1)",
+                    params![p, name.as_bytes(), ino],
+                )
+                .unwrap();
+            }
+            c.execute(
+                "INSERT INTO meta(key,value) VALUES('root_dev','1'),('root_inode','1')",
+                [],
+            )
+            .unwrap();
+        }
+        store
+    }
+
+    /// `du --depth N` must not enumerate below N. Without a depth bound the CTE
+    /// walks the whole subtree, so a deep tree costs RAM proportional to the tree
+    /// rather than to what the caller asked to see.
+    #[test]
+    fn du_depth_bounds_the_subtree_walk() {
+        let db = tmp("du-depth");
+        let store = linear_tree(&db);
+
+        let d0 = du(&store, None, false, Some(0)).unwrap();
+        assert_eq!(d0.len(), 1, "depth 0 = the root only, got {d0:?}");
+
+        let d1 = du(&store, None, false, Some(1)).unwrap();
+        assert_eq!(d1.len(), 2, "depth 1 = root + /a, got {d1:?}");
+
+        let d2 = du(&store, None, false, Some(2)).unwrap();
+        assert_eq!(d2.len(), 3, "depth 2 = root + /a + /a/b, got {d2:?}");
+
+        // Unbounded still sees every directory (4 dirs, file excluded by `all=false`).
+        let all = du(&store, None, false, None).unwrap();
+        assert_eq!(all.len(), 4, "unbounded = every dir, got {all:?}");
+
+        drop(store);
+        rm(&db);
+    }
+
+    /// The depth bound must not change the reported totals: a directory's
+    /// `recursive_bytes` is precomputed at scan time, so pruning the walk below it
+    /// is safe — the parent's total already accounts for the descendants we skip.
+    #[test]
+    fn du_depth_preserves_recursive_totals() {
+        let db = tmp("du-depth-totals");
+        let store = linear_tree(&db);
+
+        let d1 = du(&store, None, false, Some(1)).unwrap();
+        let a = d1.iter().find(|r| r.path.ends_with('a')).expect("/a present");
+        assert_eq!(
+            a.bytes, 16384,
+            "/a keeps its full recursive total even though /a/b was pruned"
+        );
+
+        drop(store);
+        rm(&db);
+    }
+
+    /// `all=true` includes files, and files must respect the same depth bound.
+    #[test]
+    fn du_depth_applies_to_files_too() {
+        let db = tmp("du-depth-files");
+        let store = linear_tree(&db);
+
+        // /a/f is at depth 2; depth 1 must exclude it.
+        let d1 = du(&store, None, true, Some(1)).unwrap();
+        assert!(
+            !d1.iter().any(|r| r.path.ends_with('f')),
+            "/a/f is depth 2, must be pruned at depth 1: {d1:?}"
+        );
+
+        let d2 = du(&store, None, true, Some(2)).unwrap();
+        assert!(
+            d2.iter().any(|r| r.path.ends_with('f')),
+            "/a/f must appear at depth 2: {d2:?}"
+        );
+
+        drop(store);
+        rm(&db);
+    }
 }

@@ -501,22 +501,12 @@ fn real_main() -> Result<()> {
                 }
                 return Ok(());
             }
-            let mut rows = query::du(&store, scope, all)?;
+            // `max_depth` is pushed into the subtree walk itself, so a shallow
+            // `--depth` never materialises the deep rows it would only discard.
+            let mut rows = query::du(&store, scope, all, max_depth)?;
             // du order: a directory prints AFTER its descendants (post-order); a
             // reverse-lexicographic sort puts deeper paths first and the root last.
             rows.sort_by(|a, b| b.path.cmp(&a.path));
-            // depth relative to the deepest common root (the queried path's root):
-            // the shortest path in the set is the subtree root.
-            let root_depth = rows
-                .iter()
-                .map(|r| r.path.trim_end_matches('/').matches('/').count())
-                .min()
-                .unwrap_or(0);
-            if let Some(md) = max_depth {
-                rows.retain(|r| {
-                    r.path.trim_end_matches('/').matches('/').count() - root_depth <= md
-                });
-            }
             if json {
                 emit::du(&rows);
                 return Ok(());

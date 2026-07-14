@@ -250,11 +250,8 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         parent_inode: root_inode,
         depth: 0,
         kind: 'd',
-        size: meta.size() as i64,
         blocks: (meta.blocks() as i64) * 512,
         uid: meta.uid() as i64,
-        gid: meta.gid() as i64,
-        mode: meta.mode() as i64,
         mtime: meta.mtime(),
         name: root.as_os_str().as_bytes().to_vec(),
         recursive: 0,
@@ -265,8 +262,13 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     // map each dir (dev,inode) -> node index and roll child subtotals into the
     // parent. Hardlinked files (same inode at multiple paths) have their blocks
     // counted ONCE — matching `du`/`df`, which never double-count shared inodes.
+    //
+    // Sized to the DIRECTORY count, not the node count: only dirs are inserted, and
+    // dirs are a small fraction of a real tree (~10%), so `nodes.len()` here would
+    // allocate ~10x the buckets ever used — ~29 bytes x every file, wasted.
+    let n_dirs_hint = nodes.iter().filter(|n| n.kind == 'd').count();
     let mut dir_idx: std::collections::HashMap<i128, usize> =
-        std::collections::HashMap::with_capacity(nodes.len());
+        std::collections::HashMap::with_capacity(n_dirs_hint);
     for (i, n) in nodes.iter().enumerate() {
         if n.kind == 'd' {
             dir_idx.insert(key(n.dev, n.inode), i);
@@ -278,43 +280,55 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     // or the canonical link of a file). Only primaries get a node row + FTS name,
     // so a search never resolves to a different hardlink's path.
     let mut primary = vec![false; nodes.len()];
+
     // Pick the canonical link per file inode DETERMINISTICALLY. The parallel walk
     // yields nodes in a nondeterministic order, so "first-seen wins" would
     // attribute a cross-directory hardlink's blocks to a DIFFERENT directory on
     // each scan, making per-dir totals flap between runs. Canonical = the link
     // with the smallest (parent_dev, parent_inode, name).
-    let mut canon: std::collections::HashMap<i128, usize> =
-        std::collections::HashMap::with_capacity(nodes.len());
-    for (i, n) in nodes.iter().enumerate() {
-        if n.kind == 'd' {
-            continue;
+    //
+    // Done by sorting file indices on (dev,inode) so an inode's links land in one
+    // contiguous run, rather than a (dev,inode)->index HashMap sized to the whole
+    // node set. Same result, ~3-4x less peak RAM for this step: 8 bytes per FILE
+    // versus ~29 bytes per NODE. Sorting also keeps this correct for links the
+    // `nlink` count can't reveal — a bind-mounted file shows the same (dev,inode)
+    // at two paths with nlink==1, so an nlink-gated fast path would mark both
+    // primary and double-count the blocks. Every file goes through the run scan.
+    let mut files: Vec<usize> = (0..nodes.len()).filter(|&i| nodes[i].kind != 'd').collect();
+    files.sort_unstable_by_key(|&i| (nodes[i].dev, nodes[i].inode));
+    let mut s = 0;
+    while s < files.len() {
+        let (d, ino) = (nodes[files[s]].dev, nodes[files[s]].inode);
+        let mut e = s + 1;
+        while e < files.len() && nodes[files[e]].dev == d && nodes[files[e]].inode == ino {
+            e += 1;
         }
-        let k = key(n.dev, n.inode);
-        match canon.get(&k) {
-            None => {
-                canon.insert(k, i);
-            }
-            Some(&j) => {
-                let a = &nodes[i];
-                let b = &nodes[j];
-                if (a.parent_dev, a.parent_inode, &a.name)
-                    < (b.parent_dev, b.parent_inode, &b.name)
-                {
-                    canon.insert(k, i);
-                }
-            }
-        }
+        // one link -> trivially canonical; several -> the min (parent, name)
+        let best = files[s..e]
+            .iter()
+            .copied()
+            .min_by(|&a, &b| {
+                (nodes[a].parent_dev, nodes[a].parent_inode, &nodes[a].name).cmp(&(
+                    nodes[b].parent_dev,
+                    nodes[b].parent_inode,
+                    &nodes[b].name,
+                ))
+            })
+            .expect("run is non-empty");
+        primary[best] = true;
+        s = e;
     }
+    drop(files); // the sort scratch is dead before the (larger) rollup arrays grow
+
     for (i, n) in nodes.iter().enumerate() {
+        // directories are always their own primary; files only when canonical
         if n.kind == 'd' {
+            primary[i] = true;
+        }
+        if primary[i] {
+            // a dir, or the single canonical link: count blocks + inode once
             bytes_sub[i] = n.blocks;
             inode_sub[i] = 1;
-            primary[i] = true;
-        } else if canon.get(&key(n.dev, n.inode)) == Some(&i) {
-            // the single canonical link for this inode: count blocks + inode once
-            bytes_sub[i] = n.blocks;
-            inode_sub[i] = 1;
-            primary[i] = true;
         } else {
             // additional hardlinks: already counted (0 bytes, 0 inodes, no row)
             bytes_sub[i] = 0;
@@ -429,9 +443,14 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
 
 /// A node captured during the parallel walk. parent (dev,inode) and depth are
 /// recorded at walk time so post-processing needs no path map. `recursive` is
-/// filled in phase 2. (`size`/`gid`/`mode` are captured but no longer stored —
-/// the v2 schema keeps only allocated `blocks`, owner `uid` and `mtime`.)
-#[allow(dead_code)]
+/// filled in phase 2.
+///
+/// EVERY node of the tree is held in memory at once (see `scan`), so this struct
+/// is on the hot path for peak scan RAM: one dead i64 here costs 8 bytes x the
+/// whole filesystem — ~800 MB across 100M files. The v2+ schema stores only
+/// allocated `blocks`, owner `uid` and `mtime`, so apparent `size`, `gid` and
+/// `mode` are deliberately NOT captured. Don't add a field here without checking
+/// it is actually written to the DB.
 struct RawNode {
     dev: i64,
     inode: i64,
@@ -439,11 +458,8 @@ struct RawNode {
     parent_inode: i64,
     depth: u32,
     kind: char,
-    size: i64,
     blocks: i64,
     uid: i64,
-    gid: i64,
-    mode: i64,
     mtime: i64,
     name: Vec<u8>, // raw filename bytes — identity-preserving (no lossy UTF-8)
     recursive: i64,
@@ -606,11 +622,8 @@ fn parallel_collect(
                         parent_inode: pino,
                         depth: cdepth,
                         kind,
-                        size: m.size() as i64,
                         blocks,
                         uid: m.uid() as i64,
-                        gid: m.gid() as i64,
-                        mode: m.mode() as i64,
                         mtime: m.mtime(),
                         name,
                         recursive: 0,
@@ -645,5 +658,114 @@ fn set_low_priority() {
         const IOPRIO_CLASS_IDLE: libc::c_int = 3;
         let ioprio = IOPRIO_CLASS_IDLE << 13;
         libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0, ioprio);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("dux-scan-{tag}-{}", std::process::id()))
+    }
+
+    fn rm_db(db: &Path) {
+        for s in ["", "-wal", "-shm"] {
+            let _ = fs::remove_file(format!("{}{s}", db.display()));
+        }
+    }
+
+    fn write_file(p: &Path, kb: usize) {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, vec![0u8; kb * 1024]).unwrap();
+    }
+
+    /// Hardlinked blocks are counted exactly ONCE (like du/df), and the canonical
+    /// link is chosen deterministically as the smallest
+    /// (parent_dev, parent_inode, name) — never "whichever the parallel walk saw
+    /// first", which would make per-dir totals flap between scans.
+    #[test]
+    fn hardlinks_counted_once_and_canonical_is_stable() {
+        let root = tmp("hardlink-tree");
+        let _ = fs::remove_dir_all(&root);
+        write_file(&root.join("aaa/f"), 64);
+        fs::create_dir_all(root.join("zzz")).unwrap();
+        // second link to the same inode, in a lexicographically LATER directory
+        fs::hard_link(root.join("aaa/f"), root.join("zzz/f")).unwrap();
+
+        let db = tmp("hardlink-db");
+        rm_db(&db);
+        let opts = ScanOptions::default();
+        let stats = rebuild_atomic(&db, &root, &opts).unwrap();
+
+        let store = Store::open_ro(&db).unwrap();
+        // exactly one `inodes` row for the shared inode...
+        let ino: i64 = fs::metadata(root.join("aaa/f")).unwrap().ino() as i64;
+        let rows: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM inodes WHERE inode=?1",
+                params![ino],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 1, "one inodes row per shared inode");
+
+        // ...but BOTH paths exist as dirents, with exactly one marked prime.
+        let dirents: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE inode=?1",
+                params![ino],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(dirents, 2, "both hardlink paths are indexed");
+        let primes: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirents WHERE inode=?1 AND prime=1",
+                params![ino],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(primes, 1, "exactly one canonical link carries the blocks");
+
+        // The canonical link is the one under `aaa` (smaller name), not `zzz`.
+        let prime_name: Vec<u8> = store
+            .conn
+            .query_row(
+                "SELECT p.name FROM dirents d JOIN dirents p
+                   ON p.dev_id=d.parent_dev AND p.inode=d.parent_inode
+                 WHERE d.inode=?1 AND d.prime=1",
+                params![ino],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&prime_name),
+            "aaa",
+            "canonical link must be the min (parent,name), deterministically"
+        );
+
+        // The shared 64K is counted once in the root total, not twice.
+        let root_ino: i64 = fs::metadata(&root).unwrap().ino() as i64;
+        let rb: i64 = store
+            .conn
+            .query_row(
+                "SELECT recursive_bytes FROM inodes WHERE inode=?1",
+                params![root_ino],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            (65536..200_000).contains(&rb),
+            "64K counted once (plus dir blocks), got {rb} — 128K means double-counted"
+        );
+        assert_eq!(stats.files, 2, "both links are still reported as files");
+
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
     }
 }

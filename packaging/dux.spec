@@ -10,6 +10,9 @@ BuildArch:      x86_64
 # runs on any x86_64 Linux regardless of the host glibc. Don't let rpm synthesize
 # a glibc requirement from the binary.
 AutoReqProv:    no
+# %pre runs groupadd to create the `dux` group that gates index access.
+# AutoReqProv is off, so this dependency must be declared explicitly.
+Requires(pre):  shadow-utils
 
 %description
 dux is an indexed, persistent du/ncdu with fast trigram file-name search and an
@@ -23,6 +26,7 @@ capacity, and ships an integrity-audit harness. Companion to xtop.
 %install
 rm -rf %{buildroot}
 mkdir -p %{buildroot}%{_bindir} %{buildroot}/usr/lib/systemd/system %{buildroot}%{_docdir}/dux
+mkdir -p %{buildroot}/var/lib/dux
 install -m0755 %{_sourcedir}/dux        %{buildroot}%{_bindir}/dux
 install -m0644 %{_sourcedir}/dux.service %{buildroot}/usr/lib/systemd/system/dux.service
 install -m0644 %{_sourcedir}/README.md  %{buildroot}%{_docdir}/dux/README.md
@@ -31,15 +35,35 @@ install -m0644 %{_sourcedir}/README.md  %{buildroot}%{_docdir}/dux/README.md
 %{_bindir}/dux
 /usr/lib/systemd/system/dux.service
 %doc %{_docdir}/dux/README.md
+# The index lists every filename on /, so the state dir is root:dux 0750, not 0755.
+%dir %attr(0750,root,dux) /var/lib/dux
+
+%pre
+# The `dux` group gates read access to the index. Created in %pre so it exists
+# before %files ownership is applied and before the unit starts.
+if ! getent group dux >/dev/null 2>&1; then
+    groupadd -r dux >/dev/null 2>&1 || true
+fi
+exit 0
 
 %post
 mkdir -p /var/lib/dux
+chgrp dux /var/lib/dux 2>/dev/null || true
+chmod 0750 /var/lib/dux 2>/dev/null || true
+# Upgrades from <= 0.5.2 left a world-readable index behind; close it.
+for f in /var/lib/dux/dux.db /var/lib/dux/dux.db-wal /var/lib/dux/dux.db-shm; do
+    [ -e "$f" ] || continue
+    chgrp dux "$f" 2>/dev/null || true
+    chmod 0640 "$f" 2>/dev/null || true
+done
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
     systemctl enable dux.service || true
     echo "dux: starting service (initial scan of / runs now, then the live daemon)…"
     systemctl restart dux.service || true
 fi
+echo "dux: the index is readable by root and the 'dux' group (it lists every"
+echo "dux: filename on /). Grant a user access with: usermod -aG dux <user>"
 exit 0
 
 %preun

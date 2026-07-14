@@ -1,8 +1,25 @@
 #!/bin/sh
 set -e
 
-# state dir for the index
+# The `dux` group gates read access to the index. The index lists every filename
+# on /, so it is 0640 root:dux rather than world-readable; members of this group
+# (and root) can run `dux find` / `dux status` directly. Must exist BEFORE the
+# unit starts — systemd resolves Group= at activation.
+if ! getent group dux >/dev/null 2>&1; then
+    addgroup --system dux >/dev/null 2>&1 || groupadd -r dux >/dev/null 2>&1 || true
+fi
+
+# state dir for the index (systemd's StateDirectory= enforces this on start too;
+# done here as well for the non-systemd path below)
 mkdir -p /var/lib/dux
+chgrp dux /var/lib/dux 2>/dev/null || true
+chmod 0750 /var/lib/dux 2>/dev/null || true
+# Upgrades from <= 0.5.2 left a world-readable index behind; close it.
+for f in /var/lib/dux/dux.db /var/lib/dux/dux.db-wal /var/lib/dux/dux.db-shm; do
+    [ -e "$f" ] || continue
+    chgrp dux "$f" 2>/dev/null || true
+    chmod 0640 "$f" 2>/dev/null || true
+done
 
 case "$1" in
     configure)
@@ -16,6 +33,8 @@ case "$1" in
         else
             echo "dux: systemd not detected; run 'dux scan /' then 'dux daemon /' manually."
         fi
+        echo "dux: the index is readable by root and the 'dux' group (it lists every"
+        echo "dux: filename on /). Grant a user access with: usermod -aG dux <user>"
         ;;
 esac
 
