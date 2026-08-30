@@ -140,6 +140,8 @@ the culprit — not just the symptom.**
 - Fixed restart gaps that could leave an apparently live but stale index.
 - Fixed pseudo-filesystem and nested container views being scanned or counted as
   independent storage.
+- Fixed the static-musl release build on platforms where `statfs.f_type` has an
+  unsigned ABI representation.
 
 ---
 

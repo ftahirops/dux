@@ -83,7 +83,7 @@ pub(crate) fn is_duplicate_storage_view(path: &Path) -> bool {
     matches!(fs_magic(path), Some(0x794c7630)) // OVERLAYFS_SUPER_MAGIC
 }
 
-fn fs_magic(path: &Path) -> Option<libc::c_long> {
+fn fs_magic(path: &Path) -> Option<u64> {
     use std::mem::MaybeUninit;
     let c = match std::ffi::CString::new(path.as_os_str().as_bytes()) {
         Ok(c) => c,
@@ -93,7 +93,10 @@ fn fs_magic(path: &Path) -> Option<libc::c_long> {
     if unsafe { libc::statfs(c.as_ptr(), s.as_mut_ptr()) } != 0 {
         return None;
     }
-    Some(unsafe { s.assume_init() }.f_type)
+    // libc exposes `f_type` as a signed long on glibc and an unsigned long on
+    // musl. Filesystem magic values are bit patterns, so normalize both ABI
+    // representations to the same unsigned value before matching.
+    Some(unsafe { s.assume_init() }.f_type as u64)
 }
 
 #[derive(Default)]
