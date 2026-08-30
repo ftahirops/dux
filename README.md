@@ -6,6 +6,7 @@ rates, and realtime alerts the classic tools can't give you.**
 
 ```
 dux            # instant tree, sorted by size, live-updating
+dux overview   # one-shot CLI dashboard: largest, growth, changes, reclaimable
 dux top /var   # biggest dirs under /var — no rescan
 dux find /home --name '*.log' --larger 1G --newer 1h
 ```
@@ -67,6 +68,38 @@ the culprit — not just the symptom.**
 
 ## New in 0.5.2
 
+**Bounded scans and visible indexing.** The initial crawl no longer stores every
+file plus multiple whole-tree scratch arrays in RAM. Parallel stat workers feed
+an 8,192-entry bounded queue into a disk-backed staging database; deterministic
+hardlink selection and bottom-up directory totals are reduced there before the
+small final index is atomically installed. Scan RAM is therefore bounded by the
+worker/batch/cache configuration rather than filesystem file count.
+
+`dux status` now exposes the live pipeline: pending/cap, kernel-queue state,
+events seen/resolved, updates committed/dropped, and catch-up lag. The TUI header
+shows both full-scan progress and incremental queue health. Its four simple
+screens answer four questions: **Overview** (what matters?), **Explore** (where
+is it?), **Activity** (what changed?), and **Reclaim** (what can safely be
+reviewed?). Explore groups by Apps/OS/Users, owner, modification age, object type,
+or file-size band. Reclaim includes per-container Docker/Podman breakdown plus
+measured, safety-labelled cleanup suggestions. The advisor never deletes.
+
+Every answer is also CLI-first and scriptable: `dux overview`, `dux large
+--files`, `dux fastest-growth --since 1h`, `dux activity --since 24h`, and `dux
+docker`. These are friendly aliases for the precise `top`, `growth`, `diff`, and
+`containers` commands, and all support `--json`. Dux's own DB/WAL/staging files
+are excluded from scans, live events, and reports so the observer never appears
+as the workload or inflates its own index.
+
+The systemd service uses `Restart=always` with unlimited attempts, bounded
+backoff, and a 45-second application watchdog. Crashes/OOM kills are restarted;
+a process that remains alive but stops making progress is restarted too. After
+any restart the daemon installs fanotify coverage first, then automatically
+reconciles the downtime gap in a low-priority atomic rebuild while the previous
+index remains queryable. Nested overlay, tmpfs, namespace and other non-storage
+views are excluded so they neither double-count bytes nor create false coverage
+warnings.
+
 **A CPU/I/O governor — dux stays invisible on a production host.** A background
 reader must never be the reason a box slows down. The daemon now:
 
@@ -97,7 +130,7 @@ snappier live updates on a machine with headroom.
 **SRE/DevOps integration — everything scriptable, everything from the index (no
 filesystem re-walk, no added daemon cost):**
 
-- **`--json` on every read command** (`top`, `find`, `growth`, `by-owner`,
+- **`--json` on every read command** (`overview`, `top`, `find`, `growth`, `by-owner`,
   `by-ext`, `deleted-open`, `diff`, `du`, `containers`) — pipe straight to `jq`.
 - **`dux metrics`** — Prometheus text-exposition output for the node_exporter
   textfile collector: `dux_fs_bytes_used`, `dux_fs_inodes_used`,
@@ -270,16 +303,18 @@ sudo install -m755 target/release/dux /usr/local/bin/dux
 ```bash
 # index once, then everything is instant
 sudo dux scan /
-dux                       # live tree UI (↑↓ move · → expand · i size⇄inodes · q quit)
+dux                       # four views: Overview · Explore · Activity · Reclaim
 
 # answer the incident
 dux top /var --dirs       # biggest directories
+dux large --files --explain --sort safety  # owner/type/relation/deletion safety
+dux explain /swap.img     # purpose, importance, why, and correct cleanup method
 dux top --inodes          # dirs with the MOST files (inode exhaustion)
 dux find /home --name '*.log' --larger 1G
 dux growth /data --since 1h
 dux diff --since 8h       # what FILLED (or freed) the disk in the last 8h
 dux du -sh /var/log       # byte-exact du, but instant (no re-walk)
-dux containers            # disk usage per Docker/Podman container
+dux containers            # writable/log/volume/reclaimable Docker/Podman breakdown
 dux deleted-open          # space held by deleted-but-open files
 dux status                # capacity + index freshness
 ```
@@ -289,6 +324,8 @@ dux status                # capacity + index freshness
 ```bash
 # JSON on every read command → pipe to jq / dashboards
 dux top --dirs --json | jq '.[] | {path, bytes}'
+dux large --files --explain --json | jq '.[].classification'
+dux explain /var/log/auth.log.1 --json
 
 # Prometheus metrics for the node_exporter textfile collector
 dux metrics > /var/lib/node_exporter/textfile_collector/dux.prom
@@ -316,9 +353,10 @@ sudo systemctl enable --now dux          # initial scan, then realtime daemon
 dux daemon / --alert-threshold 1G --alert-window 10m --alert-exec /path/hook.sh
 ```
 
-The daemon coalesces changes in memory and flushes batched updates — **~0% CPU
-idle, low single-digit % of one core under heavy write load, zero added read
-IOPS.**
+The daemon coalesces repeated changes by path and flushes bounded batches — only
+changed paths are restatted, never the full tree. It is **~0% CPU idle**, stays
+under its configured one-core duty-cycle ceiling during write storms, and adds
+no steady-state scan I/O. `dux status` shows whether it is caught up.
 
 ### Who can read the index
 
@@ -378,10 +416,14 @@ sudo DUX_RECONCILE=1 scripts/dux-verify.sh install-cron   # verify every 3h, sel
 
 ## How it works
 
-Two components, one SQLite WAL file — no server, no second database, no eBPF:
+Two long-lived components and one compact SQLite WAL index — no server and no
+eBPF. A temporary staging DB exists only during a full rebuild:
 
 ```
-dux CLI / TUI  ──reads──►  SQLite WAL index  ◄──writes──  dux daemon (scan + fanotify)
+initial crawl ──bounded queue──► staging DB ──atomic build──► SQLite WAL index
+                                                               ▲          │
+                                             fanotify changes ─┘          ▼
+                                                          dux CLI / TUI reads
 ```
 
 The daemon uses fanotify **FID mode** (`open_by_handle_at`) to track

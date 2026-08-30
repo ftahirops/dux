@@ -21,6 +21,7 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct ContainerRow {
     pub runtime: &'static str,
     pub id: String,
@@ -36,6 +37,56 @@ impl ContainerRow {
     pub fn total(&self) -> i64 {
         self.writable_bytes + self.log_bytes + self.volume_bytes
     }
+    /// Bytes freed by `docker rm`-ing THIS container: a stopped container's
+    /// writable layer + its json-log are dead weight; a running one's are live.
+    /// (Volumes are NOT counted here — they outlive the container and are
+    /// reclaimed only when orphaned; see [`Waste`].)
+    pub fn reclaimable(&self) -> i64 {
+        if self.running {
+            0
+        } else {
+            self.writable_bytes + self.log_bytes
+        }
+    }
+    pub fn state(&self) -> &'static str {
+        if self.running {
+            "running"
+        } else {
+            "stopped"
+        }
+    }
+}
+
+/// Host-level reclaimable disk — what `docker system prune` would roughly free,
+/// computed from on-disk metadata + the index (no docker socket).
+#[derive(Clone, Default)]
+pub struct Waste {
+    /// Writable layers + logs of STOPPED containers (freed by `docker rm`).
+    pub stopped_bytes: i64,
+    /// Named volumes referenced by NO container (freed by `docker volume prune`).
+    pub orphan_volume_bytes: i64,
+    pub orphan_volume_count: usize,
+    /// Build cache (freed by `docker builder prune`).
+    pub build_cache_bytes: i64,
+}
+
+impl Waste {
+    pub fn total(&self) -> i64 {
+        self.stopped_bytes + self.orphan_volume_bytes + self.build_cache_bytes
+    }
+}
+
+/// Volume-directory names on disk that are referenced by NO container — i.e.
+/// orphaned. Pure set-difference so it's unit-testable. `referenced` holds the
+/// volume *names* (the dir name under <root>/volumes) each container mounts.
+fn orphan_volumes<'a>(
+    on_disk: &'a [String],
+    referenced: &std::collections::HashSet<String>,
+) -> Vec<&'a String> {
+    on_disk
+        .iter()
+        .filter(|name| !referenced.contains(*name))
+        .collect()
 }
 
 /// (dev,inode) for a live path — the key the index is keyed by.
@@ -99,8 +150,56 @@ fn parse_upperdir(mountinfo: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
-    use super::parse_upperdir;
+    use super::{orphan_volumes, parse_upperdir, ContainerRow, Waste};
+    use std::collections::HashSet;
+
+    #[test]
+    fn orphan_volumes_are_the_unreferenced_ones() {
+        let on_disk = vec![
+            "used_a".to_string(),
+            "orphan_1".to_string(),
+            "used_b".to_string(),
+            "orphan_2".to_string(),
+        ];
+        let referenced: HashSet<String> = ["used_a".to_string(), "used_b".to_string()]
+            .into_iter()
+            .collect();
+        let mut got: Vec<&String> = orphan_volumes(&on_disk, &referenced);
+        got.sort();
+        assert_eq!(got, vec![&"orphan_1".to_string(), &"orphan_2".to_string()]);
+    }
+
+    #[test]
+    fn reclaimable_counts_stopped_only() {
+        let mk = |running, w, l| ContainerRow {
+            runtime: "docker",
+            id: "x".into(),
+            name: "n".into(),
+            image: "i".into(),
+            running,
+            writable_bytes: w,
+            log_bytes: l,
+            volume_bytes: 0,
+        };
+        // running container: nothing reclaimable, even with a big writable layer
+        assert_eq!(mk(true, 5000, 10).reclaimable(), 0);
+        // stopped: writable + logs are dead weight
+        assert_eq!(mk(false, 5000, 10).reclaimable(), 5010);
+        assert_eq!(mk(false, 0, 0).state(), "stopped");
+    }
+
+    #[test]
+    fn waste_total_sums_categories() {
+        let w = Waste {
+            stopped_bytes: 100,
+            orphan_volume_bytes: 200,
+            orphan_volume_count: 2,
+            build_cache_bytes: 50,
+        };
+        assert_eq!(w.total(), 350);
+    }
 
     #[test]
     fn upperdir_from_containerd_snapshotter() {
@@ -164,9 +263,10 @@ fn docker(store: &Store, out: &mut Vec<ContainerRow>) {
     for ent in entries.flatten() {
         let id = ent.file_name().to_string_lossy().into_owned();
         let cfg_path = ent.path().join("config.v2.json");
-        let cfg = match fs::read_to_string(&cfg_path).ok().and_then(|s| {
-            serde_json::from_str::<Value>(&s).ok()
-        }) {
+        let cfg = match fs::read_to_string(&cfg_path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        {
             Some(c) => c,
             None => continue,
         };
@@ -261,7 +361,11 @@ fn podman(store: &Store, out: &mut Vec<ContainerRow>) {
     };
     let Some(items) = arr.as_array() else { return };
     for c in items {
-        let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = c
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
@@ -304,4 +408,101 @@ pub fn list(store: &Store) -> Result<Vec<ContainerRow>> {
     podman(store, &mut out);
     out.sort_by_key(|c| std::cmp::Reverse(c.total()));
     Ok(out)
+}
+
+/// The Docker named-volume names referenced by ANY container (from every
+/// container's `MountPoints` with Type=volume). Used to find orphans.
+fn docker_referenced_volumes(root: &Path) -> std::collections::HashSet<String> {
+    let mut refd = std::collections::HashSet::new();
+    let cdir = root.join("containers");
+    let Ok(entries) = fs::read_dir(&cdir) else {
+        return refd;
+    };
+    for ent in entries.flatten() {
+        let cfg = match fs::read_to_string(ent.path().join("config.v2.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        {
+            Some(c) => c,
+            None => continue,
+        };
+        if let Some(mp) = cfg.get("MountPoints").and_then(|v| v.as_object()) {
+            for m in mp.values() {
+                if m.get("Type").and_then(|v| v.as_str()) != Some("volume") {
+                    continue;
+                }
+                // prefer the explicit volume Name; else the dir under volumes/.
+                if let Some(n) = m.get("Name").and_then(|v| v.as_str()) {
+                    if !n.is_empty() {
+                        refd.insert(n.to_string());
+                        continue;
+                    }
+                }
+                if let Some(src) = m.get("Source").and_then(|v| v.as_str()) {
+                    // .../volumes/<name>/_data  -> <name>
+                    if let Some(name) = Path::new(src).parent().and_then(|p| p.file_name()) {
+                        refd.insert(name.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+    refd
+}
+
+/// Named volumes present on disk: (name, _data path). Skips the store's own
+/// bookkeeping entries (`metadata.db`, `backingFsBlockDev`).
+fn docker_volumes_on_disk(root: &Path) -> Vec<(String, PathBuf)> {
+    let vdir = root.join("volumes");
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(&vdir) else {
+        return out;
+    };
+    for ent in entries.flatten() {
+        if !ent.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue; // metadata.db / backingFsBlockDev are files
+        }
+        let name = ent.file_name().to_string_lossy().into_owned();
+        out.push((name, ent.path().join("_data")));
+    }
+    out
+}
+
+/// Host-level reclaimable disk (≈ what `docker system prune --volumes` frees),
+/// from on-disk metadata + the index. `rows` is the output of [`list`].
+pub fn waste(store: &Store, rows: &[ContainerRow]) -> Waste {
+    // stopped containers: writable layer + logs are dead weight
+    let stopped_bytes = rows
+        .iter()
+        .filter(|c| c.runtime == "docker" && !c.running)
+        .map(|c| c.writable_bytes + c.log_bytes)
+        .sum();
+
+    let root = docker_root();
+    // orphaned named volumes: on disk but referenced by no container
+    let referenced = docker_referenced_volumes(&root);
+    let on_disk = docker_volumes_on_disk(&root);
+    let names: Vec<String> = on_disk.iter().map(|(n, _)| n.clone()).collect();
+    let orphan_names: std::collections::HashSet<&String> =
+        orphan_volumes(&names, &referenced).into_iter().collect();
+    let (mut orphan_volume_bytes, mut orphan_volume_count) = (0i64, 0usize);
+    for (name, data) in &on_disk {
+        if orphan_names.contains(name) {
+            orphan_volume_bytes += dir_bytes(store, data);
+            orphan_volume_count += 1;
+        }
+    }
+
+    // build cache (buildkit) — reclaimable via `docker builder prune`
+    let build_cache_bytes = ["buildkit", "buildx"]
+        .iter()
+        .map(|sub| dir_bytes(store, &root.join(sub)))
+        .sum();
+
+    Waste {
+        stopped_bytes,
+        orphan_volume_bytes,
+        orphan_volume_count,
+        build_cache_bytes,
+    }
 }

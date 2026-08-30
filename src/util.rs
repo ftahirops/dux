@@ -33,6 +33,42 @@ pub fn db_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("dux.db"))
 }
 
+/// True for dux's own SQLite database and transient sidecars. These must never
+/// feed back into the index or growth history: doing so wastes space and makes
+/// "fastest growth" report the observer rather than the workload.
+pub fn is_index_artifact(path: &std::path::Path, db: &std::path::Path) -> bool {
+    use std::ffi::OsString;
+    let with_suffix = |suffix: &str| {
+        let mut value: OsString = db.as_os_str().to_owned();
+        value.push(suffix);
+        std::path::PathBuf::from(value)
+    };
+    if path == db
+        || [
+            "-wal", "-shm", "-journal", ".lock", ".new", ".new-wal", ".new-shm",
+        ]
+        .iter()
+        .any(|suffix| path == with_suffix(suffix))
+    {
+        return true;
+    }
+    let Some(parent) = db.parent() else {
+        return false;
+    };
+    if path.parent() != Some(parent) {
+        return false;
+    }
+    let Some(base) = db.file_name().map(|s| s.to_string_lossy()) else {
+        return false;
+    };
+    path.file_name()
+        .map(|s| {
+            s.to_string_lossy()
+                .starts_with(&format!("{base}.new.scan-"))
+        })
+        .unwrap_or(false)
+}
+
 /// Acquire an EXCLUSIVE, non-blocking advisory lock for `db`, held for the
 /// lifetime of the returned file handle. This is the real mutual-exclusion guard
 /// (the heartbeat is only advisory): two concurrent writers — scan+scan,
@@ -134,6 +170,55 @@ pub fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Send an sd_notify datagram when systemd supplied NOTIFY_SOCKET. Implemented
+/// directly to avoid a runtime dependency and to support both pathname and
+/// Linux abstract (@name) UNIX sockets. Best-effort outside systemd.
+pub fn systemd_notify(message: &str) {
+    use std::os::unix::ffi::OsStrExt;
+    let Some(socket) = std::env::var_os("NOTIFY_SOCKET") else {
+        return;
+    };
+    let bytes = socket.as_os_str().as_bytes();
+    if bytes.is_empty() {
+        return;
+    }
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+    if fd < 0 {
+        return;
+    }
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    let max = addr.sun_path.len();
+    let (copy, abstract_socket) = if bytes[0] == b'@' {
+        (&bytes[1..], true)
+    } else {
+        (bytes, false)
+    };
+    let start = usize::from(abstract_socket);
+    if copy.len() + start >= max {
+        unsafe { libc::close(fd) };
+        return;
+    }
+    for (i, b) in copy.iter().enumerate() {
+        addr.sun_path[start + i] = *b as libc::c_char;
+    }
+    // One leading NUL for abstract sockets or one trailing NUL for path sockets.
+    let path_len = copy.len() + 1;
+    let addr_len =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + path_len) as libc::socklen_t;
+    let _ = unsafe {
+        libc::sendto(
+            fd,
+            message.as_ptr().cast(),
+            message.len(),
+            libc::MSG_NOSIGNAL,
+            (&addr as *const libc::sockaddr_un).cast(),
+            addr_len,
+        )
+    };
+    unsafe { libc::close(fd) };
+}
+
 /// Runtime heartbeat file (tmpfs). Liveness lives here, not in SQLite, so an
 /// idle daemon performs zero database/WAL writes. systemd's RuntimeDirectory
 /// creates /run/dux and removes it on stop, so the file vanishes when the
@@ -145,7 +230,12 @@ pub const HEARTBEAT_PATH: &str = "/run/dux/heartbeat";
 /// progress even when it runs in the background with stderr suppressed.
 pub const SCAN_PROGRESS_PATH: &str = "/run/dux/scan.progress";
 
+/// Volatile daemon pipeline metrics. Keeping these in tmpfs avoids turning
+/// observability into steady-state SQLite/WAL churn.
+pub const WATCH_STATUS_PATH: &str = "/run/dux/watch.status";
+
 /// Live progress of an in-flight scan.
+#[derive(Clone)]
 pub struct ScanProgress {
     pub started: i64, // epoch seconds the scan began
     pub files: u64,
@@ -160,6 +250,24 @@ pub fn write_scan_progress(started: i64, files: u64, dirs: u64, bytes: i64, inde
     let _ = std::fs::write(
         SCAN_PROGRESS_PATH,
         format!("{started} {files} {dirs} {bytes} {}", indexing as u8),
+    );
+    refresh_owned_heartbeat();
+    systemd_notify("WATCHDOG=1");
+}
+
+/// A daemon-triggered atomic rebuild runs inside the daemon process. Keep its
+/// existing per-DB heartbeat fresh while the scan loop is busy so CLI/TUI do not
+/// incorrectly report "daemon off" during a long reconciliation.
+fn refresh_owned_heartbeat() {
+    let Some((_, pid, db)) = read_heartbeat_full() else {
+        return;
+    };
+    if pid != std::process::id() as i32 {
+        return; // a manual scan must never impersonate another daemon
+    }
+    let _ = std::fs::write(
+        HEARTBEAT_PATH,
+        format!("{} {} {db}", now_secs(), std::process::id()),
     );
 }
 
@@ -197,6 +305,91 @@ pub fn read_scan_progress() -> Option<ScanProgress> {
     })
 }
 
+#[derive(Clone, Default)]
+pub struct WatchStatus {
+    pub pending: u64,
+    pub kernel_empty: bool,
+    pub events_seen: u64,
+    pub events_resolved: u64,
+    pub updates_committed: u64,
+    pub updates_dropped: u64,
+    pub behind_ms: u64,
+    pub max_pending: u64,
+}
+
+/// Publish the current event pipeline in a small, versioned text record.
+#[allow(clippy::too_many_arguments)]
+pub fn write_watch_status(
+    db: &std::path::Path,
+    pending: usize,
+    kernel_empty: bool,
+    events_seen: u64,
+    events_resolved: u64,
+    updates_committed: u64,
+    updates_dropped: u64,
+    behind_ms: u64,
+    max_pending: usize,
+) {
+    let _ = std::fs::create_dir_all("/run/dux");
+    let db = db
+        .canonicalize()
+        .unwrap_or_else(|_| db.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    let body = format!(
+        "1 {} {} {} {} {} {} {} {} {} {}\n{}",
+        now_secs(),
+        std::process::id(),
+        pending,
+        kernel_empty as u8,
+        events_seen,
+        events_resolved,
+        updates_committed,
+        updates_dropped,
+        behind_ms,
+        max_pending,
+        db,
+    );
+    let _ = std::fs::write(WATCH_STATUS_PATH, body);
+}
+
+/// Read live pipeline metrics only when fresh and belonging to this database.
+pub fn read_watch_status(db: &std::path::Path) -> Option<WatchStatus> {
+    let s = std::fs::read_to_string(WATCH_STATUS_PATH).ok()?;
+    let (head, status_db) = s.split_once('\n')?;
+    let mut f = head.split_whitespace();
+    if f.next()? != "1" {
+        return None;
+    }
+    let updated: i64 = f.next()?.parse().ok()?;
+    let _pid: i32 = f.next()?.parse().ok()?;
+    let pending = f.next()?.parse().ok()?;
+    let kernel_empty = f.next()? == "1";
+    let events_seen = f.next()?.parse().ok()?;
+    let events_resolved = f.next()?.parse().ok()?;
+    let updates_committed = f.next()?.parse().ok()?;
+    let updates_dropped = f.next()?.parse().ok()?;
+    let behind_ms = f.next()?.parse().ok()?;
+    let max_pending = f.next()?.parse().ok()?;
+    if now_secs() - updated > 30 {
+        return None;
+    }
+    let want = db.canonicalize().unwrap_or_else(|_| db.to_path_buf());
+    if std::path::Path::new(status_db.trim()) != want.as_path() {
+        return None;
+    }
+    Some(WatchStatus {
+        pending,
+        kernel_empty,
+        events_seen,
+        events_resolved,
+        updates_committed,
+        updates_dropped,
+        behind_ms,
+        max_pending,
+    })
+}
+
 /// Stamp the heartbeat file with the current epoch seconds, the daemon's PID,
 /// and the absolute path of the DB it's writing (best-effort). The PID lets
 /// `dux scan` signal the daemon to rescan itself instead of telling the user to
@@ -212,6 +405,7 @@ pub fn write_heartbeat(db: &std::path::Path) {
         HEARTBEAT_PATH,
         format!("{} {} {db}", now_secs(), std::process::id()),
     );
+    systemd_notify("WATCHDOG=1");
 }
 
 /// (epoch, pid, db_path) of the last heartbeat. Tolerates the older "<secs> <db>"
@@ -324,5 +518,32 @@ pub fn ago(secs: i64) -> String {
         format!("{}h", d / 3600)
     } else {
         format!("{}d", d / 86400)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_only_dux_index_artifacts() {
+        let db = std::path::Path::new("/var/lib/dux/dux.db");
+        for path in [
+            "/var/lib/dux/dux.db",
+            "/var/lib/dux/dux.db-wal",
+            "/var/lib/dux/dux.db-shm",
+            "/var/lib/dux/dux.db.new",
+            "/var/lib/dux/dux.db.new.scan-123-456.tmp",
+        ] {
+            assert!(is_index_artifact(std::path::Path::new(path), db), "{path}");
+        }
+        assert!(!is_index_artifact(
+            std::path::Path::new("/var/lib/dux/dux.db.backup"),
+            db
+        ));
+        assert!(!is_index_artifact(
+            std::path::Path::new("/var/lib/app/data.db"),
+            db
+        ));
     }
 }

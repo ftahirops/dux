@@ -124,9 +124,7 @@ impl CpuGovernor {
         // dead to `status`/`dux scan`.
         let mut remaining = throttle_sleep_secs(dcpu, dwall, self.target);
         let mut hb = Instant::now();
-        while remaining > 0.0
-            && !SHUTDOWN.load(Ordering::SeqCst)
-            && !RESCAN.load(Ordering::SeqCst)
+        while remaining > 0.0 && !SHUTDOWN.load(Ordering::SeqCst) && !RESCAN.load(Ordering::SeqCst)
         {
             let chunk = remaining.min(0.05);
             std::thread::sleep(Duration::from_secs_f64(chunk));
@@ -320,7 +318,8 @@ pub fn run_daemon(
     // — so any change during that gap was never observed. Flag the index dirty so
     // status/TUI recommend a reconciling `dux scan` instead of silently trusting
     // possibly-drifted totals. A rescan (or the SIGHUP in-place rescan) clears it.
-    if !rebuilt {
+    let reconcile_on_start = !rebuilt;
+    if reconcile_on_start {
         let downtime = crate::util::read_heartbeat_full()
             .filter(|(_, _, hbdb)| {
                 let want = db.canonicalize().unwrap_or_else(|_| db.to_path_buf());
@@ -330,11 +329,11 @@ pub fn run_daemon(
         match downtime {
             Some(gap) => tracing::warn!(
                 "resuming after ~{gap}s not watching — changes during the gap were not tracked; \
-                 marking index dirty (run `dux scan` to reconcile)"
+                 marking index dirty; automatic background reconciliation will start"
             ),
             None => tracing::warn!(
                 "resuming a pre-existing index this daemon didn't build — marking dirty; \
-                 run `dux scan` to reconcile"
+                 automatic background reconciliation will start"
             ),
         }
         store.set_meta("dirty_since", &now_secs().to_string()).ok();
@@ -385,7 +384,8 @@ pub fn run_daemon(
             root_canon.display()
         );
     }
-    if mark_failures > 0 {
+    let coverage_incomplete = mark_failures > 0;
+    if coverage_incomplete {
         // partial coverage is a known-incomplete watch — surface it via dirty
         // state so status/TUI stop claiming the index is trustworthy.
         store.set_meta("dirty_since", &now_secs().to_string()).ok();
@@ -419,6 +419,9 @@ pub fn run_daemon(
     }
 
     crate::util::write_heartbeat(db);
+    crate::util::systemd_notify(
+        "READY=1\nSTATUS=Watching filesystem; incremental index is caught up",
+    );
     let flush_every = Duration::from_millis(flush_ms);
     let mut last_flush = Instant::now();
     let mut last_ckpt = Instant::now();
@@ -444,6 +447,7 @@ pub fn run_daemon(
         .unwrap_or_else(|| PathBuf::from("/"));
     let mut writes_paused = false; // transient low-disk pause (self-clearing)
     let (mut ev_seen, mut ev_resolved) = (0u64, 0u64); // capability self-check (C3)
+    let (mut updates_committed, mut updates_dropped) = (0u64, 0u64);
     let mut resolve_warned = false;
     // "Throttled/behind" tracking for the UI. We're "caught up" only when BOTH the
     // kernel fanotify queue is drained AND the indexing backlog (`pending`) is
@@ -455,9 +459,17 @@ pub fn run_daemon(
     let mut last_caught_up = Instant::now();
     let mut kernel_empty = true; // did the last drain reach EAGAIN (queue empty)?
     let mut throttled_since: Option<i64> = None;
+    if reconcile_on_start {
+        // The fanotify marks are live before the rebuild begins. Events arriving
+        // during the atomic scan remain in the kernel queue and are drained onto
+        // the new index afterward, closing the restart gap without downtime.
+        RESCAN.store(true, Ordering::SeqCst);
+    }
+    crate::util::write_watch_status(db, 0, true, 0, 0, 0, 0, 0, MAX_PENDING);
 
     loop {
         if SHUTDOWN.load(Ordering::SeqCst) {
+            crate::util::systemd_notify("STOPPING=1\nSTATUS=Draining filesystem events");
             // Final best-effort DRAIN of the kernel queue first, so events that
             // landed in the brief window before SIGTERM (a file created right as
             // `systemctl stop` ran) aren't lost — then flush everything once.
@@ -469,6 +481,7 @@ pub fn run_daemon(
                         &buf[..m as usize],
                         &fsfds,
                         &root_canon,
+                        db,
                         &mut pending,
                         &mut born,
                         &mut store,
@@ -499,6 +512,7 @@ pub fn run_daemon(
             for fd in fsfds.values() {
                 unsafe { libc::close(*fd) }; // release the per-filesystem mount fds
             }
+            let _ = std::fs::remove_file(crate::util::WATCH_STATUS_PATH);
             return Ok(());
         }
         if RESCAN.swap(false, Ordering::SeqCst) {
@@ -510,6 +524,7 @@ pub fn run_daemon(
                 "rescan requested (SIGHUP) — atomic full rebuild of {}",
                 root_canon.display()
             );
+            crate::util::systemd_notify("RELOADING=1\nSTATUS=Rebuilding index atomically");
             let opts = crate::scan::ScanOptions {
                 one_file_system,
                 progress: false,
@@ -534,6 +549,11 @@ pub fn run_daemon(
                     born.clear();
                     deferred_from.clear(); // fresh db supersedes any pending renames
                     writes_paused = false; // fresh db; any pause/dirty is reconciled
+                    if coverage_incomplete {
+                        // A full scan repairs historical drift but cannot make an
+                        // unwatchable mounted filesystem live. Preserve the warning.
+                        store.set_meta("dirty_since", &now_secs().to_string()).ok();
+                    }
                     crate::util::write_heartbeat(db);
                     tracing::info!(
                         "rescan complete: {} files, {} dirs, {} ({} errors)",
@@ -542,8 +562,16 @@ pub fn run_daemon(
                         crate::util::human(s.bytes),
                         s.errors
                     );
+                    crate::util::systemd_notify(
+                        "READY=1\nSTATUS=Rescan complete; watching filesystem",
+                    );
                 }
-                Err(e) => tracing::warn!("rescan failed (keeping existing index): {e}"),
+                Err(e) => {
+                    tracing::warn!("rescan failed (keeping existing index): {e}");
+                    crate::util::systemd_notify(
+                        "READY=1\nSTATUS=Rescan failed; old index retained; watching continues",
+                    );
+                }
             }
             last_flush = Instant::now();
             last_ckpt = Instant::now();
@@ -586,6 +614,7 @@ pub fn run_daemon(
                         &buf[..n as usize],
                         &fsfds,
                         &root_canon,
+                        db,
                         &mut pending,
                         &mut born,
                         &mut store,
@@ -635,6 +664,7 @@ pub fn run_daemon(
                      index marked dirty (rescan to reconcile)"
                 );
                 store.set_meta("dirty_since", &now_secs().to_string()).ok();
+                updates_dropped = updates_dropped.saturating_add(pending.len() as u64);
                 pending.clear();
                 born.clear();
                 deferred_from.clear(); // backlog dropped; a rescan will reconcile
@@ -684,17 +714,23 @@ pub fn run_daemon(
                 // governor can't offset. Flush at most FLUSH_BATCH per cycle; the
                 // rest drains over subsequent (throttled) cycles. Splitting is safe:
                 // rename pairing across batches is handled by `deferred_from`.
+                let attempted;
                 let result = if pending.len() > FLUSH_BATCH {
-                    let keys: Vec<PathBuf> =
-                        pending.keys().take(FLUSH_BATCH).cloned().collect();
-                    let mut batch: HashMap<PathBuf, Op> =
-                        HashMap::with_capacity(keys.len());
+                    let keys: Vec<PathBuf> = pending.keys().take(FLUSH_BATCH).cloned().collect();
+                    attempted = keys.len();
+                    let mut batch: HashMap<PathBuf, Op> = HashMap::with_capacity(keys.len());
                     for k in &keys {
                         if let Some(v) = pending.remove(k) {
                             batch.insert(k.clone(), v);
                         }
                     }
-                    let r = flush(&mut store, &mut batch, &mut deferred_from, db, growth_keep_secs);
+                    let r = flush(
+                        &mut store,
+                        &mut batch,
+                        &mut deferred_from,
+                        db,
+                        growth_keep_secs,
+                    );
                     // These paths are now committed (or retried): they're no longer
                     // "born this window", so a later delete of them is a REAL delete.
                     // Removing them also keeps `born` bounded under sustained load.
@@ -705,12 +741,20 @@ pub fn run_daemon(
                     }
                     r
                 } else {
-                    flush(&mut store, &mut pending, &mut deferred_from, db, growth_keep_secs)
+                    attempted = pending.len();
+                    flush(
+                        &mut store,
+                        &mut pending,
+                        &mut deferred_from,
+                        db,
+                        growth_keep_secs,
+                    )
                 };
                 match result {
                     // Fully drained → the born-set is done; reset it for the next
                     // window. (Partial batches prune born per-key above.)
                     Ok(()) => {
+                        updates_committed = updates_committed.saturating_add(attempted as u64);
                         if pending.is_empty() {
                             born.clear();
                         }
@@ -761,6 +805,17 @@ pub fn run_daemon(
                     .execute("DELETE FROM meta WHERE key='throttled_since'", []);
                 tracing::info!("caught up — live updates resumed");
             }
+            crate::util::write_watch_status(
+                db,
+                pending.len(),
+                kernel_empty,
+                ev_seen,
+                ev_resolved,
+                updates_committed,
+                updates_dropped,
+                last_caught_up.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                MAX_PENDING,
+            );
             // Reap any finished alert children EVERY cycle (cheap try_wait) so a
             // stopped alert script never lingers as a zombie under sustained
             // Elevated pressure or while idle (check_alerts only reaps at Normal).
@@ -812,6 +867,7 @@ fn real_mounts(root: &Path, one_fs: bool) -> Vec<PathBuf> {
             let p = unescape_mount(f[4]);
             if (root == Path::new("/") || p == *root || p.starts_with(root))
                 && !crate::scan::is_pseudo_fs(&p)
+                && (p == *root || !crate::scan::is_duplicate_storage_view(&p))
             {
                 out.push(p);
             }
@@ -963,6 +1019,7 @@ fn parse_events(
     mut buf: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
     root: &Path,
+    db: &Path,
     pending: &mut HashMap<PathBuf, Op>,
     born: &mut std::collections::HashSet<PathBuf>,
     store: &mut Store,
@@ -995,7 +1052,7 @@ fn parse_events(
                 } else {
                     dir.join(&name)
                 };
-                if full.starts_with(root) {
+                if full.starts_with(root) && !crate::util::is_index_artifact(&full, db) {
                     ingest_event(pending, born, full, meta.mask);
                 }
             }
@@ -1715,6 +1772,27 @@ fn flush(
                     |r| r.get(0),
                 )
                 .unwrap_or(0);
+            // OVERWRITE-rename: `rename(src, dst)` atomically REPLACES dst when it
+            // exists (mv -f, or the write-temp-then-rename-over-original atomic-save
+            // pattern editors/dpkg/rsync use constantly). If a *different* dirent
+            // already sits at the destination name, the bare UPDATE below would hit
+            // UNIQUE(parent,name) and — since the whole flush is one transaction —
+            // roll back EVERY pending change and retry forever, freezing a "live"
+            // index. So drop the clobbered destination first (unlink_dirent also
+            // subtracts its totals from the ancestor chain, matching the on-disk
+            // replace). Skip when the destination IS the source (a no-op rename).
+            let dest_occupied = tx
+                .query_row(
+                    "SELECT 1 FROM dirents
+                     WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3 LIMIT 1",
+                    params![npdev, npino, &name],
+                    |_| Ok(()),
+                )
+                .is_ok();
+            let dest_is_source = npdev == opdev && npino == opino && name == oldname;
+            if dest_occupied && !dest_is_source {
+                unlink_dirent(&tx, &mut anc, bucket, npdev, npino, &name)?;
+            }
             // relocate THIS specific dirent old->new; children keep pointing at
             // the inode, so a directory's whole subtree follows for free.
             tx.execute(
@@ -1956,7 +2034,10 @@ mod tests {
         // Already under target (10ms CPU over 1s wall at 25%) → no sleep.
         assert_eq!(throttle_sleep_secs(0.01, 1.0, 0.25), 0.0);
         // A huge spike's payback is bounded by the cap so it can't stall forever.
-        assert_eq!(throttle_sleep_secs(100.0, 0.0, 0.25), MAX_THROTTLE_SLEEP_SECS);
+        assert_eq!(
+            throttle_sleep_secs(100.0, 0.0, 0.25),
+            MAX_THROTTLE_SLEEP_SECS
+        );
         // Lower target ⇒ more sleep for the same work (10ms cpu, ~0 wall):
         assert!(throttle_sleep_secs(0.01, 0.0, 0.05) > throttle_sleep_secs(0.01, 0.0, 0.25));
     }
@@ -1971,19 +2052,33 @@ mod tests {
         ingest_event(&mut pending, &mut born, p.clone(), FAN_CREATE);
         ingest_event(&mut pending, &mut born, p.clone(), FAN_MODIFY);
         ingest_event(&mut pending, &mut born, p.clone(), FAN_DELETE);
-        assert!(pending.is_empty(), "transient create+delete must leave no work");
-        assert!(born.is_empty(), "born entry consumed by the matching delete");
+        assert!(
+            pending.is_empty(),
+            "transient create+delete must leave no work"
+        );
+        assert!(
+            born.is_empty(),
+            "born entry consumed by the matching delete"
+        );
 
         // A delete of a PRE-EXISTING path (never created this window) is a real
         // delete and must be kept.
         let q = PathBuf::from("/data/real.log");
         ingest_event(&mut pending, &mut born, q.clone(), FAN_DELETE);
-        assert_eq!(pending.get(&q), Some(&Op::Delete), "real delete is preserved");
+        assert_eq!(
+            pending.get(&q),
+            Some(&Op::Delete),
+            "real delete is preserved"
+        );
 
         // A create that SURVIVES the window (no delete) stays as an upsert.
         let s = PathBuf::from("/data/survivor");
         ingest_event(&mut pending, &mut born, s.clone(), FAN_CREATE);
-        assert_eq!(pending.get(&s), Some(&Op::Upsert), "surviving create is indexed");
+        assert_eq!(
+            pending.get(&s),
+            Some(&Op::Upsert),
+            "surviving create is indexed"
+        );
         assert!(born.contains(&s), "still born until the window flushes");
     }
 
@@ -2348,6 +2443,69 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM growth", [], |r| r.get(0))
             .unwrap();
         assert_eq!(growth_rows, 0, "a rename must not write growth rows");
+
+        drop(store);
+        cleanup(&dir, &db);
+    }
+
+    // C2: an OVERWRITE-rename — rename onto an EXISTING name (`mv -f a b`, or the
+    // ubiquitous write-temp-then-rename-over-original atomic-save pattern used by
+    // editors, dpkg, rsync, build tools) — must atomically REPLACE the destination,
+    // not fail the flush. The bare UPDATE used to collide with the destination
+    // dirent's UNIQUE(parent,name), erroring the WHOLE flush transaction so NOTHING
+    // committed: the daemon reported "live" while the index silently froze and went
+    // stale. Regression guard for that root cause.
+    #[test]
+    fn overwrite_rename_replaces_destination() {
+        let dir = tmp("ovr");
+        let db = tmp("ovr-db");
+        cleanup(&dir, &db);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a"), vec![1u8; 4096]).unwrap();
+        std::fs::write(dir.join("b"), vec![2u8; 8192]).unwrap();
+        scan_into(&dir, &db);
+        let mut store = Store::open_rw(&db).unwrap();
+        let d = id_of(&dir);
+        let a_inode = id_of(&dir.join("a"));
+        let b_inode = id_of(&dir.join("b")); // the link that gets OVERWRITTEN
+
+        // rename a onto existing b (overwrite). On disk, `b` now IS a's inode and
+        // the old b inode has one fewer link (here: zero → gone).
+        std::fs::rename(dir.join("a"), dir.join("b")).unwrap();
+        let mut deferred: HashMap<(i64, i64), DeferredFrom> = HashMap::new();
+        let mut p = HashMap::new();
+        p.insert(dir.join("a"), Op::MovedFrom);
+        p.insert(dir.join("b"), Op::MovedTo);
+
+        // BEFORE the fix this returns Err(UNIQUE constraint failed: dirents…) and the
+        // entire batch rolls back — the whole point of the bug.
+        flush(&mut store, &mut p, &mut deferred, &db, 7 * 86400)
+            .expect("overwrite-rename flush must succeed, not poison the batch");
+
+        assert!(dirent_exists(&store, d.0, d.1, b"b"), "b must remain");
+        assert!(!dirent_exists(&store, d.0, d.1, b"a"), "a must be gone");
+        let b_target: (i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT dev_id, inode FROM dirents
+                 WHERE parent_dev=?1 AND parent_inode=?2 AND name=?3",
+                params![d.0, d.1, b"b"],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            b_target, a_inode,
+            "b must now resolve to the renamed (a) inode"
+        );
+        assert_eq!(
+            inode_rows(&store, b_inode.0, b_inode.1),
+            0,
+            "the overwritten destination inode must be removed (its last link is gone)"
+        );
+        assert!(
+            inode_rows(&store, a_inode.0, a_inode.1) > 0,
+            "the renamed inode survives at its new name"
+        );
 
         drop(store);
         cleanup(&dir, &db);

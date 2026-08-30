@@ -1,3 +1,4 @@
+mod classify;
 mod containers;
 mod deleted;
 mod emit;
@@ -10,7 +11,7 @@ mod util;
 mod watch;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use store::Store;
 use util::{ago, human};
@@ -33,6 +34,17 @@ struct Cli {
 
     #[command(subcommand)]
     cmd: Option<Cmd>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum TopSort {
+    Size,
+    #[value(alias = "age")]
+    Oldest,
+    Newest,
+    Path,
+    Owner,
+    Safety,
 }
 
 #[derive(Subcommand)]
@@ -62,19 +74,38 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// One-shot CLI dashboard: largest paths, fastest growth, changes, Docker reclaimable
+    #[command(alias = "summary", alias = "dashboard", alias = "report")]
+    Overview {
+        /// Restrict path answers to this subtree (default: whole index)
+        path: Option<PathBuf>,
+        /// Growth/change window, e.g. 1h, 24h, 7d
+        #[arg(long, default_value = "1h")]
+        since: String,
+        /// Rows per section
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+    },
     /// Largest directories or files (instant, from index)
+    #[command(alias = "largest", alias = "large")]
     Top {
         /// Restrict to this path subtree (default: whole index)
         path: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, alias = "file")]
         files: bool,
-        #[arg(long)]
+        #[arg(long, alias = "directories")]
         dirs: bool,
         /// Rank by inode/file count instead of size
         #[arg(long)]
         inodes: bool,
         #[arg(long, default_value_t = 20)]
         limit: usize,
+        /// Add owner, semantic type, deletion safety, and owning application
+        #[arg(long, alias = "details", alias = "context")]
+        explain: bool,
+        /// Sort the displayed largest-file set
+        #[arg(long, value_enum, default_value_t = TopSort::Size)]
+        sort: TopSort,
     },
     /// Ultra-fast file search over the live index (locate/find replacement)
     Find {
@@ -97,6 +128,7 @@ enum Cmd {
         limit: usize,
     },
     /// Fastest-growing paths within a window
+    #[command(alias = "fastest-growth", alias = "growing")]
     Growth {
         /// Restrict to this path subtree (default: whole index)
         path: Option<PathBuf>,
@@ -107,7 +139,7 @@ enum Cmd {
     },
     /// What changed the disk within a window (net growth AND frees), ranked by
     /// magnitude — the "what filled/freed the disk?" query.
-    #[command(alias = "since")]
+    #[command(alias = "since", alias = "changed", alias = "activity")]
     Diff {
         /// Restrict to this path subtree (default: whole index)
         path: Option<PathBuf>,
@@ -144,22 +176,28 @@ enum Cmd {
         top: usize,
     },
     /// Disk usage by container (Docker/Podman): writable layer, logs, volumes
+    #[command(alias = "docker")]
     Containers {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
     /// Deleted-but-open files still consuming disk
+    #[command(alias = "leaks")]
     DeletedOpen,
     /// Disk usage by owner
+    #[command(alias = "owners")]
     ByOwner {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
     /// Disk usage by file extension
+    #[command(alias = "extensions", alias = "exts")]
     ByExt {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Explain what an indexed file belongs to and whether/how it may be removed
+    Explain { path: PathBuf },
     /// ncdu-style interactive browser
     Tui {
         #[arg(default_value = ".")]
@@ -286,12 +324,64 @@ fn real_main() -> Result<()> {
                 s.errors
             );
         }
+        Some(Cmd::Overview { path, since, limit }) => {
+            let store = Store::open_ro(&db)?;
+            let scope = match path {
+                Some(p) => query::resolve_scope(&store, &p)?,
+                None => None,
+            };
+            let secs = util::parse_duration(&since)?;
+            let dirs = query::top(&store, true, limit, scope, false)?;
+            let extra = limit.saturating_add(8);
+            let mut files = query::top(&store, false, extra, scope, false)?;
+            let mut growth = query::growth(&store, secs, extra, scope)?;
+            let mut changes = query::changed(&store, secs, extra, scope)?;
+            filter_index_rows(&mut files, &db, limit);
+            filter_index_growth(&mut growth, &db, limit);
+            filter_index_growth(&mut changes, &db, limit);
+            let containers = containers::list(&store).unwrap_or_default();
+            let waste = containers::waste(&store, &containers);
+            if json {
+                emit::overview(&dirs, &files, &growth, &changes, &waste, secs);
+                return Ok(());
+            }
+            println!(
+                "DUX OVERVIEW  index {} · window {}",
+                if query::daemon_live(&db) {
+                    "LIVE"
+                } else {
+                    "SNAPSHOT"
+                },
+                since
+            );
+            println!("\nLARGEST DIRECTORIES");
+            print_rows(&dirs);
+            println!("\nLARGEST FILES");
+            print_rows(&files);
+            println!("\nFASTEST GROWTH");
+            print_growth_rows(&growth, "GROWTH");
+            println!("\nBIGGEST CHANGES (fills and frees)");
+            print_growth_rows(&changes, "CHANGE");
+            println!("\nDOCKER RECLAIMABLE  {}", human(waste.total()));
+            println!(
+                "  stopped {} · orphan volumes {} ({}) · build cache {}",
+                human(waste.stopped_bytes),
+                human(waste.orphan_volume_bytes),
+                waste.orphan_volume_count,
+                human(waste.build_cache_bytes)
+            );
+            println!(
+                "\nMore: dux large --files · dux fastest-growth --since 24h · dux activity --since 24h · dux docker"
+            );
+        }
         Some(Cmd::Top {
             path,
             files,
             dirs,
             inodes,
             limit,
+            explain,
+            sort,
         }) => {
             let store = Store::open_ro(&db)?;
             let scope = match path {
@@ -299,9 +389,15 @@ fn real_main() -> Result<()> {
                 None => None,
             };
             let want_dirs = dirs || !files; // default: dirs
-            let rows = query::top(&store, want_dirs, limit, scope, inodes)?;
+            let mut rows = query::top(&store, want_dirs, limit.saturating_add(8), scope, inodes)?;
+            filter_index_rows(&mut rows, &db, limit);
+            sort_top_rows(&mut rows, sort);
             if json {
-                emit::rows(&rows);
+                if explain {
+                    emit::classified_rows(&rows);
+                } else {
+                    emit::rows(&rows);
+                }
             } else if inodes {
                 println!("{:<12} {:<6} PATH", "INODES", "AGE");
                 for r in &rows {
@@ -318,8 +414,15 @@ fn real_main() -> Result<()> {
                         suffix
                     );
                 }
+            } else if explain {
+                print_context_rows(&rows);
             } else {
                 print_rows(&rows);
+                if files {
+                    eprintln!(
+                        "\nContext: rerun with `--explain`; inspect one path with `dux explain PATH`."
+                    );
+                }
             }
         }
         Some(Cmd::Find {
@@ -359,7 +462,8 @@ fn real_main() -> Result<()> {
                 None => None,
             };
             let secs = util::parse_duration(&since)?;
-            let rows = query::growth(&store, secs, limit, scope)?;
+            let mut rows = query::growth(&store, secs, limit.saturating_add(8), scope)?;
+            filter_index_growth(&mut rows, &db, limit);
             if json {
                 emit::growth(&rows);
                 return Ok(());
@@ -370,7 +474,7 @@ fn real_main() -> Result<()> {
                 println!(
                     "{:<14} {}",
                     format!("{sign}{}", human(r.delta.abs())),
-                    util::display_path(&r.path)
+                    display_growth_path(&r.path)
                 );
             }
         }
@@ -428,6 +532,16 @@ fn real_main() -> Result<()> {
                 );
             }
         }
+        Some(Cmd::Explain { path }) => {
+            let store = Store::open_ro(&db)?;
+            let row = query::inspect(&store, &path)?;
+            let insight = classify::classify(&row);
+            if json {
+                emit::explain(&row, &insight);
+            } else {
+                print_explanation(&row, &insight);
+            }
+        }
         Some(Cmd::Diff { path, since, limit }) => {
             let store = Store::open_ro(&db)?;
             let scope = match path {
@@ -435,7 +549,8 @@ fn real_main() -> Result<()> {
                 None => None,
             };
             let secs = util::parse_duration(&since)?;
-            let rows = query::changed(&store, secs, limit, scope)?;
+            let mut rows = query::changed(&store, secs, limit.saturating_add(8), scope)?;
+            filter_index_growth(&mut rows, &db, limit);
             if json {
                 emit::growth(&rows);
                 return Ok(());
@@ -450,7 +565,7 @@ fn real_main() -> Result<()> {
                 println!(
                     "{:<14} {}",
                     format!("{sign}{}", human(r.delta.abs())),
-                    util::display_path(&r.path)
+                    display_growth_path(&r.path)
                 );
             }
         }
@@ -522,10 +637,12 @@ fn real_main() -> Result<()> {
         }
         Some(Cmd::Containers { limit }) => {
             let store = Store::open_ro(&db)?;
-            let mut rows = containers::list(&store)?;
-            rows.truncate(limit);
+            // waste is host-level, so compute it over the FULL list before the
+            // display truncation.
+            let rows = containers::list(&store)?;
+            let waste = containers::waste(&store, &rows);
             if json {
-                emit::containers(&rows);
+                emit::containers(&rows, &waste);
                 return Ok(());
             }
             if rows.is_empty() {
@@ -536,21 +653,74 @@ fn real_main() -> Result<()> {
                 return Ok(());
             }
             println!(
-                "{:<7} {:<20} {:<26} {:>10} {:>9} {:>9} {:>10}",
-                "RUNTIME", "NAME", "IMAGE", "WRITABLE", "LOGS", "VOLUMES", "TOTAL"
+                "{:<7} {:<8} {:<18} {:<22} {:>9} {:>8} {:>8} {:>9} {:>9}",
+                "RUNTIME",
+                "STATE",
+                "NAME",
+                "IMAGE",
+                "WRITABLE",
+                "LOGS",
+                "VOLUMES",
+                "TOTAL",
+                "RECLAIM"
             );
-            for c in &rows {
+            for c in rows.iter().take(limit) {
+                let reclaim = c.reclaimable();
                 println!(
-                    "{:<7} {:<20} {:<26} {:>10} {:>9} {:>9} {:>10}",
+                    "{:<7} {:<8} {:<18} {:<22} {:>9} {:>8} {:>8} {:>9} {:>9}",
                     c.runtime,
-                    trunc(&util::display_path(&c.name), 20),
-                    trunc(&util::display_path(&c.image), 26),
+                    c.state(),
+                    trunc(&util::display_path(&c.name), 18),
+                    trunc(&util::display_path(&c.image), 22),
                     human(c.writable_bytes),
                     human(c.log_bytes),
                     human(c.volume_bytes),
                     human(c.total()),
+                    if reclaim > 0 {
+                        human(reclaim)
+                    } else {
+                        "-".into()
+                    },
                 );
             }
+            // totals across ALL containers (not just the shown top-N). Note: a
+            // volume shared by N containers is counted once per container here —
+            // the accurate reclaimable-volume figure is the orphan line below.
+            let (sw, sl, sv): (i64, i64, i64) = rows.iter().fold((0, 0, 0), |a, c| {
+                (
+                    a.0 + c.writable_bytes,
+                    a.1 + c.log_bytes,
+                    a.2 + c.volume_bytes,
+                )
+            });
+            println!(
+                "{:<7} {:<8} {:<18} {:<22} {:>9} {:>8} {:>8} {:>9} {:>9}",
+                "",
+                "",
+                format!("TOTAL ({})", rows.len()),
+                "",
+                human(sw),
+                human(sl),
+                human(sv),
+                human(sw + sl + sv),
+                "",
+            );
+            // reclaimable / waste — what `docker system prune` would free.
+            println!("\nRECLAIMABLE (≈ docker system prune --volumes):");
+            println!(
+                "  stopped container layers+logs   {}",
+                human(waste.stopped_bytes)
+            );
+            println!(
+                "  orphaned volumes ({:>3})           {}",
+                waste.orphan_volume_count,
+                human(waste.orphan_volume_bytes)
+            );
+            println!(
+                "  build cache                     {}",
+                human(waste.build_cache_bytes)
+            );
+            println!("  TOTAL RECLAIMABLE               {}", human(waste.total()));
         }
         Some(Cmd::Tui { path }) => {
             // Resolve the start node, then DROP this connection before the TUI runs
@@ -759,7 +929,11 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
         ));
     };
     g("dux_up", "1 if the dux index is readable.", "1".into());
-    g("dux_index_nodes", "Inodes tracked in the index.", nodes.to_string());
+    g(
+        "dux_index_nodes",
+        "Inodes tracked in the index.",
+        nodes.to_string(),
+    );
     g(
         "dux_index_bytes",
         "Allocated bytes tracked by the index.",
@@ -861,6 +1035,104 @@ fn print_rows(rows: &[query::Row]) {
     }
 }
 
+fn owner_label(uid: i64) -> String {
+    if !(0..=u32::MAX as i64).contains(&uid) {
+        return format!("uid:{uid}");
+    }
+    nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid as u32))
+        .ok()
+        .flatten()
+        .map(|u| u.name)
+        .unwrap_or_else(|| format!("uid:{uid}"))
+}
+
+fn sort_top_rows(rows: &mut [query::Row], sort: TopSort) {
+    match sort {
+        TopSort::Size => rows.sort_by_key(|r| std::cmp::Reverse(r.size)),
+        TopSort::Oldest => rows.sort_by_key(|r| r.mtime),
+        TopSort::Newest => rows.sort_by_key(|r| std::cmp::Reverse(r.mtime)),
+        TopSort::Path => rows.sort_by(|a, b| a.path.cmp(&b.path)),
+        TopSort::Owner => rows.sort_by_key(|r| (owner_label(r.uid), std::cmp::Reverse(r.size))),
+        TopSort::Safety => {
+            rows.sort_by_key(|r| (classify::classify(r).safety, std::cmp::Reverse(r.size)))
+        }
+    }
+}
+
+fn print_context_rows(rows: &[query::Row]) {
+    println!(
+        "{:<11} {:<6} {:<12} {:<18} {:<14} {:<22} PATH",
+        "SIZE", "AGE", "OWNER", "TYPE", "SAFETY", "BELONGS TO"
+    );
+    for row in rows {
+        let info = classify::classify(row);
+        println!(
+            "{:<11} {:<6} {:<12} {:<18} {:<14} {:<22} {}",
+            human(row.size),
+            ago(row.mtime),
+            trunc(&owner_label(row.uid), 12),
+            trunc(info.file_type, 18),
+            info.safety.label(),
+            trunc(info.belongs_to, 22),
+            util::display_path(&row.path),
+        );
+    }
+    println!("\nUse `dux explain PATH` for purpose, importance, reason, and safe action.");
+}
+
+fn print_explanation(row: &query::Row, info: &classify::Insight) {
+    println!("FILE RELATION & SAFETY");
+    println!("  Path        {}", util::display_path(&row.path));
+    println!("  Size        {} allocated", human(row.size));
+    println!("  Age         {}", ago(row.mtime));
+    println!("  Owner       {} (uid {})", owner_label(row.uid), row.uid);
+    println!("  Type        {}", info.file_type);
+    println!("  Belongs to  {}", info.belongs_to);
+    println!("  Purpose     {}", info.purpose);
+    println!("  Importance  {}", info.importance);
+    println!("  Safety      {}", info.safety.label());
+    println!("  Why         {}", info.reason);
+    println!("  Action      {}", info.action);
+    println!(
+        "\nClassification is conservative advice; dux does not delete or execute cleanup commands."
+    );
+}
+
+fn filter_index_rows(rows: &mut Vec<query::Row>, db: &std::path::Path, limit: usize) {
+    rows.retain(|r| !util::is_index_artifact(std::path::Path::new(&r.path), db));
+    rows.truncate(limit);
+}
+
+fn filter_index_growth(rows: &mut Vec<query::GrowthRow>, db: &std::path::Path, limit: usize) {
+    rows.retain(|r| !util::is_index_artifact(std::path::Path::new(&r.path), db));
+    rows.truncate(limit);
+}
+
+fn display_growth_path(path: &str) -> String {
+    path.strip_prefix("inode:")
+        .map(|inode| format!("[deleted/unlinked file · inode {inode}]"))
+        .unwrap_or_else(|| util::display_path(path))
+}
+
+fn print_growth_rows(rows: &[query::GrowthRow], heading: &str) {
+    println!("{:<14} PATH", heading);
+    if rows.is_empty() {
+        println!(
+            "{:<14} no changes recorded (the daemon builds this history)",
+            "—"
+        );
+        return;
+    }
+    for r in rows {
+        let sign = if r.delta >= 0 { "+" } else { "-" };
+        println!(
+            "{:<14} {}",
+            format!("{sign}{}", human(r.delta.saturating_abs())),
+            display_growth_path(&r.path)
+        );
+    }
+}
+
 /// Parse sizes like 1G, 500M, 10K, 1024.
 fn parse_size(s: &str) -> Result<i64> {
     let s = s.trim();
@@ -915,6 +1187,40 @@ mod tests {
         assert_eq!(util::parse_duration("1h").unwrap(), 3600);
         assert_eq!(util::parse_duration("7d").unwrap(), 604800);
         assert!(util::parse_duration("12x").is_err());
+    }
+
+    #[test]
+    fn cli_answer_aliases_are_stable() {
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "large", "--files"])
+                .unwrap()
+                .cmd,
+            Some(Cmd::Top { files: true, .. })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "fastest-growth", "--since", "1h"])
+                .unwrap()
+                .cmd,
+            Some(Cmd::Growth { .. })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "activity"]).unwrap().cmd,
+            Some(Cmd::Diff { .. })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "summary"]).unwrap().cmd,
+            Some(Cmd::Overview { .. })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "large", "--files", "--details", "--sort", "safety"])
+                .unwrap()
+                .cmd,
+            Some(Cmd::Top {
+                explain: true,
+                sort: TopSort::Safety,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1020,6 +1326,12 @@ mod tests {
             b_total < 8192 + 8192,
             "hardlink double-counted: b total = {b_total}"
         );
+
+        // Exact explanations are served from indexed path records, not a live
+        // stat: a file that vanished after this snapshot can still be identified.
+        std::fs::remove_file(dir.join("a/real.bin")).unwrap();
+        let inspected = query::inspect(&store, &dir.join("a/real.bin")).unwrap();
+        assert_eq!(inspected.size, 8192);
 
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);

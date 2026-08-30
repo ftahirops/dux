@@ -2,13 +2,13 @@ use crate::store::{PathResolver, Store};
 use crate::util::{ago, human};
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 use rusqlite::params;
 use std::io::stdout;
@@ -36,8 +36,59 @@ enum Focus {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
-    Main,
+    Overview,
+    Explore,
+    Activity,
+    Reclaim,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Distribution {
     Apps,
+    Owners,
+    Ages,
+    Types,
+    SizeBands,
+}
+
+impl Distribution {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Apps => "Apps / OS / Users",
+            Self::Owners => "Owners",
+            Self::Ages => "Last modified",
+            Self::Types => "Object types",
+            Self::SizeBands => "File size bands",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Apps => Self::Owners,
+            Self::Owners => Self::Ages,
+            Self::Ages => Self::Types,
+            Self::Types => Self::SizeBands,
+            Self::SizeBands => Self::Apps,
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            Self::Apps => Self::SizeBands,
+            Self::Owners => Self::Apps,
+            Self::Ages => Self::Owners,
+            Self::Types => Self::Ages,
+            Self::SizeBands => Self::Types,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct CleanupRow {
+    name: String,
+    size: i64,
+    safety: &'static str,
+    action: String,
 }
 
 #[derive(Clone)]
@@ -53,7 +104,7 @@ enum GroupView {
 
 #[derive(Clone)]
 struct GroupRow {
-    name: &'static str,
+    name: String,
     size: i64,
     growth: i64,
     targets: Vec<GroupTarget>,
@@ -84,6 +135,7 @@ struct App {
     root_dev: i64,
     root_inode: i64,
     top_growth: Vec<(String, i64)>,
+    recent_changes: Vec<(String, i64)>,
     top_files: Vec<(String, i64, i64, i64)>, // path, blocks, mtime, recent growth/h
     groups: Vec<GroupRow>,
     total_size: i64,
@@ -101,17 +153,28 @@ struct App {
     paused_since: Option<i64>, // Some(epoch) if writes are paused (host pressure)
     pause_reason: String,     // why writes are paused (low disk / low memory / …)
     throttled_since: Option<i64>, // Some(epoch) if governing keeps the index stale
+    watch: Option<crate::util::WatchStatus>,
+    scan: Option<crate::util::ScanProgress>,
+    containers: Vec<crate::containers::ContainerRow>,
+    waste: crate::containers::Waste,
+    cleanup: Vec<CleanupRow>,
+    storage_calc: Instant,
     // recursive write-rate per node (bytes in the last hour), summed up the tree
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     growth_calc: Instant,
-    items: i64,          // total indexed nodes (files + dirs)
-    growth_per_day: i64, // extrapolated from the last hour of change log
-    screen: Screen,      // full-screen mode vs normal TUI
-    focus: Focus,        // which section the keyboard drives
-    asel: usize,         // selected row in the App/OS groups panel
-    gsel: usize,         // selected row in the Fastest-Growth panel
-    fsel: usize,         // selected row in the Largest-Files panel
-    detail: String,      // full path of the current selection (shown in footer)
+    items: i64,                 // total indexed nodes (files + dirs)
+    growth_per_day: i64,        // extrapolated from the last hour of change log
+    screen: Screen,             // Overview / Explore / Activity / Reclaim
+    explore_distribution: bool, // Explore toggles between tree and grouped view
+    distribution: Distribution,
+    show_help: bool,
+    focus: Focus, // which section the keyboard drives
+    asel: usize,  // selected row in the App/OS groups panel
+    gsel: usize,  // selected row in the Fastest-Growth panel
+    fsel: usize,  // selected row in the Largest-Files panel
+    activity_sel: usize,
+    reclaim_sel: usize,
+    detail: String, // full path of the current selection (shown in footer)
     // Structure generation: bumped whenever `expanded`/`metric` change. A
     // background refresh result is only applied to the TREE if its generation
     // still matches (the user hasn't restructured since) — see the worker.
@@ -123,15 +186,18 @@ struct Snapshot {
     expanded: std::collections::HashSet<(i64, i64)>,
     metric: Metric,
     window_secs: i64,
+    distribution: Distribution,
     gen: u64,
 }
 
 /// View data the worker produces (all owned/`Send`), applied by the UI thread.
 struct RefreshResult {
     gen: u64,
+    distribution: Distribution,
     rows: Vec<Row>,
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     top_growth: Vec<(String, i64)>,
+    recent_changes: Vec<(String, i64)>,
     top_files: Vec<(String, i64, i64, i64)>,
     groups: Vec<GroupRow>,
     total_size: i64,
@@ -144,6 +210,11 @@ struct RefreshResult {
     paused_since: Option<i64>,
     pause_reason: String,
     throttled_since: Option<i64>,
+    watch: Option<crate::util::WatchStatus>,
+    scan: Option<crate::util::ScanProgress>,
+    containers: Vec<crate::containers::ContainerRow>,
+    waste: crate::containers::Waste,
+    cleanup: Vec<CleanupRow>,
 }
 
 /// Background refresh worker: owns its OWN read-only connection and a shadow App
@@ -182,6 +253,7 @@ fn refresh_worker(
         shadow.expanded = snap.expanded;
         shadow.metric = snap.metric;
         shadow.window_secs = snap.window_secs;
+        shadow.distribution = snap.distribution;
         shadow.growth_calc = Instant::now() - Duration::from_secs(60); // force recompute
         let ok = {
             shadow.refresh_growth_map(&store);
@@ -199,9 +271,11 @@ fn refresh_worker(
         }
         let result = RefreshResult {
             gen: snap.gen,
+            distribution: snap.distribution,
             rows: std::mem::take(&mut shadow.rows),
             growth_map: shadow.growth_map.clone(),
             top_growth: std::mem::take(&mut shadow.top_growth),
+            recent_changes: std::mem::take(&mut shadow.recent_changes),
             top_files: std::mem::take(&mut shadow.top_files),
             groups: std::mem::take(&mut shadow.groups),
             total_size: shadow.total_size,
@@ -211,6 +285,11 @@ fn refresh_worker(
             fs: shadow.fs,
             daemon_live: shadow.daemon_live,
             throttled_since: shadow.throttled_since,
+            watch: shadow.watch.clone(),
+            scan: shadow.scan.clone(),
+            containers: shadow.containers.clone(),
+            waste: shadow.waste.clone(),
+            cleanup: shadow.cleanup.clone(),
             dirty_since: shadow.dirty_since,
             paused_since: shadow.paused_since,
             pause_reason: std::mem::take(&mut shadow.pause_reason),
@@ -326,6 +405,7 @@ impl App {
             root_dev: dev,
             root_inode: inode,
             top_growth: Vec::new(),
+            recent_changes: Vec::new(),
             top_files: Vec::new(),
             groups: Vec::new(),
             total_size: 0,
@@ -343,15 +423,26 @@ impl App {
             paused_since: None,
             pause_reason: String::new(),
             throttled_since: None,
+            watch: None,
+            scan: None,
+            containers: Vec::new(),
+            waste: crate::containers::Waste::default(),
+            cleanup: Vec::new(),
+            storage_calc: Instant::now() - Duration::from_secs(60),
             growth_map: std::collections::HashMap::new(),
             growth_calc: Instant::now() - Duration::from_secs(60),
             items: 0,
             growth_per_day: 0,
-            screen: Screen::Main,
+            screen: Screen::Overview,
+            explore_distribution: false,
+            distribution: Distribution::Apps,
+            show_help: false,
             focus: Focus::Tree,
             asel: 0,
             gsel: 0,
             fsel: 0,
+            activity_sel: 0,
+            reclaim_sel: 0,
             detail: String::new(),
             view_gen: 0,
         }
@@ -364,12 +455,13 @@ impl App {
     fn apply_refresh(&mut self, r: RefreshResult) {
         self.growth_map = r.growth_map;
         self.top_growth = r.top_growth;
+        self.recent_changes = r.recent_changes;
         self.top_files = r.top_files;
         // The worker's shadow always computes TOP-level groups (Snapshot carries
         // no group_view). Only adopt them while we're actually showing the top
         // view — otherwise a refresh would clobber the drilled-in Detail groups
         // (computed synchronously on drill) back to top-level every ~4s.
-        if self.group_view == GroupView::Top {
+        if self.group_view == GroupView::Top && self.distribution == r.distribution {
             self.groups = r.groups;
         }
         self.total_size = r.total_size;
@@ -379,6 +471,11 @@ impl App {
         self.fs = r.fs;
         self.daemon_live = r.daemon_live;
         self.throttled_since = r.throttled_since;
+        self.watch = r.watch;
+        self.scan = r.scan;
+        self.containers = r.containers;
+        self.waste = r.waste;
+        self.cleanup = r.cleanup;
         self.dirty_since = r.dirty_since;
         self.paused_since = r.paused_since;
         self.pause_reason = r.pause_reason;
@@ -397,6 +494,10 @@ impl App {
         self.asel = self.asel.min(self.groups.len().saturating_sub(1));
         self.gsel = self.gsel.min(self.top_growth.len().saturating_sub(1));
         self.fsel = self.fsel.min(self.top_files.len().saturating_sub(1));
+        self.activity_sel = self
+            .activity_sel
+            .min(self.recent_changes.len().saturating_sub(1));
+        self.reclaim_sel = self.reclaim_sel.min(self.cleanup.len().saturating_sub(1));
     }
 
     fn init_root(&mut self, store: &Store) -> Result<()> {
@@ -520,16 +621,20 @@ impl App {
     }
 
     fn refresh_groups(&mut self, store: &Store) {
-        self.groups = compute_groups(
-            store,
-            &self.root_path,
-            self.root_dev,
-            self.root_inode,
-            self.total_size,
-            &self.docker_paths,
-            self.group_view,
-            &self.growth_map,
-        );
+        self.groups = if self.distribution == Distribution::Apps {
+            compute_groups(
+                store,
+                &self.root_path,
+                self.root_dev,
+                self.root_inode,
+                self.total_size,
+                &self.docker_paths,
+                self.group_view,
+                &self.growth_map,
+            )
+        } else {
+            aggregate_groups(store, self)
+        };
         self.asel = self.asel.min(self.groups.len().saturating_sub(1));
     }
 
@@ -737,6 +842,8 @@ impl App {
         self.dirty_since = crate::query::dirty_since(store);
         self.paused_since = crate::query::paused_since(store);
         self.throttled_since = crate::query::throttled_since(store);
+        self.watch = crate::util::read_watch_status(&self.db);
+        self.scan = crate::util::read_scan_progress();
         self.pause_reason = store
             .get_meta("pause_reason")
             .ok()
@@ -790,13 +897,33 @@ impl App {
             .filter_map(|(d, i, delta)| {
                 let p = pr.resolve(d, i);
                 // skip rows whose node is gone (path can't be resolved) and dups
-                if p.starts_with("inode:") || !seen_paths.insert(p.clone()) {
+                if p.starts_with("inode:")
+                    || crate::util::is_index_artifact(std::path::Path::new(&p), &self.db)
+                    || !seen_paths.insert(p.clone())
+                {
                     None
                 } else {
                     Some((crate::util::display_path(&p), delta))
                 }
             })
             .take(6)
+            .collect();
+
+        // Activity is sourced entirely from the compact, bucketed change log.
+        // It never scans the filesystem and is bounded to 30 resolved paths.
+        let activity_scope = if scope_sql.is_empty() {
+            None
+        } else {
+            Some((self.root_dev, self.root_inode))
+        };
+        self.recent_changes = crate::query::changed(store, self.window_secs, 30, activity_scope)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| {
+                !r.path.starts_with("inode:")
+                    && !crate::util::is_index_artifact(std::path::Path::new(&r.path), &self.db)
+            })
+            .map(|r| (crate::util::display_path(&r.path), r.delta))
             .collect();
 
         let fsql = format!(
@@ -814,23 +941,121 @@ impl App {
         })?;
         self.top_files = f
             .filter_map(|x| x.ok())
-            .map(|(d, i, blocks, mtime)| {
+            .filter_map(|(d, i, blocks, mtime)| {
                 // recent write rate for this file (leaf growth from the map)
                 let growth = self.growth_map.get(&(d, i)).copied().unwrap_or(0);
-                (
-                    crate::util::display_path(&pr.resolve(d, i)),
-                    blocks,
-                    mtime,
-                    growth,
-                )
+                let path = pr.resolve(d, i);
+                if crate::util::is_index_artifact(std::path::Path::new(&path), &self.db) {
+                    return None;
+                }
+                Some((crate::util::display_path(&path), blocks, mtime, growth))
             })
             .collect();
         self.refresh_groups(store);
+        self.refresh_storage(store);
         // keep panel selections in range as panels change
         self.asel = self.asel.min(self.groups.len().saturating_sub(1));
         self.gsel = self.gsel.min(self.top_growth.len().saturating_sub(1));
         self.fsel = self.fsel.min(self.top_files.len().saturating_sub(1));
+        self.activity_sel = self
+            .activity_sel
+            .min(self.recent_changes.len().saturating_sub(1));
+        self.reclaim_sel = self.reclaim_sel.min(self.cleanup.len().saturating_sub(1));
         Ok(())
+    }
+
+    fn refresh_storage(&mut self, store: &Store) {
+        if self.storage_calc.elapsed() < Duration::from_secs(30) {
+            return;
+        }
+        self.storage_calc = Instant::now();
+        self.containers = crate::containers::list(store).unwrap_or_default();
+        self.waste = crate::containers::waste(store, &self.containers);
+        let mut rows = Vec::new();
+        let mut add = |name: &str, size: i64, safety: &'static str, action: &str| {
+            if size > 0 {
+                rows.push(CleanupRow {
+                    name: name.into(),
+                    size,
+                    safety,
+                    action: action.into(),
+                });
+            }
+        };
+        add(
+            "Stopped container layers + logs",
+            self.waste.stopped_bytes,
+            "verify",
+            "docker container prune  # inspect stopped containers first",
+        );
+        add(
+            "Unreferenced Docker volumes",
+            self.waste.orphan_volume_bytes,
+            "verify",
+            "docker volume prune  # irreversible; verify backups/owners",
+        );
+        add(
+            "Docker build cache",
+            self.waste.build_cache_bytes,
+            "safe-ish",
+            "docker builder prune  # cache is reproducible but rebuilds get slower",
+        );
+
+        let package_cache: i64 = [
+            "/var/cache/apt/archives",
+            "/var/cache/dnf",
+            "/var/cache/yum",
+            "/var/cache/pacman/pkg",
+        ]
+        .iter()
+        .map(|p| indexed_path_size(store, p))
+        .sum();
+        add(
+            "Package download caches",
+            package_cache,
+            "safe-ish",
+            "use your package manager's clean command (apt/dnf/yum/pacman)",
+        );
+        add(
+            "systemd journal",
+            indexed_path_size(store, "/var/log/journal"),
+            "policy",
+            "journalctl --disk-usage; journalctl --vacuum-time=14d",
+        );
+        let temp: i64 = ["/tmp", "/var/tmp"]
+            .iter()
+            .map(|p| indexed_path_size(store, p))
+            .sum();
+        add(
+            "Temporary areas (upper bound)",
+            temp,
+            "review",
+            "review age/owners; remove only stale files, never the directories",
+        );
+        let trash = indexed_path_size(store, "/root/.local/share/Trash");
+        add(
+            "Root user's trash",
+            trash,
+            "safe-ish",
+            "review /root/.local/share/Trash before emptying",
+        );
+
+        let page_size: i64 = store
+            .conn
+            .query_row("PRAGMA page_size", [], |r| r.get(0))
+            .unwrap_or(4096);
+        let free_pages: i64 = store
+            .conn
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))
+            .unwrap_or(0);
+        add(
+            "Unused pages inside dux index",
+            page_size.saturating_mul(free_pages),
+            "safe",
+            "stop writer briefly, then sqlite3 <dux.db> 'VACUUM;'",
+        );
+        rows.sort_by_key(|r| std::cmp::Reverse(r.size));
+        self.cleanup = rows;
     }
 
     /// Full path of the current selection (focused section) — shown in the footer
@@ -860,6 +1085,92 @@ impl App {
                 .unwrap_or_default(),
         };
     }
+}
+
+fn indexed_path_size(store: &Store, path: &str) -> i64 {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(m) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+    node_totals(store, m.dev() as i64, m.ino() as i64)
+        .map(|v| v.0)
+        .unwrap_or(0)
+}
+
+fn owner_name(uid: i64) -> String {
+    std::fs::read_to_string("/etc/passwd")
+        .ok()
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                let mut fields = line.split(':');
+                let name = fields.next()?;
+                let _password = fields.next()?;
+                let id = fields.next()?.parse::<i64>().ok()?;
+                (id == uid).then(|| format!("{name} (uid {uid})"))
+            })
+        })
+        .unwrap_or_else(|| format!("uid {uid}"))
+}
+
+/// Alternate Explore distributions. These are aggregate SQL queries over the
+/// compact index, executed by the background worker only for the selected tab.
+fn aggregate_groups(store: &Store, app: &App) -> Vec<GroupRow> {
+    let (scope, scope_args) = app.panel_scope(store);
+    let now = crate::util::now_secs();
+    let (sql, mut args): (String, Vec<i64>) = match app.distribution {
+        Distribution::Owners => (
+            format!(
+                "SELECT CAST(uid AS TEXT), SUM(blocks), COUNT(*) FROM inodes WHERE 1=1{scope} GROUP BY uid ORDER BY 2 DESC LIMIT 30"
+            ),
+            Vec::new(),
+        ),
+        Distribution::Ages => (
+            format!(
+                "SELECT CASE WHEN mtime>=?1 THEN 'Modified today' WHEN mtime>=?2 THEN 'Modified this week' WHEN mtime>=?3 THEN 'Modified this month' WHEN mtime>=?4 THEN 'Modified this year' ELSE 'Older than one year' END band, SUM(blocks), COUNT(*) FROM inodes WHERE 1=1{scope} GROUP BY band ORDER BY 2 DESC"
+            ),
+            vec![now - 86_400, now - 604_800, now - 2_592_000, now - 31_536_000],
+        ),
+        Distribution::Types => (
+            format!(
+                "SELECT CASE kind WHEN 'd' THEN 'Directories' WHEN 'f' THEN 'Regular files' WHEN 'l' THEN 'Symbolic links' WHEN 'b' THEN 'Block devices' WHEN 'c' THEN 'Character devices' WHEN 'p' THEN 'Named pipes' WHEN 's' THEN 'Sockets' ELSE 'Other' END type, SUM(blocks), COUNT(*) FROM inodes WHERE 1=1{scope} GROUP BY type ORDER BY 2 DESC"
+            ),
+            Vec::new(),
+        ),
+        Distribution::SizeBands => (
+            format!(
+                "SELECT CASE WHEN blocks>=10737418240 THEN '10 GiB and larger' WHEN blocks>=1073741824 THEN '1–10 GiB' WHEN blocks>=104857600 THEN '100 MiB–1 GiB' WHEN blocks>=10485760 THEN '10–100 MiB' WHEN blocks>=1048576 THEN '1–10 MiB' WHEN blocks>=102400 THEN '100 KiB–1 MiB' ELSE 'Under 100 KiB' END band, SUM(blocks), COUNT(*) FROM inodes WHERE kind!='d'{scope} GROUP BY band ORDER BY 2 DESC"
+            ),
+            Vec::new(),
+        ),
+        Distribution::Apps => return Vec::new(),
+    };
+    args.extend(scope_args);
+    let Ok(mut stmt) = store.conn.prepare(&sql) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    }) else {
+        return Vec::new();
+    };
+    rows.flatten()
+        .map(|(mut name, size, count)| {
+            if app.distribution == Distribution::Owners {
+                name = name.parse::<i64>().map(owner_name).unwrap_or(name);
+            }
+            GroupRow {
+                name: format!("{name} · {} items", count_human(count)),
+                size,
+                growth: 0,
+                targets: Vec::new(),
+                drill: None,
+            }
+        })
+        .collect()
 }
 
 struct GroupDef {
@@ -893,7 +1204,16 @@ const APP_PATHS: &[&str] = &[
     "/snap",
 ];
 const CACHE_PATHS: &[&str] = &["/var/cache", "/tmp", "/var/tmp"];
-const USER_PATHS: &[&str] = &["/home", "/root"];
+const USER_SEGMENTS: &[GroupDef] = &[
+    GroupDef {
+        name: "home directories",
+        paths: &["/home"],
+    },
+    GroupDef {
+        name: "root user",
+        paths: &["/root"],
+    },
+];
 
 const OS_SEGMENTS: &[GroupDef] = &[
     GroupDef {
@@ -1125,6 +1445,11 @@ const TOP_PROFILES: &[AppProfile] = &[
         segments: DOCKER_SEGMENTS,
     },
     AppProfile {
+        id: "users",
+        name: "Users",
+        segments: USER_SEGMENTS,
+    },
+    AppProfile {
         id: "nginx",
         name: "nginx",
         segments: NGINX_SEGMENTS,
@@ -1178,10 +1503,6 @@ const FALLBACK_GROUPS: &[GroupDef] = &[
     GroupDef {
         name: "Caches/Temp",
         paths: CACHE_PATHS,
-    },
-    GroupDef {
-        name: "Users",
-        paths: USER_PATHS,
     },
 ];
 
@@ -1266,9 +1587,12 @@ fn compute_groups(
             }
         }
         GroupView::Detail(id) => {
+            if id == "users" {
+                return compute_user_groups(store, &root_cmp_path, growth_map);
+            }
             let Some(profile) = TOP_PROFILES.iter().find(|p| p.id == id) else {
                 return vec![GroupRow {
-                    name: "Other",
+                    name: "Other".into(),
                     size: total_size,
                     growth: root_growth,
                     targets: Vec::new(),
@@ -1299,7 +1623,7 @@ fn compute_groups(
         let other_growth = root_growth - assigned_growth;
         if other_size > 0 || other_growth != 0 || groups.is_empty() {
             groups.push(GroupRow {
-                name: "Other",
+                name: "Other".into(),
                 size: other_size,
                 growth: other_growth,
                 targets: Vec::new(),
@@ -1311,6 +1635,76 @@ fn compute_groups(
     groups.sort_by_key(|g| std::cmp::Reverse(g.size.max(0)));
     groups.truncate(12);
     groups
+}
+
+fn compute_user_groups(
+    store: &Store,
+    root_cmp_path: &str,
+    growth_map: &std::collections::HashMap<(i64, i64), i64>,
+) -> Vec<GroupRow> {
+    use std::os::unix::fs::MetadataExt;
+    let mut out = Vec::new();
+    if path_contains(root_cmp_path, "/home") {
+        if let Ok(meta) = std::fs::symlink_metadata("/home") {
+            if let Ok(mut stmt) = store.conn.prepare(
+                "SELECT d.name,d.dev_id,d.inode,i.recursive_bytes
+                 FROM dirents d JOIN inodes i
+                   ON i.dev_id=d.dev_id AND i.inode=d.inode
+                 WHERE d.parent_dev=?1 AND d.parent_inode=?2 AND i.kind='d'
+                 ORDER BY i.recursive_bytes DESC LIMIT 1000",
+            ) {
+                if let Ok(rows) =
+                    stmt.query_map(params![meta.dev() as i64, meta.ino() as i64], |r| {
+                        Ok((
+                            r.get::<_, Vec<u8>>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, i64>(2)?,
+                            r.get::<_, i64>(3)?,
+                        ))
+                    })
+                {
+                    for row in rows.flatten() {
+                        let (name, dev, inode, size) = row;
+                        let shown = crate::util::display_name(&name);
+                        out.push(GroupRow {
+                            name: shown.clone(),
+                            size,
+                            growth: growth_map.get(&(dev, inode)).copied().unwrap_or(0),
+                            targets: vec![GroupTarget {
+                                path: format!("/home/{shown}"),
+                            }],
+                            drill: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    if path_contains(root_cmp_path, "/root") {
+        if let Some((size, growth)) = std::fs::symlink_metadata("/root").ok().and_then(|m| {
+            node_totals(store, m.dev() as i64, m.ino() as i64).map(|v| {
+                (
+                    v.0,
+                    growth_map
+                        .get(&(m.dev() as i64, m.ino() as i64))
+                        .copied()
+                        .unwrap_or(0),
+                )
+            })
+        }) {
+            out.push(GroupRow {
+                name: "root".into(),
+                size,
+                growth,
+                targets: vec![GroupTarget {
+                    path: "/root".into(),
+                }],
+                drill: None,
+            });
+        }
+    }
+    out.sort_by_key(|g| std::cmp::Reverse(g.size));
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1326,7 +1720,7 @@ fn add_profile_group(
     profile: &AppProfile,
 ) {
     let mut row = GroupRow {
-        name: profile.name,
+        name: profile.name.into(),
         size: 0,
         growth: 0,
         targets: Vec::new(),
@@ -1364,7 +1758,7 @@ fn add_def_group(
     drill: Option<&'static str>,
 ) {
     let mut row = GroupRow {
-        name: def.name,
+        name: def.name.into(),
         size: 0,
         growth: 0,
         targets: Vec::new(),
@@ -1551,6 +1945,7 @@ fn event_loop<B: Backend>(
             expanded: app.expanded.clone(),
             metric: app.metric,
             window_secs: app.window_secs,
+            distribution: app.distribution,
             gen: app.view_gen,
         });
     };
@@ -1601,7 +1996,12 @@ fn event_loop<B: Backend>(
             loop {
                 if let Event::Key(k) = event::read()? {
                     if k.kind == KeyEventKind::Press {
-                        if k.code == KeyCode::Char('r') {
+                        // Raw mode turns Ctrl+C into a key event; it does not send
+                        // SIGINT. Preserve the modifiers so Ctrl+C quits instead of
+                        // being mistaken for the plain 'c' Storage shortcut.
+                        if is_interrupt_key(k.code, k.modifiers) {
+                            return Ok(());
+                        } else if matches!(k.code, KeyCode::Char('R') | KeyCode::F(5)) {
                             // Manual refresh: rebuild the tree from the DB (cheap,
                             // no fs I/O) and ask the background WORKER to recompute
                             // panels off this thread. Refreshing panels inline here
@@ -1637,28 +2037,45 @@ fn event_loop<B: Backend>(
     }
 }
 
+fn is_interrupt_key(code: KeyCode, modifiers: KeyModifiers) -> bool {
+    code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL)
+}
+
 /// Handle one keypress. Returns Ok(true) to quit.
 fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
     // Global keys
     match code {
         KeyCode::Char('q') => return Ok(true),
-        KeyCode::Char('a') => {
-            app.screen = if app.screen == Screen::Apps {
-                Screen::Main
-            } else {
-                app.focus = Focus::Groups;
-                Screen::Apps
-            };
+        KeyCode::Char('?') => {
+            app.show_help = !app.show_help;
+            return Ok(false);
+        }
+        KeyCode::Esc if app.show_help => {
+            app.show_help = false;
+            return Ok(false);
+        }
+        KeyCode::Char('1') | KeyCode::Char('o') => app.screen = Screen::Overview,
+        KeyCode::Char('2') | KeyCode::Char('e') => {
+            app.screen = Screen::Explore;
+            app.explore_distribution = false;
             app.update_detail(store);
             return Ok(false);
         }
-        KeyCode::Esc if app.screen == Screen::Apps => {
-            app.screen = Screen::Main;
+        KeyCode::Char('3') | KeyCode::Char('a') => {
+            app.screen = Screen::Activity;
+            return Ok(false);
+        }
+        KeyCode::Char('4') | KeyCode::Char('r') | KeyCode::Char('c') => {
+            app.screen = Screen::Reclaim;
+            return Ok(false);
+        }
+        KeyCode::Esc if app.screen != Screen::Overview => {
+            app.screen = Screen::Overview;
             app.update_detail(store);
             return Ok(false);
         }
         KeyCode::Tab => {
-            if app.screen == Screen::Apps {
+            if app.screen != Screen::Explore || app.explore_distribution {
                 return Ok(false);
             }
             app.focus = match app.focus {
@@ -1673,8 +2090,24 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
         _ => {}
     }
 
-    if app.screen == Screen::Apps {
+    if app.screen == Screen::Explore && app.explore_distribution {
         match code {
+            KeyCode::Char('d') => {
+                app.explore_distribution = false;
+                app.focus = Focus::Tree;
+            }
+            KeyCode::Char('[') => {
+                app.distribution = app.distribution.previous();
+                app.group_view = GroupView::Top;
+                app.asel = 0;
+                app.groups.clear();
+            }
+            KeyCode::Char(']') => {
+                app.distribution = app.distribution.next();
+                app.group_view = GroupView::Top;
+                app.asel = 0;
+                app.groups.clear();
+            }
             KeyCode::Down | KeyCode::Char('j') if app.asel + 1 < app.groups.len() => app.asel += 1,
             KeyCode::Up | KeyCode::Char('k') => app.asel = app.asel.saturating_sub(1),
             KeyCode::Home | KeyCode::Char('g') => app.asel = 0,
@@ -1694,6 +2127,58 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
             _ => {}
         }
         app.update_detail(store);
+        return Ok(false);
+    }
+    if app.screen == Screen::Activity {
+        match code {
+            KeyCode::Down | KeyCode::Char('j')
+                if app.activity_sel + 1 < app.recent_changes.len() =>
+            {
+                app.activity_sel += 1
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.activity_sel = app.activity_sel.saturating_sub(1)
+            }
+            KeyCode::Home | KeyCode::Char('g') => app.activity_sel = 0,
+            KeyCode::End | KeyCode::Char('G') => {
+                app.activity_sel = app.recent_changes.len().saturating_sub(1)
+            }
+            KeyCode::Char('[') => {
+                app.window_secs = match app.window_secs {
+                    0..=3600 => 3600,
+                    3601..=86_400 => 3600,
+                    _ => 86_400,
+                };
+            }
+            KeyCode::Char(']') => {
+                app.window_secs = match app.window_secs {
+                    0..=3600 => 86_400,
+                    3601..=86_400 => 604_800,
+                    _ => 604_800,
+                };
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+    if app.screen == Screen::Reclaim {
+        match code {
+            KeyCode::Down | KeyCode::Char('j') if app.reclaim_sel + 1 < app.cleanup.len() => {
+                app.reclaim_sel += 1
+            }
+            KeyCode::Up | KeyCode::Char('k') => app.reclaim_sel = app.reclaim_sel.saturating_sub(1),
+            KeyCode::Home | KeyCode::Char('g') => app.reclaim_sel = 0,
+            KeyCode::End | KeyCode::Char('G') => {
+                app.reclaim_sel = app.cleanup.len().saturating_sub(1)
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
+    // Overview is intentionally non-interactive: it answers the common questions
+    // at a glance. Navigation keys above move into the detailed screens.
+    if app.screen == Screen::Overview {
         return Ok(false);
     }
 
@@ -1769,6 +2254,10 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                     };
                     app.view_gen += 1;
                     app.rebuild(store)?;
+                }
+                KeyCode::Char('d') => {
+                    app.explore_distribution = true;
+                    app.focus = Focus::Groups;
                 }
                 KeyCode::Home | KeyCode::Char('g') => app.sel = 0,
                 KeyCode::End | KeyCode::Char('G') => app.sel = app.rows.len().saturating_sub(1),
@@ -1910,12 +2399,566 @@ fn group_view_total(app: &App) -> i64 {
     }
 }
 
+fn freshness_text(app: &App) -> String {
+    if let Some(p) = &app.scan {
+        format!(
+            "scanning · {} files · {} dirs · {} · {}s",
+            count_human(p.files.min(i64::MAX as u64) as i64),
+            count_human(p.dirs.min(i64::MAX as u64) as i64),
+            human(p.bytes),
+            (crate::util::now_secs() - p.started).max(0)
+        )
+    } else if let Some(since) = app.dirty_since {
+        format!("DIRTY {} · reconciliation required", ago(since))
+    } else if let Some(since) = app.paused_since {
+        format!("writes paused {} · {}", ago(since), app.pause_reason)
+    } else if let Some(since) = app.throttled_since {
+        format!("throttled · about {} stale", ago(since))
+    } else if app.daemon_live {
+        app.watch
+            .as_ref()
+            .map(|w| {
+                if w.pending == 0 && w.kernel_empty {
+                    format!(
+                        "live · caught up · {} updates",
+                        count_human(w.updates_committed as i64)
+                    )
+                } else {
+                    format!(
+                        "live · queue {}/{} · {}ms lag",
+                        w.pending, w.max_pending, w.behind_ms
+                    )
+                }
+            })
+            .unwrap_or_else(|| "live · incremental index".into())
+    } else {
+        format!("snapshot · {} old · daemon off", ago(app.last_scan))
+    }
+}
+
+fn draw_nav(f: &mut Frame, area: Rect, app: &App, title: &str) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(4)])
+        .split(area);
+    let show_root = area.width >= 110;
+    let status_width = if show_root { 64 } else { 42 };
+    let mut brand = vec![
+        Span::styled(
+            " dux ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {title}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("     ", Style::default()),
+        Span::styled(
+            short(&freshness_text(app), status_width),
+            Style::default().fg(if app.dirty_since.is_some() {
+                CRIT_COLOR
+            } else {
+                Color::Gray
+            }),
+        ),
+    ];
+    if show_root {
+        brand.push(Span::styled(
+            "     Root  ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        brand.push(Span::styled(
+            short(&app.root_path, 20),
+            Style::default().fg(Color::Gray),
+        ));
+    }
+    f.render_widget(Paragraph::new(Line::from(brand)), sections[0]);
+
+    // Keep the four choices visually grouped instead of stretching four giant
+    // empty tiles across an ultrawide terminal.
+    let nav_width = sections[1].width.min(144);
+    let nav_area = Rect {
+        x: sections[1].x + sections[1].width.saturating_sub(nav_width) / 2,
+        y: sections[1].y,
+        width: nav_width,
+        height: sections[1].height,
+    };
+    let tabs = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Ratio(1, 4),
+            Constraint::Ratio(1, 4),
+            Constraint::Ratio(1, 4),
+            Constraint::Ratio(1, 4),
+        ])
+        .split(nav_area);
+    let choices = [
+        (Screen::Overview, "1", "OVERVIEW", "Disk health"),
+        (Screen::Explore, "2", "EXPLORE", "Where space is"),
+        (Screen::Activity, "3", "ACTIVITY", "What changed"),
+        (Screen::Reclaim, "4", "RECLAIM", "Free safely"),
+    ];
+    for (idx, (screen, number, name, purpose)) in choices.into_iter().enumerate() {
+        let selected = app.screen == screen;
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(if selected {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            })
+            .title(Span::styled(
+                format!(" {number} "),
+                if selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(ACCENT)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            ));
+        let lines = vec![
+            Line::from(Span::styled(
+                name,
+                if selected {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(Color::Gray)
+                        .add_modifier(Modifier::BOLD)
+                },
+            )),
+            Line::from(Span::styled(purpose, Style::default().fg(Color::DarkGray))),
+        ];
+        let mut paragraph = Paragraph::new(lines)
+            .alignment(Alignment::Center)
+            .block(block);
+        if selected {
+            paragraph = paragraph.style(Style::default().bg(Color::Rgb(22, 30, 45)));
+        }
+        f.render_widget(paragraph, tabs[idx]);
+    }
+}
+
+fn ranked_card(title: String, lines: Vec<Line<'static>>) -> Paragraph<'static> {
+    Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(Span::styled(
+                format!(" {title} "),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            )),
+    )
+}
+
+fn draw_overview(f: &mut Frame, app: &App) {
+    // On narrow terminals stack the answer cards; give each enough height for
+    // borders + value + explanation. Wide terminals keep the compact row.
+    let compact = f.area().width < 90;
+    let card_height = if compact { 15 } else { 9 };
+    let disk_height = if compact { 3 } else { 4 };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Length(disk_height),
+            Constraint::Length(card_height),
+            if compact {
+                Constraint::Length(0)
+            } else {
+                Constraint::Min(4)
+            },
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+    draw_nav(f, rows[0], app, "Overview");
+
+    let pct = app.fs.use_pct();
+    let gauge = bar((pct / 100.0).clamp(0.0, 1.0), 24);
+    let color = if pct >= 95.0 { CRIT_COLOR } else { SIZE_COLOR };
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(vec![Span::styled(
+                format!(" {:>3.0}%  {gauge}", pct),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(vec![
+                Span::styled(" Used  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    human(app.fs.used),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" / {}", human(app.fs.total)),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::styled("     Free  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    human(app.fs.avail),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+            ]),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Disk health ",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        rows[1],
+    );
+
+    let cards = if compact {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7), // borders + five largest files
+                Constraint::Length(5), // borders + three growth rows
+                Constraint::Min(3),    // borders + one reclaim summary row
+            ])
+            .split(rows[2])
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+            ])
+            .split(rows[2])
+    };
+    let reclaimable: i64 = app.cleanup.iter().map(|r| r.size.max(0)).sum();
+    let largest_width = cards[0].width.saturating_sub(38) as usize;
+    let largest_lines: Vec<Line<'static>> = app
+        .top_files
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(idx, (path, size, _, _))| {
+            let relation = crate::classify::classify_path(path, 'f').belongs_to;
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", idx + 1),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(&human(*size), 10, true)),
+                    Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(relation, 20, false)),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::raw(short(path, largest_width)),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        ranked_card(
+            "Top 5 largest · size │ belongs to │ path".into(),
+            if largest_lines.is_empty() {
+                vec![Line::from(" index is warming up")]
+            } else {
+                largest_lines
+            },
+        ),
+        cards[0],
+    );
+    let growth_width = cards[1].width.saturating_sub(38) as usize;
+    let growth_lines: Vec<Line<'static>> = app
+        .top_growth
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(idx, (path, delta))| {
+            let relation = crate::classify::classify_path(path, 'f').belongs_to;
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", idx + 1),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(&rate_str(*delta), 10, false)),
+                    Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(relation, 20, false)),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::raw(short(path, growth_width)),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        ranked_card(
+            "Top 5 growth · rate │ belongs to │ path".into(),
+            if growth_lines.is_empty() {
+                vec![Line::from(" no recent growth")]
+            } else {
+                growth_lines
+            },
+        ),
+        cards[1],
+    );
+    let reclaim_width = cards[2].width.saturating_sub(27) as usize;
+    let reclaim_lines: Vec<Line<'static>> = app
+        .cleanup
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(idx, row)| {
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", idx + 1),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(&human(row.size), 10, true)),
+                    Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(row.safety, 10, false)),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::raw(short(&row.name, reclaim_width)),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        ranked_card(
+            format!(
+                "Top 5 reclaim · total {} · size │ safety │ source",
+                human(reclaimable)
+            ),
+            if reclaim_lines.is_empty() {
+                vec![Line::from(" no measured candidates")]
+            } else {
+                reclaim_lines
+            },
+        ),
+        cards[2],
+    );
+
+    let max = app
+        .groups
+        .iter()
+        .map(|g| g.size.max(0))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let inner = rows[3].height.saturating_sub(2) as usize;
+    let lines: Vec<Line> = app
+        .groups
+        .iter()
+        .take(inner)
+        .map(|g| {
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", fixw(&human(g.size.max(0)), 9, true)),
+                    Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} ", bar(g.size.max(0) as f64 / max as f64, 18)),
+                    Style::default().fg(SIZE_COLOR),
+                ),
+                Span::styled(
+                    format!("{} ", fixw(&rate_str(g.growth), 11, false)),
+                    Style::default().fg(RATE_COLOR),
+                ),
+                Span::raw(&g.name),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    format!(" Where space is used — {} ", app.distribution.label()),
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        rows[3],
+    );
+    let footer = if f.area().width < 100 {
+        " 2 Explore · 3 Activity · 4 Reclaim · ? Help · q Quit"
+    } else {
+        " 2/e explore · 3/a activity · 4/r reclaim · F5/R refresh · ? help · q/Ctrl-C quit"
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(footer, Style::default().fg(Color::DarkGray))),
+        rows[4],
+    );
+}
+
+fn window_label(secs: i64) -> &'static str {
+    if secs <= 3600 {
+        "1 hour"
+    } else if secs <= 86_400 {
+        "24 hours"
+    } else {
+        "7 days"
+    }
+}
+
+fn draw_activity(f: &mut Frame, app: &App) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Length(2),
+            Constraint::Min(8),
+            Constraint::Length(4),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+    draw_nav(f, rows[0], app, "Activity");
+    let grown = app
+        .recent_changes
+        .iter()
+        .filter(|x| x.1 > 0)
+        .fold(0i64, |a, x| a.saturating_add(x.1));
+    let freed = app
+        .recent_changes
+        .iter()
+        .filter(|x| x.1 < 0)
+        .fold(0i64, |a, x| a.saturating_add(x.1.saturating_abs()));
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(" Window {} ", window_label(app.window_secs)),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "grown {} · freed {} · net {} · {} changed paths",
+                human(grown),
+                human(freed),
+                rate_str(grown.saturating_sub(freed)),
+                app.recent_changes.len()
+            )),
+        ])),
+        rows[1],
+    );
+    let panels = Layout::default()
+        .direction(if f.area().width >= 95 {
+            Direction::Horizontal
+        } else {
+            Direction::Vertical
+        })
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[2]);
+    let visible = panels[0].height.saturating_sub(2) as usize;
+    let start = app.activity_sel.saturating_sub(visible.saturating_sub(1));
+    let changes: Vec<Line> = app
+        .recent_changes
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible)
+        .map(|(idx, (p, d))| {
+            let mut line = Line::from(vec![
+                Span::styled(
+                    format!(" {} ", fixw(&rate_str(*d), 12, false)),
+                    Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(short(p, panels[0].width.saturating_sub(18) as usize)),
+            ]);
+            if idx == app.activity_sel {
+                line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
+            }
+            line
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(if changes.is_empty() {
+            vec![Line::from("  No indexed changes in this window.")]
+        } else {
+            changes
+        })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Biggest changes — fills and frees ",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        panels[0],
+    );
+    let hot: Vec<Line> = app
+        .top_growth
+        .iter()
+        .take(visible)
+        .map(|(p, d)| {
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", fixw(&rate_str(*d), 12, false)),
+                    Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(short(p, panels[1].width.saturating_sub(18) as usize)),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(if hot.is_empty() {
+            vec![Line::from(
+                "  No growing paths yet; keep the daemon running.",
+            )]
+        } else {
+            hot
+        })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Growing now ",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        panels[1],
+    );
+    let selected = app
+        .recent_changes
+        .get(app.activity_sel)
+        .map(|x| format!("{} · {}", rate_str(x.1), x.0))
+        .unwrap_or_else(|| "No selection".into());
+    f.render_widget(
+        Paragraph::new(selected).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Selected path "),
+        ),
+        rows[3],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            " [ / ] window (1h, 24h, 7d) · ↑↓ select · 1 overview · 2 explore · 4 reclaim · ? help",
+            Style::default().fg(Color::DarkGray),
+        )),
+        rows[4],
+    );
+}
+
 fn draw_apps(f: &mut Frame, app: &mut App) {
     let area = f.area();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(5),
+            Constraint::Length(1),
             Constraint::Min(8),
             Constraint::Length(5),
             Constraint::Length(1),
@@ -1923,35 +2966,21 @@ fn draw_apps(f: &mut Frame, app: &mut App) {
         .split(area);
 
     let title = match app.group_view {
-        GroupView::Top => "Apps/OS Distribution",
+        GroupView::Top => app.distribution.label(),
         GroupView::Detail(id) => TOP_PROFILES
             .iter()
             .find(|p| p.id == id)
             .map(|p| p.name)
             .unwrap_or("Details"),
     };
-    let header = vec![
-        Line::from(vec![
-            Span::styled(
-                " dux ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(
-                format!("   {}", app.root_path),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
-        Line::from(Span::styled(
+    draw_nav(f, rows[0], app, &format!("Explore / {title}"));
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
             "Size       Share  Distribution                         Growth       Name",
             Style::default().fg(Color::DarkGray),
-        )),
-    ];
-    f.render_widget(Paragraph::new(header), rows[0]);
+        ))),
+        rows[1],
+    );
 
     let total = group_view_total(app).max(1);
     let max_group = app
@@ -1961,7 +2990,7 @@ fn draw_apps(f: &mut Frame, app: &mut App) {
         .max()
         .unwrap_or(1)
         .max(1);
-    let body_h = rows[1].height.saturating_sub(2) as usize;
+    let body_h = rows[2].height.saturating_sub(2) as usize;
     let start = app.asel.saturating_sub(body_h.saturating_sub(1));
     let end = (start + body_h).min(app.groups.len());
     let mut lines = Vec::new();
@@ -2010,7 +3039,7 @@ fn draw_apps(f: &mut Frame, app: &mut App) {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 )),
         ),
-        rows[1],
+        rows[2],
     );
 
     let detail = app
@@ -2037,7 +3066,7 @@ fn draw_apps(f: &mut Frame, app: &mut App) {
         )),
         Line::from(Span::raw(short(
             &detail,
-            rows[2].width.saturating_sub(4) as usize,
+            rows[3].width.saturating_sub(4) as usize,
         ))),
     ];
     f.render_widget(
@@ -2048,33 +3077,200 @@ fn draw_apps(f: &mut Frame, app: &mut App) {
                 .border_style(Style::default().fg(Color::DarkGray))
                 .title(" Paths "),
         ),
-        rows[2],
+        rows[3],
     );
 
     let legend = if app.group_view == GroupView::Top {
-        " a close · ↑↓ move · Enter/→ drill down · q quit"
+        " [/] grouping · d tree · ↑↓ move · Enter/→ drill · 1 overview · 3 activity · 4 reclaim · q quit"
     } else {
-        " a close · ←/Esc back · ↑↓ move · q quit"
+        " d tree · ← back · ↑↓ move · 1 overview · 3 activity · 4 reclaim · q quit"
     };
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             legend,
             Style::default().fg(Color::DarkGray),
         ))),
-        rows[3],
+        rows[4],
     );
 }
 
-fn draw(f: &mut Frame, app: &mut App) {
-    if app.screen == Screen::Apps {
-        draw_apps(f, app);
-        return;
-    }
+fn draw_storage(f: &mut Frame, app: &App) {
     let area = f.area();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // title
+            Constraint::Length(5),
+            Constraint::Length(1),
+            Constraint::Percentage(45),
+            Constraint::Min(6),
+            Constraint::Length(4),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    draw_nav(f, rows[0], app, "Reclaim");
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(
+                    " Measured Docker reclaimable {} · ",
+                    human(app.waste.total())
+                ),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "advice only — dux never deletes anything",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])),
+        rows[1],
+    );
+
+    let cmax = app
+        .containers
+        .iter()
+        .map(|c| c.total())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let cheight = rows[2].height.saturating_sub(2) as usize;
+    let clines: Vec<Line> = if app.containers.is_empty() {
+        vec![Line::from(Span::styled(
+            "  No Docker/Podman metadata found (or storage paths are not readable/indexed).",
+            Style::default().fg(Color::DarkGray),
+        ))]
+    } else {
+        app.containers
+            .iter()
+            .take(cheight)
+            .map(|c| {
+                Line::from(vec![
+                    Span::styled(
+                        format!(" {} ", fixw(&human(c.total()), 9, true)),
+                        Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{} ", bar(c.total() as f64 / cmax as f64, 14)),
+                        Style::default().fg(SIZE_COLOR),
+                    ),
+                    Span::styled(
+                        format!("{:<8} ", c.state()),
+                        Style::default().fg(if c.running { Color::Gray } else { RATE_COLOR }),
+                    ),
+                    Span::raw(format!(
+                        "W {}  L {}  V {}  reclaim {}  {} ({})",
+                        human(c.writable_bytes),
+                        human(c.log_bytes),
+                        human(c.volume_bytes),
+                        human(c.reclaimable()),
+                        short(&c.name, 24),
+                        short(&c.image, 24),
+                    )),
+                ])
+            })
+            .collect()
+    };
+    f.render_widget(
+        Paragraph::new(clines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Docker/Podman — writable · logs · volumes ",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        rows[2],
+    );
+
+    let rheight = rows[3].height.saturating_sub(2) as usize;
+    let suggestions: Vec<Line> = if app.cleanup.is_empty() {
+        vec![Line::from(Span::styled(
+            "  No indexed cleanup candidates found.",
+            Style::default().fg(Color::DarkGray),
+        ))]
+    } else {
+        app.cleanup
+            .iter()
+            .enumerate()
+            .take(rheight)
+            .map(|(idx, r)| {
+                let mut line = Line::from(vec![
+                    Span::styled(
+                        format!(" {} ", fixw(&human(r.size), 9, true)),
+                        Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{:<9} ", r.safety),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(
+                        format!("{:<31} ", short(&r.name, 30)),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(short(&r.action, rows[3].width.saturating_sub(56) as usize)),
+                ]);
+                if idx == app.reclaim_sel {
+                    line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
+                }
+                line
+            })
+            .collect()
+    };
+    f.render_widget(
+        Paragraph::new(suggestions).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Cleanup candidates — measured size · safety · recommended action ",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        rows[3],
+    );
+    let evidence = app
+        .cleanup
+        .get(app.reclaim_sel)
+        .map(|r| {
+            vec![
+                Line::from(vec![
+                    Span::styled(
+                        format!("{} · {} · ", human(r.size), r.safety),
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(&r.name),
+                ]),
+                Line::from(vec![
+                    Span::styled("Suggested: ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(&r.action),
+                ]),
+            ]
+        })
+        .unwrap_or_else(|| vec![Line::from("No cleanup candidate selected.")]);
+    f.render_widget(
+        Paragraph::new(evidence).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Evidence & suggested command (not executed) "),
+        ),
+        rows[4],
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            " ↑↓ inspect candidate · 1 overview · 2 explore · 3 activity · ? help · q/Ctrl-C quit",
+            Style::default().fg(Color::DarkGray),
+        ))),
+        rows[5],
+    );
+}
+
+fn draw_explore(f: &mut Frame, app: &mut App) {
+    let area = f.area();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // prominent navigation tiles + live state
             Constraint::Length(1), // capacity gauge
             Constraint::Min(3),    // tree (primary view, on top)
             Constraint::Length(8), // panels (growth | largest), below
@@ -2082,61 +3278,7 @@ fn draw(f: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
-    // ---- title line ----
-    let header = Line::from(vec![
-        Span::styled(
-            " dux ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            &app.root_path,
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-        // Freshness. IMPORTANT: when the daemon is live the index is maintained
-        // in realtime, so the time since the last FULL scan is NOT staleness —
-        // showing "index 2m old" there wrongly nudges users to rescan. Only a
-        // snapshot (daemon off) actually ages; a dirty index is the real warning.
-        if let Some(since) = app.dirty_since {
-            Span::styled(
-                format!("   ⚠ DIRTY {} — rescan recommended", ago(since)),
-                Style::default().fg(CRIT_COLOR).add_modifier(Modifier::BOLD),
-            )
-        } else if let Some(since) = app.paused_since {
-            // transient: guardian paused writes under host pressure, nothing lost
-            Span::styled(
-                format!("   ⏸ writes paused {} ({})", ago(since), app.pause_reason),
-                Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
-            )
-        } else if let Some(since) = app.throttled_since {
-            // live but intentionally behind: the CPU/IO governor is protecting the
-            // host under heavy fs activity, so the numbers are ~this stale.
-            Span::styled(
-                format!(
-                    "   ◐ throttled {} stale — capping CPU/IO to protect the host; catches up when load eases",
-                    ago(since)
-                ),
-                Style::default().fg(RATE_COLOR).add_modifier(Modifier::BOLD),
-            )
-        } else if app.daemon_live {
-            Span::styled(
-                "   ● live — maintained in realtime",
-                Style::default().fg(Color::DarkGray),
-            )
-        } else {
-            Span::styled(
-                format!(
-                    "   ○ snapshot · {} old (daemon off; growth/ETA need it)",
-                    ago(app.last_scan)
-                ),
-                Style::default().fg(Color::DarkGray),
-            )
-        },
-    ]);
-    f.render_widget(Paragraph::new(header), rows[0]);
+    draw_nav(f, rows[0], app, "Explore / Tree");
 
     // ---- status bar: disk gauge + used/free + growth/day + ETA + items + inodes ----
     let fs = &app.fs;
@@ -2195,6 +3337,25 @@ fn draw(f: &mut Frame, app: &mut App) {
         sep(),
         label("Items"),
         Span::styled(count_human(app.items), Style::default()),
+        sep(),
+        label("Queue"),
+        Span::styled(
+            app.watch
+                .as_ref()
+                .map(|w| {
+                    format!(
+                        "{} ({:.0}% resolved)",
+                        count_human(w.pending as i64),
+                        if w.events_seen == 0 {
+                            100.0
+                        } else {
+                            w.events_resolved as f64 * 100.0 / w.events_seen as f64
+                        }
+                    )
+                })
+                .unwrap_or_else(|| "—".into()),
+            Style::default(),
+        ),
         sep(),
         label("Inodes"),
         Span::styled(format!("{:.0}%", fs.inode_pct()), Style::default()),
@@ -2265,7 +3426,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                     format!("{} ", fixw(&rate_str(g.growth), 10, false)),
                     Style::default().fg(RATE_COLOR),
                 ),
-                Span::raw(short(g.name, 18)),
+                Span::raw(short(&g.name, 18)),
             ]);
             if app.focus == Focus::Groups && idx == app.asel {
                 line = line.style(Style::default().bg(Color::Rgb(38, 44, 66)));
@@ -2468,7 +3629,8 @@ fn draw(f: &mut Frame, app: &mut App) {
     // footer: compact key legend + the FULL path of the current selection
     // (long/truncated panel names are always fully readable here).
     let foot = rows[4];
-    let legend = " a apps · Tab section · ↑↓ move · →/⏎ expand · i size⇄inodes · q quit │ ";
+    let legend =
+        " d distribution · Tab section · ↑↓ move · →/⏎ expand · i size⇄inodes · 1/3/4 screens · q quit │ ";
     // measure in terminal COLUMNS (display width), and truncate via the same
     // width-aware helper as the tree, so a CJK/emoji path can't overflow the line.
     let avail = (foot.width as usize).saturating_sub(display_width(legend) + 1);
@@ -2483,10 +3645,84 @@ fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(footer), foot);
 }
 
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
+}
+
+fn draw_help(f: &mut Frame) {
+    let area = centered_rect(72, 62, f.area());
+    f.render_widget(Clear, area);
+    let help = vec![
+        Line::from(Span::styled(
+            "Four questions, four screens",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("1 / o  Overview     Is the disk healthy? What matters now?"),
+        Line::from("2 / e  Explore      Where is space used? Expand the indexed tree."),
+        Line::from("       d             Toggle Tree ↔ Apps/OS/Users distribution."),
+        Line::from("3 / a  Activity     What changed? [ and ] select 1h / 24h / 7d."),
+        Line::from("4 / r  Reclaim      What may be freed? Inspect evidence and safety."),
+        Line::from(""),
+        Line::from("↑↓ / j k move · Enter/→ expand or drill · ← collapse/back"),
+        Line::from("Tab changes Explore section · i toggles size/inode heat"),
+        Line::from("F5 or R refreshes from the index · q or Ctrl-C exits"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "dux only advises: it never runs cleanup commands.",
+            Style::default().fg(Color::Gray),
+        )),
+    ];
+    f.render_widget(
+        Paragraph::new(help).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(ACCENT))
+                .title(" Help — press ? or Esc to close "),
+        ),
+        area,
+    );
+}
+
+fn draw(f: &mut Frame, app: &mut App) {
+    match app.screen {
+        Screen::Overview => draw_overview(f, app),
+        Screen::Explore if app.explore_distribution => draw_apps(f, app),
+        Screen::Explore => draw_explore(f, app),
+        Screen::Activity => draw_activity(f, app),
+        Screen::Reclaim => draw_storage(f, app),
+    }
+    if app.show_help {
+        draw_help(f);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scan::{self, ScanOptions};
+
+    #[test]
+    fn ctrl_c_quits_but_plain_c_remains_storage_shortcut() {
+        assert!(is_interrupt_key(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(!is_interrupt_key(KeyCode::Char('c'), KeyModifiers::NONE));
+    }
 
     fn tmp(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("dux-tui-{tag}-{}", std::process::id()))
@@ -2583,9 +3819,11 @@ mod tests {
     fn result(gen: u64, rows: Vec<Row>, total: i64) -> RefreshResult {
         RefreshResult {
             gen,
+            distribution: Distribution::Apps,
             rows,
             growth_map: std::collections::HashMap::new(),
             top_growth: Vec::new(),
+            recent_changes: Vec::new(),
             top_files: Vec::new(),
             groups: Vec::new(),
             total_size: total,
@@ -2598,6 +3836,11 @@ mod tests {
             paused_since: None,
             pause_reason: String::new(),
             throttled_since: None,
+            watch: None,
+            scan: None,
+            containers: Vec::new(),
+            waste: crate::containers::Waste::default(),
+            cleanup: Vec::new(),
         }
     }
 
@@ -2614,6 +3857,7 @@ mod tests {
             root_dev: 1,
             root_inode: 1,
             top_growth: Vec::new(),
+            recent_changes: Vec::new(),
             top_files: Vec::new(),
             groups: Vec::new(),
             total_size: 0,
@@ -2631,15 +3875,26 @@ mod tests {
             paused_since: None,
             pause_reason: String::new(),
             throttled_since: None,
+            watch: None,
+            scan: None,
+            containers: Vec::new(),
+            waste: crate::containers::Waste::default(),
+            cleanup: Vec::new(),
+            storage_calc: Instant::now(),
             growth_map: std::collections::HashMap::new(),
             growth_calc: Instant::now(),
             items: 0,
             growth_per_day: 0,
-            screen: Screen::Main,
+            screen: Screen::Overview,
+            explore_distribution: false,
+            distribution: Distribution::Apps,
+            show_help: false,
             focus: Focus::Tree,
             asel: 0,
             gsel: 0,
             fsel: 0,
+            activity_sel: 0,
+            reclaim_sel: 0,
             detail: String::new(),
             view_gen: 5,
         };

@@ -1,17 +1,17 @@
 # dux Production Readiness Audit
 
 Date: 2026-07-14
-Updated: 2026-07-14 — remediation pass; see "Remediation Status" below.
+Updated: 2026-08-30 — bounded-scan and observability remediation pass.
 
 ## Remediation Status
 
 | # | Risk | Status |
 |---|---|---|
-| 1 | Full scans use high RAM | **Reduced, not eliminated.** Per-node cost cut ~34% (see below). All nodes are still held in memory; the streaming redesign is still open and is a speed/memory tradeoff — see "Open: streaming scan". |
+| 1 | Full scans use high RAM | **Fixed architecturally.** Nodes cross an 8,192-entry bounded queue into a disk-backed staging DB; no whole-tree Rust vectors/maps remain. |
 | 4 | Expensive read commands | **Fixed for `du`.** `--max-depth` now prunes the SQL walk instead of filtering after: `du --max-depth=1 /usr` went 1.99s/31MB → 0.02s/6MB. The redundant full-subtree buffer is gone. `by_ext` re-measured — see below. |
 | 6 | Filename disclosure | **Fixed.** Index is now `0640 root:dux`, not world-readable. `usermod -aG dux <user>` grants access. Upgrades chmod the existing index. |
 | 5 | Operational docs | **Fixed.** README documents DIRTY / WRITES PAUSED / THROTTLED and when to rescan. |
-| 2,3,5,7 | Daemon storm/pressure behaviour | Unchanged — audit found these already well handled. |
+| 2,3,5,7 | Daemon storm/pressure behaviour | Improved: queue depth/capacity, resolution, commits, drops, kernel drain state and lag are visible in status/TUI. |
 | 7 | Broad capabilities | **Won't fix.** `CAP_SYS_ADMIN` is required by fanotify; already bounded via `CapabilityBoundingSet`. |
 
 Corrections to the original audit:
@@ -23,38 +23,17 @@ Corrections to the original audit:
 - **`du` was the real unbounded read path**, and worse than described: it built
   the full subtree list *twice* (a tuple `Vec`, then a `DuRow` `Vec`).
 
-Scan memory, per node (the dominant term — every node is resident at once):
+### Bounded scan design
 
-| Structure | Before | After |
-|---|---|---|
-| `RawNode` | 128 B | 104 B (dropped write-only `size`/`gid`/`mode`) |
-| `canon` map | ~29 B x every node | removed; 8 B x every *file*, transient |
-| `dir_idx` map | ~29 B x every node | ~29 B x every *directory* (~10% of nodes) |
+Both former whole-tree blockers are now reduced on disk. Parallel stat workers
+feed an 8,192-entry bounded channel into a side staging DB. A window function
+selects the deterministic minimum `(parent_dev,parent_inode,name)` per inode,
+then indexed depth passes roll directory totals from deepest to root. The
+staging file is removed before FTS and secondary indexes are built, so it never
+bloats the installed index.
 
-Roughly 230 B/node → ~150 B/node, so the ~4 GB `MemoryMax` ceiling moves from
-roughly 17M to roughly 27M files. Verified behaviour-preserving: rescanning
-`/usr` (283,812 inodes, 20 hardlinks) yields byte-identical `du` output, and two
-consecutive scans are identical (canonicalisation is deterministic).
-
-### Open: streaming scan
-
-The streaming redesign (recommendation 1) is **not** a free win and was left for
-an explicit decision. Both blockers are whole-tree reductions:
-
-1. **Bottom-up rollup** — a directory's `recursive_bytes` isn't final until its
-   deepest descendant is seen.
-2. **Hardlink canonicalisation** — the canonical link is the min
-   `(parent_dev, parent_inode, name)` across *all* links, so it needs global
-   knowledge per inode.
-
-Pushing both into SQLite trades the current in-memory array rollup (fast: `/usr`
-scans in ~12s) for per-depth `UPDATE` passes, which is likely to make scans
-markedly slower. Memory-vs-speed is a product call, not a bug fix.
-
-Note: an `nlink > 1` fast path is the obvious cheap fix here and is **unsound** —
-a bind-mounted file shows the same `(dev,inode)` at two paths with `nlink == 1`,
-so gating on `nlink` would mark both primary and double-count the blocks. The
-current sort-based canonicalisation is correct for that case.
+Workspace validation: 5,516 paths and 1.10 GiB indexed in 0.31s at 9.1 MiB
+maximum RSS. Indexed bytes were exactly 1,177,096,192, identical to GNU `du`.
 
 ## Verdict
 
@@ -64,14 +43,16 @@ Validation run:
 
 ```text
 cargo test
-23 passed, 0 failed
+32 passed, 0 failed
 ```
 
 ## Main Risks
 
-1. Full scans can use very high RAM on huge filesystems.
+1. Full scans need temporary disk space.
 
-   `src/scan.rs` uses an unbounded channel and then collects all `RawNode`s into memory. The scan then allocates additional vectors and hash maps sized to the full node count. On tens or hundreds of millions of files, this can OOM or hit the packaged `MemoryMax=4G` service limit.
+   Bounded RAM is achieved with a side staging DB next to the destination index.
+   A rebuild needs space for staging metadata plus the new atomic index until the
+   swap completes. Failure remains safe: the old index is kept.
 
 2. Daemon event storms degrade to eventual consistency, not exact realtime.
 
@@ -81,9 +62,11 @@ cargo test
 
    Under low memory, low disk, high load, or PSI pressure, writes pause and SQLite memory is shrunk. Pending events remain in memory until recovery or until `MAX_PENDING` is exceeded. This protects the host, but a long critical period plus huge churn can still consume substantial RAM before the backlog is dropped.
 
-4. Some read commands can be expensive on very large indexes.
+4. Some read commands can be CPU-expensive on very large indexes.
 
-   `by_ext` scans all prime file dirents in Rust and builds a hash map. `du` collects the full subtree into memory. These read paths are not governed like the daemon and can still cause CPU/RAM spikes on very large indexes.
+   `by_ext` scans prime file dirents but uses memory proportional only to
+   distinct extensions. Bounded-depth `du` is SQL-pruned and no longer
+   double-buffers its subtree. Unbounded analytical queries can still consume CPU.
 
 5. Large moved-in directories are bounded but may become dirty.
 
@@ -104,7 +87,7 @@ cargo test
 - The daemon has CPU throttling and idle I/O priority.
 - Pending events and flush batches are bounded.
 - Fanotify queue overflow, missing capabilities, partial watch coverage, downtime gaps, and dropped backlog mark the index dirty instead of silently claiming exact data.
-- Status/TUI can surface dirty, paused, and throttled states.
+- Status/TUI surface dirty, paused, throttled, scan-progress, queue and lag states.
 - WAL checkpointing has a size backstop.
 - Alert subprocesses are capped and reaped.
 - The schema handles hardlinks with separate inode and dirent tables.
@@ -128,17 +111,15 @@ So `dux` is designed to protect the host under this case. It is not guaranteed t
 ## Production Readiness Grade
 
 - Daemon steady-state: reasonably production-minded, but not perfect.
-- Full scan path: not ready for truly massive file counts without a memory redesign.
+- Full scan path: bounded-memory design; very large-scale disk/time benchmarks remain.
 - Security posture: acceptable only if filename disclosure and required capabilities are acceptable.
 - "No bugs / all possible use cases": no.
 - "Pragmatic production beta with host-protection and dirty-state fallback": yes.
 
 ## Recommended Hardening Before Calling It Production-Ready
 
-1. Redesign full scan to stream into SQLite or bounded batches instead of holding all nodes in memory.
-2. Add load tests for millions of creates, deletes, renames, and modify events.
-3. Add benchmark gates for query memory and latency on large indexes.
-4. Add a root-only default packaging mode or require an explicit opt-in for world-readable indexes.
-5. Add operational documentation for dirty/throttled/paused states and when to run `dux scan`.
-6. Consider cgroup memory/CPU limits for manual CLI scans, not just the packaged daemon.
-7. Add integration tests around fanotify overflow, permission failure, and real daemon restart gaps.
+1. Add repeatable load tests for millions of creates, deletes, renames, and modifies.
+2. Add benchmark gates for scan/index size and query memory/latency.
+3. Add integration tests around real fanotify overflow and permission failure.
+4. Consider cgroup memory/CPU limits for manual CLI scans, not just the daemon.
+5. Add automatic bounded reconciliation where the missed-event scope is known.

@@ -1,7 +1,7 @@
 use crate::store::Store;
 use crate::util::now_secs;
 use anyhow::{Context, Result};
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use std::fs;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
@@ -47,32 +47,53 @@ fn scan_threads(opts: &ScanOptions) -> usize {
 /// address space — counting it is meaningless. Shared with the daemon so both
 /// cover exactly the same set of filesystems.
 pub(crate) fn is_pseudo_fs(path: &Path) -> bool {
+    matches!(
+        fs_magic(path),
+        Some(
+            0x9fa0       // PROC
+            | 0x62656572 // SYSFS
+            | 0x27e0eb   // CGROUP
+            | 0x63677270 // CGROUP2
+            | 0x1cd1     // DEVPTS
+            | 0x64626720 // DEBUGFS
+            | 0x74726163 // TRACEFS
+            | 0x73636673 // SECURITYFS
+            | 0xcafe4a11 // BPF
+            | 0x19800202 // MQUEUE
+            | 0x6165676c // PSTORE
+            | 0x42494e4d // BINFMTFS
+            | 0x9fa2     // USBDEVICE
+            | 0x65735543 // FUSECTL
+            | 0x62656570 // CONFIGFS
+            | 0x65735546 // FUSE (portal/remote userspace view)
+            | 0x6e736673 // NSFS (network namespaces)
+            | 0x958458f6 // HUGETLBFS
+            | 0x858458f6 // RAMFS
+            | 0x01021994 // TMPFS
+            | 0x0187 // AUTOFS
+        )
+    )
+}
+
+/// Overlay mountpoints are merged views backed by upper/lower directories that
+/// are already indexed on their real filesystems. Crossing a nested overlay
+/// double-counts physical storage and fanotify often cannot mark the merged
+/// view. The scan root itself is handled by callers and remains allowed.
+pub(crate) fn is_duplicate_storage_view(path: &Path) -> bool {
+    matches!(fs_magic(path), Some(0x794c7630)) // OVERLAYFS_SUPER_MAGIC
+}
+
+fn fs_magic(path: &Path) -> Option<libc::c_long> {
     use std::mem::MaybeUninit;
     let c = match std::ffi::CString::new(path.as_os_str().as_bytes()) {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let mut s = MaybeUninit::<libc::statfs>::uninit();
     if unsafe { libc::statfs(c.as_ptr(), s.as_mut_ptr()) } != 0 {
-        return false;
+        return None;
     }
-    let t = unsafe { s.assume_init() }.f_type;
-    matches!(
-        t,
-        0x9fa0       // PROC
-        | 0x62656572 // SYSFS
-        | 0x27e0eb   // CGROUP
-        | 0x63677270 // CGROUP2
-        | 0x1cd1     // DEVPTS
-        | 0x64626720 // DEBUGFS
-        | 0x74726163 // TRACEFS
-        | 0x73636673 // SECURITYFS
-        | 0xcafe4a11 // BPF
-        | 0x19800202 // MQUEUE
-        | 0x6165676c // PSTORE
-        | 0x42494e4d // BINFMTFS
-        | 0x9fa2 // USBDEVICE
-    )
+    Some(unsafe { s.assume_init() }.f_type)
 }
 
 #[derive(Default)]
@@ -91,6 +112,7 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
     let mut new_os = db.to_path_buf().into_os_string();
     new_os.push(".new");
     let db_new = PathBuf::from(new_os);
+    cleanup_stale_scan_files(&db_new);
     for suf in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suf}", db_new.display()));
     }
@@ -123,12 +145,43 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
     Ok(stats)
 }
 
+/// A SIGKILL/power loss cannot run StageGuard. The exclusive DB lock guarantees
+/// no other rebuild is active, so remove only staging files for this exact
+/// destination before starting the next atomic rebuild.
+fn cleanup_stale_scan_files(db_new: &Path) {
+    let Some(parent) = db_new.parent() else {
+        return;
+    };
+    let Some(base) = db_new.file_name().map(|s| s.to_string_lossy().into_owned()) else {
+        return;
+    };
+    let prefix = format!("{base}.scan-");
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&prefix)
+            && (name.ends_with(".tmp")
+                || name.ends_with(".tmp-journal")
+                || name.ends_with(".tmp-wal")
+                || name.ends_with(".tmp-shm"))
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Full scan of `root` into the index. Computes recursive directory totals
 /// bottom-up in a single transaction (batched inserts — never row-at-a-time IO).
 pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
     if opts.low_priority {
         set_low_priority();
     }
+    // Whole-index GROUP/window/FTS operations may need large sort scratch. Keep
+    // that scratch on disk during a scan; temp_store=MEMORY reached ~1.8 GiB on
+    // a 2.1M-entry production index despite the Rust pipeline being bounded.
+    store.conn.execute_batch("PRAGMA temp_store=FILE;")?;
     let root = root
         .canonicalize()
         .with_context(|| format!("resolving {}", root.display()))?;
@@ -224,200 +277,153 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         handle: progress_thread,
     };
 
-    // ---- phase 1: parallel walk, collect raw nodes ----
+    // ---- phase 1: parallel walk into a bounded, disk-backed staging DB ----
     let n_errors = Arc::new(AtomicU64::new(0));
-    let raw = parallel_collect(
-        &root, root_dev, root_inode, opts, &n_files, &n_dirs, &n_bytes, &n_errors,
-    );
-
-    // ---- phase 2: recursive totals ----
-    // Switch the progress message to "indexing" — the walk is done.
-    indexing.store(true, Ordering::Relaxed);
-    let mut nodes = raw;
-
-    // (dev,inode) compose into one key — inode numbers collide ACROSS devices,
-    // and scanning `/` crosses many mounts, so we must never key by inode alone.
-    #[inline]
-    fn key(dev: i64, ino: i64) -> i128 {
-        ((dev as i128) << 64) | (ino as u64 as i128)
-    }
-
-    // the root node itself (parent = self marks the root; name = absolute path)
-    nodes.push(RawNode {
-        dev: root_dev,
-        inode: root_inode,
-        parent_dev: root_dev,
-        parent_inode: root_inode,
-        depth: 0,
-        kind: 'd',
-        blocks: (meta.blocks() as i64) * 512,
-        uid: meta.uid() as i64,
-        mtime: meta.mtime(),
-        name: root.as_os_str().as_bytes().to_vec(),
-        recursive: 0,
-        rinodes: 1,
-    });
-
-    // bottom-up totals via the tree (index-based). Directories are unique, so we
-    // map each dir (dev,inode) -> node index and roll child subtotals into the
-    // parent. Hardlinked files (same inode at multiple paths) have their blocks
-    // counted ONCE — matching `du`/`df`, which never double-count shared inodes.
-    //
-    // Sized to the DIRECTORY count, not the node count: only dirs are inserted, and
-    // dirs are a small fraction of a real tree (~10%), so `nodes.len()` here would
-    // allocate ~10x the buckets ever used — ~29 bytes x every file, wasted.
-    let n_dirs_hint = nodes.iter().filter(|n| n.kind == 'd').count();
-    let mut dir_idx: std::collections::HashMap<i128, usize> =
-        std::collections::HashMap::with_capacity(n_dirs_hint);
-    for (i, n) in nodes.iter().enumerate() {
-        if n.kind == 'd' {
-            dir_idx.insert(key(n.dev, n.inode), i);
-        }
-    }
-    let mut bytes_sub = vec![0i64; nodes.len()];
-    let mut inode_sub = vec![0i64; nodes.len()];
-    // `primary[i]` = this is the single canonical row/name for its inode (a dir,
-    // or the canonical link of a file). Only primaries get a node row + FTS name,
-    // so a search never resolves to a different hardlink's path.
-    let mut primary = vec![false; nodes.len()];
-
-    // Pick the canonical link per file inode DETERMINISTICALLY. The parallel walk
-    // yields nodes in a nondeterministic order, so "first-seen wins" would
-    // attribute a cross-directory hardlink's blocks to a DIFFERENT directory on
-    // each scan, making per-dir totals flap between runs. Canonical = the link
-    // with the smallest (parent_dev, parent_inode, name).
-    //
-    // Done by sorting file indices on (dev,inode) so an inode's links land in one
-    // contiguous run, rather than a (dev,inode)->index HashMap sized to the whole
-    // node set. Same result, ~3-4x less peak RAM for this step: 8 bytes per FILE
-    // versus ~29 bytes per NODE. Sorting also keeps this correct for links the
-    // `nlink` count can't reveal — a bind-mounted file shows the same (dev,inode)
-    // at two paths with nlink==1, so an nlink-gated fast path would mark both
-    // primary and double-count the blocks. Every file goes through the run scan.
-    let mut files: Vec<usize> = (0..nodes.len()).filter(|&i| nodes[i].kind != 'd').collect();
-    files.sort_unstable_by_key(|&i| (nodes[i].dev, nodes[i].inode));
-    let mut s = 0;
-    while s < files.len() {
-        let (d, ino) = (nodes[files[s]].dev, nodes[files[s]].inode);
-        let mut e = s + 1;
-        while e < files.len() && nodes[files[e]].dev == d && nodes[files[e]].inode == ino {
-            e += 1;
-        }
-        // one link -> trivially canonical; several -> the min (parent, name)
-        let best = files[s..e]
-            .iter()
-            .copied()
-            .min_by(|&a, &b| {
-                (nodes[a].parent_dev, nodes[a].parent_inode, &nodes[a].name).cmp(&(
-                    nodes[b].parent_dev,
-                    nodes[b].parent_inode,
-                    &nodes[b].name,
-                ))
-            })
-            .expect("run is non-empty");
-        primary[best] = true;
-        s = e;
-    }
-    drop(files); // the sort scratch is dead before the (larger) rollup arrays grow
-
-    for (i, n) in nodes.iter().enumerate() {
-        // directories are always their own primary; files only when canonical
-        if n.kind == 'd' {
-            primary[i] = true;
-        }
-        if primary[i] {
-            // a dir, or the single canonical link: count blocks + inode once
-            bytes_sub[i] = n.blocks;
-            inode_sub[i] = 1;
-        } else {
-            // additional hardlinks: already counted (0 bytes, 0 inodes, no row)
-            bytes_sub[i] = 0;
-            inode_sub[i] = 0;
-        }
-    }
-    let mut order: Vec<usize> = (0..nodes.len()).collect();
-    order.sort_by(|&a, &b| nodes[b].depth.cmp(&nodes[a].depth)); // deepest first
-    for &i in &order {
-        let pk = key(nodes[i].parent_dev, nodes[i].parent_inode);
-        if let Some(&p) = dir_idx.get(&pk) {
-            if p != i {
-                bytes_sub[p] += bytes_sub[i];
-                inode_sub[p] += inode_sub[i];
-            }
-        }
-    }
-    for (i, n) in nodes.iter_mut().enumerate() {
-        if n.kind == 'd' {
-            n.recursive = bytes_sub[i];
-            n.rinodes = inode_sub[i];
-        } else {
-            n.recursive = n.blocks;
-            n.rinodes = 1;
-        }
-    }
-    let root_total = dir_idx
-        .get(&key(root_dev, root_inode))
-        .map(|&i| bytes_sub[i])
+    let main_db: String = store.conn.query_row(
+        "SELECT file FROM pragma_database_list WHERE name='main'",
+        [],
+        |r| r.get(0),
+    )?;
+    // Atomic rebuilds write `<live>.new`; normalize back to the live DB name so
+    // the walker can exclude the live file, `.new`, WAL/SHM, lock and scan-stage
+    // files as one family.
+    let index_db = PathBuf::from(main_db.strip_suffix(".new").unwrap_or(&main_db));
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
-
-    // ---- phase 3: batched bulk insert (no triggers/indexes yet — fast) ----
-    // One `inodes` row per PRIMARY node (the inode counted once); one `dirents`
-    // row per node INCLUDING extra hardlinks (every valid path is represented,
-    // prime=0 for the non-canonical links). FTS triggers don't exist yet, so the
-    // bulk load isn't slowed by per-row FTS writes — finalize_bulk rebuilds once.
-    let mut idx = 0;
-    while idx < nodes.len() {
-        let end = (idx + 50_000).min(nodes.len());
-        let tx = store.conn.transaction()?;
-        {
-            let mut ino_stmt = tx.prepare(
-                "INSERT OR REPLACE INTO inodes
-                 (dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-            )?;
-            let mut de_stmt = tx.prepare(
-                "INSERT OR REPLACE INTO dirents
-                 (parent_dev,parent_inode,name,dev_id,inode,prime)
-                 VALUES (?1,?2,?3,?4,?5,?6)",
-            )?;
-            for j in idx..end {
-                let n = &nodes[j];
-                if primary[j] {
-                    ino_stmt.execute(params![
-                        n.dev,
-                        n.inode,
-                        n.kind.to_string(),
-                        n.blocks,
-                        n.recursive,
-                        n.rinodes,
-                        n.uid,
-                        n.mtime,
-                    ])?;
-                }
-                // The walker also emits the scan root as a child of its real parent
-                // dir (parent=<real parent>, name=<basename>). The canonical root
-                // dirent is the SELF-parented one pushed manually (name=abspath);
-                // skip the walker's duplicate so the root resolves to its full path.
-                let is_root = n.dev == root_dev && n.inode == root_inode;
-                let self_parented = n.parent_dev == n.dev && n.parent_inode == n.inode;
-                if is_root && !self_parented {
-                    continue;
-                }
-                de_stmt.execute(params![
-                    n.parent_dev,
-                    n.parent_inode,
-                    n.name,
-                    n.dev,
-                    n.inode,
-                    primary[j] as i64,
-                ])?;
+    let stage_path = PathBuf::from(format!(
+        "{}.scan-{}-{nonce}.tmp",
+        main_db,
+        std::process::id(),
+    ));
+    struct StageGuard(PathBuf);
+    impl Drop for StageGuard {
+        fn drop(&mut self) {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                let _ = std::fs::remove_file(format!("{}{suffix}", self.0.display()));
             }
         }
-        tx.commit()?;
-        idx = end;
     }
+    let stage_guard = StageGuard(stage_path.clone());
+    let mut stage = Connection::open(&stage_path)
+        .with_context(|| format!("creating scan staging DB {}", stage_path.display()))?;
+    stage.execute_batch(
+        "PRAGMA journal_mode=OFF;
+         PRAGMA synchronous=OFF;
+         PRAGMA temp_store=FILE;
+         PRAGMA cache_size=-16384;
+         CREATE TABLE scan_nodes (
+           dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+           parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL,
+           depth INTEGER NOT NULL, kind TEXT NOT NULL, blocks INTEGER NOT NULL,
+           uid INTEGER NOT NULL, mtime INTEGER NOT NULL, name BLOB NOT NULL
+         );",
+    )?;
+    parallel_stage(
+        &mut stage, &root, root_dev, root_inode, &index_db, opts, &n_files, &n_dirs, &n_bytes,
+        &n_errors,
+    )?;
+    stage.execute(
+        "INSERT INTO scan_nodes
+         (dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name)
+         VALUES (?1,?2,?1,?2,0,'d',?3,?4,?5,?6)",
+        params![
+            root_dev,
+            root_inode,
+            (meta.blocks() as i64) * 512,
+            meta.uid() as i64,
+            meta.mtime(),
+            root.as_os_str().as_bytes(),
+        ],
+    )?;
+
+    // ---- phase 2: deterministic hardlinks + bottom-up totals in SQLite ----
+    indexing.store(true, Ordering::Relaxed);
+    stage.execute_batch(
+        "CREATE INDEX scan_nodes_target ON scan_nodes(dev,inode,parent_dev,parent_inode,name);
+         CREATE INDEX scan_nodes_depth ON scan_nodes(depth);",
+    )?;
+    drop(stage);
+    store.conn.execute(
+        "ATTACH DATABASE ?1 AS scan",
+        params![stage_path.to_string_lossy()],
+    )?;
+    let build_result: Result<i64> = (|| {
+        store.conn.execute_batch(
+            "BEGIN IMMEDIATE;
+             INSERT INTO inodes
+               (dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+             SELECT dev,inode,MAX(kind),MAX(blocks),MAX(blocks),1,MAX(uid),MAX(mtime)
+             FROM scan.scan_nodes GROUP BY dev,inode;
+
+             INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+             SELECT parent_dev,parent_inode,name,dev,inode,
+                    CASE WHEN ROW_NUMBER() OVER (
+                      PARTITION BY dev,inode ORDER BY parent_dev,parent_inode,name
+                    )=1 THEN 1 ELSE 0 END
+             FROM scan.scan_nodes;
+
+             CREATE TEMP TABLE rollup (
+               dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+               bytes INTEGER NOT NULL, items INTEGER NOT NULL,
+               PRIMARY KEY(dev,inode)
+             ) WITHOUT ROWID;
+             COMMIT;",
+        )?;
+        let max_depth: i64 = store.conn.query_row(
+            "SELECT COALESCE(MAX(depth),0) FROM scan.scan_nodes",
+            [],
+            |r| r.get(0),
+        )?;
+        for depth in (1..=max_depth).rev() {
+            let tx = store.conn.transaction()?;
+            tx.execute("DELETE FROM rollup", [])?;
+            tx.execute(
+                "INSERT INTO rollup(dev,inode,bytes,items)
+                 SELECT s.parent_dev,s.parent_inode,
+                        COALESCE(SUM(CASE WHEN d.prime=1 THEN i.recursive_bytes ELSE 0 END),0),
+                        COALESCE(SUM(CASE WHEN d.prime=1 THEN i.recursive_inodes ELSE 0 END),0)
+                 FROM scan.scan_nodes s
+                 JOIN dirents d ON d.parent_dev=s.parent_dev
+                   AND d.parent_inode=s.parent_inode AND d.name=s.name
+                 JOIN inodes i ON i.dev_id=s.dev AND i.inode=s.inode
+                 WHERE s.depth=?1 AND NOT (s.dev=s.parent_dev AND s.inode=s.parent_inode)
+                 GROUP BY s.parent_dev,s.parent_inode",
+                params![depth],
+            )?;
+            tx.execute_batch(
+                "UPDATE inodes SET
+                   recursive_bytes=recursive_bytes+COALESCE((
+                     SELECT bytes FROM rollup r WHERE r.dev=inodes.dev_id AND r.inode=inodes.inode
+                   ),0),
+                   recursive_inodes=recursive_inodes+COALESCE((
+                     SELECT items FROM rollup r WHERE r.dev=inodes.dev_id AND r.inode=inodes.inode
+                   ),0)
+                 WHERE EXISTS (
+                   SELECT 1 FROM rollup r WHERE r.dev=inodes.dev_id AND r.inode=inodes.inode
+                 );",
+            )?;
+            tx.commit()?;
+        }
+        Ok(store.conn.query_row(
+            "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![root_dev, root_inode],
+            |r| r.get(0),
+        )?)
+    })();
+    let _ = store
+        .conn
+        .execute_batch("DROP TABLE IF EXISTS temp.rollup; DETACH DATABASE scan;");
+    let root_total = build_result?;
+    drop(stage_guard);
+
+    // ---- phase 3: build query indexes once (no per-row trigger overhead) ----
     // Build the FTS index in one pass and install the sync triggers + indexes.
     store.finalize_bulk()?;
+    // Restore the query-optimized connection default. In the atomic rebuild path
+    // this connection is about to close, but direct scan tests may reuse it.
+    store.conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
 
     let stats = ScanStats {
         files: n_files.load(Ordering::Relaxed),
@@ -441,16 +447,7 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     Ok(stats)
 }
 
-/// A node captured during the parallel walk. parent (dev,inode) and depth are
-/// recorded at walk time so post-processing needs no path map. `recursive` is
-/// filled in phase 2.
-///
-/// EVERY node of the tree is held in memory at once (see `scan`), so this struct
-/// is on the hot path for peak scan RAM: one dead i64 here costs 8 bytes x the
-/// whole filesystem — ~800 MB across 100M files. The v2+ schema stores only
-/// allocated `blocks`, owner `uid` and `mtime`, so apparent `size`, `gid` and
-/// `mode` are deliberately NOT captured. Don't add a field here without checking
-/// it is actually written to the DB.
+/// A node in the bounded handoff between stat workers and the staging writer.
 struct RawNode {
     dev: i64,
     inode: i64,
@@ -462,31 +459,31 @@ struct RawNode {
     uid: i64,
     mtime: i64,
     name: Vec<u8>, // raw filename bytes — identity-preserving (no lossy UTF-8)
-    recursive: i64,
-    rinodes: i64,
 }
 
 /// Parallel directory walk (jwalk). All per-entry stat work happens on worker
 /// threads; nodes stream back over a channel. Pseudo-fs, excludes, and (with
 /// one_file_system) other mounts are pruned so we never descend into them.
 #[allow(clippy::too_many_arguments)]
-fn parallel_collect(
+fn parallel_stage(
+    stage: &mut Connection,
     root: &Path,
     root_dev: i64,
     root_inode: i64,
+    index_db: &Path,
     opts: &ScanOptions,
     n_files: &Arc<AtomicU64>,
     n_dirs: &Arc<AtomicU64>,
     n_bytes: &Arc<AtomicI64>,
     n_errors: &Arc<AtomicU64>,
-) -> Vec<RawNode> {
+) -> Result<()> {
     use jwalk::WalkDirGeneric;
 
-    // NOTE: this channel must stay UNBOUNDED. The walk is driven to completion
-    // (`for _ in walk {}`) BEFORE rx is drained, so a bounded channel would block
-    // the walkers once full and deadlock. Truly capping scan memory needs a
-    // concurrent-consume redesign (the node Vec dominates peak RAM anyway).
-    let (tx, rx) = crossbeam_channel::unbounded::<RawNode>();
+    // Backpressure bounds queued names/metadata even when storage is slower than
+    // stat workers. The producer runs concurrently so a full channel cannot deadlock.
+    const QUEUE_CAP: usize = 8192;
+    const INSERT_BATCH: usize = 8192;
+    let (tx, rx) = crossbeam_channel::bounded::<RawNode>(QUEUE_CAP);
     // canonicalize excludes so relative paths match the canonical entry paths
     let exclude: Vec<PathBuf> = opts
         .exclude
@@ -509,6 +506,7 @@ fn parallel_collect(
         .collect();
     let include_pseudo = opts.include_pseudo;
     let one_fs = opts.one_file_system;
+    let index_db = index_db.to_path_buf();
     let nf = n_files.clone();
     let nd = n_dirs.clone();
     let nb = n_bytes.clone();
@@ -528,122 +526,193 @@ fn parallel_collect(
     // must check every subdir to preserve the "exclude pseudo contents" behavior.
     let root_pseudo = is_pseudo_fs(root);
 
-    {
-        let walk = WalkDirGeneric::<((), ())>::new(root)
-            .skip_hidden(false)
-            .follow_links(false)
-            .parallelism(jwalk::Parallelism::RayonNewPool(threads))
-            .process_read_dir(move |_depth, dir_path, _state, children| {
-                // stat the directory once to learn the parent (dev,inode); all of
-                // these children share it. depth is the dir's depth + 1.
-                let pinfo = std::fs::symlink_metadata(dir_path)
-                    .ok()
-                    .map(|m| (m.dev() as i64, m.ino() as i64));
-                // cycle guard: if this exact directory was already walked, a
-                // bind-mount / dir-hardlink cycle is sending us back through it —
-                // prune so the walk terminates. Only guard on a successful stat so
-                // a stat failure doesn't collide with the root's fallback key.
-                if let Some(id) = pinfo {
-                    // poison-tolerant: the critical section is a single HashSet
-                    // insert (can't panic), but recover the guard rather than let
-                    // one walker's panic cascade into every other walker's unwrap.
-                    // Scope the guard to just the insert so it's NOT held across the
-                    // per-directory processing below (that would serialize walkers).
-                    let already_seen = {
-                        let mut vis = visited.lock().unwrap_or_else(|e| e.into_inner());
-                        !vis.insert(id)
-                    };
-                    if already_seen {
-                        children.clear();
-                        return;
-                    }
-                }
-                let (pdev, pino) = pinfo.unwrap_or((root_dev, root_inode));
-                let cdepth = dir_path.components().count() as u32 + 1;
-                children.retain(|res| {
-                    let entry = match res {
-                        Ok(e) => e,
-                        Err(_) => {
-                            ne.fetch_add(1, Ordering::Relaxed);
-                            return false;
+    std::thread::scope(|scope| -> Result<()> {
+        let producer = scope.spawn(move || {
+            {
+                let walk = WalkDirGeneric::<((), ())>::new(root)
+                    .skip_hidden(false)
+                    .follow_links(false)
+                    .parallelism(jwalk::Parallelism::RayonNewPool(threads))
+                    .process_read_dir(move |_depth, dir_path, _state, children| {
+                        // stat the directory once to learn the parent (dev,inode); all of
+                        // these children share it. depth is the dir's depth + 1.
+                        let pinfo = std::fs::symlink_metadata(dir_path)
+                            .ok()
+                            .map(|m| (m.dev() as i64, m.ino() as i64));
+                        // cycle guard: if this exact directory was already walked, a
+                        // bind-mount / dir-hardlink cycle is sending us back through it —
+                        // prune so the walk terminates. Only guard on a successful stat so
+                        // a stat failure doesn't collide with the root's fallback key.
+                        if let Some(id) = pinfo {
+                            // poison-tolerant: the critical section is a single HashSet
+                            // insert (can't panic), but recover the guard rather than let
+                            // one walker's panic cascade into every other walker's unwrap.
+                            // Scope the guard to just the insert so it's NOT held across the
+                            // per-directory processing below (that would serialize walkers).
+                            let already_seen = {
+                                let mut vis = visited.lock().unwrap_or_else(|e| e.into_inner());
+                                !vis.insert(id)
+                            };
+                            if already_seen {
+                                children.clear();
+                                return;
+                            }
                         }
-                    };
-                    let path = entry.path();
-                    if exclude.iter().any(|x| path.starts_with(x)) {
-                        return false;
-                    }
-                    let m = match std::fs::symlink_metadata(&path) {
-                        Ok(m) => m,
-                        Err(_) => {
-                            ne.fetch_add(1, Ordering::Relaxed);
-                            return false;
-                        }
-                    };
-                    let dev = m.dev() as i64;
-                    if one_fs && dev != root_dev {
-                        return false;
-                    }
-                    let is_dir = m.is_dir();
-                    // Only statfs at a MOUNT boundary (child dev != parent dev) —
-                    // pseudo filesystems are always mounts, so this skips a statfs
-                    // syscall on every ordinary subdir (millions on a deep tree)
-                    // with no loss of coverage. `root_pseudo` forces the check when
-                    // the scan root itself is a pseudo fs.
-                    if is_dir
-                        && !include_pseudo
-                        && (dev != pdev || root_pseudo)
-                        && is_pseudo_fs(&path)
-                    {
-                        return false;
-                    }
-                    let blocks = (m.blocks() as i64) * 512;
-                    let kind = if is_dir {
-                        'd'
-                    } else if m.file_type().is_symlink() {
-                        'l'
-                    } else if m.is_file() {
-                        'f'
-                    } else {
-                        'o'
-                    };
-                    let ino = m.ino() as i64;
-                    // The walker also surfaces the scan root as a child of its real
-                    // parent dir. Don't emit or count that duplicate (the canonical
-                    // self-parented root is added separately) — but still recurse
-                    // into it so the real subtree is walked.
-                    if dev == root_dev && ino == root_inode {
-                        return true;
-                    }
-                    let name = entry.file_name().as_bytes().to_vec();
-                    let _ = tx.send(RawNode {
-                        dev,
-                        inode: ino,
-                        parent_dev: pdev,
-                        parent_inode: pino,
-                        depth: cdepth,
-                        kind,
-                        blocks,
-                        uid: m.uid() as i64,
-                        mtime: m.mtime(),
-                        name,
-                        recursive: 0,
-                        rinodes: 1,
+                        let (pdev, pino) = pinfo.unwrap_or((root_dev, root_inode));
+                        let cdepth = dir_path.components().count() as u32 + 1;
+                        children.retain(|res| {
+                            let entry = match res {
+                                Ok(e) => e,
+                                Err(_) => {
+                                    ne.fetch_add(1, Ordering::Relaxed);
+                                    return false;
+                                }
+                            };
+                            let path = entry.path();
+                            if crate::util::is_index_artifact(&path, &index_db)
+                                || exclude.iter().any(|x| path.starts_with(x))
+                            {
+                                return false;
+                            }
+                            let m = match std::fs::symlink_metadata(&path) {
+                                Ok(m) => m,
+                                Err(_) => {
+                                    ne.fetch_add(1, Ordering::Relaxed);
+                                    return false;
+                                }
+                            };
+                            let dev = m.dev() as i64;
+                            if one_fs && dev != root_dev {
+                                return false;
+                            }
+                            let is_dir = m.is_dir();
+                            // Only statfs at a MOUNT boundary (child dev != parent dev) —
+                            // pseudo filesystems are always mounts, so this skips a statfs
+                            // syscall on every ordinary subdir (millions on a deep tree)
+                            // with no loss of coverage. `root_pseudo` forces the check when
+                            // the scan root itself is a pseudo fs.
+                            if is_dir && !include_pseudo {
+                                let nested_mount = dev != pdev;
+                                if ((nested_mount || root_pseudo) && is_pseudo_fs(&path))
+                                    || (nested_mount && is_duplicate_storage_view(&path))
+                                {
+                                    return false;
+                                }
+                            }
+                            let blocks = (m.blocks() as i64) * 512;
+                            let kind = if is_dir {
+                                'd'
+                            } else if m.file_type().is_symlink() {
+                                'l'
+                            } else if m.is_file() {
+                                'f'
+                            } else {
+                                'o'
+                            };
+                            let ino = m.ino() as i64;
+                            // The walker also surfaces the scan root as a child of its real
+                            // parent dir. Don't emit or count that duplicate (the canonical
+                            // self-parented root is added separately) — but still recurse
+                            // into it so the real subtree is walked.
+                            if dev == root_dev && ino == root_inode {
+                                return true;
+                            }
+                            let name = entry.file_name().as_bytes().to_vec();
+                            let sent = tx
+                                .send(RawNode {
+                                    dev,
+                                    inode: ino,
+                                    parent_dev: pdev,
+                                    parent_inode: pino,
+                                    depth: cdepth,
+                                    kind,
+                                    blocks,
+                                    uid: m.uid() as i64,
+                                    mtime: m.mtime(),
+                                    name,
+                                })
+                                .is_ok();
+                            // The staging writer failed/cancelled (most commonly
+                            // disk full). Stop descending immediately; otherwise
+                            // a failed consumer would still stat the entire tree.
+                            if !sent {
+                                return false;
+                            }
+                            if is_dir {
+                                nd.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                nf.fetch_add(1, Ordering::Relaxed);
+                            }
+                            nb.fetch_add(blocks, Ordering::Relaxed);
+                            // keep only directories so jwalk recurses; files already sent
+                            is_dir
+                        });
                     });
-                    if is_dir {
-                        nd.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        nf.fetch_add(1, Ordering::Relaxed);
-                    }
-                    nb.fetch_add(blocks, Ordering::Relaxed);
-                    // keep only directories so jwalk recurses; files already sent
-                    is_dir
-                });
-            });
-        // drive the walk to completion; all work happens in the closure
-        for _ in walk {}
-    } // walk + its tx clones dropped here -> channel closes
+                // drive the walk to completion; all work happens in the closure
+                for _ in walk {}
+            } // walk + its tx clones dropped here -> channel closes
+        });
 
-    rx.into_iter().collect()
+        let mut batch = Vec::with_capacity(INSERT_BATCH);
+        let mut write_error = None;
+        loop {
+            match rx.recv() {
+                Ok(node) => batch.push(node),
+                Err(_) => {
+                    if !batch.is_empty() {
+                        if let Err(e) = insert_stage_batch(stage, &mut batch) {
+                            write_error = Some(e);
+                        }
+                    }
+                    break;
+                }
+            }
+            if batch.len() >= INSERT_BATCH {
+                if let Err(e) = insert_stage_batch(stage, &mut batch) {
+                    write_error = Some(e);
+                    break;
+                }
+            }
+        }
+        // Wake any producer blocked in send before joining it. This is essential
+        // on ENOSPC/SQLite failure: keeping the receiver alive would deadlock.
+        drop(rx);
+        producer
+            .join()
+            .map_err(|_| anyhow::anyhow!("scan worker panicked"))?;
+        if let Some(e) = write_error {
+            return Err(e);
+        }
+        Ok(())
+    })
+}
+
+fn insert_stage_batch(stage: &mut Connection, batch: &mut Vec<RawNode>) -> Result<()> {
+    let tx = stage.transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO scan_nodes
+             (dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        )?;
+        for n in batch.iter() {
+            stmt.execute(params![
+                n.dev,
+                n.inode,
+                n.parent_dev,
+                n.parent_inode,
+                n.depth,
+                n.kind.to_string(),
+                n.blocks,
+                n.uid,
+                n.mtime,
+                n.name,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    batch.clear();
+    Ok(())
 }
 
 fn set_low_priority() {

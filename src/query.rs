@@ -2,6 +2,7 @@ use crate::store::{PathResolver, Store};
 use crate::util::{human, now_secs};
 use anyhow::{Context, Result};
 use rusqlite::params;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -109,6 +110,84 @@ pub struct Row {
     pub inodes: i64,
     pub mtime: i64,
     pub kind: char,
+    pub uid: i64,
+}
+
+/// Inspect one exact path entirely from the index. Lookup is narrowed by the
+/// basename index, then candidate parent paths are resolved and compared. This
+/// works even when the caller cannot traverse the real directory (trusted `dux`
+/// group members can query the protected index without a failing filesystem stat).
+pub fn inspect(store: &Store, path: &Path) -> Result<Row> {
+    let requested = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    // The root uses a self-parent dirent whose name is the full root path, so it
+    // needs a direct identity check before ordinary basename lookup.
+    if let Some((dev, inode)) = index_root(store) {
+        let root_path = store.path_of(dev, inode).unwrap_or_default();
+        if Path::new(&root_path) == requested {
+            return inode_row(store, dev, inode, root_path);
+        }
+    }
+
+    let basename = requested
+        .file_name()
+        .context("path has no filename")?
+        .as_bytes();
+    let mut stmt = store.conn.prepare(
+        "SELECT d.dev_id,d.inode,d.parent_dev,d.parent_inode,d.name
+         FROM dirents d WHERE d.name=?1",
+    )?;
+    let candidates = stmt.query_map(params![basename], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+            r.get::<_, i64>(3)?,
+            r.get::<_, Vec<u8>>(4)?,
+        ))
+    })?;
+    let mut resolver = PathResolver::new(&store.conn);
+    for candidate in candidates {
+        let (dev, inode, pdev, pino, raw_name) = candidate?;
+        let parent = resolver.resolve(pdev, pino);
+        let name = String::from_utf8_lossy(&raw_name);
+        let full = if parent.ends_with('/') {
+            format!("{parent}{name}")
+        } else {
+            format!("{parent}/{name}")
+        };
+        if Path::new(&full) == requested {
+            return inode_row(store, dev, inode, full);
+        }
+    }
+    anyhow::bail!(
+        "{} is not in the index — wait for the daemon or run `dux scan`",
+        path.display()
+    )
+}
+
+fn inode_row(store: &Store, dev: i64, inode: i64, path: String) -> Result<Row> {
+    Ok(store.conn.query_row(
+        "SELECT blocks,recursive_bytes,recursive_inodes,mtime,kind,uid
+         FROM inodes WHERE dev_id=?1 AND inode=?2",
+        params![dev, inode],
+        |r| {
+            let kind: String = r.get(4)?;
+            let kind = kind.chars().next().unwrap_or('?');
+            Ok(Row {
+                path,
+                size: if kind == 'd' { r.get(1)? } else { r.get(0)? },
+                inodes: if kind == 'd' { r.get(2)? } else { 1 },
+                mtime: r.get(3)?,
+                kind,
+                uid: r.get(5)?,
+            })
+        },
+    )?)
 }
 
 /// Largest nodes under the index. `dirs`: directories ranked by recursive bytes
@@ -131,7 +210,7 @@ pub fn top(
     };
     let kind_cmp = if dirs { "=" } else { "!=" };
     let mut sql = format!(
-        "SELECT dev_id, inode, blocks, recursive_bytes, recursive_inodes, mtime, kind, {col} AS s
+        "SELECT dev_id, inode, blocks, recursive_bytes, recursive_inodes, mtime, kind, uid, {col} AS s
          FROM inodes WHERE kind{kind_cmp}'d'"
     );
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -160,18 +239,20 @@ pub fn top(
             r.get::<_, i64>(4)?,
             r.get::<_, i64>(5)?,
             k,
+            r.get::<_, i64>(7)?,
         ))
     })?;
     let mut out = Vec::new();
     let mut pr = PathResolver::new(&store.conn);
     for row in rows {
-        let (dev, inode, size, inodes, mtime, kind) = row?;
+        let (dev, inode, size, inodes, mtime, kind, uid) = row?;
         out.push(Row {
             path: pr.resolve(dev, inode),
             size,
             inodes: if kind == 'd' { inodes } else { 1 },
             mtime,
             kind,
+            uid,
         });
     }
     Ok(out)
@@ -194,7 +275,7 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
     // dirents carry the path; inodes carry blocks/mtime/uid (allocated blocks =
     // disk usage, consistent with `top`).
     let mut sql = String::from(
-        "SELECT d.dev_id, d.inode, i.blocks, i.mtime, i.kind, d.parent_dev, d.parent_inode, d.name
+        "SELECT d.dev_id, d.inode, i.blocks, i.mtime, i.kind, d.parent_dev, d.parent_inode, d.name, i.uid
          FROM dirents d JOIN inodes i ON i.dev_id=d.dev_id AND i.inode=d.inode WHERE 1=1",
     );
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -261,12 +342,13 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
             r.get::<_, i64>(5)?,    // parent_dev
             r.get::<_, i64>(6)?,    // parent_inode
             String::from_utf8_lossy(&name).into_owned(),
+            r.get::<_, i64>(8)?,
         ))
     })?;
     let mut out = Vec::new();
     let mut pr = PathResolver::new(&store.conn);
     for row in rows {
-        let (dev, inode, size, mtime, kind, pdev, pino, name) = row?;
+        let (dev, inode, size, mtime, kind, pdev, pino, name, uid) = row?;
         // exact matched path = this entry's parent path + its own name (so the
         // path shown is the link that matched, not an arbitrary other hardlink).
         let path = if (pdev == dev && pino == inode) || pino == 0 {
@@ -285,6 +367,7 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
             inodes: 1,
             mtime,
             kind: kind.chars().next().unwrap_or('?'),
+            uid,
         });
     }
     Ok(out)
@@ -424,7 +507,11 @@ pub fn changed(
     let mut stmt = store.conn.prepare(&sql)?;
     let pref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(pref.as_slice(), |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
     })?;
     let mut out = Vec::new();
     let mut pr = PathResolver::new(&store.conn);
@@ -500,12 +587,8 @@ pub fn du(
     let root = match scope {
         Some(x) => Some(x),
         None => {
-            let rd: Option<i64> = store
-                .get_meta("root_dev")?
-                .and_then(|s| s.parse().ok());
-            let ri: Option<i64> = store
-                .get_meta("root_inode")?
-                .and_then(|s| s.parse().ok());
+            let rd: Option<i64> = store.get_meta("root_dev")?.and_then(|s| s.parse().ok());
+            let ri: Option<i64> = store.get_meta("root_inode")?.and_then(|s| s.parse().ok());
             rd.zip(ri)
         }
     };
@@ -570,9 +653,7 @@ pub fn du(
                 .map(|r| r.path.trim_end_matches('/').matches('/').count())
                 .min()
                 .unwrap_or(0);
-            out.retain(|r| {
-                r.path.trim_end_matches('/').matches('/').count() - root_depth <= md
-            });
+            out.retain(|r| r.path.trim_end_matches('/').matches('/').count() - root_depth <= md);
         }
     }
     Ok(out)
@@ -700,6 +781,28 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     // daemon liveness — only "live" if the heartbeat belongs to THIS db
     if crate::util::daemon_live_for(db) {
         out.push_str("daemon:     live (tracks create/delete/rename/growth)");
+        if let Some(w) = crate::util::read_watch_status(db) {
+            let resolve_pct = if w.events_seen == 0 {
+                100.0
+            } else {
+                w.events_resolved as f64 * 100.0 / w.events_seen as f64
+            };
+            let queue_state = if w.kernel_empty {
+                "drained"
+            } else {
+                "receiving"
+            };
+            out.push_str(&format!(
+                "\npipeline:   {queue_state}; {} pending / {} cap; {} events ({resolve_pct:.1}% resolved); \
+                 {} updates committed; {} dropped; {}ms since caught up",
+                w.pending,
+                w.max_pending,
+                w.events_seen,
+                w.updates_committed,
+                w.updates_dropped,
+                w.behind_ms,
+            ));
+        }
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
     }
@@ -888,7 +991,10 @@ mod tests {
         let store = linear_tree(&db);
 
         let d1 = du(&store, None, false, Some(1)).unwrap();
-        let a = d1.iter().find(|r| r.path.ends_with('a')).expect("/a present");
+        let a = d1
+            .iter()
+            .find(|r| r.path.ends_with('a'))
+            .expect("/a present");
         assert_eq!(
             a.bytes, 16384,
             "/a keeps its full recursive total even though /a/b was pruned"
