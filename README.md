@@ -66,39 +66,84 @@ the culprit — not just the symptom.**
 
 ---
 
+## New in 0.6.0
+
+### Clear, answer-first TUI
+
+- Four prominent numbered destinations replace the crowded inline navigation:
+  **1 Overview**, **2 Explore**, **3 Activity**, and **4 Reclaim**. Number and
+  letter shortcuts work globally, and `Ctrl-C` now exits cleanly.
+- Overview shows the **top five** largest files, fastest-growing paths, and
+  reclaim candidates. Each row explains what the path belongs to (for example
+  PostgreSQL, Vault, Cargo build output, a backup, or system logging) instead of
+  presenting an unexplained filename.
+- The layout is responsive: wide terminals get balanced cards and distributions;
+  an 80x24 terminal keeps the navigation and all five largest-file rows readable.
+- Explore can group indexed usage by application/OS/user data, owner, age, object
+  type, or file-size band. Reclaim separates measured facts from estimates and
+  labels every suggestion by safety. **Dux advises; it never deletes.**
+
+### Faster CLI answers with context
+
+- Added `dux overview`, `dux large --files`, `dux fastest-growth --since 1h`,
+  `dux activity --since 24h`, and `dux docker`. They are friendly aliases for
+  the precise indexed reports and retain `--json` support for automation.
+- `dux large --files --explain` adds owner, type, safety, application/workload,
+  and purpose. Results can be sorted by size, safety, age, path, or owner.
+- `dux explain PATH` identifies why an indexed file exists, how important it is,
+  and the correct cleanup action. Classification is deliberately conservative:
+  databases, swap, container storage, active logs, and unknown application data
+  are never presented as blindly safe to remove.
+- Explanation uses the index, so it remains instant and can describe a path even
+  when the invoking user cannot traverse its parent or the file disappeared
+  after the last indexed snapshot.
+
+### Bounded scanning and a smaller live workload
+
+- The initial crawl no longer retains the whole filesystem plus several scratch
+  copies in memory. Parallel metadata workers feed a fixed 8,192-entry queue into
+  a disk-backed staging database; hardlinks and directory totals are reduced
+  before the compact final SQLite index is atomically installed.
+- After the initial scan, fanotify sends only changed paths through a bounded,
+  coalescing update pipeline. Create/delete bursts are collapsed, commits are
+  batched, and overload degrades to an automatic reconcile instead of unbounded
+  CPU or RAM growth.
+- `dux status` and the TUI expose pending/capacity, events seen and resolved,
+  updates committed, dropped events, throttling, scan progress, and catch-up lag.
+  You can now distinguish **live and caught up** from scanning or intentionally
+  throttled states.
+- Dux's own database, WAL, shared-memory, and staging files are excluded from the
+  scan, live events, growth reports, and rankings, preventing observer feedback
+  and unnecessary index growth.
+
+### Daemon and container reliability
+
+- The packaged service uses `Restart=always`, bounded restart backoff, and a
+  45-second application watchdog. It recovers from crashes/OOM kills and from a
+  process that is alive but no longer making indexing progress.
+- On restart, watch coverage is installed first; a low-priority atomic rebuild
+  then reconciles the downtime gap while the previous index remains queryable.
+- Nested overlay, tmpfs, namespace, and other non-storage views are filtered to
+  avoid double-counting and false coverage warnings.
+- Docker/Podman reporting breaks usage down into writable layers, logs, volumes,
+  image/content storage, snapshots, and build/cache areas, then provides
+  evidence-based cleanup suggestions.
+
+### Bug fixes
+
+- Fixed `Ctrl-C` not closing the TUI.
+- Fixed the Overview cards showing only one file instead of useful top-five
+  rankings with application relationships.
+- Fixed congested navigation and tightly coupled status text.
+- Fixed dux reporting its own database/WAL as fast-growing disk consumption.
+- Fixed event storms causing excessive per-path work and poorly bounded queues.
+- Fixed restart gaps that could leave an apparently live but stale index.
+- Fixed pseudo-filesystem and nested container views being scanned or counted as
+  independent storage.
+
+---
+
 ## New in 0.5.2
-
-**Bounded scans and visible indexing.** The initial crawl no longer stores every
-file plus multiple whole-tree scratch arrays in RAM. Parallel stat workers feed
-an 8,192-entry bounded queue into a disk-backed staging database; deterministic
-hardlink selection and bottom-up directory totals are reduced there before the
-small final index is atomically installed. Scan RAM is therefore bounded by the
-worker/batch/cache configuration rather than filesystem file count.
-
-`dux status` now exposes the live pipeline: pending/cap, kernel-queue state,
-events seen/resolved, updates committed/dropped, and catch-up lag. The TUI header
-shows both full-scan progress and incremental queue health. Its four simple
-screens answer four questions: **Overview** (what matters?), **Explore** (where
-is it?), **Activity** (what changed?), and **Reclaim** (what can safely be
-reviewed?). Explore groups by Apps/OS/Users, owner, modification age, object type,
-or file-size band. Reclaim includes per-container Docker/Podman breakdown plus
-measured, safety-labelled cleanup suggestions. The advisor never deletes.
-
-Every answer is also CLI-first and scriptable: `dux overview`, `dux large
---files`, `dux fastest-growth --since 1h`, `dux activity --since 24h`, and `dux
-docker`. These are friendly aliases for the precise `top`, `growth`, `diff`, and
-`containers` commands, and all support `--json`. Dux's own DB/WAL/staging files
-are excluded from scans, live events, and reports so the observer never appears
-as the workload or inflates its own index.
-
-The systemd service uses `Restart=always` with unlimited attempts, bounded
-backoff, and a 45-second application watchdog. Crashes/OOM kills are restarted;
-a process that remains alive but stops making progress is restarted too. After
-any restart the daemon installs fanotify coverage first, then automatically
-reconciles the downtime gap in a low-priority atomic rebuild while the previous
-index remains queryable. Nested overlay, tmpfs, namespace and other non-storage
-views are excluded so they neither double-count bytes nor create false coverage
-warnings.
 
 **A CPU/I/O governor — dux stays invisible on a production host.** A background
 reader must never be the reason a box slows down. The daemon now:

@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.5.2
+Version:        0.6.0
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -81,6 +81,23 @@ fi
 exit 0
 
 %changelog
+* Sun Aug 30 2026 dux maintainers <root@localhost> - 0.6.0-1
+- Rebuilt the TUI around four prominent, numbered destinations: Overview,
+  Explore, Activity, and Reclaim, with responsive layouts down to 80x24.
+- Overview now ranks five largest files, fastest-growing paths, and reclaim
+  candidates, including workload/application relationships rather than an
+  unexplained path alone.
+- Added indexed CLI dashboards and aliases: overview, large, fastest-growth,
+  activity, docker, and explain; detailed file reports include owner, type,
+  purpose, importance, and conservative deletion guidance.
+- Bounded the initial scan with a fixed queue and disk-backed staging reduction;
+  added explicit pipeline depth, catch-up lag, update, and drop telemetry.
+- Hardened the always-on daemon with systemd watchdog notification,
+  Restart=always, watch-first startup, and automatic low-priority reconciliation.
+- Fixed Ctrl-C handling, dux indexing its own database/WAL, duplicate pseudo and
+  overlay filesystem views, crowded navigation, one-row overview cards, and
+  unbounded work during large filesystem event bursts.
+
 * Mon Jul 13 2026 dux maintainers <root@localhost> - 0.5.2-1
 - Daemon CPU/I/O governor — dux is a background reader and must never load a
   production host. New guarantees:
