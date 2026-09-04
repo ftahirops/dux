@@ -310,34 +310,31 @@ first start):
 ## Install
 
 The packages ship a **static musl binary** with no shared-library dependencies,
-so they run on **any x86-64 Linux** regardless of host glibc. The commands below
-resolve the newest release automatically, so they never go stale between versions.
+so they run on **any x86-64 Linux** regardless of host glibc. Each URL below
+always points to the newest release — no version to look up.
 
-**Debian / Ubuntu**:
+**Debian / Ubuntu**
 ```bash
-curl -s https://api.github.com/repos/ftahirops/dux/releases/latest \
-  | grep -o 'https://[^"]*_amd64\.deb' | xargs curl -LO
-sudo dpkg -i dux_*_amd64.deb
+curl -L -o dux-latest.deb https://github.com/ftahirops/dux/releases/latest/download/dux-latest.deb
+sudo dpkg -i dux-latest.deb
 ```
 
-**RHEL / Fedora / Rocky / openSUSE**:
+**RHEL / Fedora / Rocky / openSUSE**
 ```bash
-curl -s https://api.github.com/repos/ftahirops/dux/releases/latest \
-  | grep -o 'https://[^"]*\.x86_64\.rpm' | xargs curl -LO
-sudo rpm -i dux-*.x86_64.rpm
+curl -L -o dux-latest.rpm https://github.com/ftahirops/dux/releases/latest/download/dux-latest.rpm
+sudo rpm -i dux-latest.rpm
 ```
 
-**Standalone binary** (no package manager, any distro):
+**Standalone binary** (no package manager, any distro)
 ```bash
-curl -s https://api.github.com/repos/ftahirops/dux/releases/latest \
-  | grep -o 'https://[^"]*-x86_64-linux-static' | xargs curl -L -o dux
+curl -L -o dux https://github.com/ftahirops/dux/releases/latest/download/dux-latest-linux-static
 sudo install -m755 dux /usr/local/bin/dux
 ```
 
-The `.deb`/`.rpm` install `/usr/bin/dux` and a systemd unit that builds the index
-on first start and then runs the realtime daemon — so after install you can go
-straight to `dux`. (Browse all downloads on the
-[latest release page](https://github.com/ftahirops/dux/releases/latest).)
+The `.deb`/`.rpm` install `/usr/bin/dux` plus a systemd unit that runs the first
+full scan **in the background** (watch it with `dux status`) and then keeps the
+index live. So after install you can go straight to `dux`. (Browse every download
+on the [latest release page](https://github.com/ftahirops/dux/releases/latest).)
 
 **From source** (Rust toolchain):
 ```bash
