@@ -733,8 +733,26 @@ fn real_main() -> Result<()> {
             tui::run(&db, start)?;
         }
         Some(Cmd::Status) => {
-            let store = Store::open_ro(&db)?;
-            println!("{}", query::status(&store, &db)?);
+            // On a fresh box the FIRST scan hasn't produced dux.db yet, so open_ro
+            // would hard-fail with a cryptic error. Instead: if a scan is running,
+            // show its live progress; if not, print a friendly hint. Only a db that
+            // exists but is unreadable is a real error worth propagating.
+            match Store::open_ro(&db) {
+                Ok(store) => println!("{}", query::status(&store, &db)?),
+                Err(e) => {
+                    if let Some(line) = query::scan_progress_line() {
+                        println!("no index yet — initial scan in progress:\n{line}");
+                    } else if !db.exists() {
+                        println!(
+                            "no index yet at {} — the daemon builds one on first start, \
+                             or run `dux scan /`.",
+                            db.display()
+                        );
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         }
         Some(Cmd::Daemon {
             root,

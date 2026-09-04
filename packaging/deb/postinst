@@ -26,10 +26,14 @@ case "$1" in
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload || true
             systemctl enable dux.service || true
-            # Starting the service triggers the initial scan (ExecStartPre)
-            # and then launches the live daemon.
-            echo "dux: starting service (initial scan of / runs now, then the live daemon)…"
-            systemctl restart dux.service || true
+            # --no-block: the FIRST start runs a full `dux scan /` (ExecStartPre),
+            # which can take a long time on a big filesystem. Without --no-block,
+            # `systemctl restart` (and therefore dpkg/apt) would BLOCK the terminal
+            # for the entire scan. --no-block returns immediately; the scan runs in
+            # the background under systemd. Progress is observable (see message).
+            echo "dux: starting service — the initial scan of / runs in the BACKGROUND."
+            systemctl restart --no-block dux.service || true
+            echo "dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)"
         else
             echo "dux: systemd not detected; run 'dux scan /' then 'dux daemon /' manually."
         fi

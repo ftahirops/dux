@@ -846,22 +846,38 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     }
     // A scan running RIGHT NOW (initial build or rescan) publishes live progress —
     // surface it so the user knows to wait rather than trusting a stale snapshot.
-    if let Some(p) = crate::util::read_scan_progress() {
-        let elapsed = (crate::util::now_secs() - p.started).max(0);
-        let phase = if p.indexing {
-            "building index"
-        } else {
-            "scanning"
-        };
-        out.push_str(&format!(
-            "\nscan:       IN PROGRESS ({phase}) — {} files, {} dirs, {} so far, {}s elapsed",
-            p.files,
-            p.dirs,
-            human(p.bytes),
-            elapsed,
-        ));
+    if let Some(line) = scan_progress_line() {
+        out.push('\n');
+        out.push_str(&line);
     }
     Ok(out)
+}
+
+/// Format the live scan-progress file (`/run/dux/scan.progress`) into one human
+/// line, or None if no scan is running. Shared by `status` (appended to the
+/// report) and by the no-index-yet path in `main` — on a fresh box the first
+/// scan hasn't produced a `dux.db` yet, so this is the ONLY way to show progress
+/// before the index exists.
+pub fn scan_progress_line() -> Option<String> {
+    Some(format_scan_progress(&crate::util::read_scan_progress()?))
+}
+
+/// Pure formatter for a [`crate::util::ScanProgress`] snapshot (no I/O), so the
+/// wording is unit-testable without touching the live `/run/dux/scan.progress`.
+fn format_scan_progress(p: &crate::util::ScanProgress) -> String {
+    let elapsed = (crate::util::now_secs() - p.started).max(0);
+    let phase = if p.indexing {
+        "building index"
+    } else {
+        "scanning"
+    };
+    format!(
+        "scan:       IN PROGRESS ({phase}) — {} files, {} dirs, {} so far, {}s elapsed",
+        p.files,
+        p.dirs,
+        human(p.bytes),
+        elapsed,
+    )
 }
 
 /// Epoch seconds the daemon paused writes for low disk (self-clearing), if set.
@@ -900,6 +916,32 @@ pub fn daemon_live(db: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The scan-progress line must render sensibly during the FIRST scan (before an
+    // index exists) — this is what `dux status` shows on a fresh box instead of a
+    // hard "no such database" error.
+    #[test]
+    fn scan_progress_line_wording() {
+        let p = crate::util::ScanProgress {
+            started: now_secs() - 5,
+            files: 1234,
+            dirs: 56,
+            bytes: 4096,
+            indexing: false,
+        };
+        let s = format_scan_progress(&p);
+        assert!(s.contains("IN PROGRESS (scanning)"), "{s}");
+        assert!(s.contains("1234 files"), "{s}");
+        assert!(s.contains("56 dirs"), "{s}");
+        let p2 = crate::util::ScanProgress {
+            indexing: true,
+            ..p
+        };
+        assert!(
+            format_scan_progress(&p2).contains("building index"),
+            "indexing phase must say 'building index'"
+        );
+    }
 
     fn tmp(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("dux-query-{tag}-{}", std::process::id()))

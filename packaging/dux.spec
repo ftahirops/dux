@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.6.0
+Version:        0.6.1
 Release:        1%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
@@ -59,8 +59,11 @@ done
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
     systemctl enable dux.service || true
-    echo "dux: starting service (initial scan of / runs now, then the live daemon)…"
-    systemctl restart dux.service || true
+    # --no-block so the first-start full scan runs in the BACKGROUND and does not
+    # block rpm/dnf for the whole scan. Progress is observable via `dux status`.
+    echo "dux: starting service — the initial scan of / runs in the BACKGROUND."
+    systemctl restart --no-block dux.service || true
+    echo "dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)"
 fi
 echo "dux: the index is readable by root and the 'dux' group (it lists every"
 echo "dux: filename on /). Grant a user access with: usermod -aG dux <user>"
