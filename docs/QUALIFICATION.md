@@ -3572,3 +3572,24 @@ The VM remained inactive. Host load1 was **17.68**, CPU PSI some avg10
 **32.08%**, I/O PSI some avg10 **7.75%**, and I/O PSI full avg10 **5.07%**;
 the local admission limit still rejects load above **10**. A Go test was active
 in the shared host. Root had **74 GiB free (59% used)** and `/dev/shm` **6% used**.
+
+### R63 VM boot interrupted by a host-pressure surge — 2026-11-03 20:02 UTC
+
+After load briefly fell to **7.33** and CPU PSI some avg10 to **8.91%**, the
+guarded 4 GiB Ubuntu 24.04 VM was admitted at **20:02:13 UTC** with QEMU capped
+at 25%. Host pressure rose during boot; at **20:02:57 UTC** the controller
+stopped it at load1 **14.89** and CPU PSI some avg10 **53.01%**. The guest had
+used **10.689 CPU seconds** and peaked at **547.1 MiB**. Two SSH attempts timed
+out during banner exchange; cloud-init never became accessible, the candidate
+was not copied, and no suite started. This is a boot interruption, not an
+overflow result or candidate failure.
+
+The VM unit and QEMU process are confirmed inactive. Its ephemeral overlay,
+seed, and keys were removed; the verified base image remains with SHA-256
+`04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`. Boot
+console evidence is retained at
+`target/readiness/qualification-vm-boot-20261103T2002Z/console.log` (SHA-256
+`ad44f4ea2cbefd990c749869883e1dca0114262dc500b4906e9c47c412dcd4ef`), with
+the interruption descriptor alongside it. Future retries need a sustained
+low-pressure interval; a single passing admission sample did not predict a
+safe boot window.
