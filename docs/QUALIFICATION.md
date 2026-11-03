@@ -3464,3 +3464,27 @@ counter did not clear. A further 4 GiB VM attempt was stopped before SSH at
 19:33:51 UTC when load1 reached **10.87** and CPU PSI some avg10 **44.65%**;
 the stopped overlay was removed. The host remains outside the VM controller's
 safe sustained-pressure window.
+
+### R63 overflow run interrupted by host guard — 2026-11-03 19:45 UTC
+
+The exact R63 candidate was finally exercised in the local 4 GiB Ubuntu 24.04
+guest. The 100,000-file ext4 fixture and baseline scan completed; the
+`overflow` suite entered `running` at **19:44:56 UTC**. At **19:45:23 UTC**,
+the host guard stopped QEMU at load1 **13.63** and CPU PSI some avg10
+**60.96%**. The SSH session closed; the last fetched report still showed
+`status=running`, `current_suite=overflow`, with no terminal evidence. The
+overflow suite ran for about 27 seconds and is **interrupted**, not passed or
+failed. Post-stop host pressure reached load1 **21.89** and CPU PSI some
+avg10 **64.12%**.
+
+The attempt is bound to candidate SHA-256
+`109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e` and
+harness SHA-256 `c5db5687326e893f87f1c30c396817735c948b96c60e4ccc28adcf23f90e5970`;
+both 4 GiB guest and 4 GiB worker used a 25% CPU quota. The final fetched
+report snapshot is SHA-256
+`af646afd4131044962680069bc30e0a8911b2de3ce7ed774e3e848093629af18`. The
+guard/interruption descriptor is
+`target/readiness/qualification-r63-overflow-20261103T1942Z-interrupted.json`
+(SHA-256 `0f1ee68b5538fea53ba7304dac476d401921af4deefb4f43d02dc468727d0fc8`).
+The stopped overlay was removed from tmpfs; the verified base image remains
+for a later guarded retry. No production index or service was touched.
