@@ -3388,10 +3388,19 @@ the report; use the offered dedicated VPS once its SSH route is available.
 ### Local KVM retry and live-state refresh — 2026-11-03 19:26 UTC
 
 The current-source release-63 executable remains SHA-256
-`109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`; the
-existing source-drift report says code and packaging inputs still match the
-candidate. Canonical's Ubuntu 24.04 cloud-image checksum was verified before
-boot. A disposable standard-profile guest completed cloud-init but ran no Dux
+`109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`. A
+refreshed comparison at 19:37 UTC, recorded in
+`target/readiness/source-drift-r63-20261103T1935Z.json` (SHA-256
+`7765ce151c66e49d8dd28b30c3d227eb6135fa64b6157efbdd6ce0de993195ea`), confirms
+the full source tree differs: candidate/current tree hashes are
+`d952c8d46a7b57234c46a4af24c07698c3ac07512732ce56fa520634957dd4d6` /
+`f18c2774b7bf85e872e5c0b12be2c640ee6e0339e4f4eafa776396d8705d3593`, with
+126/125 files. The only non-documentation differences are the intentionally
+removed `.github/workflows/ci.yml` and the readiness workflow edit; no runtime
+code or packaging input differs. This establishes input equivalence, not an
+exact-tree build or runtime qualification. Canonical's Ubuntu 24.04
+cloud-image checksum was verified before boot. A disposable standard-profile
+guest completed cloud-init but ran no Dux
 suite; it was stopped cleanly to select the 4 GiB qualification profile. That
 profile was then stopped by the VM pressure guard before SSH became available,
 at load1 **14.08** and CPU PSI some avg10 **72.52%** (PROD-TEST-290). This is
