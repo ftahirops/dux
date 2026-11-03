@@ -3421,3 +3421,24 @@ GiB free (57% used)**. The verified cloud image is retained under `/dev/shm`
 for retry; all stopped guest overlays were removed from tmpfs. No production
 service, package, database, or index mutation occurred, and the Git worktree
 remains clean apart from this checkpoint.
+
+### Production event-loss refresh — 2026-11-03 19:31 UTC
+
+The R16 watch queue crossed a second important boundary after the 19:26
+sample. At 19:31:04 UTC, the v3 sidecar recorded **6,105,283 events seen**,
+**1,279,591 resolved**, **58,368 committed**, **500,180 userspace updates
+dropped**, and **8,971 pending**. It remained kernel-nonempty and uncertain;
+the CLI reported `dirty=true`, `caught_up=false`, no scan in progress, and
+`write_error=null`. Its behind counter was **22,950.755 seconds** and the
+last event commit was 19:30:49 UTC. The pending decrease from 492,740 is not
+recovery: the userspace drop counter rose from zero to 500,180, and the
+journal recorded a new kernel fanotify overflow at **19:30:54 UTC**, bringing
+the day's overflow-warning count to **124**. R16 remains source-unmatched, so
+these observations establish production impact but do not identify a current
+source-level cause.
+
+The 4 GiB local qualification guest was stopped by its pressure guard at
+19:30:43 UTC with load1 **13.27**, CPU PSI some avg10 **42.68%**, and I/O PSI
+some avg10 **8.53%**. It did not reach SSH or run a Dux suite. Its stopped
+overlay was removed from tmpfs; the verified base image remains available
+for another guarded attempt.
