@@ -3353,12 +3353,19 @@ maintenance item (B15)**. No production release is qualified.
   **15.14** (PROD-TEST-287); a separate `go vet ./...` build was active soon
   afterward. Neither attempt ran a Dux suite. Current-release overflow is
   unrun, not passed or failed.
-- **Historical P0 evidence is hash-bound to an older binary:** the October 24
-  full matrix passed for candidate SHA
-  `4e14a7127105cc204458de8531927790fa33a4344dc6b86be3dfccb5f25bd9ee` on
-  ext4 with a 100,000-file seed. It cannot qualify release-63 or close B07,
-  B09, or B10. Current Rust unit, Python harness, migration, and bounded
-  watcher evidence remain useful but do not replace the missing exact-release
+- **Historical P0 evidence is hash-bound to an older binary:** the latest
+  full P0 composite is R21, candidate SHA
+  `0e61da726b784b9b7d75299bb864758284097106d7741c370c3c360cb8b4e3ab`, source
+  tree SHA `46e7dfa310eb517a415f8af60c524e428f4f74f710e9a69d214bc3a4661167de`.
+  All 14 listed suites passed across two separately executed reports on
+  Ubuntu 24.04/ext4 with a 100,000-file seed, 2,048 MiB fixture, 50% worker
+  CPU quota, and 4 GiB worker limit; the composite explicitly is not one
+  consolidated invocation.
+  The run does not include 72-hour soak, full scale budgets, package lifecycle
+  and security, production drift convergence, or canary. It cannot qualify
+  release-63 SHA `109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`
+  or close B07, B09, or B10. Current Rust unit, Python harness, migration,
+  and bounded watcher evidence do not replace the missing exact-release
   crash/overflow/pressure/scale matrix, package rollback, soak, or canary.
 - **Disk and temporary work:** root has **75 GiB available (58% used)**;
   `/tmp` is **2.6 GiB**, occupied by active Go test/build scratch, and must be
