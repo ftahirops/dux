@@ -3488,3 +3488,18 @@ guard/interruption descriptor is
 (SHA-256 `0f1ee68b5538fea53ba7304dac476d401921af4deefb4f43d02dc468727d0fc8`).
 The stopped overlay was removed from tmpfs; the verified base image remains
 for a later guarded retry. No production index or service was touched.
+
+### Post-run production status — 2026-11-03 19:46 UTC
+
+The production service remains active as PID **2777300** with zero restarts.
+At 19:46:20 UTC, its v3 watch sidecar reported **20,517 pending**,
+**6,306,253 seen / 1,311,294 resolved / 60,544 committed**,
+**500,180 userspace updates dropped**, kernel-empty=false, uncertain=true, and
+**23,866.642 seconds behind**. The CLI remained `dirty=true`, `caught_up=false`,
+with no scan in progress and `write_error=null`; the last event commit was
+19:45:16 UTC. Since the 19:39 sample, pending increased by 3,940 and the
+behind counter by about 416 seconds while the drop counter stayed latched.
+The journal now contains **126** fanotify overflow warnings, latest at
+**19:41:35 UTC**, and **92** pressure deferrals, latest at **19:42:07 UTC**.
+The index remains unqualified. Root has **77 GiB free (57% used)**; the VM is
+inactive and its stopped overlay has been removed.
