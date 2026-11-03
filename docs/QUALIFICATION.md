@@ -3550,3 +3550,10 @@ The Go race-test process exited during the subsequent 20-second host poll, but
 **10.23**, above the VM controller's **10.0** admission limit, and CPU PSI
 some avg10 was **15.94%**. The R63 VM retry therefore remains inadmissible;
 the exact test has not been restarted.
+
+At 19:58:31 UTC, the load window worsened to **32.34** and CPU PSI some
+avg10 to **76.55%** while Go security analysis and compiler jobs were active
+from `/home/xgenstack.com/backend`; the Dux daemon was also present at its
+one-CPU quota. Root remained **58% used with 75 GiB available** and `/dev/shm`
+was **6% used**, so the current qualification blocker is host compute
+pressure, not disk capacity. The guest was not restarted under these conditions.
