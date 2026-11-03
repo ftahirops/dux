@@ -3324,3 +3324,47 @@ The release-gate count remains **14 active blockers (B01–B14) and one resolved
 - **Disk and temporary storage at the last check:** root filesystem was **98 GiB used / 79 GiB free**; `/tmp` **692 KiB**, `/var/tmp` **160 KiB**, and `/dev/shm` **1.1 MiB** after the external Go test exited. Root free space is adequate for current housekeeping but does not qualify the full-root migration's peak workspace requirement.
 
 The two obsolete private SSH keys from archived, stopped Rocky qualification guests were removed from ignored artifacts on Nov. 3; the exact staged Git diff for the source push contained no Gitleaks findings. The remaining blockers and all production service/index changes are unchanged.
+
+### Current readiness checkpoint — 2026-11-03 15:03 UTC
+
+The release-gate count remains **14 active blockers (B01–B14) and one resolved
+maintenance item (B15)**. No production release is qualified.
+
+- **Production remains unsafe to promote (B01–B04):** installed package
+  0.6.3-16/R16, PID **2777300**, is active with zero restarts. At 15:03:17 UTC,
+  status was dirty/not caught up with **152,132 pending**, **1,324,377 seen /
+  439,883 resolved / 29,440 committed**, and **6,882 seconds behind**; no scan
+  was active and `write_error=null`. The v1 status still does not report
+  kernel-overflow counts. Between the 15:02:38 and 15:03:17 samples, these
+  counters did not advance. A process sample at 15:02:38 measured Dux at
+  approximately **98% of one CPU** with no scan active. The source-unmatched
+  installed binary prevents assigning that behavior to the candidate source.
+- **Current candidate evidence:** release-63 executable SHA-256
+  `109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e` passed
+  the Ubuntu 24.04 guest `capability`, `wal`, and `mount` integration suites
+  (PROD-TEST-284). Its current-hash overflow suite remains unrun. An attempted
+  guest startup for overflow was stopped before SSH and before any product
+  suite by the host-pressure guard at CPU PSI **69.20%** and load1 **13.79**;
+  contemporaneous host checks showed unrelated Go test work as well as the
+  saturated production daemon. This guard event is not a Dux product failure
+  or a qualification result (PROD-TEST-286).
+- **Historical P0 evidence is hash-bound to an older binary:** the October 24
+  full matrix passed for candidate SHA
+  `4e14a7127105cc204458de8531927790fa33a4344dc6b86be3dfccb5f25bd9ee` on
+  ext4 with a 100,000-file seed. It cannot qualify release-63 or close B07,
+  B09, or B10. Current Rust unit, Python harness, migration, and bounded
+  watcher evidence remain useful but do not replace the missing exact-release
+  crash/overflow/pressure/scale matrix, package rollback, soak, or canary.
+- **Disk and temporary work:** root has **76 GiB available (58% used)**;
+  `/tmp` is **1.8 GiB**, occupied by active Go test/build scratch, and must be
+  retained until those jobs exit. `/var/tmp` is **160 KiB** and `/dev/shm` is
+  **1.1 MiB**. The temporary VM image, identity, and overlay were removed
+  after the guard stopped the guest. The 6.2 GiB readiness evidence tree
+  remains retained. The latest audit changes are pushed on
+  `hardening/audit-remediation`; no live package, service, or database
+  mutation was made.
+
+Retry current-release overflow qualification only after the external host
+workload exits and admission pressure remains below the VM guard thresholds;
+preserve the current binary hash, exact-tree verification, and recovery
+telemetry in the report.
