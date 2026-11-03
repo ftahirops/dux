@@ -3503,3 +3503,33 @@ The journal now contains **126** fanotify overflow warnings, latest at
 **19:41:35 UTC**, and **92** pressure deferrals, latest at **19:42:07 UTC**.
 The index remains unqualified. Root has **77 GiB free (57% used)**; the VM is
 inactive and its stopped overlay has been removed.
+
+### Production CPU saturation and executable identity — 2026-11-03 19:54 UTC
+
+Read-only sampling found the live daemon consuming **7.44 CPU seconds during
+an 8-second interval (93% of one CPU)**. It is a single-threaded process in
+`dux.service`; systemd reports `CPUWeight=10`, `CPUQuotaPerSecUSec=1s`
+(one CPU), and `MemoryMax=4 GiB`. The host's other large Go test had exited,
+but a separate Go package compile started and host CPU PSI some avg10 rose to
+**38.39%** with load1 **12.71**. The VM admission/pressure guard therefore
+continues to prohibit another qualification run.
+
+At the 19:54 status sample, the index had **39,572 pending** updates,
+**6,510,687 seen / 1,346,138 resolved / 61,184 committed**, **500,180 dropped**,
+and was **24,373.562 seconds behind**. It remained `dirty=true`,
+`caught_up=false`, with no scan and no reported write error. Relative to
+19:46, pending grew by **19,055** and seen events by **204,434**, while commits
+grew by only **640**; the drop counter remained nonzero. The latest journal
+sample included fanotify overflow and deferred reconciliation warnings.
+This is an observed production CPU/catch-up failure, not an inference from
+the interrupted qualification VM.
+
+Executable provenance is still not exact: `/usr/bin/dux` reports
+`0.6.3 (a42739776bbd+modified) [production]`, but its SHA-256 is
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`, which
+does not match the retained R63 candidate's
+`109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`. The
+version string alone cannot establish the installed binary's source identity.
+No daemon, package, database, index, or quota was changed. Production remains
+unqualified; the exact-binary overflow recovery, scale, migration/rollback,
+fault, endurance, and canary gates remain open.
