@@ -3637,3 +3637,31 @@ The evidence is retained at
 SHA-256 `c80e126c096285700eae5be25c52f2461e6c2c249ac11b0b3696a0456e227f0d`).
 The guest is inactive, its tmpfs overlay was cleaned, and the verified base
 image remains unchanged.
+
+
+### Production index remains dirty under event backlog — 2026-11-03 22:10 UTC
+
+A refreshed read-only production snapshot at 22:10:09 UTC shows the daemon
+active with no systemd restarts, but the root index remains dirty and not caught
+up. The JSON status reported **240,830 pending updates** out of a **500,000**
+cap, **8,698,084 events seen / 1,771,529 resolved**, **77,952 updates
+committed**, **500,180 events dropped**, **32,528 seconds behind**, no active
+scan, and `write_error=null`. The 22:10:09 snapshot had 233,757 pending
+and 77,824 committed; these samples show the backlog growing while only 128
+additional updates committed. `dirty_reason` is **subtree reconciliation budget
+exhausted**. Recent journal entries include recurring fanotify queue overflows
+and reconciliation deferrals under host pressure, plus a bounded subtree walk
+exhaustion under `node_modules/simple-icons/icons`.
+
+At the same time, host load1 was **16.15** (then **13.15** on a follow-up),
+CPU PSI some avg10 fell from **2.47%** to **0.89%**, root had **73 GiB free**
+(59% used), and `/dev/shm` had about **12.4 GiB free**. A shared-host Go test
+and linker were active. The qualification VM remained inactive; starting it
+would exceed the local controller's load1 admission limit (**10**). Disk is
+not the qualification blocker. Do not treat this production event as evidence
+against the current worktree: installed `/usr/bin/dux` is 0.6.3 from source
+revision `a42739776bbd+modified` with SHA-256
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`, which
+does not match the current R63 candidate/source. Production recovery and CPU
+behavior therefore remain unresolved and unqualified; no service, index, or
+package mutation was made.
