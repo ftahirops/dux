@@ -3623,3 +3623,17 @@ overflow daemon; its targeted boundary regression passed. The next attempt
 will use a **2 GiB ext4 fixture** and `/var/tmp` for the worker workspace, with
 the same candidate, 100,000-file baseline and 25% quotas. The full overflow
 suite remains unpassed.
+
+### Corrected R63 retry deferred during host Go builds — 2026-11-03 22:05 UTC
+
+After waiting through a short low-load interval, the VM controller admitted a
+fresh 4 GiB guest at **22:03:46 UTC**. Go compilation/test work started during
+cloud-init. At **22:05:42 UTC**, the guard stopped QEMU at load1 **13.48**, CPU
+PSI some avg10 **48.75%**, and memory PSI some avg10 **1.13%**. SSH never became
+ready; the revised harness and candidate were not uploaded, so no suite ran.
+The evidence is retained at
+`target/readiness/qualification-vm-boot-20261103T2203Z/` (console SHA-256
+`88e29ecf9d421c11bd18140ec32d6173a4bf35b492292bb4f9350a8784825a9d`, descriptor
+SHA-256 `c80e126c096285700eae5be25c52f2461e6c2c249ac11b0b3696a0456e227f0d`).
+The guest is inactive, its tmpfs overlay was cleaned, and the verified base
+image remains unchanged.
