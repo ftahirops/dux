@@ -47,6 +47,24 @@ drift. The precise APPLY-01 hotspot remains unproven until phase profiling.
 Baseline artifacts and interrupted runs stay available; an incomplete checkpoint
 does not count as a passed batch.
 
+### DB-01 disposition update — 2026-11-03
+
+The original dependency finding is fixed in the current source candidate:
+`Cargo.lock` resolves rusqlite 0.41.1 and libsqlite3-sys 0.39.1, whose bundled
+SQLite headers identify version 3.54.1. The candidate's static executable
+contains the matching source ID, and
+`store::tests::bundled_sqlite_includes_wal_reset_fix` passed with that runtime
+identity and enforces the upstream fixed-version floor of 3.51.3. SQLite's
+[WAL-reset advisory](https://www.sqlite.org/wal.html#walreset) identifies
+3.51.3 and later as fixed.
+
+**Production exposure remains open:** the installed static R16 executable
+contains SQLite 3.46.0, which is in the affected range. The newer candidate has
+not passed final package, live-index migration, rollback, and production rollout
+gates, so the source fix must not be treated as deployed mitigation. This does
+not prove the WAL-reset race occurred in production; it means production still
+runs an affected engine version until a qualified replacement is installed.
+
 Upstream constraints:
 
 - [SQLite WAL-reset advisory](https://www.sqlite.org/wal.html#walreset): affected
