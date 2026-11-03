@@ -3435,7 +3435,10 @@ recovery: the userspace drop counter rose from zero to 500,180, and the
 journal recorded a new kernel fanotify overflow at **19:30:54 UTC**, bringing
 the day's overflow-warning count to **124**. R16 remains source-unmatched, so
 these observations establish production impact but do not identify a current
-source-level cause.
+source-level cause. The journal also records **90** full-reconciliation
+deferrals since midnight, latest at **19:27:10 UTC**, explaining why no
+full-root scan had started in those logged intervals; the installed source
+does not establish whether the current candidate has identical scheduling.
 
 The 4 GiB local qualification guest was stopped by its pressure guard at
 19:30:43 UTC with load1 **13.27**, CPU PSI some avg10 **42.68%**, and I/O PSI
