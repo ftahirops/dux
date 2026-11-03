@@ -3593,3 +3593,33 @@ console evidence is retained at
 the interruption descriptor alongside it. Future retries need a sustained
 low-pressure interval; a single passing admission sample did not predict a
 safe boot window.
+
+### R63 overflow attempt stopped by fixture headroom — 2026-11-03 21:55 UTC
+
+The next guarded attempt booted successfully, verified the exact candidate and
+harness hashes, created the **100,000-file** baseline, and completed its
+baseline scan. The overflow suite then failed in its precondition
+`daemon.exact()` before it injected any overflow. Candidate logs show the
+fixture daemon resumed a pre-existing index, started reconciliation, and
+cancelled scans under its low-disk guard; one status sample reported only
+**271,314,944 available bytes** on the watched fixture filesystem. The 768 MiB
+image left too little headroom for the concurrent reconciliation checks, so
+the pipeline remained uncertain and the harness timed out. This is a terminal
+harness/setup failure, **not an overflow recovery result or a product failure**.
+
+The terminal report is retained at
+`target/readiness/qualification-r63-overflow-20261103T2150Z/terminal-report.json`
+(SHA-256 `06c1f9a5d8955f56bced8769e7b0b58e58d9c46be9fe99ba945e696baf640f91`);
+its classification descriptor is alongside it (SHA-256
+`f434e49f35792dc7ba568d23bd329b39331526e3cc0636c8edee3ed4f7589e05`). The
+QEMU console log is also preserved. After the harness exited, the outer host
+guard stopped the guest at **21:57:12 UTC** when host load1 reached **14.49**
+and CPU PSI some avg10 **60.47%**. The inactive guest's ephemeral overlay was
+cleaned and the verified base image remains intact.
+
+To avoid repeating this setup failure, the readiness harness now checks for
+at least **512 MiB** free on the watched filesystem before starting the
+overflow daemon; its targeted boundary regression passed. The next attempt
+will use a **2 GiB ext4 fixture** and `/var/tmp` for the worker workspace, with
+the same candidate, 100,000-file baseline and 25% quotas. The full overflow
+suite remains unpassed.

@@ -28,6 +28,7 @@ import time
 from dux_qualification_sandbox import require_disposable_qualification_vm
 
 MIB = 1024 * 1024
+OVERFLOW_RECOVERY_MIN_FREE_BYTES = 512 * MIB
 
 
 def command(*args, **kwargs):
@@ -61,6 +62,18 @@ def parse_legacy_pipeline_status(output):
         "dropped": int(dropped),
         "uncertain": "uncertain" in output.lower(),
     }
+
+
+def validate_overflow_recovery_headroom(available_bytes):
+    """Reject overflow fixtures that leave too little space for recovery scans."""
+    if available_bytes < OVERFLOW_RECOVERY_MIN_FREE_BYTES:
+        raise RuntimeError(
+            "overflow suite needs at least "
+            f"{OVERFLOW_RECOVERY_MIN_FREE_BYTES // MIB} MiB free on the watched "
+            f"fixture filesystem for reconciliation; only {available_bytes // MIB} "
+            "MiB remains. Increase --filesystem-mib; overflow was not injected."
+        )
+    return available_bytes
 
 
 def snapshot(db, immutable=False, attachments=()):
@@ -582,6 +595,8 @@ def overflow_reconciliation_evidence(daemon_log):
 def overflow_test(case, _args, evidence):
     maximum = int(Path("/proc/sys/fs/fanotify/max_queued_events").read_text())
     assert maximum <= 65536, "configured kernel queue too large for this bounded local test"
+    statvfs = os.statvfs(case.tree)
+    validate_overflow_recovery_headroom(statvfs.f_bavail * statvfs.f_frsize)
     daemon = Daemon(case)
     before = daemon.exact()["scan_generation"]
     daemon.process.send_signal(signal.SIGSTOP)

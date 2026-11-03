@@ -21,6 +21,12 @@ READINESS_SPEC.loader.exec_module(READINESS)
 
 
 class ReadinessHarnessTests(unittest.TestCase):
+    def test_overflow_suite_rejects_fixture_with_insufficient_recovery_headroom(self):
+        required = READINESS.OVERFLOW_RECOVERY_MIN_FREE_BYTES
+        self.assertEqual(READINESS.validate_overflow_recovery_headroom(required), required)
+        with self.assertRaisesRegex(RuntimeError, "Increase --filesystem-mib; overflow was not injected"):
+            READINESS.validate_overflow_recovery_headroom(required - 1)
+
     def test_overflow_recovery_accepts_reconcile_after_backlog_drains(self):
         log = "\n".join((
             "starting background reconciliation of earlier restart gap",
