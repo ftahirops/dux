@@ -3325,19 +3325,19 @@ The release-gate count remains **14 active blockers (B01–B14) and one resolved
 
 The two obsolete private SSH keys from archived, stopped Rocky qualification guests were removed from ignored artifacts on Nov. 3; the exact staged Git diff for the source push contained no Gitleaks findings. The remaining blockers and all production service/index changes are unchanged.
 
-### Current readiness checkpoint — 2026-11-03 15:07 UTC
+### Current readiness checkpoint — 2026-11-03 15:15 UTC
 
 The release-gate count remains **14 active blockers (B01–B14) and one resolved
 maintenance item (B15)**. No production release is qualified.
 
 - **Production remains unsafe to promote (B01–B04):** installed package
-  0.6.3-16/R16, PID **2777300**, is active with zero restarts. At 15:07:27 UTC,
-  status was dirty/not caught up with **158,369 pending**, **1,339,295 seen /
-  447,814 resolved / 29,696 committed**, and **7,133 seconds behind**; no scan
-  was active and `write_error=null`. Relative to 15:03:17, pending rose by
-  **6,237** and lag by **250 seconds** while 256 updates were committed. The
+  0.6.3-16/R16, PID **2777300**, is active with zero restarts. At 15:15:53 UTC,
+  status was dirty/not caught up with **166,658 pending**, **1,432,752 seen /
+  470,904 resolved / 30,208 committed**, and **7,638 seconds behind**; no scan
+  was active and `write_error=null`. Relative to 15:07:27, pending rose by
+  **8,289** and lag by **505 seconds** while 512 updates were committed. The
   v1 status still does not report kernel-overflow counts. A process sample at
-  15:02:38 measured Dux at approximately **98% of one CPU** with no scan
+  15:15:53 measured Dux at approximately **98% of one CPU** with no scan
   active. The source-unmatched installed binary prevents assigning that
   behavior to the candidate source.
 - **Current candidate evidence:** release-63 executable SHA-256
@@ -3351,8 +3351,11 @@ maintenance item (B15)**. No production release is qualified.
   or a qualification result (PROD-TEST-286). A second attempt after the Go
   race job exited was stopped before SSH at CPU PSI **63.59%** and load1
   **15.14** (PROD-TEST-287); a separate `go vet ./...` build was active soon
-  afterward. Neither attempt ran a Dux suite. Current-release overflow is
-  unrun, not passed or failed.
+  afterward. A third attempt did boot the verified guest, create and scan a
+  100,000-file ext4 fixture, and start the overflow suite. The durable report
+  remained `status=running` at suite start when the VM guard stopped QEMU at
+  load1 **14.47** (PROD-TEST-289). No durable overflow/recovery outcome was
+  written, so this run is **interrupted**, not a pass or product failure.
 - **Historical P0 evidence is hash-bound to an older binary:** the latest
   full P0 composite is R21, candidate SHA
   `0e61da726b784b9b7d75299bb864758284097106d7741c370c3c360cb8b4e3ab`, source
@@ -3367,8 +3370,8 @@ maintenance item (B15)**. No production release is qualified.
   or close B07, B09, or B10. Current Rust unit, Python harness, migration,
   and bounded watcher evidence do not replace the missing exact-release
   crash/overflow/pressure/scale matrix, package rollback, soak, or canary.
-- **Disk and temporary work:** root has **75 GiB available (58% used)**;
-  `/tmp` is **2.6 GiB**, occupied by active Go test/build scratch, and must be
+- **Disk and temporary work:** root has **73 GiB available (60% used)**;
+  `/tmp` is **5.0 GiB**, occupied by active Go test/build scratch, and must be
   retained until those jobs exit. `/var/tmp` is **160 KiB** and `/dev/shm` is
   **1.1 MiB**. The temporary VM image, identity, and overlay were removed
   after the guard stopped the guest. The 6.2 GiB readiness evidence tree
@@ -3377,6 +3380,7 @@ maintenance item (B15)**. No production release is qualified.
   mutation was made.
 
 Retry current-release overflow qualification only after external host
-workloads exit and pressure stays low for a sustained interval; a 30-second
-window proved insufficient. Preserve the current binary hash, exact-tree
-verification, and recovery telemetry in the report.
+workloads exit and pressure stays low for a sustained interval; multiple
+short low-load windows were followed by large Go test/build bursts. Preserve
+the current binary hash, exact-tree verification, and recovery telemetry in
+the report; use the offered dedicated VPS once its SSH route is available.
