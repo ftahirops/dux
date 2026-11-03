@@ -19303,7 +19303,7 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Compared with 14:43:12, pending rose from **139,142** to **141,751**. The host CPU PSI sample was low (avg10 **0.00%**, avg60 **0.86%**); this does not show the cause of the reconciliation delay. The installed R16 executable remains source-unmatched and unchanged.
 - Root filesystem has **79 GiB free**. `/tmp` **692 KiB**, `/var/tmp` **160 KiB**, `/dev/shm` **1.1 MiB**; no active Go test/build process was present at the sample. No production service, configuration, or index mutation was made.
 
-### PROD-TEST-283 Focused reconciliation-admission and retry regressions pass — 2026-11-03 14:52 UTC
+### PROD-TEST-283 Focused reconciliation-admission and retry regressions pass — 2026-11-03 14:51 UTC
 
 - Ran three focused tests from the current source-built all-feature test executable: `guard::tests::elevated_pressure_requires_ten_seconds_of_continuous_normal_before_rebuilds_resume`, `watch::tests::persistent_backlog_can_start_reconciliation_but_retries_are_bounded`, and `watch::tests::reconciliation_pressure_deferral_is_reported_once_per_episode`. All passed **1/1** individually.
 - These tests verify candidate unit state transitions and retry policy only. They do not reproduce the production R16 daemon's stale status, unexplained deferral, or full-root recovery; the installed binary remains source-unmatched. No service/index state was changed and the tests left no retained fixture.
