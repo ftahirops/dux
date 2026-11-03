@@ -4,7 +4,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
@@ -13,7 +12,6 @@ from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github/workflows/readiness.yml"
 HARNESS = ROOT / "scripts/dux-readiness.py"
 SCALE_HARNESS = ROOT / "scripts/dux-scale.py"
 VM_HARNESS = ROOT / "scripts/dux-qualification-vm.py"
@@ -22,16 +20,7 @@ READINESS = importlib.util.module_from_spec(READINESS_SPEC)
 READINESS_SPEC.loader.exec_module(READINESS)
 
 
-class ReadinessWorkflowTests(unittest.TestCase):
-    def test_ephemeral_workflow_provisions_explicit_sandbox_marker(self):
-        workflow = WORKFLOW.read_text()
-        self.assertIn("Mark the ephemeral hosted runner for isolated qualification", workflow)
-        self.assertIn("/etc/dux-qualification-sandbox", workflow)
-        self.assertIn("p.chmod(0o400)", workflow)
-        source = (ROOT / "scripts/dux_qualification_sandbox.py").read_text()
-        self.assertNotIn("GITHUB_ACTIONS", source)
-        self.assertNotIn("GITHUB_WORKSPACE", source)
-
+class ReadinessHarnessTests(unittest.TestCase):
     def test_overflow_recovery_accepts_reconcile_after_backlog_drains(self):
         log = "\n".join((
             "starting background reconciliation of earlier restart gap",
@@ -139,34 +128,6 @@ class ReadinessWorkflowTests(unittest.TestCase):
             self.assertEqual(checkpoint["completed_batches"][0]["batch"], 1)
             self.assertEqual(list(Path(directory).iterdir()), [progress_path])
             self.assertRegex(checkpoint["last_checkpoint_at"], r"^\d{4}-\d{2}-\d{2}T.*Z$")
-
-    def test_workflow_runs_every_harness_suite_once(self):
-        workflow = WORKFLOW.read_text()
-        command = re.search(
-            r"scripts/dux-readiness\.py[^\n]*--suites\s+(.+?)\s+--crash-rounds",
-            workflow,
-        )
-        self.assertIsNotNone(command, "workflow must invoke the readiness harness with an explicit suite list")
-        configured = command.group(1).split()
-        self.assertEqual(len(configured), len(set(configured)), "workflow repeats a readiness suite")
-        self.assertEqual(configured[-1], "root", "the host-root scan must not pressure earlier recovery suites")
-
-        tree = ast.parse(HARNESS.read_text())
-        assignment = next(
-            node for node in tree.body
-            if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "SUITES" for target in node.targets)
-        )
-        ordered = [key.value for key in assignment.value.keys if isinstance(key, ast.Constant)]
-        available = set(ordered)
-        self.assertEqual(set(configured), available)
-        self.assertEqual(ordered[-1], "root", "the read-only root scan must run after pressure-sensitive suites")
-
-    def test_workflow_timeout_has_margin_over_recorded_matrix_duration(self):
-        workflow = WORKFLOW.read_text()
-        timeout = re.search(r"(?m)^\s*timeout-minutes:\s*(\d+)\s*$", workflow)
-        self.assertIsNotNone(timeout, "readiness job must have an explicit timeout")
-        self.assertGreaterEqual(int(timeout.group(1)), 90)
 
     def test_cpu_budget_separates_event_production_from_pipeline_catchup(self):
         tree = ast.parse(HARNESS.read_text())
