@@ -3384,3 +3384,40 @@ workloads exit and pressure stays low for a sustained interval; multiple
 short low-load windows were followed by large Go test/build bursts. Preserve
 the current binary hash, exact-tree verification, and recovery telemetry in
 the report; use the offered dedicated VPS once its SSH route is available.
+
+### Local KVM retry and live-state refresh — 2026-11-03 19:26 UTC
+
+The current-source release-63 executable remains SHA-256
+`109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`; the
+existing source-drift report says code and packaging inputs still match the
+candidate. Canonical's Ubuntu 24.04 cloud-image checksum was verified before
+boot. A disposable standard-profile guest completed cloud-init but ran no Dux
+suite; it was stopped cleanly to select the 4 GiB qualification profile. That
+profile was then stopped by the VM pressure guard before SSH became available,
+at load1 **14.08** and CPU PSI some avg10 **72.52%** (PROD-TEST-290). This is
+an infrastructure interruption, not a candidate pass or product failure.
+At 19:26 UTC host load1 was **30.06** and CPU PSI some avg10 **54.86%**; the
+local KVM fault suite remains inadmissible until host pressure clears.
+
+The live R16 daemon is still active with zero observed service restarts, but
+the index is untrustworthy (B01/B02). At 19:26:19 UTC, CLI JSON reported
+**492,740 pending** against a configured **500,000** threshold,
+**6,023,862 seen / 1,254,106 resolved / 57,984 committed**, **22,664 seconds
+behind**, `dirty=true`, `caught_up=false`, no scan in progress, and
+`write_error=null`. The process-validated v3 `/run/dux/watch.status` sample
+also reports kernel-empty=false, uncertain=true, and zero userspace drops;
+the CLI's zero `events_dropped` field does not count kernel queue overflows.
+The raw v3 sidecar record was `3 1793733977 2777300 492740 0 6023862
+1254106 57984 0 22664073 500000 1 1793733934`.
+The last event commit was at 19:25:34 UTC, while the status was refreshed at
+19:26:17 UTC. The journal contains **123 fanotify queue overflow warnings
+since midnight UTC**, latest at **19:20:36 UTC**. The full-root scan timestamp
+is 13:08:33 UTC; no scan-progress file is active. Therefore neither the
+backlog nor the indexed tree can be treated as exact, even though the latest
+status call reports no write error.
+
+Disk remains adequate for the local qualification artifacts: root has **77
+GiB free (57% used)**. The verified cloud image is retained under `/dev/shm`
+for retry; all stopped guest overlays were removed from tmpfs. No production
+service, package, database, or index mutation occurred, and the Git worktree
+remains clean apart from this checkpoint.
