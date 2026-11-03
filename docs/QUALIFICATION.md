@@ -3445,3 +3445,13 @@ The 4 GiB local qualification guest was stopped by its pressure guard at
 some avg10 **8.53%**. It did not reach SSH or run a Dux suite. Its stopped
 overlay was removed from tmpfs; the verified base image remains available
 for another guarded attempt.
+
+At 19:34:04 UTC, the v3 sidecar still showed `kernel_empty=false` and
+`uncertain=true`, with **8,889 pending**, **500,180 userspace drops**, and
+**23,129.170 seconds behind**; no scan was active and `write_error=null`.
+Since the 19:31 sample, pending decreased by only 82 while seen events rose
+by 19,089 and the behind counter grew by 178 seconds. The userspace-drop
+counter did not clear. A further 4 GiB VM attempt was stopped before SSH at
+19:33:51 UTC when load1 reached **10.87** and CPU PSI some avg10 **44.65%**;
+the stopped overlay was removed. The host remains outside the VM controller's
+safe sustained-pressure window.
