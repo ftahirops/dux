@@ -64,19 +64,59 @@ structurally cannot.
 It's the tool you wish you'd had at 2 a.m.: **realtime, indexed, and it shows you
 the culprit — not just the symptom.**
 
+> **Release status:** This worktree is still under production-readiness
+> qualification and is not approved for production deployment. See the
+> [readiness audit](PRODUCTION_READINESS_AUDIT.md) for the open release gates.
+> Dux answers from its latest indexed snapshot; before treating results as a
+> current view, check `dux status --json`. Dirty, paused, scanning, or a status
+> that is not caught up means results may be stale or incomplete. A clean,
+> caught-up status is not by itself proof of exact filesystem accounting after
+> an event-loss or accounting incident.
+
 ---
+
+## Reliability fixes in 0.6.2
+
+- Host load is compared with host CPUs, independently of the daemon's CPU quota.
+  Resource pauses require sustained recovery before resuming.
+- Failed event batches and deferred renames remain available for retry. Missing
+  ancestors are inserted before children; directory allocation and writes that
+  follow renames are included in totals.
+- Reconciliation builds a bounded staging index on a background thread while
+  event ingestion continues. Existing indexes are replaced through a SQLite
+  transaction, preserving active readers and their WAL snapshots. Growth history
+  is carried into the replacement index rather than discarded.
+- The kernel event queue and moved-directory work are bounded. Event loss and
+  failed accounting checks mark the index dirty and schedule reconciliation with
+  a five-minute cooldown. Partial watch coverage still requires operator action.
+- Hardlink target FIDs let the daemon refresh a surviving inode when a temporary
+  hardlink is written and removed before its alias path can be indexed. Live
+  indexing requires Linux 5.17+ or a vendor backport of `FAN_REPORT_TARGET_FID`.
+- Keyboard handlers perform no database or filesystem work. View requests use a
+  one-slot mailbox; health refreshes independently. Refresh failures and delayed
+  views are visible and retried, and obsolete results cannot overwrite a new view.
+- Runtime records are published atomically and scoped to their database. SQLite
+  writes use FULL synchronization; `dux --version` includes the source revision.
 
 ## New in 0.6.0
 
 ### Clear, answer-first TUI
 
-- Four prominent numbered destinations replace the crowded inline navigation:
-  **1 Overview**, **2 Explore**, **3 Activity**, and **4 Reclaim**. Number and
+- Five prominent numbered destinations replace the crowded inline navigation:
+  **1 Overview**, **2 Explore**, **3 Activity**, **4 Reclaim**, and
+  **5 Large Files**. Number and
   letter shortcuts work globally, and `Ctrl-C` now exits cleanly.
 - Overview shows the **top five** largest files, fastest-growing paths, and
   reclaim candidates. Each row explains what the path belongs to (for example
   PostgreSQL, Vault, Cargo build output, a backup, or system logging) instead of
   presenting an unexplained filename.
+- Large Files provides a complete paged inventory of indexed files, ranked by
+  allocated space or absolute growth over the selected 1h/24h/7d window. Its
+  treemap sizes tiles proportionally within the current 100-file page; the
+  ranked table pages through the full inventory and shows allocated bytes,
+  growth delta, modification age, and path. Use `↑`/`↓` to select, `PgUp`/`PgDn`
+  to page, `s` to rank by size, `G` to rank by growth, and `[`/`]` to change
+  the history window.
 - The layout is responsive: wide terminals get balanced cards and distributions;
   an 80x24 terminal keeps the navigation and all five largest-file rows readable.
 - Explore can group indexed usage by application/OS/user data, owner, age, object
@@ -147,25 +187,27 @@ the culprit — not just the symptom.**
 
 ## New in 0.5.2
 
-**A CPU/I/O governor — dux stays invisible on a production host.** A background
-reader must never be the reason a box slows down. The daemon now:
+**CPU/I/O controls for a lower-priority background indexer.** Dux shares host
+resources with production workloads. Its controls reduce its impact; they do not
+guarantee zero contention or uninterrupted index freshness:
 
-- **Hard-caps its own CPU.** It self-measures its CPU and injects proportional
-  sleeps to hold a duty-cycle ceiling (`dux daemon --max-cpu`, default **25% of
-  one core**). Under a filesystem event storm it *stays at the cap* instead of
-  spiking — verified holding **3–5%** through a 1.8M-file create storm that used
-  to pin 16–21%. An idle daemon is still ~0%.
+- **Limits event-loop CPU.** It measures the watcher thread and injects
+  proportional sleeps to target a duty cycle (`dux daemon --max-cpu`, default
+  **25% of one core**). Work outside that thread is bounded by the packaged
+  cgroup limits. Large event bursts can still raise short-term load. An idle
+  daemon is typically near 0% CPU.
 - **Runs at idle I/O priority** (`IOPRIO_CLASS_IDLE`) + low `nice`, so the kernel
-  only gives it disk/CPU when nothing else wants it — **zero contention** with
-  your workload. The packaged unit adds cgroup backstops (`CPUQuota`, `IOWeight`).
-- **Buffers, never spikes.** Bursts wait in the kernel's fanotify queue; the flush
-  is bounded per cycle so a storm can't produce one giant spike. If the daemon
-  ever can't keep up at its cap, it **degrades to eventual consistency** (marks
-  the index for a later reconcile) rather than ever loading the host.
-- **Tells you when it's behind.** If the governor is deliberately holding the
-  daemon back, `dux status` and the TUI show a **THROTTLED** state explaining the
-  index is intentionally stale to protect the host, how stale it is, and that it
-  catches up automatically when load eases (raise `--max-cpu` for faster updates).
+  gives it lower I/O scheduling priority. The packaged unit also sets CPU and
+  I/O weights and a **100% of one core** CPU ceiling. These controls reduce the
+  daemon's resource share under contention, but do not eliminate its impact.
+- **Bounds event batches.** Fanotify queues events in a finite kernel queue and
+  the watcher flushes bounded batches. If event rates exceed processing capacity,
+  the queue can overflow; Dux marks coverage uncertain and requires reconciliation.
+  Sustained host pressure can delay that reconciliation, so stale or uncertain
+  results can persist until the scan is admitted and completes.
+- **Reports lag and uncertainty.** `dux status` and the TUI expose queued work,
+  dirty state, and reconciliation progress. Raise `--max-cpu` only when the host
+  has measured headroom; the systemd CPU quota still sets a hard ceiling.
 
 Tune it: `dux daemon / --max-cpu 10` for an ultra-quiet host, or higher for
 snappier live updates on a machine with headroom.
@@ -183,6 +225,8 @@ filesystem re-walk, no added daemon cost):**
   textfile collector: `dux_fs_bytes_used`, `dux_fs_inodes_used`,
   `dux_index_bytes`, `dux_daemon_up`, `dux_last_scan_timestamp_seconds`, and
   `dux_path_bytes{path=…}` for the top directories (label values injection-safe).
+  `dux_fanotify_overflow_count_available` distinguishes a known zero from legacy
+  watcher status formats that do not publish the overflow counter.
 - **`dux diff --since <window>`** (alias `since`) — the *"what filled or freed the
   disk?"* query: net per-path change over a window, ranked by magnitude.
 - **`dux du`** — byte-exact `du`-compatible output (`-s`/`-a`/`-h`/`-m`/
@@ -197,10 +241,81 @@ filesystem re-walk, no added daemon cost):**
 **Portability:** the `.deb`/`.rpm` now ship a **static musl binary** with no
 shared-library dependencies, so they run on **any x86-64 Linux** regardless of
 host glibc (0.4.x hard-pinned a recent glibc and failed on Debian 12 / RHEL 9 /
-Ubuntu 22.04). Reproducible via `scripts/build-release.sh`.
+Ubuntu 22.04). `scripts/build-release.sh` uses pinned `cargo-auditable 0.7.7`
+to embed the Rust dependency list in the executable; the release CI audits the
+embedded list as well as `Cargo.lock`.
+Source-built release bundles also include `dux.debug` with the runtime binary's
+matching Build ID. Keep it with the release evidence; to add its symbols to
+Linux `perf`, run `perf buildid-cache --add <path-to-release>/dux.debug`. The
+installed `.deb`/`.rpm` executable omits DWARF, retains its function symbol
+table, and references `dux.debug` by GNU debug link; runtime package size does
+not include DWARF data.
 
-**Production hardening** (from a full audit — races, leaks, unsafe/FFI,
-crash-safety — plus fuzzing, chaos, and soak testing):
+**Release qualification:** the current plan, acceptance criteria and outstanding
+gates are in [PRODUCTION_READINESS_AUDIT.md](PRODUCTION_READINESS_AUDIT.md).
+Passing unit tests or a short churn run does not qualify a release for every
+filesystem or workload. The 72-hour endurance and package/platform gates require
+separate recorded evidence.
+
+For this release, the recorded crash-durability qualification matrix covers
+ext4, XFS and Btrfs on Debian 12 / Linux 6.1. Other kernels and filesystems are
+outside that recorded fault-test matrix; verify them in your deployment before
+relying on the same crash-recovery behavior.
+
+The isolated Linux failure suite builds a disposable loop filesystem in a
+private mount namespace. `--filesystem-type` selects ext4 (default), XFS, or
+Btrfs; install the matching filesystem utilities (`e2fsprogs`, `xfsprogs`, or
+`btrfs-progs`) before running that matrix. It exercises SIGKILL boundaries, actual fanotify queue
+overflow, rejected health-metadata writes, full/read-only storage, unreadable
+subtrees and bounded churn. It never opens the installed live index. Requires
+root, systemd, loop mounts, Python 3 and e2fsprogs:
+
+```sh
+cargo build --locked --release
+mkdir -p target/readiness
+cp target/release/dux target/readiness/dux-production
+cargo build --locked --release --features fault-injection
+cp target/release/dux target/readiness/dux-faults
+cargo build --locked --release # restore the ordinary build for packaging
+sudo python3 scripts/dux-readiness.py --binary target/readiness/dux-production \
+  --fault-binary target/readiness/dux-faults --crash-rounds 30 --duration-seconds 120
+```
+
+The indexer and optional remote access have separate services. Packages do not
+create tunnel identities, enable `dux-tunnel.service`, or start outbound tunnels.
+The indexer retains only `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`. Operators who
+need remote access must install its SSH dependencies, create a root-owned
+`/etc/dux/tunnel.conf` (mode `0600`, parent `/etc/dux` mode `0700`) with one
+reviewed `HOST PORT` endpoint per line, and create its identity with
+`dux tunnel keygen`. Provision `/etc/dux/known_hosts` (root-owned, mode `0600`)
+with the SSH host keys for those endpoints. You may collect candidate keys with
+`ssh-keyscan -p PORT HOST`, but verify each fingerprint against an independent
+trusted source before installing it; the tunnel refuses unknown or changed
+keys. Then enable `dux-tunnel.service`. The executable contains no operator
+endpoints; the config, identity, and verified host keys are required. This
+service remains separate from the indexer.
+
+Schema v6 keys retained growth history by inode birth time to distinguish rapid
+inode reuse; legacy ambiguous history remains hidden rather than misattributed.
+An atomic rebuild upgrades v4/v5 while retaining legacy rows as unattributed.
+Rollback across
+this schema change requires the matching pre-upgrade database backup as well as
+the previous executable; retain both before replacing a live installation.
+
+JSON evidence, including executable hashes, is written to
+`target/readiness/report.json`. Fault hooks are compiled out of default builds;
+never install the explicitly enabled `dux-faults` executable. The manual
+`Isolated Linux failure qualification` CI workflow runs the same bounded suite.
+`dux metrics --top 0` exposes dirty, paused, scan, backlog and caught-up signals;
+alert on `dux_index_dirty=1` and sustained `dux_index_caught_up=0` alongside
+`dux_daemon_up`. Treat `dux_fanotify_overflow_count_available=0` as unknown
+overflow history, not as a zero count. When writing a node_exporter textfile, refresh it by writing a
+temporary file in the collector directory and renaming it into place. Monitor
+that file's timestamp or absence too: if `dux metrics` cannot open the index it
+cannot emit `dux_up=0`, and a collector may otherwise keep exposing the last
+successful snapshot. A readable index alone does not mean its data is current.
+
+**Production hardening history:**
 
 - **Crash/downtime drift is no longer silent.** A daemon resuming after a crash,
   reboot, or clean stop/start flags the index **dirty** (with the downtime gap in
@@ -211,9 +326,10 @@ crash-safety — plus fuzzing, chaos, and soak testing):
 - **Hardlink counter correctness.** Modifying a file through a *non-prime*
   hardlink no longer mis-attributes the byte delta or drives directory totals
   negative; a `MAX(0, …)` floor guarantees no total ever displays negative.
-- **Bounded WAL under load.** The daemon now checkpoints under *Elevated* host
-  pressure too (plus a 256 MiB forced-checkpoint backstop), so the write-ahead
-  log can't grow without bound on a busy high-churn host.
+- **WAL checkpointing under load.** The daemon checkpoints under *Elevated* host
+  pressure too and retries when the WAL exceeds 256 MiB. This is a soft target:
+  long-lived readers can prevent a passive checkpoint from reclaiming pages.
+  Reader-held WAL growth remains a release qualification gate.
 - **Fuzz-hardened parsers** (a multibyte-input panic in size parsing is fixed;
   **0 panics** across thousands of adversarial inputs), fanotify parser
   compile-time guards, and a poison-tolerant scan cycle-guard lock.
@@ -241,19 +357,20 @@ create/rename/delete soak (stable RSS, constant fd count — no leak).
 
 ## New in 0.3.0
 
-**A resource guardian so dux always yields to the host.** dux is a background
-tool — it must never be the thing that takes your server down. The daemon now
-continuously watches host pressure (free RAM, free disk, load average, and
-kernel PSI for memory/io/cpu) and self-throttles:
+**A resource guardian that reduces load under pressure.** Dux watches host
+pressure (free RAM, free disk, load average, and kernel PSI for memory/I/O/CPU)
+and changes its work rate:
 
-- **Critical** (low RAM, low disk, high load, or a PSI spike) → it **pauses its
-  own index writes** (keeping pending changes, losing nothing) and hands SQLite's
-  caches back to the OS. `dux status` and the TUI show `WRITES PAUSED (<reason>)`.
+- **Critical** (low RAM, low disk, high load, or a PSI spike) → it pauses index
+  writes, retains pending userspace changes, and asks SQLite to release caches.
+  Fanotify's kernel queue is finite; overflow marks coverage uncertain and
+  requires reconciliation. `dux status` and the TUI show `WRITES PAUSED (<reason>)`.
 - **Elevated** → it keeps indexing but drops the optional extra work (WAL
-  checkpoint, alert scan) so it adds no load.
+  checkpoint, alert scan) to reduce extra load.
 - **Normal** → full speed; it resumes automatically when the host recovers.
-- It also marks itself the **preferred OOM victim** (`oom_score_adj`), so if the
-  kernel ever must reclaim memory it kills dux — never your real workload.
+- The one-off direct scan raises its OOM score to make it a more likely victim
+  during memory exhaustion. The long-lived systemd daemon keeps the default OOM
+  score; neither setting guarantees which process the kernel will kill.
 
 Plus performance work for very large filesystems:
 - Daemon uses `poll(2)` instead of a 50 ms busy-loop — **~0.5 idle wakeups/s**
@@ -291,8 +408,9 @@ first start):
     no longer race and corrupt the index; you get a clear error instead.
   - **Graceful shutdown** — flushes pending changes on `systemctl stop` / SIGTERM
     instead of dropping the last window.
-  - **Low-disk protection** — pauses index writes when the filesystem drops below
-    256 MiB free, so dux is never the process that fills your disk.
+  - **Low-disk protection** — pauses index writes after observing less than
+    256 MiB free on the index filesystem. In-flight transactions and other
+    writers can still consume remaining space.
   - **Bounded under stress** — caps the in-memory event backlog and the number of
     concurrent `--alert-exec` processes (and reaps them), and tracks
     metadata-only changes plus directories moved into the tree.
@@ -310,8 +428,10 @@ first start):
 ## Install
 
 The packages ship a **static musl binary** with no shared-library dependencies,
-so they run on **any x86-64 Linux** regardless of host glibc. Each URL below
-always points to the newest release — no version to look up.
+so they run on x86-64 distributions regardless of host glibc. The live fanotify
+daemon requires Linux 5.17+ or a vendor backport of `FAN_REPORT_TARGET_FID`, plus
+the capabilities granted by its systemd unit. Each URL below always points to
+the newest release — no version to look up.
 
 **Debian / Ubuntu**
 ```bash
@@ -347,7 +467,7 @@ sudo install -m755 target/release/dux /usr/local/bin/dux
 ```bash
 # index once, then everything is instant
 sudo dux scan /
-dux                       # four views: Overview · Explore · Activity · Reclaim
+dux                       # five views: Overview · Explore · Activity · Reclaim · Large Files
 
 # answer the incident
 dux top /var --dirs       # biggest directories
@@ -372,7 +492,9 @@ dux large --files --explain --json | jq '.[].classification'
 dux explain /var/log/auth.log.1 --json
 
 # Prometheus metrics for the node_exporter textfile collector
-dux metrics > /var/lib/node_exporter/textfile_collector/dux.prom
+dux metrics --top 0 > /var/lib/node_exporter/textfile_collector/dux.prom.tmp \
+  && mv /var/lib/node_exporter/textfile_collector/dux.prom.tmp \
+        /var/lib/node_exporter/textfile_collector/dux.prom
 #   exposes dux_fs_bytes_used, dux_index_bytes, dux_daemon_up,
 #   dux_last_scan_timestamp_seconds, and dux_path_bytes{path=...}
 
@@ -391,16 +513,46 @@ All read commands accept `--json`; every query above is served from the index
 
 ```bash
 sudo cp packaging/dux.service /etc/systemd/system/
-sudo systemctl enable --now dux          # initial scan, then realtime daemon
-
-# alert when something fills the disk
-dux daemon / --alert-threshold 1G --alert-window 10m --alert-exec /path/hook.sh
+sudo systemctl enable --now dux.service  # initial scan, then realtime daemon
 ```
 
-The daemon coalesces repeated changes by path and flushes bounded batches — only
-changed paths are restatted, never the full tree. It is **~0% CPU idle**, stays
-under its configured one-core duty-cycle ceiling during write storms, and adds
-no steady-state scan I/O. `dux status` shows whether it is caught up.
+For an alert hook on the systemd daemon, run `sudo systemctl edit dux.service`
+and add this override:
+
+```ini
+[Service]
+ExecStart=
+ExecStart=/usr/bin/dux daemon / --alert-threshold 1G --alert-window 10m --alert-exec /path/hook.sh
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+```
+
+Then apply the override:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart dux.service
+```
+
+Alert hooks run as root for compatibility, but their Linux capabilities are
+cleared before execution by default. The packaged service keeps only the two
+capabilities Dux needs and locks root capability regain off. To let a reviewed
+hook inherit those capabilities, add `--alert-exec-keep-capabilities`.
+The default systemd unit restricts the daemon to Unix sockets. Expand its
+`RestrictAddressFamilies` setting only when a configured alert hook needs IP
+network access; it applies to the hook child as well as the daemon. Configure
+alerts with a systemd `ExecStart` override so the existing daemon owns the index.
+Alert evaluation is skipped while the host pressure guard is Elevated or
+Critical. Treat hooks as best-effort notifications: sustained host pressure can
+delay or miss a threshold check, so they are not an emergency disk-full channel.
+
+The daemon coalesces repeated changes by path and flushes bounded batches; normal
+event updates restat changed paths, while reconciliation scans may traverse the
+tree. The watcher CPU governor targets an average duty cycle for its event-loop
+thread, not the whole process, and short bursts can exceed that target. The
+packaged systemd unit caps aggregate daemon CPU at 100% of one core and assigns
+a low CPU weight under contention. Scheduling priorities reduce resource share
+but do not eliminate contention or guarantee freshness under sustained load.
+`dux status` shows whether it is caught up.
 
 ### Who can read the index
 
@@ -427,22 +579,83 @@ the state:
 | State | What it means | What to do |
 |---|---|---|
 | *(none shown)* | Index is live and believed exact. | Nothing. |
-| **DIRTY** | The daemon knows it **missed events** — fanotify queue overflow, a downtime gap, dropped backlog, missing capabilities, partial watch coverage, or a moved-in directory too large to reconcile. Totals may be stale or wrong. | **`sudo dux scan /`** — the only thing that clears it. |
+| **DIRTY** | Events were missed, scan coverage is incomplete, or totals failed verification. | Reconciliation runs automatically with a five-minute cooldown when coverage permits. Use `sudo dux scan /` to request it immediately; fix persistent capability, mount, or permission problems. |
 | **WRITES PAUSED** (*reason*) | Deliberate self-protection: low memory, low disk, high load, or kernel PSI pressure. The daemon stopped writing and shrank its caches to protect the host. Events keep coalescing in memory. | Nothing — it resumes automatically. Fix the underlying pressure. If it persists under sustained churn the backlog cap trips and the index goes **DIRTY**. |
-| **THROTTLED** | The CPU governor is intentionally holding dux back (default: 25% of one core), so the index is *knowingly behind*. `dux status` reports how stale. | Nothing. Raise `daemon --max-cpu` only if you want dux to catch up faster at the cost of host CPU. |
+| **BEHIND** | The pipeline has not fully caught up recently. This measures time since catch-up, not the precise age of each indexed value. | Check pending updates, pause reason, and write errors. CPU budget, event volume, storage latency, and failed writes can all contribute. |
 
 ```bash
 dux status              # index state, staleness, daemon liveness
 dux status --json       # same, for monitoring
 ```
 
-Rule of thumb: **DIRTY is the only state that needs you.** Paused and throttled
-are dux choosing the host over its own freshness, and both self-recover.
+A live heartbeat means the process is responding; it does not guarantee an exact
+index. Check pipeline state and warnings. Persistent DIRTY, write errors, or
+refresh failures need investigation even if the process is live.
+
+### Startup and alert response
+
+On first install or after a restart, the daemon attaches filesystem watches
+before it builds the baseline. Queries continue to use the last complete index
+while the scan runs; `scan_in_progress` and the scan timestamp distinguish this
+normal startup work from a caught-up index.
+
+For an initial alert policy, after the first baseline completes, page
+immediately when `dux_index_dirty` is 1 outside a declared scan. During startup,
+alert separately if the scan exceeds the expected duration for the indexed
+tree. Alert when `dux_daemon_up` is 0, `dux_watch_status_available` is 0 for
+more than two monitoring intervals, or the metrics file is missing/stale. Warn
+when `dux_index_caught_up` stays 0 for five minutes outside a full scan, or when
+`dux_pending_updates` exceeds 80% of its 500,000-entry cap. `dux_up` only
+describes a readable index when a metrics scrape succeeds; it is not a
+replacement for monitoring scrape failures or file freshness. These are
+starting thresholds; tune them against the host's workload and scan duration
+before treating them as service-level objectives.
+
+```bash
+sudo systemctl status dux --no-pager
+sudo journalctl -u dux --since -15m --no-pager
+dux status --json
+dux metrics --top 0
+```
+
+If the service is alive but DIRTY, inspect the journal for missed events,
+unreadable paths, capability errors, mount changes, or SQLite failures. Restore
+the required capabilities and filesystem availability first, then request a
+reconciliation with `sudo dux scan /`; verify that `dirty` clears and the event
+pipeline drains. WRITES PAUSED is deliberate resource protection: relieve the
+reported memory, disk, load, or PSI pressure and let the daemon resume. If a
+refresh fails, the previous complete generation remains queryable; fix the
+reported storage or coverage issue before retrying. A readable index without a
+fresh watch-status record is a static snapshot, not a live index.
+
+### Controlled upgrade and rollback
+
+For a production canary, keep the exact previous package and binary hash until
+the canary closes. Record the service-enabled state and
+`sha256sum /usr/bin/dux`, stop the service cleanly, and make a verified SQLite
+online backup of `/var/lib/dux/dux.db`. Store it with mode `0600` in a root-only
+directory outside the package state directory, then verify it with
+`PRAGMA quick_check`. Do not use a plain copy of a live database and its WAL
+files as a rollback snapshot.
+
+After installing the candidate, check `dux status --json`, the service journal,
+`dux metrics --top 0`, and indexed totals. Keep the canary under observation for
+the agreed window and retain those outputs with the package and binary hashes.
+A live daemon or a drained queue alone does not prove correctness; the index
+must also be clean and pass reconciliation checks.
+
+If rollback is needed, stop the service first and restore the verified database
+snapshot before installing or starting the previous package. This ordering
+matters when the candidate has migrated the schema: an older binary may not be
+able to open the upgraded database. Reinstall the retained previous package,
+restore the recorded service-enabled state, start the service, and verify its
+binary hash and health. The restored snapshot predates the canary window, so
+request a full scan and confirm the index is clean and caught up before
+trusting it. Keep the rollback snapshot until that recovery is complete.
 
 A `dux scan` is also warranted after bulk changes made while the daemon was
-stopped, and is safe to run any time — rebuilds are atomic (the live index is
-replaced only once the new one is complete, so a failed scan never leaves a
-half-built index).
+stopped, and is safe to run any time — rebuilds are transactional: the old index stays readable until the completed
+replacement commits. Existing readers keep their SQLite snapshot.
 
 ---
 
@@ -455,6 +668,12 @@ half-built index).
 sudo scripts/dux-verify.sh audit          # integrity + ground-truth cross-checks
 sudo DUX_RECONCILE=1 scripts/dux-verify.sh install-cron   # verify every 3h, self-heal
 ```
+
+`install-cron` copies the verifier to `/usr/local/sbin/dux-verify`, installs a
+fixed root cron entry, and sends output to syslog/journal under the `dux-verify`
+tag. `DUX_RECONCILE=1` is an explicit opt-in: on a failed audit, the scheduled
+job stops the daemon, performs a full scan, then restarts it. Without it, the
+job reports findings but does not reconcile.
 
 ---
 

@@ -1,9 +1,10 @@
 Package: dux
-Version: 0.6.1
+Version: 0.6.3-12
 Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: dux maintainers <root@localhost>
+Depends: adduser, python3
 Description: persistent realtime disk usage + file search
  dux is an indexed, persistent du/ncdu with fast trigram file-name search
  and an optional live fanotify daemon. It answers "largest dirs/files",

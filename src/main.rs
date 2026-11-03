@@ -2,16 +2,18 @@ mod classify;
 mod containers;
 mod deleted;
 mod emit;
+mod fault;
 mod guard;
 mod query;
 mod scan;
 mod store;
 mod tui;
+mod tunnel;
 mod util;
 mod watch;
 
-use anyhow::Result;
-use clap::{Parser, Subcommand, ValueEnum};
+use anyhow::{Context, Result};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use store::Store;
 use util::{ago, human};
@@ -19,7 +21,7 @@ use util::{ago, human};
 /// dux — persistent, realtime disk usage + file search.
 /// du/ncdu/locate/find, but indexed and live. Companion to xtop.
 #[derive(Parser)]
-#[command(name = "dux", version, about, long_about = None)]
+#[command(name = "dux", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("DUX_BUILD_REVISION"), ") [", env!("DUX_BUILD_KIND"), "] source-sha256=", env!("DUX_BUILD_SOURCE_SHA256")), about, long_about = None)]
 struct Cli {
     /// Path to open in the TUI (when no subcommand is given)
     path: Option<PathBuf>,
@@ -211,7 +213,7 @@ enum Cmd {
         #[arg(default_value = "/")]
         root: PathBuf,
         /// Flush coalesced changes every N ms
-        #[arg(long, default_value_t = 2000)]
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(10..=60000))]
         flush_ms: u64,
         /// Only watch the root's filesystem (match `scan --one-file-system`)
         #[arg(long)]
@@ -225,20 +227,45 @@ enum Cmd {
         /// Command to run on alert (env: DUX_PATH, DUX_DELTA, DUX_DELTA_HUMAN, DUX_WINDOW)
         #[arg(long)]
         alert_exec: Option<String>,
+        /// Let alert hooks inherit the daemon's CAP_SYS_ADMIN and
+        /// CAP_DAC_READ_SEARCH capabilities (default: clear them before exec).
+        #[arg(long)]
+        alert_exec_keep_capabilities: bool,
         /// Seconds between repeat alerts for the same path
         #[arg(long, default_value_t = 300)]
         alert_debounce: i64,
         /// Days of growth history to keep. Lower = smaller index on a high-churn
         /// host (growth dominates index size). Min 1.
-        #[arg(long, default_value_t = 7)]
+        #[arg(long, default_value_t = 7, value_parser = clap::value_parser!(i64).range(1..=3650))]
         growth_days: i64,
-        /// Hard cap on the daemon's own CPU, as a percent of ONE core. Under a
-        /// filesystem event storm it self-throttles to stay under this; the backlog
-        /// buffers in the kernel queue (and, if that overflows, reconciles via a
-        /// later scan). Lower = more silent. The daemon also runs at idle I/O
-        /// priority so it never contends with production for disk.
-        #[arg(long, default_value_t = 25)]
+        /// Target average CPU duty cycle for the fanotify event-loop thread, as a
+        /// percent of ONE core. This does not cap SQLite, scan, or other worker
+        /// threads; systemd CPUQuota is the process-wide ceiling. Under event
+        /// storms the event loop sleeps and the kernel queue buffers work; overflow
+        /// marks coverage uncertain and requires reconciliation. Lower = quieter,
+        /// with more lag. The daemon also runs at idle I/O priority.
+        #[arg(long, default_value_t = 25, value_parser = clap::value_parser!(u32).range(1..=100))]
         max_cpu: u32,
+    },
+    /// Reverse-SSH tunnel management (reach this host behind NAT via a home
+    /// endpoint). Run it separately with the optional dux-tunnel.service;
+    /// this subcommand can also provision the identity key.
+    Tunnel {
+        #[command(subcommand)]
+        action: TunnelCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum TunnelCmd {
+    /// Run the optional remote-access supervisor, separately from the indexer.
+    Run,
+    /// Create the tunnel identity key and print the line to authorize on each
+    /// home endpoint.
+    Keygen {
+        /// Replace an existing key instead of refusing.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -254,8 +281,22 @@ fn main() {
     }
 }
 
+fn cli_command() -> clap::Command {
+    Cli::command().mut_subcommand("du", |du| {
+        // Keep du-compatible `-h` for human sizes and preserve `--help` while
+        // avoiding Clap's default `-h` help alias on this one subcommand.
+        du.disable_help_flag(true).arg(
+            clap::Arg::new("help")
+                .long("help")
+                .action(clap::ArgAction::Help)
+                .help("Print help"),
+        )
+    })
+}
+
 fn real_main() -> Result<()> {
-    let cli = Cli::parse();
+    let matches = cli_command().get_matches();
+    let cli = Cli::from_arg_matches(&matches)?;
     let db = match &cli.db {
         Some(p) => p.clone(),
         None => util::db_path()?,
@@ -273,26 +314,34 @@ fn real_main() -> Result<()> {
             quiet,
             force,
         }) => {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| "warn".into()),
+                )
+                .init();
             // If the daemon is live for THIS db, it holds the exclusive lock and
             // is the only writer — so instead of making the user stop/scan/start
             // by hand, ask the daemon to rebuild its own index in place (atomic,
             // no downtime). This also reconciles any drift/downtime gap.
             let scanned_db = db.canonicalize().unwrap_or_else(|_| db.clone());
-            let hb = util::read_heartbeat_full();
+            let hb = util::read_heartbeat_for(&db);
             let daemon_live = match &hb {
                 Some((secs, pid, hbdb)) => {
                     // Heartbeat can stay "fresh" (≤30s) for a while AFTER a crash;
                     // verify the PID is actually alive (kill(pid,0)) so a post-crash
                     // `dux scan` reconciles directly instead of trying to SIGHUP a
                     // dead process and failing exactly when it's needed most.
-                    let alive = *pid > 0 && unsafe { libc::kill(*pid, 0) } == 0;
-                    (util::now_secs() - secs) <= 30
+                    let alive = util::process_alive(*pid);
+                    util::timestamp_is_fresh(*secs, 30)
                         && std::path::Path::new(hbdb) == scanned_db.as_path()
                         && alive
                 }
                 None => false,
             };
             if daemon_live && !force {
+                anyhow::ensure!(exclude.is_empty() && !include_pseudo && jobs.is_none() && !one_file_system,
+                    "a running daemon rescans with its own settings; stop it before changing scan options");
                 request_daemon_rescan(&db, &path, &hb)?;
                 return Ok(());
             }
@@ -300,9 +349,10 @@ fn real_main() -> Result<()> {
             // lock is the hard guard — if something really is writing this index,
             // lock_db fails with a clear message rather than corrupting it.
             let _lock = util::lock_db(&db)?;
-            // A scan buffers node metadata in RAM; make dux the preferred OOM
-            // victim so a big scan can never get a real workload killed instead.
-            guard::oom_protect_self();
+            // A one-off direct scan buffers metadata in RAM; let it yield first
+            // under global OOM. The long-lived daemon uses the neutral systemd
+            // score so it is not artificially selected at low resident memory.
+            guard::oom_protect_scan();
             let opts = scan::ScanOptions {
                 one_file_system,
                 exclude,
@@ -310,15 +360,22 @@ fn real_main() -> Result<()> {
                 include_pseudo,
                 progress: !quiet,
                 jobs,
+                cancel: None,
             };
             // Atomic rebuild: scan into a sibling file, then rename over the live
             // index — fragmentation-free, never a half-built or empty index.
             let start = std::time::Instant::now();
             let s = scan::rebuild_atomic(&db, &path, &opts)?;
             eprintln!(
-                "scanned {} files, {} dirs, {} in {:.1}s ({} errors)",
+                "scanned {} files, {} dirs, {} staged path instances ({} directory alias paths), visible {} bytes/{} entries, unique {} bytes/{} inodes, {} in {:.1}s ({} coverage issues)",
                 s.files,
                 s.dirs,
+                s.staged_path_instances,
+                s.staged_directory_alias_paths,
+                s.staged_root_visible_bytes,
+                s.staged_root_visible_entries,
+                s.staged_root_unique_bytes,
+                s.staged_root_unique_inodes,
                 human(s.bytes),
                 start.elapsed().as_secs_f64(),
                 s.errors
@@ -339,8 +396,8 @@ fn real_main() -> Result<()> {
             filter_index_rows(&mut files, &db, limit);
             filter_index_growth(&mut growth, &db, limit);
             filter_index_growth(&mut changes, &db, limit);
-            let containers = containers::list(&store).unwrap_or_default();
-            let waste = containers::waste(&store, &containers);
+            let containers = containers::list(&store)?;
+            let waste = containers::waste(&store, &containers)?;
             if json {
                 emit::overview(&dirs, &files, &growth, &changes, &waste, secs);
                 return Ok(());
@@ -473,7 +530,7 @@ fn real_main() -> Result<()> {
                 let sign = if r.delta >= 0 { "+" } else { "-" };
                 println!(
                     "{:<14} {}",
-                    format!("{sign}{}", human(r.delta.abs())),
+                    format!("{sign}{}", util::human_magnitude(r.delta)),
                     display_growth_path(&r.path)
                 );
             }
@@ -564,7 +621,7 @@ fn real_main() -> Result<()> {
                 let sign = if r.delta >= 0 { "+" } else { "-" };
                 println!(
                     "{:<14} {}",
-                    format!("{sign}{}", human(r.delta.abs())),
+                    format!("{sign}{}", util::human_magnitude(r.delta)),
                     display_growth_path(&r.path)
                 );
             }
@@ -588,9 +645,9 @@ fn real_main() -> Result<()> {
                 if h {
                     human(b)
                 } else if megabytes {
-                    format!("{}", (b + (1 << 20) - 1) / (1 << 20))
+                    format!("{}", util::ceil_div_nonnegative(b, 1 << 20))
                 } else {
-                    format!("{}", (b + 1023) / 1024)
+                    format!("{}", util::ceil_div_nonnegative(b, 1024))
                 }
             };
             // -s (summarize): the total for the path ONLY — a single index lookup,
@@ -599,10 +656,10 @@ fn real_main() -> Result<()> {
             if summarize {
                 let (rd, ri) = match scope {
                     Some(x) => x,
-                    None => query::index_root(&store)
+                    None => query::index_root(&store)?
                         .ok_or_else(|| anyhow::anyhow!("no index root — run `dux scan` first"))?,
                 };
-                let bytes = query::subtree_bytes(&store, rd, ri);
+                let bytes = query::subtree_bytes(&store, rd, ri)?;
                 let p = store.path_of(rd, ri).unwrap_or_else(|_| "/".into());
                 if json {
                     emit::du(&[query::DuRow {
@@ -640,7 +697,7 @@ fn real_main() -> Result<()> {
             // waste is host-level, so compute it over the FULL list before the
             // display truncation.
             let rows = containers::list(&store)?;
-            let waste = containers::waste(&store, &rows);
+            let waste = containers::waste(&store, &rows)?;
             if json {
                 emit::containers(&rows, &waste);
                 return Ok(());
@@ -688,9 +745,9 @@ fn real_main() -> Result<()> {
             // the accurate reclaimable-volume figure is the orphan line below.
             let (sw, sl, sv): (i64, i64, i64) = rows.iter().fold((0, 0, 0), |a, c| {
                 (
-                    a.0 + c.writable_bytes,
-                    a.1 + c.log_bytes,
-                    a.2 + c.volume_bytes,
+                    a.0.saturating_add(c.writable_bytes),
+                    a.1.saturating_add(c.log_bytes),
+                    a.2.saturating_add(c.volume_bytes),
                 )
             });
             println!(
@@ -702,7 +759,7 @@ fn real_main() -> Result<()> {
                 human(sw),
                 human(sl),
                 human(sv),
-                human(sw + sl + sv),
+                human(sw.saturating_add(sl).saturating_add(sv)),
                 "",
             );
             // reclaimable / waste — what `docker system prune` would free.
@@ -738,16 +795,64 @@ fn real_main() -> Result<()> {
             // show its live progress; if not, print a friendly hint. Only a db that
             // exists but is unreadable is a real error worth propagating.
             match Store::open_ro(&db) {
-                Ok(store) => println!("{}", query::status(&store, &db)?),
+                Ok(store) => {
+                    if json {
+                        println!("{}", query::status_json(&store, &db)?);
+                    } else {
+                        println!("{}", query::status(&store, &db)?);
+                    }
+                }
                 Err(e) => {
-                    if let Some(line) = query::scan_progress_line() {
-                        println!("no index yet — initial scan in progress:\n{line}");
-                    } else if !db.exists() {
-                        println!(
-                            "no index yet at {} — the daemon builds one on first start, \
-                             or run `dux scan /`.",
-                            db.display()
-                        );
+                    if let Some(progress) = util::read_scan_progress_for(&db) {
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::json!({
+                                    "status_version": 1,
+                                    "root": null,
+                                    "daemon_live": util::daemon_live_for(&db),
+                                    "watch_status_available": false,
+                                    "dirty": false,
+                                    "paused": false,
+                                    "scan_in_progress": true,
+                                    "scan_progress": {
+                                        "started_at_seconds": progress.started,
+                                        "files_seen": progress.files,
+                                        "directories_seen": progress.dirs,
+                                        "allocated_bytes_seen": progress.bytes,
+                                        "indexing": progress.indexing,
+                                    },
+                                    "caught_up": false,
+                                })
+                            );
+                        } else {
+                            let line = query::scan_progress_line(&db).unwrap_or_default();
+                            println!("no index yet — initial scan in progress:\n{line}");
+                        }
+                    } else if !Store::has_index_artifacts(&db)? {
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::json!({
+                                    "status_version": 1,
+                                    "root": null,
+                                    "daemon_live": util::daemon_live_for(&db),
+                                    "watch_status_available": false,
+                                    "dirty": false,
+                                    "paused": false,
+                                    "scan_in_progress": false,
+                                    "scan_progress": null,
+                                    "caught_up": false,
+                                    "error": "no index yet",
+                                })
+                            );
+                        } else {
+                            println!(
+                                "no index yet at {} — the daemon builds one on first start, \
+                                 or run `dux scan /`.",
+                                db.display()
+                            );
+                        }
                     } else {
                         return Err(e);
                     }
@@ -761,10 +866,17 @@ fn real_main() -> Result<()> {
             alert_threshold,
             alert_window,
             alert_exec,
+            alert_exec_keep_capabilities,
             alert_debounce,
             growth_days,
             max_cpu,
         }) => {
+            if alert_exec_keep_capabilities && alert_exec.is_none() {
+                anyhow::bail!("--alert-exec-keep-capabilities requires --alert-exec");
+            }
+            if alert_exec_keep_capabilities && alert_threshold.is_none() {
+                anyhow::bail!("--alert-exec-keep-capabilities requires --alert-threshold");
+            }
             tracing_subscriber::fmt()
                 .with_env_filter(
                     tracing_subscriber::EnvFilter::try_from_default_env()
@@ -776,6 +888,7 @@ fn real_main() -> Result<()> {
                     threshold: parse_size(&t)?,
                     window: util::parse_duration(&alert_window)?,
                     exec: alert_exec,
+                    keep_capabilities: alert_exec_keep_capabilities,
                     debounce: alert_debounce,
                 }),
                 None => None,
@@ -790,6 +903,13 @@ fn real_main() -> Result<()> {
                 max_cpu as f64 / 100.0,
             )?;
         }
+        Some(Cmd::Tunnel { action }) => match action {
+            TunnelCmd::Run => {
+                tracing_subscriber::fmt().with_env_filter("info").init();
+                tunnel::run()?;
+            }
+            TunnelCmd::Keygen { force } => tunnel::keygen(force)?,
+        },
         None => {
             // bare `dux` or `dux <path>` opens the TUI. Drop this connection before
             // the TUI runs (run() owns its own reopenable store — see above).
@@ -806,14 +926,54 @@ fn real_main() -> Result<()> {
     Ok(())
 }
 
-/// Last-scan timestamp stored in the index (0 if unreadable). Used to detect
-/// when a daemon-driven rescan has finished (the daemon writes a fresh value).
-fn read_last_scan_ts(db: &std::path::Path) -> i64 {
-    Store::open_ro(db)
-        .ok()
-        .and_then(|s| s.get_meta("last_scan_ts").ok().flatten())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0)
+/// Read the daemon's atomic-rescan marker. Database and metadata errors must
+/// remain errors: treating them as an empty marker can make an unchanged old
+/// generation look like a completed rescan.
+fn read_scan_generation(store: &Store) -> Result<Option<String>> {
+    let generation = store.get_meta("scan_generation")?;
+    if let Some(value) = generation.as_deref() {
+        anyhow::ensure!(!value.is_empty(), "scan_generation metadata is empty");
+    }
+    Ok(generation)
+}
+
+fn scan_generation_advanced(previous: Option<&str>, current: Option<&str>) -> bool {
+    current.is_some_and(|value| !value.is_empty() && Some(value) != previous)
+}
+
+fn daemon_rescan_is_complete(
+    generation_settled: bool,
+    dirty: bool,
+    paused: bool,
+    scan_active: bool,
+    watch: Option<&util::WatchStatus>,
+) -> bool {
+    generation_settled
+        && !dirty
+        && !paused
+        && !scan_active
+        && watch
+            .is_some_and(|status| status.kernel_empty && status.pending == 0 && !status.uncertain)
+}
+
+const DAEMON_RESCAN_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn daemon_rescan_start_timed_out(
+    scan_started: bool,
+    generation_advanced: bool,
+    elapsed: std::time::Duration,
+) -> bool {
+    !scan_started && !generation_advanced && elapsed >= DAEMON_RESCAN_START_TIMEOUT
+}
+
+fn canonical_scan_root(requested: &std::path::Path) -> Result<PathBuf> {
+    let root = requested
+        .canonicalize()
+        .with_context(|| format!("resolving requested scan path {}", requested.display()))?;
+    let metadata = std::fs::metadata(&root)
+        .with_context(|| format!("inspecting requested scan path {}", root.display()))?;
+    anyhow::ensure!(metadata.is_dir(), "{} is not a directory", root.display());
+    Ok(root)
 }
 
 /// Ask the running daemon to rebuild its index in place (SIGHUP), then wait for
@@ -824,19 +984,18 @@ fn request_daemon_rescan(
     requested: &std::path::Path,
     hb: &Option<(i64, i32, String)>,
 ) -> Result<()> {
+    let want = canonical_scan_root(requested)?;
     // The daemon rescans the tree IT indexes; warn if that's not what was asked.
-    if let Ok(store) = Store::open_ro(db) {
-        if let Ok(Some(root)) = store.get_meta("last_scan_root") {
-            let want = requested
-                .canonicalize()
-                .unwrap_or_else(|_| requested.to_path_buf());
-            if std::path::Path::new(&root) != want {
-                eprintln!(
-                    "dux: note — the daemon indexes {root}; it will rescan THAT tree.\n\
-                     \x20     To index a different tree, stop the daemon first \
-                     (sudo systemctl stop dux), then scan."
-                );
-            }
+    let store =
+        Store::open_ro(db).context("checking the index before requesting a daemon rescan")?;
+    if let Some(root) = crate::store::indexed_root_path(&store.conn)? {
+        if root != want {
+            eprintln!(
+                "dux: note — the daemon indexes {}; it will rescan THAT tree.\n\
+                 \x20     To index a different tree, stop the daemon first \
+                 (sudo systemctl stop dux), then scan.",
+                root.display()
+            );
         }
     }
 
@@ -849,7 +1008,8 @@ fn request_daemon_rescan(
         );
     }
 
-    let prev_ts = read_last_scan_ts(db);
+    let mut poll_store = Store::open_ro(db)?;
+    let previous_generation = read_scan_generation(&poll_store)?;
     // SIGHUP = "rescan now"; the daemon picks it up at the top of its loop.
     let rc = unsafe { libc::kill(pid, libc::SIGHUP) };
     if rc != 0 {
@@ -861,43 +1021,62 @@ fn request_daemon_rescan(
     }
     eprintln!("dux: daemon is live — triggering an in-place atomic rescan (no downtime)…");
 
-    // Wait for the daemon's last_scan_ts to advance past the old value. prev_ts is
-    // the PREVIOUS scan (seconds/minutes ago), so the fresh one is strictly newer.
+    // A new generation marks baseline installation, not successful completion:
+    // wait for queued event replay and independent accounting verification too.
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(1800);
-    let mut poll_store = Store::open_ro(db).ok();
     let mut last_reopen = std::time::Instant::now();
+    let mut generation_advanced = false;
+    let mut scan_started = util::read_scan_progress_for(db).is_some();
+    let mut generation_observed_at = None;
     loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
-        let cur_ts = match poll_store.as_ref() {
-            Some(s) => s
-                .get_meta("last_scan_ts")
-                .ok()
-                .flatten()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-            None => read_last_scan_ts(db),
-        };
-        if cur_ts > prev_ts {
-            eprintln!(
-                "dux: rescan complete — index rebuilt in {:.0}s.",
-                start.elapsed().as_secs_f64()
+        anyhow::ensure!(
+            util::process_alive(pid),
+            "daemon exited before reconciliation completed"
+        );
+        let generation = read_scan_generation(&poll_store)?;
+        generation_advanced |=
+            scan_generation_advanced(previous_generation.as_deref(), generation.as_deref());
+        let scan_active = util::read_scan_progress_for(db).is_some();
+        scan_started |= scan_active || generation_advanced;
+        if daemon_rescan_start_timed_out(scan_started, generation_advanced, start.elapsed()) {
+            anyhow::bail!(
+                "daemon did not report starting the requested rescan within {}s; the request may still be queued. Check `dux status` and daemon logs before requesting another scan",
+                DAEMON_RESCAN_START_TIMEOUT.as_secs()
             );
-            return Ok(());
         }
-        // The daemon swaps in a new DB by rename. A read connection can keep
-        // seeing the old inode, so reopen occasionally while still avoiding a
-        // twice-per-second open/schema check loop during long rescans.
+        if generation_advanced {
+            let observed_at = *generation_observed_at.get_or_insert_with(std::time::Instant::now);
+            let dirty = poll_store.get_meta("dirty_since")?.is_some();
+            let paused = poll_store.get_meta("paused_since")?.is_some();
+            let watch = util::read_watch_status(db);
+            if daemon_rescan_is_complete(
+                observed_at.elapsed() >= std::time::Duration::from_secs(1),
+                dirty,
+                paused,
+                scan_active,
+                watch.as_ref(),
+            ) {
+                eprintln!(
+                    "dux: rescan reconciled, queue drained, and accounting verified in {:.0}s.",
+                    start.elapsed().as_secs_f64()
+                );
+                return Ok(());
+            }
+        }
+        // Reconciliation can update or replace the database. Reopen occasionally
+        // so this reader observes a newly installed generation without doing an
+        // open/schema check twice per second during long rescans.
         if last_reopen.elapsed() >= std::time::Duration::from_secs(5) {
-            poll_store = Store::open_ro(db).ok();
+            poll_store = Store::open_ro(db)?;
             last_reopen = std::time::Instant::now();
         }
         if start.elapsed() > timeout {
-            eprintln!(
-                "dux: rescan still running in the daemon after {}s — check `dux status`.",
+            anyhow::bail!(
+                "rescan did not complete within {}s; check `dux status` and daemon logs",
                 timeout.as_secs()
             );
-            return Ok(());
         }
     }
 }
@@ -932,13 +1111,24 @@ fn prom_label(s: &str) -> String {
 
 /// Prometheus text-exposition output for the node_exporter textfile collector.
 fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<String> {
-    let root = store.get_meta("last_scan_root")?.unwrap_or_default();
-    let ts: i64 = store
-        .get_meta("last_scan_ts")?
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let (nodes, bytes) = query::index_totals(store);
+    let root_path = crate::store::indexed_root_path(&store.conn)?;
+    let ts = query::optional_timestamp(store, "last_scan_ts")?.unwrap_or(0);
+    let (nodes, bytes) = query::index_totals(store)?;
     let daemon = util::daemon_live_for(db) as i32;
+    let watch = util::read_watch_status(db);
+    let kernel_overflow_notifications =
+        watch.as_ref().and_then(|w| w.kernel_overflow_notifications);
+    let dirty =
+        store.get_meta("dirty_since")?.is_some() || watch.as_ref().is_some_and(|w| w.uncertain);
+    let paused = store.get_meta("paused_since")?.is_some();
+    let scanning = util::read_scan_progress_for(db).is_some();
+    let caught_up = daemon == 1
+        && !dirty
+        && !paused
+        && !scanning
+        && watch
+            .as_ref()
+            .is_some_and(|w| w.kernel_empty && w.pending == 0);
 
     let mut s = String::new();
     let mut g = |name: &str, help: &str, val: String| {
@@ -967,7 +1157,38 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
         "1 if the live watch daemon is running.",
         daemon.to_string(),
     );
-    if let Some(fs) = util::fs_stat(std::path::Path::new(&root)) {
+    for (name, help, value) in [
+        ("dux_index_dirty", "1 if coverage or accounting is uncertain, including volatile event loss.", dirty),
+        ("dux_index_paused", "1 if index writes are paused by the resource guardian.", paused),
+        ("dux_scan_in_progress", "1 if a full scan is publishing live progress.", scanning),
+        ("dux_index_caught_up", "1 if the live daemon reports drained queues, no pending changes and no known uncertainty or scan.", caught_up),
+        ("dux_watch_status_available", "1 if fresh, process-validated event pipeline status is available.", watch.is_some()),
+    ] {
+        g(name, help, (value as u8).to_string());
+    }
+    g(
+        "dux_fanotify_overflow_count_available",
+        "1 if the current watcher status format includes kernel overflow accounting.",
+        (kernel_overflow_notifications.is_some() as u8).to_string(),
+    );
+    if let Some(w) = watch {
+        g(
+            "dux_last_event_commit_timestamp_seconds",
+            "Unix time of the most recent committed live event batch, or 0 if none.",
+            w.last_commit_at.to_string(),
+        );
+        g(
+            "dux_pending_updates",
+            "Pending path changes including deferred renames.",
+            w.pending.to_string(),
+        );
+        g(
+            "dux_behind_seconds",
+            "Seconds since both the kernel and pending queues were drained.",
+            (w.behind_ms as f64 / 1000.0).to_string(),
+        );
+    }
+    if let Some(fs) = root_path.as_deref().and_then(util::fs_stat) {
         g(
             "dux_fs_bytes_total",
             "Total bytes of the scanned filesystem.",
@@ -1008,29 +1229,18 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
             ));
         }
     }
+    if let Some(overflows) = kernel_overflow_notifications {
+        s.push_str(&format!(
+            "# HELP dux_fanotify_overflow_notifications_total Kernel fanotify queue-overflow notifications observed; each implies unknown event loss.\n\
+             # TYPE dux_fanotify_overflow_notifications_total counter\n\
+             dux_fanotify_overflow_notifications_total {overflows}\n",
+        ));
+    }
     Ok(s)
 }
 
 fn resolve_start(store: &Store, path: &std::path::Path) -> Result<Option<(i64, i64)>> {
-    use std::os::unix::fs::MetadataExt;
-    let m = std::fs::symlink_metadata(path)
-        .map_err(|e| anyhow::anyhow!("cannot stat {}: {e}", path.display()))?;
-    let id = (m.dev() as i64, m.ino() as i64);
-    let ok = store
-        .conn
-        .query_row(
-            "SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2",
-            rusqlite::params![id.0, id.1],
-            |_| Ok(()),
-        )
-        .is_ok();
-    if !ok {
-        anyhow::bail!(
-            "{} is not in the index — run `dux scan` first",
-            path.display()
-        );
-    }
-    Ok(Some(id))
+    query::resolve_scope(store, path)
 }
 
 fn print_rows(rows: &[query::Row]) {
@@ -1192,10 +1402,257 @@ fn parse_size(s: &str) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
     use std::os::unix::fs::MetadataExt;
+
+    #[test]
+    fn max_cpu_help_distinguishes_event_thread_target_from_process_limit() {
+        let command = Cli::command();
+        let daemon = command.find_subcommand("daemon").unwrap();
+        let argument = daemon
+            .get_arguments()
+            .find(|argument| argument.get_long() == Some("max-cpu"))
+            .unwrap();
+        let help = argument.get_help().unwrap().to_string();
+        assert!(help.contains("event-loop"), "{help}");
+        assert!(help.contains("does not cap"), "{help}");
+        assert!(help.contains("process-wide ceiling"), "{help}");
+    }
+
+    #[test]
+    fn du_human_short_flag_and_long_help_do_not_conflict() {
+        let matches = cli_command()
+            .try_get_matches_from(["dux", "du", "-h"])
+            .unwrap();
+        let parsed = Cli::from_arg_matches(&matches).unwrap();
+        match parsed.cmd.unwrap() {
+            Cmd::Du { human, .. } => assert!(human),
+            _ => panic!("expected du command"),
+        }
+
+        let error = cli_command()
+            .try_get_matches_from(["dux", "du", "--help"])
+            .unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+    }
+
+    #[test]
+    fn resolve_start_preserves_database_errors() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: store::SCHEMA_VERSION,
+        };
+        let error = resolve_start(&store, std::path::Path::new("/"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no such table: inodes"), "{error}");
+        assert!(!error.contains("is not in the index"), "{error}");
+    }
+
+    #[test]
+    fn daemon_scan_request_requires_an_existing_directory() {
+        let dir = tmp("scan-root-validation");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("file");
+        std::fs::write(&file, b"not a directory").unwrap();
+        assert_eq!(
+            canonical_scan_root(&dir).unwrap(),
+            dir.canonicalize().unwrap()
+        );
+        assert!(canonical_scan_root(&file)
+            .unwrap_err()
+            .to_string()
+            .contains("not a directory"));
+        assert!(canonical_scan_root(&dir.join("missing"))
+            .unwrap_err()
+            .to_string()
+            .contains("resolving requested scan path"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn daemon_rescan_waits_for_queue_drain_and_verified_clean_status() {
+        let clean = util::WatchStatus {
+            kernel_empty: true,
+            pending: 0,
+            uncertain: false,
+            ..Default::default()
+        };
+        assert!(daemon_rescan_is_complete(
+            true,
+            false,
+            false,
+            false,
+            Some(&clean)
+        ));
+        assert!(!daemon_rescan_is_complete(
+            false,
+            false,
+            false,
+            false,
+            Some(&clean)
+        ));
+        assert!(!daemon_rescan_is_complete(
+            true,
+            true,
+            false,
+            false,
+            Some(&clean)
+        ));
+        assert!(!daemon_rescan_is_complete(
+            true,
+            false,
+            true,
+            false,
+            Some(&clean)
+        ));
+        assert!(!daemon_rescan_is_complete(
+            true,
+            false,
+            false,
+            true,
+            Some(&clean)
+        ));
+        assert!(!daemon_rescan_is_complete(true, false, false, false, None));
+
+        let mut pending = clean.clone();
+        pending.pending = 1;
+        assert!(!daemon_rescan_is_complete(
+            true,
+            false,
+            false,
+            false,
+            Some(&pending)
+        ));
+        let mut kernel_not_drained = clean.clone();
+        kernel_not_drained.kernel_empty = false;
+        assert!(!daemon_rescan_is_complete(
+            true,
+            false,
+            false,
+            false,
+            Some(&kernel_not_drained)
+        ));
+        let mut uncertain = clean.clone();
+        uncertain.uncertain = true;
+        assert!(!daemon_rescan_is_complete(
+            true,
+            false,
+            false,
+            false,
+            Some(&uncertain)
+        ));
+    }
 
     fn tmp(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!("dux-t-{tag}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn metrics_never_call_volatile_event_loss_caught_up() {
+        let db = tmp("metrics-uncertain");
+        let store = Store::create_fresh(&db).unwrap();
+        util::write_heartbeat(&db);
+        util::write_watch_status_with_overflows(
+            &db, 0, true, 100, 90, 30, 0, 5, 0, 500000, 2, true,
+        );
+        let metrics = metrics_text(&store, &db, 0).unwrap();
+        assert!(metrics.contains("\ndux_index_dirty 1\n"));
+        assert!(metrics.contains("\ndux_index_caught_up 0\n"));
+        assert!(metrics.contains("dux_fanotify_overflow_count_available 1\n"));
+        assert!(metrics.contains("dux_fanotify_overflow_notifications_total 2\n"));
+        let legacy_status = format!(
+            "3 {} {} 0 1 100 90 30 5 0 500000 0 {}\n{}",
+            util::now_secs(),
+            std::process::id(),
+            util::now_secs(),
+            db.canonicalize().unwrap_or_else(|_| db.clone()).display()
+        );
+        std::fs::write(util::runtime_path(&db, "watch.status"), legacy_status).unwrap();
+        let metrics = metrics_text(&store, &db, 0).unwrap();
+        assert!(metrics.contains("\ndux_index_dirty 0\n"));
+        assert!(metrics.contains("\ndux_index_caught_up 1\n"));
+        assert!(metrics.contains("dux_fanotify_overflow_count_available 0\n"));
+        assert!(!metrics.contains("dux_fanotify_overflow_notifications_total"));
+        util::write_watch_status(&db, 0, true, 100, 90, 30, 0, 5, 0, 500000, false);
+        let metrics = metrics_text(&store, &db, 0).unwrap();
+        assert!(metrics.contains("dux_fanotify_overflow_count_available 1\n"));
+        assert!(metrics.contains("dux_fanotify_overflow_notifications_total 0\n"));
+        std::fs::remove_file(util::runtime_path(&db, "watch.status")).unwrap();
+        let metrics = metrics_text(&store, &db, 0).unwrap();
+        assert!(metrics.contains("\ndux_index_caught_up 0\n"));
+        std::fs::remove_file(util::runtime_path(&db, "heartbeat")).unwrap();
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+    }
+
+    #[test]
+    fn metrics_reject_malformed_scan_timestamp() {
+        let db = tmp("metrics-invalid-scan-ts");
+        let store = Store::create_fresh(&db).unwrap();
+        store.set_meta("last_scan_ts", "not-a-timestamp").unwrap();
+        let error = metrics_text(&store, &db, 0).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("invalid last_scan_ts timestamp in index metadata"));
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+    }
+
+    #[test]
+    fn rescan_generation_requires_a_new_nonempty_marker() {
+        assert!(!scan_generation_advanced(None, None));
+        assert!(!scan_generation_advanced(Some("old"), Some("old")));
+        assert!(!scan_generation_advanced(Some("old"), Some("")));
+        assert!(scan_generation_advanced(None, Some("new")));
+        assert!(scan_generation_advanced(Some("old"), Some("new")));
+    }
+
+    #[test]
+    fn daemon_rescan_reports_when_request_never_starts() {
+        assert!(!daemon_rescan_start_timed_out(
+            false,
+            false,
+            DAEMON_RESCAN_START_TIMEOUT - std::time::Duration::from_millis(1),
+        ));
+        assert!(daemon_rescan_start_timed_out(
+            false,
+            false,
+            DAEMON_RESCAN_START_TIMEOUT,
+        ));
+        assert!(!daemon_rescan_start_timed_out(
+            true,
+            false,
+            DAEMON_RESCAN_START_TIMEOUT * 2,
+        ));
+        assert!(!daemon_rescan_start_timed_out(
+            false,
+            true,
+            DAEMON_RESCAN_START_TIMEOUT * 2,
+        ));
+    }
+
+    #[test]
+    fn rescan_generation_reads_fail_instead_of_becoming_empty() {
+        let db = tmp("scan-generation-errors");
+        let store = Store::create_fresh(&db).unwrap();
+        assert_eq!(read_scan_generation(&store).unwrap(), None);
+        store.set_meta("scan_generation", "").unwrap();
+        assert!(read_scan_generation(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("is empty"));
+        store.conn.execute_batch("DROP TABLE meta").unwrap();
+        assert!(read_scan_generation(&store).is_err());
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
     }
 
     #[test]
@@ -1292,6 +1749,9 @@ mod tests {
         let mut store = Store::open_rw(&db).unwrap();
         let opts = scan::ScanOptions {
             progress: false,
+            // Rust tests use TMPDIR on tmpfs; scan this fixture tree rather than
+            // treating its nested directories as pseudo-filesystem mounts.
+            include_pseudo: true,
             ..Default::default()
         };
         let stats = scan::scan(&mut store, &dir, &opts).unwrap();

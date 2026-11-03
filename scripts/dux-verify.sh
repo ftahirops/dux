@@ -2,7 +2,7 @@
 #
 # dux-verify.sh — independent integrity & correctness audit for the dux index.
 #
-# Verifies the dux SQLite index (schema v4: inodes + dirents) from every angle:
+# Verifies the dux SQLite index's inode/dirent core from every angle:
 #   * DB integrity (sqlite PRAGMA checks)
 #   * structural integrity (no orphans, no duplicate PATHS, leaf math, no
 #     negative totals, no unaddressed dirty state)
@@ -24,7 +24,6 @@ set -uo pipefail
 DB="${DUX_DB:-/var/lib/dux/dux.db}"
 DUX="${DUX_BIN:-/usr/bin/dux}"
 ROOT="${DUX_ROOT:-/}"
-LOGDIR="${DUX_LOGDIR:-/var/log/dux}"
 SAMPLE="${DUX_SAMPLE:-200}"        # files sampled per existence/du check
 TOL_PCT="${DUX_TOL_PCT:-2}"        # tolerance for ground-truth (live FS) checks
 SQLITE="$(command -v sqlite3 || true)"
@@ -39,7 +38,10 @@ warn(){ WARN=$((WARN+1)); printf '  %sWARN%s %s\n' "$YEL" "$RST" "$*"; }
 fail(){ FAIL=$((FAIL+1)); printf '  %sFAIL%s %s\n' "$RED" "$RST" "$*"; }
 hdr(){ printf '\n%s== %s ==%s\n' "$CYN" "$*" "$RST"; }
 
-q() { sudo sqlite3 -noheader -batch "$DB" "$1" 2>/dev/null; }
+# Audit and selftest queries must never recover, create sidecars for, or modify
+# the inspected index. The selftest's separate temporary scan DB is queried
+# directly below because it is disposable test output.
+q() { sudo sqlite3 -readonly -noheader -batch "$DB" "$1" 2>/dev/null; }
 
 # abs/pct diff helpers (integer math; values can be huge so use awk)
 within_tol() { # $1 actual $2 expected $3 tol_pct -> 0 if within
@@ -85,12 +87,18 @@ grade_zero() { # $1 count  $2 total  $3 message
 }
 
 # Mountpoints at/under $1 on real filesystems (the same set dux indexes).
+is_unwatched_fstype() {
+  case "$1" in
+    proc|sysfs|cgroup|cgroup2|devpts|devtmpfs|tmpfs|debugfs|tracefs|securityfs|bpf|mqueue|pstore|binfmt_misc|fusectl|configfs|nsfs|hugetlbfs|ramfs|autofs|rpc_pipefs|selinuxfs|overlay|fuse|fuse.*)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 real_mounts() {
   local root="$1"
   findmnt -rno TARGET,FSTYPE 2>/dev/null | while read -r tgt fstype; do
-    case "$fstype" in
-      proc|sysfs|cgroup|cgroup2|devpts|debugfs|tracefs|securityfs|bpf|mqueue|pstore|binfmt_misc|configfs|fusectl|autofs|nsfs) continue ;;
-    esac
+    is_unwatched_fstype "$fstype" && continue
     if [ "$root" = "/" ] || [ "$tgt" = "$root" ] || case "$tgt" in "$root"/*) true ;; *) false ;; esac; then
       printf '%s\n' "$tgt"
     fi
@@ -115,12 +123,20 @@ audit() {
 
   hdr "1. SQLite integrity"
   local ic; ic="$(q "PRAGMA integrity_check")"
-  [ "$ic" = "ok" ] && pass "integrity_check = ok" || fail "integrity_check: $ic"
+  if [ "$ic" = "ok" ]; then pass "integrity_check = ok"
+  else fail "integrity_check: $ic"; fi
   local qc; qc="$(q "PRAGMA quick_check")"
-  [ "$qc" = "ok" ] && pass "quick_check = ok" || fail "quick_check: $qc"
+  if [ "$qc" = "ok" ]; then pass "quick_check = ok"
+  else fail "quick_check: $qc"; fi
   say "  ${DIM}note: PRAGMA checks validate DB pages, NOT the filesystem-tree invariants below.${RST}"
 
-  hdr "2. Schema (v4: inodes + dirents)"
+  local schema_ver; schema_ver="$(q "SELECT value FROM meta WHERE key='schema_version'")"
+  hdr "2. Schema (reported version: ${schema_ver:-unknown}; inode/dirent core)"
+  if [[ "$schema_ver" =~ ^[0-9]+$ ]]; then
+    pass "schema_version metadata = $schema_ver"
+  else
+    fail "schema_version metadata is missing or invalid"
+  fi
   for col in dev_id inode kind blocks recursive_bytes recursive_inodes uid mtime; do
     if q "SELECT $col FROM inodes LIMIT 1" >/dev/null 2>&1; then pass "column inodes.$col present"
     else fail "column inodes.$col MISSING"; fi
@@ -137,7 +153,8 @@ audit() {
   # inodes at one (parent,name). UNIQUE(parent_dev,parent_inode,name) forbids it,
   # so a nonzero here means schema corruption.
   local duppath; duppath="$(q "SELECT count(*) FROM (SELECT parent_dev,parent_inode,name,count(*) c FROM dirents GROUP BY parent_dev,parent_inode,name HAVING c>1)")"
-  [ "${duppath:-0}" = "0" ] && pass "no duplicate (parent,name) paths" || fail "$duppath duplicate paths (two inodes at one name)"
+  if [ "${duppath:-0}" = "0" ]; then pass "no duplicate (parent,name) paths"
+  else fail "$duppath duplicate paths (two inodes at one name)"; fi
 
   # orphans: a non-root dirent whose parent inode is absent (briefly possible
   # between a file's flush and its parent dir's flush while the daemon is live)
@@ -152,12 +169,14 @@ audit() {
 
   # negative totals are ALWAYS corruption (drift drove an ancestor below zero)
   local neg; neg="$(q "SELECT count(*) FROM inodes WHERE recursive_bytes<0 OR recursive_inodes<0")"
-  [ "${neg:-0}" = "0" ] && pass "no negative recursive totals" || fail "$neg inodes with negative totals (drift)"
+  if [ "${neg:-0}" = "0" ]; then pass "no negative recursive totals"
+  else fail "$neg inodes with negative totals (drift)"; fi
 
   # a dirty index has KNOWN missed events (fanotify overflow / partial watch) —
   # it is not trustworthy until rescanned, regardless of the checks above.
   local dirty; dirty="$(q "SELECT value FROM meta WHERE key='dirty_since'")"
-  [ -z "$dirty" ] && pass "index not marked dirty" || fail "index DIRTY since $dirty — missed events; rescan needed"
+  if [ -z "$dirty" ]; then pass "index not marked dirty"
+  else fail "index DIRTY since $dirty — missed events; rescan needed"; fi
 
   hdr "4. EXACT internal totals (stored vs recomputed from the tables)"
   # inodes holds one row per inode (hardlinks collapsed), so the root's stored
@@ -241,8 +260,9 @@ audit() {
     [ -z "$f" ] && continue
     dchk=$((dchk+1))
     local di; di="$(stat -c '%d %i' "$f" 2>/dev/null)" || continue
-    set -- $di
-    local hit; hit="$(q "SELECT 1 FROM inodes WHERE dev_id=$1 AND inode=$2 LIMIT 1")"
+    local d ino
+    read -r d ino <<<"$di"
+    local hit; hit="$(q "SELECT 1 FROM inodes WHERE dev_id=$d AND inode=$ino LIMIT 1")"
     [ "$hit" = "1" ] || miss=$((miss+1))
   done < <(sudo find "$scan_root" -xdev -type f 2>/dev/null | shuf -n "$SAMPLE" 2>/dev/null)
   if [ "$miss" = "0" ]; then pass "all $dchk sampled on-disk files are present in the index"
@@ -356,7 +376,7 @@ selftest() {
 }
 
 node_exists_name() { q "SELECT count(*) FROM dirents WHERE name=CAST('$1' AS BLOB)"; }
-dir_recursive() { local di; di="$(stat -c '%d %i' "$1")"; set -- $di; q "SELECT recursive_bytes FROM inodes WHERE dev_id=$1 AND inode=$2"; }
+dir_recursive() { local di d ino; di="$(stat -c '%d %i' "$1")"; read -r d ino <<<"$di"; q "SELECT recursive_bytes FROM inodes WHERE dev_id=$d AND inode=$ino"; }
 
 # poll the index until COND is true (handles daemon lag on busy systems)
 poll_until() {
@@ -371,7 +391,7 @@ poll_until() {
 # assert dux's recursive_bytes for dir == expected du bytes, polling for lag
 expect_dir_blocks() {
   local dir="$1" exp="$2" label="$3" i=0 got
-  local di; di="$(stat -c '%d %i' "$dir")"; set -- $di; local d=$1 ino=$2
+  local di d ino; di="$(stat -c '%d %i' "$dir")"; read -r d ino <<<"$di"
   while [ $i -lt 30 ]; do
     got="$(q "SELECT recursive_bytes FROM inodes WHERE dev_id=$d AND inode=$ino")"
     [ "$got" = "$exp" ] && { pass "$label: dux total == du ($(human "$exp")) after ${i}s"; return 0; }
@@ -381,13 +401,30 @@ expect_dir_blocks() {
 }
 
 # ---------------------------------------------------------------------------
+cron_entry() {
+  local reconcile=${DUX_RECONCILE:-0}
+  case "$reconcile" in
+    0|1) ;;
+    *) echo "DUX_RECONCILE must be 0 or 1" >&2; return 2 ;;
+  esac
+  printf '0 */3 * * * root DUX_RECONCILE=%s /usr/local/sbin/dux-verify audit 2>&1 | /usr/bin/logger -t dux-verify\n' "$reconcile"
+}
+
 install_cron() {
+  local line
+  line="$(cron_entry)" || return $?
   local self; self="$(readlink -f "$0")"
-  mkdir -p "$LOGDIR" 2>/dev/null || sudo mkdir -p "$LOGDIR"
-  local line="0 */3 * * * root $self audit >> $LOGDIR/verify.log 2>&1"
-  echo "$line" | sudo tee /etc/cron.d/dux-verify >/dev/null
+  local installed=/usr/local/sbin/dux-verify
+  if sudo test -L "$installed"; then
+    echo "refusing symlinked cron verifier path: $installed" >&2
+    return 1
+  fi
+  sudo install -o root -g root -m 0755 -- "$self" "$installed"
+  # Do not interpolate caller-controlled paths or variables into a root cron
+  # command. Install an immutable root-owned copy and send output to syslog.
+  printf '%s\n' "$line" | sudo tee /etc/cron.d/dux-verify >/dev/null
   echo "installed: $line"
-  echo "logs -> $LOGDIR/verify.log"
+  echo "logs -> syslog/journal (tag dux-verify)"
 }
 
 summary() {
@@ -401,9 +438,11 @@ summary() {
   else echo "  ${GRN}RESULT: all checks passed (structural exact; ground-truth sampled)${RST}"; exit 0; fi
 }
 
-case "${1:-audit}" in
-  audit) audit ;;
-  selftest) selftest ;;
-  install-cron) install_cron ;;
-  *) echo "usage: $0 {audit|selftest|install-cron}"; exit 2 ;;
-esac
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-audit}" in
+    audit) audit ;;
+    selftest) selftest ;;
+    install-cron) install_cron ;;
+    *) echo "usage: $0 {audit|selftest|install-cron}"; exit 2 ;;
+  esac
+fi

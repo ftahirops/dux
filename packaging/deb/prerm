@@ -2,10 +2,10 @@
 set -e
 
 case "$1" in
-    remove|deconfigure|upgrade)
+    remove|deconfigure)
         if [ -d /run/systemd/system ]; then
-            systemctl stop dux.service || true
-            systemctl disable dux.service || true
+            systemctl stop dux.service dux-tunnel.service || true
+            systemctl disable dux.service dux-tunnel.service || true
         fi
         ;;
 esac

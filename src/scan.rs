@@ -23,6 +23,34 @@ pub struct ScanOptions {
     /// Cap walker threads. None = auto (all cores, capped 16; or cores/4 under
     /// low_priority so a production box keeps headroom). Some(n) forces n.
     pub jobs: Option<usize>,
+    /// Cooperative cancellation for background rebuilds when the host enters
+    /// critical pressure. The old live index remains installed on cancellation.
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
+#[derive(Debug)]
+pub struct ScanCancelled;
+
+impl std::fmt::Display for ScanCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("scan cancelled by host pressure guard")
+    }
+}
+
+impl std::error::Error for ScanCancelled {}
+
+fn cancellation_requested(cancel: &Option<Arc<AtomicBool>>) -> bool {
+    cancel
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::Relaxed))
+}
+
+fn ensure_not_cancelled(cancel: &Option<Arc<AtomicBool>>) -> Result<()> {
+    if cancellation_requested(cancel) {
+        Err(ScanCancelled.into())
+    } else {
+        Ok(())
+    }
 }
 
 /// Resolve the walker thread count from options + host. Fewer threads = less CPU
@@ -42,13 +70,44 @@ fn scan_threads(opts: &ScanOptions) -> usize {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DirectoryAncestor {
+    identity: (i64, i64),
+    parent: Option<Arc<DirectoryAncestor>>,
+}
+
+fn extend_ancestors(
+    ancestors: &Option<Arc<DirectoryAncestor>>,
+    identity: (i64, i64),
+) -> Option<Arc<DirectoryAncestor>> {
+    Some(Arc::new(DirectoryAncestor {
+        identity,
+        parent: ancestors.clone(),
+    }))
+}
+
+fn has_ancestor(ancestors: &Option<Arc<DirectoryAncestor>>, identity: (i64, i64)) -> bool {
+    let mut current = ancestors.as_deref();
+    while let Some(ancestor) = current {
+        if ancestor.identity == identity {
+            return true;
+        }
+        current = ancestor.parent.as_deref();
+    }
+    false
+}
+
 /// True if `path` sits on a virtual/pseudo filesystem whose "sizes" are not real
 /// disk usage (/proc, /sys, cgroup, devpts, …). /proc/kcore reports the entire
 /// address space — counting it is meaningless. Shared with the daemon so both
 /// cover exactly the same set of filesystems.
 pub(crate) fn is_pseudo_fs(path: &Path) -> bool {
+    is_pseudo_magic(fs_magic(path))
+}
+
+fn is_pseudo_magic(magic: Option<u64>) -> bool {
     matches!(
-        fs_magic(path),
+        magic,
         Some(
             0x9fa0       // PROC
             | 0x62656572 // SYSFS
@@ -71,6 +130,8 @@ pub(crate) fn is_pseudo_fs(path: &Path) -> bool {
             | 0x858458f6 // RAMFS
             | 0x01021994 // TMPFS
             | 0x0187 // AUTOFS
+            | 0x67596969 // RPC_PIPEFS
+            | 0xf97cff8c // SELINUXFS
         )
     )
 }
@@ -103,47 +164,207 @@ fn fs_magic(path: &Path) -> Option<u64> {
 pub struct ScanStats {
     pub files: u64,
     pub dirs: u64,
+    pub staged_path_instances: u64,
+    pub staged_directory_alias_paths: u64,
+    pub staged_root_visible_bytes: i64,
+    pub staged_root_visible_entries: u64,
+    pub staged_root_unique_bytes: i64,
+    pub staged_root_unique_inodes: u64,
     pub bytes: i64,
+    /// Total coverage issues. Nonzero prevents a scan from claiming exactness.
     pub errors: u64,
+    pub unreadable_entries: u64,
+    pub repeated_directory_identities: u64,
+    pub cycle_paths: u64,
+    pub conflicting_inode_edges: u64,
+    pub conflicting_inode_allocations: u64,
+    pub conflicting_inode_incarnations: u64,
+    pub unknown_repeated_inode_identities: u64,
 }
 
-/// Atomic full rebuild: scan `root` into a brand-new index next to `db`, then
-/// replace `db` in a single rename. Guarantees a fragmentation-free file and
-/// never leaves a half-built or empty index in place (callers: `dux scan` and
-/// the daemon's self-heal when the on-disk schema is incompatible/missing).
+/// Atomic full rebuild: scan beside `db`, then install through a SQLite backup
+/// transaction for existing indexes or a rename for first installation. Readers
+/// retain complete snapshots; failed installation leaves the previous database
+/// intact (callers hold the exclusive writer lock).
 pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+    ensure_not_cancelled(&opts.cancel)?;
+    // Inspect directory entries without following them before SQLite opens the
+    // source. A dangling main-database symlink is an existing install target;
+    // sidecar symlinks are rejected by Store's artifact check.
+    Store::has_index_artifacts(db)?;
+    // Unknown/future/corrupt sources must not silently lose committed history.
+    // A first installation has no source; known v4/v5/v6 upgrades preserve it.
+    let previous = if Store::has_recoverable_database_state(db)? {
+        Some(
+            Store::open_rebuild_source(db)
+                .context("validating previous index and growth history")?,
+        )
+    } else {
+        None
+    };
     let mut new_os = db.to_path_buf().into_os_string();
     new_os.push(".new");
     let db_new = PathBuf::from(new_os);
-    cleanup_stale_scan_files(&db_new);
+    cleanup_stale_scan_files(&db_new)?;
     for suf in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suf}", db_new.display()));
     }
+    struct StagingIndexGuard(PathBuf);
+    impl Drop for StagingIndexGuard {
+        fn drop(&mut self) {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                let _ = std::fs::remove_file(format!("{}{suffix}", self.0.display()));
+            }
+        }
+    }
+    let _staging_index_guard = StagingIndexGuard(db_new.clone());
     let stats = {
         let mut store = Store::create_fresh(&db_new)?;
+        // This database is private staging state: no reader can observe it, and
+        // the previous live database remains untouched until atomic install.
+        // Avoid generating a database-sized WAL for the bulk transaction. The
+        // completed file is returned to WAL/FULL mode and fsynced before install,
+        // so a crash during this build only discards `.new` and cannot corrupt
+        // the active index.
+        let journal_mode: String = store
+            .conn
+            .query_row("PRAGMA journal_mode=OFF", [], |row| row.get(0))?;
+        anyhow::ensure!(
+            journal_mode.eq_ignore_ascii_case("off"),
+            "could not disable journaling for private rebuild database"
+        );
+        store.conn.execute_batch("PRAGMA synchronous=OFF;")?;
         let s = scan(&mut store, root, opts)?;
-        // drain the WAL so the file is self-contained before the swap
+        if let Some(cancel) = opts.cancel.as_ref() {
+            let cancel = Arc::clone(cancel);
+            store
+                .conn
+                .progress_handler(10_000, Some(move || cancel.load(Ordering::Relaxed)))?;
+        }
+        ensure_not_cancelled(&opts.cancel)?;
+        // A full filesystem baseline repairs current state; it must not erase
+        // the independent history used by growth reports and alert windows.
+        // The daemon pauses index writes while rebuilding, so this is a stable
+        // source. Never mix histories from a different indexed root/schema.
+        if let Some(previous) = previous.as_ref() {
+            if crate::store::indexed_root_path(&previous.conn)?
+                == crate::store::indexed_root_path(&store.conn)?
+            {
+                store.conn.execute(
+                    "ATTACH DATABASE ?1 AS previous",
+                    params![db.to_str().context("index path is not UTF-8")?],
+                )?;
+                let copied = (|| -> Result<()> {
+                    let tx = store.conn.transaction()?;
+                    if previous.schema_version >= 6 {
+                        tx.execute_batch("INSERT INTO main.growth(bucket,dev_id,inode,birth_ns,delta) SELECT bucket,dev_id,inode,birth_ns,delta FROM previous.growth;")?;
+                    } else {
+                        // Pre-v6 bucket rows do not identify an inode incarnation.
+                        // Keep them for forensic retention but label them unknown
+                        // so growth_current cannot claim them for today's inode.
+                        tx.execute_batch("INSERT INTO main.growth(bucket,dev_id,inode,birth_ns,delta) SELECT bucket,dev_id,inode,0,delta FROM previous.growth;")?;
+                    }
+                    let bucket = now_secs() / crate::store::GROWTH_BUCKET_SECS;
+                    // Record net allocation observed by the new baseline. Without
+                    // this, a write already seen by the scanner would produce a
+                    // zero replay delta and disappear from growth history.
+                    if previous.schema_version >= 5 {
+                        tx.execute(
+                            "INSERT INTO main.growth(bucket,dev_id,inode,birth_ns,delta)
+                             SELECT ?1,n.dev_id,n.inode,n.birth_ns,n.blocks-COALESCE(p.blocks,0)
+                             FROM main.inodes n LEFT JOIN previous.inodes p
+                               ON p.dev_id=n.dev_id AND p.inode=n.inode AND p.birth_ns=n.birth_ns
+                             WHERE n.birth_ns!=0 AND n.blocks!=COALESCE(p.blocks,0)
+                             ON CONFLICT(bucket,dev_id,inode,birth_ns) DO UPDATE SET delta=delta+excluded.delta",
+                            params![bucket])?;
+                        tx.execute(
+                            "INSERT INTO main.growth(bucket,dev_id,inode,birth_ns,delta)
+                             SELECT ?1,p.dev_id,p.inode,p.birth_ns,-p.blocks FROM previous.inodes p
+                             WHERE p.birth_ns!=0 AND p.blocks!=0 AND NOT EXISTS(
+                               SELECT 1 FROM main.inodes n WHERE n.dev_id=p.dev_id AND n.inode=p.inode AND n.birth_ns=p.birth_ns)
+                             ON CONFLICT(bucket,dev_id,inode,birth_ns) DO UPDATE SET delta=delta+excluded.delta",
+                            params![bucket])?;
+                    }
+                    tx.commit()?;
+                    Ok(())
+                })();
+                store.conn.execute_batch("DETACH DATABASE previous;")?;
+                copied.context("preserving growth history during reconciliation")?;
+            }
+        }
+        ensure_not_cancelled(&opts.cancel)?;
+        // Restore the normal durable mode before the completed file is closed
+        // and fsynced. The old database remains the recovery point until then.
+        let journal_mode: String = store
+            .conn
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
+        anyhow::ensure!(
+            journal_mode.eq_ignore_ascii_case("wal"),
+            "could not restore WAL mode for rebuilt index"
+        );
         store
             .conn
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-            .ok();
+            .execute_batch("PRAGMA synchronous=FULL; PRAGMA wal_checkpoint(TRUNCATE);")?;
+        ensure_not_cancelled(&opts.cancel)?;
         s
     }; // store dropped here -> connection closed, -wal/-shm removed
        // fsync the finished file before the rename: the rename is namespace-atomic
        // but a crash could otherwise expose a rename to not-yet-durable contents.
-    if let Ok(f) = std::fs::File::open(&db_new) {
-        let _ = f.sync_all();
+    crate::fault::checkpoint("scan.build_complete");
+    crate::fault::fail_scan("scan.build_complete")?;
+    std::fs::File::open(&db_new)?
+        .sync_all()
+        .context("sync rebuilt index")?;
+    // Once installation starts, finish its atomic transaction even if pressure
+    // changes; cancellation before this point leaves the old index untouched.
+    ensure_not_cancelled(&opts.cancel)?;
+    if Store::has_index_artifacts(db)? {
+        // Never unlink WAL/SHM underneath readers. SQLite's online backup API
+        // installs the rebuilt pages in ONE destination transaction; existing
+        // WAL readers keep their snapshot, new readers see the committed rebuild.
+        let source =
+            Connection::open_with_flags(&db_new, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut target = Connection::open(db)?;
+        target.busy_timeout(Duration::from_secs(1))?;
+        target.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
+        {
+            let backup = rusqlite::backup::Backup::new(&source, &mut target)?;
+            crate::fault::checkpoint("scan.install_started");
+            let mut blocked_since = None;
+            loop {
+                match backup.step(crate::fault::backup_step_pages())? {
+                    rusqlite::backup::StepResult::Done => break,
+                    rusqlite::backup::StepResult::More => {
+                        crate::fault::checkpoint("scan.install_midway");
+                        blocked_since = None;
+                    }
+                    rusqlite::backup::StepResult::Busy | rusqlite::backup::StepResult::Locked => {
+                        let start = blocked_since.get_or_insert_with(Instant::now);
+                        anyhow::ensure!(
+                            start.elapsed() < Duration::from_secs(30),
+                            "index replacement remained locked for 30s"
+                        );
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    _ => anyhow::bail!("unexpected SQLite backup result"),
+                }
+                crate::util::refresh_owned_heartbeat(db);
+            }
+        }
+        crate::fault::checkpoint("scan.install_committed");
+        let _ = target.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+        drop(target);
+        drop(source);
+        std::fs::remove_file(&db_new)?;
+    } else {
+        std::fs::rename(&db_new, db)
+            .with_context(|| format!("installing new index at {}", db.display()))?;
     }
-    for suf in ["-wal", "-shm"] {
-        let _ = std::fs::remove_file(format!("{}{suf}", db.display()));
-    }
-    std::fs::rename(&db_new, db)
-        .with_context(|| format!("installing new index at {}", db.display()))?;
     // fsync the parent directory so the rename itself survives a crash.
     if let Some(parent) = db.parent() {
-        if let Ok(d) = std::fs::File::open(parent) {
-            let _ = d.sync_all();
-        }
+        std::fs::File::open(parent)?
+            .sync_all()
+            .context("sync index directory")?;
     }
     Ok(stats)
 }
@@ -151,33 +372,101 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
 /// A SIGKILL/power loss cannot run StageGuard. The exclusive DB lock guarantees
 /// no other rebuild is active, so remove only staging files for this exact
 /// destination before starting the next atomic rebuild.
-fn cleanup_stale_scan_files(db_new: &Path) {
+fn cleanup_stale_scan_files(db_new: &Path) -> Result<()> {
     let Some(parent) = db_new.parent() else {
-        return;
+        anyhow::bail!("staging database path has no parent directory");
     };
-    let Some(base) = db_new.file_name().map(|s| s.to_string_lossy().into_owned()) else {
-        return;
-    };
+    let base = db_new
+        .file_name()
+        .context("staging database path has no filename")?
+        .to_string_lossy();
     let prefix = format!("{base}.scan-");
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return;
+    let entries = match std::fs::read_dir(parent) {
+        Ok(entries) => entries,
+        // A not-yet-created custom DB parent cannot contain stale staging files;
+        // the normal store creation path will create it when needed.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("listing scan staging directory {}", parent.display()));
+        }
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!("reading scan staging directory entry {}", parent.display())
+        })?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&prefix)
-            && (name.ends_with(".tmp")
-                || name.ends_with(".tmp-journal")
-                || name.ends_with(".tmp-wal")
-                || name.ends_with(".tmp-shm"))
+        if !is_stale_scan_artifact_name(&name, &prefix) {
+            continue;
+        }
+        // Never remove a directory, symlink, or special file that happens to
+        // occupy the reserved internal filename pattern.
+        if !entry
+            .file_type()
+            .with_context(|| format!("checking scan staging entry {}", entry.path().display()))?
+            .is_file()
         {
-            let _ = std::fs::remove_file(entry.path());
+            continue;
+        }
+        match std::fs::remove_file(entry.path()) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "removing stale scan staging file {}",
+                        entry.path().display()
+                    )
+                });
+            }
         }
     }
+    Ok(())
+}
+
+fn is_stale_scan_artifact_name(name: &str, prefix: &str) -> bool {
+    let Some(rest) = name.strip_prefix(prefix) else {
+        return false;
+    };
+    let stem = [".tmp-journal", ".tmp-wal", ".tmp-shm", ".tmp"]
+        .iter()
+        .find_map(|suffix| rest.strip_suffix(suffix));
+    let Some(stem) = stem else {
+        return false;
+    };
+    let Some((pid, nonce)) = stem.split_once('-') else {
+        return false;
+    };
+    !pid.is_empty()
+        && !nonce.is_empty()
+        && pid.bytes().all(|byte| byte.is_ascii_digit())
+        && nonce.bytes().all(|byte| byte.is_ascii_digit())
+        && pid.parse::<u32>().is_ok_and(|value| value > 0)
+        && nonce.parse::<u128>().is_ok_and(|value| value > 0)
 }
 
 /// Full scan of `root` into the index. Computes recursive directory totals
 /// bottom-up in a single transaction (batched inserts — never row-at-a-time IO).
 pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+    if let Some(cancel) = opts.cancel.as_ref() {
+        let cancel = Arc::clone(cancel);
+        store
+            .conn
+            .progress_handler(10_000, Some(move || cancel.load(Ordering::Relaxed)))?;
+    }
+    let result = scan_inner(store, root, opts);
+    let cleanup = store.conn.progress_handler(0, None::<fn() -> bool>);
+    if cancellation_requested(&opts.cancel) {
+        Err(ScanCancelled.into())
+    } else {
+        let stats = result?;
+        cleanup?;
+        Ok(stats)
+    }
+}
+
+fn scan_inner(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+    ensure_not_cancelled(&opts.cancel)?;
     if opts.low_priority {
         set_low_priority();
     }
@@ -192,8 +481,15 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     if !meta.is_dir() {
         anyhow::bail!("{} is not a directory", root.display());
     }
-    let root_dev = meta.dev() as i64;
-    let root_inode = meta.ino() as i64;
+    let root_allocated = crate::util::allocated_bytes(&meta)
+        .with_context(|| format!("reading allocated size for scan root {}", root.display()))?;
+    let (root_dev, root_inode) = crate::util::indexed_identity(&meta).with_context(|| {
+        format!(
+            "reading filesystem identity for scan root {}",
+            root.display()
+        )
+    })?;
+    let (root_birth_ns, root_mount_id) = crate::util::inode_path_metadata_at(&meta, &root);
     let now = now_secs();
     let started = Instant::now();
 
@@ -204,7 +500,7 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     // ---- shared progress counters + background printer thread ----
     let n_files = Arc::new(AtomicU64::new(0));
     let n_dirs = Arc::new(AtomicU64::new(1)); // counting root
-    let n_bytes = Arc::new(AtomicI64::new((meta.blocks() as i64) * 512));
+    let n_bytes = Arc::new(AtomicI64::new(root_allocated));
     let done = Arc::new(AtomicBool::new(false));
     let indexing = Arc::new(AtomicBool::new(false));
     // RAII guard: signals `done` and joins the printer on EVERY exit path
@@ -226,6 +522,12 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     // The progress thread ALWAYS runs and publishes a tmpfs progress file (so a
     // background/--quiet scan is still observable via `dux status`); the stderr
     // spinner is only drawn for an interactive scan (opts.progress).
+    let progress_db: String = store.conn.query_row(
+        "SELECT file FROM pragma_database_list WHERE name='main'",
+        [],
+        |r| r.get(0),
+    )?;
+    let progress_db = PathBuf::from(progress_db.strip_suffix(".new").unwrap_or(&progress_db));
     let progress_thread = {
         let (f, d, b, dn, ix) = (
             n_files.clone(),
@@ -249,7 +551,14 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                 let indexing = ix.load(Ordering::Relaxed);
                 // publish to tmpfs ~1×/s so a concurrent `dux status` can show it
                 if last_pub.elapsed() >= Duration::from_millis(1000) {
-                    crate::util::write_scan_progress(started_epoch, fc, dc, bc, indexing);
+                    crate::util::write_scan_progress(
+                        &progress_db,
+                        started_epoch,
+                        fc,
+                        dc,
+                        bc,
+                        indexing,
+                    );
                     last_pub = Instant::now();
                 }
                 if show_stderr {
@@ -272,7 +581,7 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                 i += 1;
                 std::thread::sleep(Duration::from_millis(120));
             }
-            crate::util::clear_scan_progress(); // scan finished — remove the file
+            crate::util::clear_scan_progress(&progress_db); // scan finished — remove the file
         }))
     };
     let progress_guard = ProgressGuard {
@@ -317,47 +626,113 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
          PRAGMA temp_store=FILE;
          PRAGMA cache_size=-16384;
          CREATE TABLE scan_nodes (
+           path_id INTEGER PRIMARY KEY CHECK(path_id>0), parent_path_id INTEGER NOT NULL,
+           mount_id INTEGER,
            dev INTEGER NOT NULL, inode INTEGER NOT NULL,
            parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL,
            depth INTEGER NOT NULL, kind TEXT NOT NULL, blocks INTEGER NOT NULL,
-           uid INTEGER NOT NULL, mtime INTEGER NOT NULL, name BLOB NOT NULL
+           uid INTEGER NOT NULL, mtime INTEGER NOT NULL, name BLOB NOT NULL,
+           birth_ns INTEGER NOT NULL, cycle INTEGER NOT NULL DEFAULT 0,
+           UNIQUE(parent_path_id,name)
          );",
     )?;
+    stage.execute_batch(crate::store::PATH_GRAPH_TABLES_SQL)?;
     parallel_stage(
-        &mut stage, &root, root_dev, root_inode, &index_db, opts, &n_files, &n_dirs, &n_bytes,
+        &mut stage,
+        &root,
+        root_dev,
+        root_inode,
+        root_mount_id,
+        &index_db,
+        opts,
+        &n_files,
+        &n_dirs,
+        &n_bytes,
         &n_errors,
     )?;
     stage.execute(
         "INSERT INTO scan_nodes
-         (dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name)
-         VALUES (?1,?2,?1,?2,0,'d',?3,?4,?5,?6)",
+         (path_id,parent_path_id,mount_id,dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name,birth_ns)
+         VALUES (1,-1,?1,?2,?3,?2,?3,0,'d',?4,?5,?6,?7,?8)",
         params![
+            root_mount_id,
             root_dev,
             root_inode,
-            (meta.blocks() as i64) * 512,
+            root_allocated,
             meta.uid() as i64,
             meta.mtime(),
             root.as_os_str().as_bytes(),
+            root_birth_ns,
         ],
     )?;
 
+    stage.execute_batch(
+        "CREATE INDEX scan_nodes_target ON scan_nodes(dev,inode,parent_dev,parent_inode,name);",
+    )?;
+
+    let repeated_directory_identities = count_repeated_directory_identities(&stage)?;
+    if repeated_directory_identities > 0 {
+        tracing::error!(
+            repeated_directory_identities,
+            "multiple visible directory paths share inode identities; legacy index remains incomplete"
+        );
+    }
+    let conflicting_inode_edges = count_conflicting_inode_edges(&stage)?;
+    if conflicting_inode_edges > 0 {
+        tracing::error!(
+            conflicting_inode_edges,
+            "the same inode-parent/name edge resolved to different objects during the scan"
+        );
+    }
+    let conflicting_inode_allocations = count_conflicting_inode_allocations(&stage)?;
+    if conflicting_inode_allocations > 0 {
+        tracing::error!(
+            conflicting_inode_allocations,
+            "the same inode had different allocated sizes during the scan"
+        );
+    }
+    let conflicting_inode_incarnations = count_conflicting_inode_incarnations(&stage)?;
+    if conflicting_inode_incarnations > 0 {
+        tracing::error!(
+            conflicting_inode_incarnations,
+            "inode numbers were observed with different birth-time incarnations during the scan"
+        );
+    }
+    let unknown_repeated_inode_identities = count_unknown_repeated_inode_identities(&stage)?;
+    if unknown_repeated_inode_identities > 0 {
+        tracing::error!(
+            unknown_repeated_inode_identities,
+            "repeated inode numbers lack birth-time evidence and cannot be proven to share an incarnation"
+        );
+    }
+    let cycle_paths = count_cycle_paths(&stage)?;
+
+    validate_scan_path_stage(&stage, root_dev, root_inode)?;
+
+    let (staged_path_instances, staged_directory_alias_paths) =
+        build_and_validate_staged_path_graph(&stage)?;
+    stage.execute_batch("CREATE INDEX scan_nodes_depth ON scan_nodes(depth);")?;
+    let (
+        staged_root_visible_bytes,
+        staged_root_visible_entries,
+        staged_root_unique_bytes,
+        staged_root_unique_inodes,
+    ) = build_staged_path_totals(&mut stage)?;
+
     // ---- phase 2: deterministic hardlinks + bottom-up totals in SQLite ----
     indexing.store(true, Ordering::Relaxed);
-    stage.execute_batch(
-        "CREATE INDEX scan_nodes_target ON scan_nodes(dev,inode,parent_dev,parent_inode,name);
-         CREATE INDEX scan_nodes_depth ON scan_nodes(depth);",
-    )?;
     drop(stage);
     store.conn.execute(
         "ATTACH DATABASE ?1 AS scan",
         params![stage_path.to_string_lossy()],
     )?;
     let build_result: Result<i64> = (|| {
+        store.conn.execute_batch(V6_SCAN_PROJECTION_SQL)?;
         store.conn.execute_batch(
             "BEGIN IMMEDIATE;
              INSERT INTO inodes
-               (dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
-             SELECT dev,inode,MAX(kind),MAX(blocks),MAX(blocks),1,MAX(uid),MAX(mtime)
+               (dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns)
+             SELECT dev,inode,MAX(kind),MAX(blocks),MAX(blocks),1,MAX(uid),MAX(mtime),MAX(birth_ns)
              FROM scan.scan_nodes GROUP BY dev,inode;
 
              INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
@@ -365,7 +740,7 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                     CASE WHEN ROW_NUMBER() OVER (
                       PARTITION BY dev,inode ORDER BY parent_dev,parent_inode,name
                     )=1 THEN 1 ELSE 0 END
-             FROM scan.scan_nodes;
+             FROM scan_v6_nodes;
 
              CREATE TEMP TABLE rollup (
                dev INTEGER NOT NULL, inode INTEGER NOT NULL,
@@ -375,11 +750,12 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
              COMMIT;",
         )?;
         let max_depth: i64 = store.conn.query_row(
-            "SELECT COALESCE(MAX(depth),0) FROM scan.scan_nodes",
+            "SELECT COALESCE(MAX(depth),0) FROM scan_v6_nodes",
             [],
             |r| r.get(0),
         )?;
         for depth in (1..=max_depth).rev() {
+            ensure_not_cancelled(&opts.cancel)?;
             let tx = store.conn.transaction()?;
             tx.execute("DELETE FROM rollup", [])?;
             tx.execute(
@@ -387,7 +763,7 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
                  SELECT s.parent_dev,s.parent_inode,
                         COALESCE(SUM(CASE WHEN d.prime=1 THEN i.recursive_bytes ELSE 0 END),0),
                         COALESCE(SUM(CASE WHEN d.prime=1 THEN i.recursive_inodes ELSE 0 END),0)
-                 FROM scan.scan_nodes s
+                 FROM scan_v6_nodes s
                  JOIN dirents d ON d.parent_dev=s.parent_dev
                    AND d.parent_inode=s.parent_inode AND d.name=s.name
                  JOIN inodes i ON i.dev_id=s.dev AND i.inode=s.inode
@@ -415,9 +791,11 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
             |r| r.get(0),
         )?)
     })();
-    let _ = store
-        .conn
-        .execute_batch("DROP TABLE IF EXISTS temp.rollup; DETACH DATABASE scan;");
+    let _ = store.conn.execute_batch(
+        "DROP TABLE IF EXISTS temp.rollup;
+         DROP TABLE IF EXISTS temp.scan_v6_nodes;
+         DETACH DATABASE scan;",
+    );
     let root_total = build_result?;
     drop(stage_guard);
 
@@ -431,8 +809,26 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     let stats = ScanStats {
         files: n_files.load(Ordering::Relaxed),
         dirs: n_dirs.load(Ordering::Relaxed),
+        staged_path_instances: staged_path_instances as u64,
+        staged_directory_alias_paths: staged_directory_alias_paths as u64,
+        staged_root_visible_bytes,
+        staged_root_visible_entries: staged_root_visible_entries as u64,
+        staged_root_unique_bytes,
+        staged_root_unique_inodes: staged_root_unique_inodes as u64,
         bytes: root_total,
-        errors: n_errors.load(Ordering::Relaxed),
+        unreadable_entries: n_errors.load(Ordering::Relaxed),
+        repeated_directory_identities: repeated_directory_identities as u64,
+        cycle_paths: cycle_paths as u64,
+        conflicting_inode_edges: conflicting_inode_edges as u64,
+        conflicting_inode_allocations: conflicting_inode_allocations as u64,
+        conflicting_inode_incarnations: conflicting_inode_incarnations as u64,
+        unknown_repeated_inode_identities: unknown_repeated_inode_identities as u64,
+        errors: n_errors.load(Ordering::Relaxed)
+            + repeated_directory_identities as u64
+            + conflicting_inode_edges as u64
+            + conflicting_inode_allocations as u64
+            + conflicting_inode_incarnations as u64
+            + unknown_repeated_inode_identities as u64,
     };
 
     // stop + join the printer thread (the guard would also do this on early
@@ -443,8 +839,20 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
         std::io::stderr().flush().ok();
     }
 
+    if stats.errors > 0 {
+        store.set_meta("dirty_since", &now_secs().to_string())?;
+        store.set_meta("dirty_reason", &incomplete_scan_reason(&stats))?;
+    }
     store.set_meta("last_scan_ts", &now.to_string())?;
+    store.set_meta(
+        "scan_generation",
+        &format!("{}-{nonce}", std::process::id()),
+    )?;
     store.set_meta("last_scan_root", &root.to_string_lossy())?;
+    store.set_meta(
+        "last_scan_root_bytes",
+        &crate::store::encode_path_bytes(&root),
+    )?;
     store.set_meta("root_dev", &root_dev.to_string())?;
     store.set_meta("root_inode", &root_inode.to_string())?;
     Ok(stats)
@@ -452,6 +860,9 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
 
 /// A node in the bounded handoff between stat workers and the staging writer.
 struct RawNode {
+    path_id: i64,
+    parent_path_id: i64,
+    mount_id: Option<i64>,
     dev: i64,
     inode: i64,
     parent_dev: i64,
@@ -461,8 +872,351 @@ struct RawNode {
     blocks: i64,
     uid: i64,
     mtime: i64,
+    birth_ns: i64,
+    cycle: bool,
     name: Vec<u8>, // raw filename bytes — identity-preserving (no lossy UTF-8)
 }
+
+/// Ephemeral scan path IDs flow through jwalk's entry state. They are scoped to
+/// one private scan generation and are not published into the v6 index.
+#[derive(Debug, Default)]
+struct ScanPathState;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ScanPathInfo {
+    path_id: i64,
+    mount_id: Option<i64>,
+    /// Directory identities above this path instance, excluding itself.
+    ancestors: Option<Arc<DirectoryAncestor>>,
+}
+
+impl jwalk::ClientState for ScanPathState {
+    type ReadDirState = ScanPathInfo;
+    type DirEntryState = ScanPathInfo;
+
+    fn read_dir_state_for_entry(
+        entry_state: &Self::DirEntryState,
+        _inherited: &Self::ReadDirState,
+    ) -> Self::ReadDirState {
+        entry_state.clone()
+    }
+}
+
+fn allocate_scan_path_id(next: &AtomicI64) -> Option<i64> {
+    next.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .ok()
+}
+
+/// Verify the private walk's path-instance edges before deriving v6 inode
+/// edges. A lost parent context must fail the candidate scan, not publish
+/// apparently complete inode-keyed totals.
+fn validate_scan_path_stage(stage: &Connection, root_dev: i64, root_inode: i64) -> Result<()> {
+    let (root_rows, root_sentinels, bad_ids, bad_parents, duplicate_names, invalid_names): (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+    ) = stage.query_row(
+        "SELECT
+               (SELECT COUNT(*) FROM scan_nodes
+                 WHERE path_id=1 AND parent_path_id=-1 AND depth=0
+                   AND dev=?1 AND inode=?2 AND kind='d'),
+               (SELECT COUNT(*) FROM scan_nodes WHERE parent_path_id=-1),
+               (SELECT COUNT(*) FROM scan_nodes WHERE path_id<=0),
+               (SELECT COUNT(*) FROM scan_nodes c
+                 LEFT JOIN scan_nodes p ON p.path_id=c.parent_path_id
+                 WHERE c.path_id<>1 AND (
+                   c.parent_path_id<=0 OR c.parent_path_id>=c.path_id
+                   OR p.path_id IS NULL OR p.kind<>'d'
+                   OR p.dev<>c.parent_dev OR p.inode<>c.parent_inode)),
+               (SELECT COUNT(*) FROM (
+                  SELECT parent_path_id,name FROM scan_nodes WHERE path_id<>1
+                  GROUP BY parent_path_id,name HAVING COUNT(*)>1)),
+               (SELECT COUNT(*) FROM scan_nodes WHERE path_id<>1 AND (
+                  length(name)=0 OR instr(name,X'2f')>0 OR instr(name,X'00')>0
+                  OR name IN (X'2e',X'2e2e'))) ",
+        params![root_dev, root_inode],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        },
+    )?;
+    if root_rows != 1
+        || root_sentinels != 1
+        || bad_ids != 0
+        || bad_parents != 0
+        || duplicate_names != 0
+        || invalid_names != 0
+    {
+        anyhow::bail!(
+            "invalid scan path staging graph: root_rows={root_rows}, root_sentinels={root_sentinels}, bad_ids={bad_ids}, bad_parents={bad_parents}, duplicate_names={duplicate_names}, invalid_names={invalid_names}"
+        );
+    }
+    Ok(())
+}
+
+fn count_repeated_directory_identities(stage: &Connection) -> Result<i64> {
+    stage
+        .query_row(
+            "SELECT COUNT(*) FROM (
+               SELECT dev,inode,birth_ns FROM scan_nodes
+               WHERE kind='d' AND cycle=0
+               GROUP BY dev,inode,birth_ns HAVING COUNT(*)>1
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .context("counting directory path aliases in scan staging")
+}
+
+fn count_conflicting_inode_edges(stage: &Connection) -> Result<i64> {
+    stage
+        .query_row(
+            "SELECT COUNT(*) FROM (
+               SELECT parent_dev,parent_inode,name FROM scan_nodes
+               GROUP BY parent_dev,parent_inode,name
+               HAVING COUNT(DISTINCT dev)>1 OR COUNT(DISTINCT inode)>1
+                  OR COUNT(DISTINCT birth_ns)>1
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .context("checking inode-parent edges for scan-time identity conflicts")
+}
+
+fn count_conflicting_inode_allocations(stage: &Connection) -> Result<i64> {
+    stage
+        .query_row(
+            "SELECT COUNT(*) FROM (
+               SELECT dev,inode,birth_ns FROM scan_nodes
+               GROUP BY dev,inode,birth_ns HAVING MIN(blocks)!=MAX(blocks)
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .context("checking inode allocation stability during scan")
+}
+
+fn count_conflicting_inode_incarnations(stage: &Connection) -> Result<i64> {
+    stage
+        .query_row(
+            "SELECT COUNT(*) FROM (
+               SELECT dev,inode FROM scan_nodes
+               GROUP BY dev,inode HAVING MIN(birth_ns)!=MAX(birth_ns)
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .context("checking inode-number reuse during scan")
+}
+
+fn count_unknown_repeated_inode_identities(stage: &Connection) -> Result<i64> {
+    stage
+        .query_row(
+            "SELECT COUNT(*) FROM (
+               SELECT dev,inode FROM scan_nodes
+               GROUP BY dev,inode
+               HAVING COUNT(*)>1 AND MIN(birth_ns)=0 AND MAX(birth_ns)=0
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .context("checking repeated inode identities without birth-time evidence")
+}
+
+fn count_cycle_paths(stage: &Connection) -> Result<i64> {
+    stage
+        .query_row("SELECT COUNT(*) FROM scan_nodes WHERE cycle=1", [], |row| {
+            row.get(0)
+        })
+        .context("counting cycle-closing paths in scan staging")
+}
+
+fn build_and_validate_staged_path_graph(stage: &Connection) -> Result<(i64, i64)> {
+    stage.execute(
+        "INSERT INTO paths(path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle)
+         SELECT path_id,parent_path_id,name,dev,inode,birth_ns,kind,COALESCE(mount_id,-1),
+                CASE WHEN ROW_NUMBER() OVER (
+                  PARTITION BY dev,inode,birth_ns ORDER BY blocks DESC,path_id
+                )=1 THEN 1 ELSE 0 END,cycle
+         FROM scan_nodes",
+        [],
+    )?;
+    stage.execute_batch(crate::store::PATH_GRAPH_INDEXES_SQL)?;
+
+    let (row_mismatch, field_mismatch, root_rows, bad_prime_groups, bad_parents): (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+    ) = stage.query_row(
+        "SELECT
+           ABS((SELECT COUNT(*) FROM paths)-(SELECT COUNT(*) FROM scan_nodes)),
+           (SELECT COUNT(*) FROM paths p JOIN scan_nodes s USING(path_id)
+             WHERE p.parent_path_id!=s.parent_path_id OR p.name!=s.name
+               OR p.dev_id!=s.dev OR p.inode!=s.inode OR p.birth_ns!=s.birth_ns OR p.kind!=s.kind
+               OR p.mount_id!=COALESCE(s.mount_id,-1) OR p.cycle!=s.cycle),
+           (SELECT COUNT(*) FROM paths WHERE parent_path_id=-1 AND path_id=1),
+           (SELECT COUNT(*) FROM (
+              SELECT dev_id,inode,birth_ns FROM paths GROUP BY dev_id,inode,birth_ns
+              HAVING SUM(prime)!=1)),
+           (SELECT COUNT(*) FROM paths c
+             LEFT JOIN paths p ON p.path_id=c.parent_path_id
+             JOIN scan_nodes s ON s.path_id=c.path_id
+             WHERE c.parent_path_id!=-1 AND (
+               p.path_id IS NULL OR p.kind!='d'
+               OR p.dev_id!=s.parent_dev OR p.inode!=s.parent_inode))",
+        [],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        },
+    )?;
+    if row_mismatch != 0
+        || field_mismatch != 0
+        || root_rows != 1
+        || bad_prime_groups != 0
+        || bad_parents != 0
+    {
+        anyhow::bail!(
+            "invalid staged v7 path graph: row_mismatch={row_mismatch}, field_mismatch={field_mismatch}, root_rows={root_rows}, bad_prime_groups={bad_prime_groups}, bad_parents={bad_parents}"
+        );
+    }
+    let path_instances: i64 =
+        stage.query_row("SELECT COUNT(*) FROM paths", [], |row| row.get(0))?;
+    let directory_alias_paths: i64 = stage.query_row(
+        "SELECT COUNT(*) FROM paths p JOIN scan_nodes s USING(path_id)
+         WHERE p.kind='d' AND p.prime=0 AND s.cycle=0",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok((path_instances, directory_alias_paths))
+}
+
+fn build_staged_path_totals(stage: &mut Connection) -> Result<(i64, i64, i64, i64)> {
+    stage.execute_batch(
+        "CREATE TEMP TABLE staged_path_totals(
+           path_id INTEGER PRIMARY KEY,
+           visible_bytes INTEGER NOT NULL,
+           visible_entries INTEGER NOT NULL,
+           unique_bytes INTEGER NOT NULL,
+           unique_inodes INTEGER NOT NULL
+         );",
+    )?;
+    let max_depth: i64 =
+        stage.query_row("SELECT COALESCE(MAX(depth),0) FROM scan_nodes", [], |row| {
+            row.get(0)
+        })?;
+    for depth in (0..=max_depth).rev() {
+        let tx = stage.transaction()?;
+        tx.execute(
+            "INSERT INTO staged_path_totals
+             SELECT p.path_id,
+                    s.blocks+COALESCE(SUM(child_totals.visible_bytes),0),
+                    1+COALESCE(SUM(child_totals.visible_entries),0),
+                    CASE WHEN p.prime=1 THEN s.blocks ELSE 0 END
+                      +COALESCE(SUM(child_totals.unique_bytes),0),
+                    CASE WHEN p.prime=1 THEN 1 ELSE 0 END
+                      +COALESCE(SUM(child_totals.unique_inodes),0)
+             FROM paths p JOIN scan_nodes s USING(path_id)
+             LEFT JOIN paths child ON child.parent_path_id=p.path_id
+             LEFT JOIN staged_path_totals child_totals ON child_totals.path_id=child.path_id
+             WHERE s.depth=?1
+             GROUP BY p.path_id,s.blocks,p.prime",
+            [depth],
+        )?;
+        tx.commit()?;
+    }
+    stage.execute(
+        "INSERT INTO dir_totals(path_id,visible_bytes,visible_entries,unique_bytes,unique_inodes)
+         SELECT p.path_id,t.visible_bytes,t.visible_entries,t.unique_bytes,t.unique_inodes
+         FROM paths p JOIN staged_path_totals t USING(path_id)
+         WHERE p.kind='d'",
+        [],
+    )?;
+    let (visible_bytes, visible_entries, unique_bytes, unique_inodes): (i64, i64, i64, i64) = stage
+        .query_row(
+            "SELECT visible_bytes,visible_entries,unique_bytes,unique_inodes
+             FROM dir_totals WHERE path_id=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    let expected_visible_bytes: i64 = stage.query_row(
+        "SELECT COALESCE(SUM(blocks),0) FROM scan_nodes",
+        [],
+        |row| row.get(0),
+    )?;
+    let expected_visible_entries: i64 =
+        stage.query_row("SELECT COUNT(*) FROM scan_nodes", [], |row| row.get(0))?;
+    let expected_unique_bytes: i64 = stage.query_row(
+        "SELECT COALESCE(SUM(blocks),0) FROM (
+           SELECT dev,inode,birth_ns,MAX(blocks) AS blocks
+           FROM scan_nodes GROUP BY dev,inode,birth_ns
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    let expected_unique_inodes: i64 = stage.query_row(
+        "SELECT COUNT(*) FROM (
+           SELECT dev,inode,birth_ns FROM scan_nodes GROUP BY dev,inode,birth_ns
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    anyhow::ensure!(
+        visible_bytes == expected_visible_bytes
+            && visible_entries == expected_visible_entries
+            && unique_bytes == expected_unique_bytes
+            && unique_inodes == expected_unique_inodes,
+        "staged root totals mismatch: visible=({visible_bytes},{visible_entries}) expected=({expected_visible_bytes},{expected_visible_entries}); unique=({unique_bytes},{unique_inodes}) expected=({expected_unique_bytes},{expected_unique_inodes})"
+    );
+    Ok((visible_bytes, visible_entries, unique_bytes, unique_inodes))
+}
+
+fn incomplete_scan_reason(stats: &ScanStats) -> String {
+    format!(
+        "scan incomplete: {} unreadable entries, {} repeated directory identities ({} cycle paths), {} conflicting inode-parent edges, {} conflicting inode allocations, {} conflicting inode incarnations, {} repeated inode identities with unknown incarnation",
+        stats.unreadable_entries,
+        stats.repeated_directory_identities,
+        stats.cycle_paths,
+        stats.conflicting_inode_edges,
+        stats.conflicting_inode_allocations,
+        stats.conflicting_inode_incarnations,
+        stats.unknown_repeated_inode_identities,
+    )
+}
+
+/// Build a compatibility projection for the current inode-parent schema. The
+/// private walk keeps every path instance; v6 gets one deterministic row per
+/// parent inode/name edge and excludes cycle-closing edges.
+const V6_SCAN_PROJECTION_SQL: &str = r#"
+CREATE TEMP TABLE scan_v6_nodes AS
+SELECT * FROM scan.scan_nodes
+WHERE cycle=0 AND path_id IN (
+  SELECT path_id FROM (
+    SELECT path_id,ROW_NUMBER() OVER (
+      PARTITION BY parent_dev,parent_inode,name ORDER BY path_id
+    ) AS edge_rank
+    FROM scan.scan_nodes
+    WHERE cycle=0
+  ) WHERE edge_rank=1
+);
+CREATE INDEX temp.scan_v6_nodes_depth ON scan_v6_nodes(depth);
+"#;
 
 /// Parallel directory walk (jwalk). All per-entry stat work happens on worker
 /// threads; nodes stream back over a channel. Pseudo-fs, excludes, and (with
@@ -473,6 +1227,7 @@ fn parallel_stage(
     root: &Path,
     root_dev: i64,
     root_inode: i64,
+    root_mount_id: Option<i64>,
     index_db: &Path,
     opts: &ScanOptions,
     n_files: &Arc<AtomicU64>,
@@ -481,6 +1236,12 @@ fn parallel_stage(
     n_errors: &Arc<AtomicU64>,
 ) -> Result<()> {
     use jwalk::WalkDirGeneric;
+
+    let cancel = opts.cancel.clone();
+    if let Some(flag) = cancel.as_ref() {
+        let flag = Arc::clone(flag);
+        stage.progress_handler(10_000, Some(move || flag.load(Ordering::Relaxed)))?;
+    }
 
     // Backpressure bounds queued names/metadata even when storage is slower than
     // stat workers. The producer runs concurrently so a full channel cannot deadlock.
@@ -514,60 +1275,87 @@ fn parallel_stage(
     let nd = n_dirs.clone();
     let nb = n_bytes.clone();
     let ne = n_errors.clone();
+    let walk_errors = n_errors.clone();
 
     let threads = scan_threads(opts);
 
-    // Cycle guard: bind mounts / directory hardlinks can make a directory
-    // reachable from WITHIN its own subtree. follow_links(false) stops symlink
-    // loops but not these real path cycles — without a visited set the walk would
-    // recurse forever and exhaust memory. Track already-walked directory
-    // (dev,inode)s and prune on a repeat.
-    let visited: Arc<std::sync::Mutex<std::collections::HashSet<(i64, i64)>>> =
-        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    // Use path-specific ancestor chains to stop only actual traversal cycles.
+    // Alias subtrees still enter disk-backed scan_nodes for the v7 graph; the
+    // v6 projection deterministically collapses duplicate edges. Repeated
+    // directory identities are counted from SQLite after the walk, avoiding a
+    // per-directory in-memory alias map.
     // For the pseudo-fs check below: normally we only statfs at a mount boundary
     // (child dev != parent dev), but if the scan root is ITSELF a pseudo fs we
     // must check every subdir to preserve the "exclude pseudo contents" behavior.
     let root_pseudo = is_pseudo_fs(root);
+    let walk_cancel = cancel.clone();
+    let callback_cancel = walk_cancel.clone();
+    let next_path_id = Arc::new(AtomicI64::new(2));
+    let path_ids = Arc::clone(&next_path_id);
+    let scan_root = root.to_path_buf();
 
     std::thread::scope(|scope| -> Result<()> {
         let producer = scope.spawn(move || {
             {
-                let walk = WalkDirGeneric::<((), ())>::new(root)
+                let walk = WalkDirGeneric::<ScanPathState>::new(&scan_root)
                     .skip_hidden(false)
                     .follow_links(false)
                     .parallelism(jwalk::Parallelism::RayonNewPool(threads))
-                    .process_read_dir(move |_depth, dir_path, _state, children| {
-                        // stat the directory once to learn the parent (dev,inode); all of
-                        // these children share it. depth is the dir's depth + 1.
+                    .root_read_dir_state(ScanPathInfo {
+                        path_id: 1,
+                        mount_id: root_mount_id,
+                        ancestors: None,
+                    })
+                    .process_read_dir(move |depth, dir_path, parent_path_info, children| {
+                        if cancellation_requested(&callback_cancel) {
+                            children.clear();
+                            return;
+                        }
+                        // jwalk invokes this callback once for its synthetic root
+                        // entry, passing that entry's parent. For `/` the parent
+                        // is an empty path; processing it drops the root entry,
+                        // so the walk silently indexes nothing. The root entry is
+                        // already handled by the normal iteration below.
+                        if depth.is_none() {
+                            return;
+                        }
+                        // Stat the directory once to learn the parent (dev,inode); all of
+                        // these children share it. The parent path ID is per occurrence,
+                        // carried in jwalk state rather than reconstructed from a pathname.
+                        let parent_path_id = parent_path_info.path_id;
+                        if parent_path_id <= 0 {
+                            ne.fetch_add(1, Ordering::Relaxed);
+                            children.clear();
+                            return;
+                        }
                         let pinfo = std::fs::symlink_metadata(dir_path)
                             .ok()
-                            .map(|m| (m.dev() as i64, m.ino() as i64));
-                        // cycle guard: if this exact directory was already walked, a
-                        // bind-mount / dir-hardlink cycle is sending us back through it —
-                        // prune so the walk terminates. Only guard on a successful stat so
-                        // a stat failure doesn't collide with the root's fallback key.
-                        if let Some(id) = pinfo {
-                            // poison-tolerant: the critical section is a single HashSet
-                            // insert (can't panic), but recover the guard rather than let
-                            // one walker's panic cascade into every other walker's unwrap.
-                            // Scope the guard to just the insert so it's NOT held across the
-                            // per-directory processing below (that would serialize walkers).
-                            let already_seen = {
-                                let mut vis = visited.lock().unwrap_or_else(|e| e.into_inner());
-                                !vis.insert(id)
-                            };
-                            if already_seen {
-                                children.clear();
-                                return;
+                            .and_then(|metadata| crate::util::indexed_identity(&metadata).ok());
+                        if pinfo.is_none() {
+                            // Never attribute children to the scan root when
+                            // their real parent cannot be identified.
+                            let prior = ne.fetch_add(1, Ordering::Relaxed);
+                            if prior < 32 {
+                                tracing::warn!(path = %dir_path.display(), "could not stat directory while scanning its children");
                             }
+                            children.clear();
+                            return;
                         }
                         let (pdev, pino) = pinfo.unwrap_or((root_dev, root_inode));
+                        let child_ancestors =
+                            extend_ancestors(&parent_path_info.ancestors, (pdev, pino));
                         let cdepth = dir_path.components().count() as u32 + 1;
-                        children.retain(|res| {
+                        children.retain_mut(|res| {
+                            if cancellation_requested(&callback_cancel) {
+                                return false;
+                            }
                             let entry = match res {
                                 Ok(e) => e,
-                                Err(_) => {
-                                    ne.fetch_add(1, Ordering::Relaxed);
+                                Err(error) => {
+                                    let prior = ne.fetch_add(1, Ordering::Relaxed);
+                                    if prior < 32 {
+                                        tracing::warn!(path = %dir_path.display(), %error, "walker returned an unreadable child entry");
+                                    }
                                     return false;
                                 }
                             };
@@ -579,16 +1367,34 @@ fn parallel_stage(
                             }
                             let m = match std::fs::symlink_metadata(&path) {
                                 Ok(m) => m,
-                                Err(_) => {
-                                    ne.fetch_add(1, Ordering::Relaxed);
+                                Err(e) => {
+                                    if e.kind() != std::io::ErrorKind::NotFound {
+                                        let prior = ne.fetch_add(1, Ordering::Relaxed);
+                                        if prior < 32 {
+                                            tracing::warn!(path = %path.display(), %e, "could not stat entry during scan");
+                                        }
+                                    }
                                     return false;
                                 }
                             };
-                            let dev = m.dev() as i64;
+                            let (dev, ino) = match crate::util::indexed_identity(&m) {
+                                Ok(identity) => identity,
+                                Err(error) => {
+                                    let prior = ne.fetch_add(1, Ordering::Relaxed);
+                                    if prior < 32 {
+                                        tracing::warn!(
+                                            path = %path.display(),
+                                            %error,
+                                            "filesystem identity cannot be represented during scan"
+                                        );
+                                    }
+                                    return false;
+                                }
+                            };
+                            let is_dir = m.is_dir();
                             if one_fs && dev != root_dev {
                                 return false;
                             }
-                            let is_dir = m.is_dir();
                             // Only statfs at a MOUNT boundary (child dev != parent dev) —
                             // pseudo filesystems are always mounts, so this skips a statfs
                             // syscall on every ordinary subdir (millions on a deep tree)
@@ -602,7 +1408,20 @@ fn parallel_stage(
                                     return false;
                                 }
                             }
-                            let blocks = (m.blocks() as i64) * 512;
+                            let blocks = match crate::util::allocated_bytes(&m) {
+                                Ok(blocks) => blocks,
+                                Err(error) => {
+                                    let prior = ne.fetch_add(1, Ordering::Relaxed);
+                                    if prior < 32 {
+                                        tracing::warn!(
+                                            path = %path.display(),
+                                            %error,
+                                            "allocated size cannot be represented during scan"
+                                        );
+                                    }
+                                    return false;
+                                }
+                            };
                             let kind = if is_dir {
                                 'd'
                             } else if m.file_type().is_symlink() {
@@ -612,17 +1431,31 @@ fn parallel_stage(
                             } else {
                                 'o'
                             };
-                            let ino = m.ino() as i64;
                             // The walker also surfaces the scan root as a child of its real
                             // parent dir. Don't emit or count that duplicate (the canonical
                             // self-parented root is added separately) — but still recurse
                             // into it so the real subtree is walked.
-                            if dev == root_dev && ino == root_inode {
+                            if path == scan_root {
                                 return true;
                             }
+                            let Some(path_id) = allocate_scan_path_id(&path_ids) else {
+                                ne.fetch_add(1, Ordering::Relaxed);
+                                return false;
+                            };
+                            let (birth_ns, mount_id) =
+                                crate::util::inode_path_metadata_at(&m, &path);
+                            let is_cycle = is_dir && has_ancestor(&child_ancestors, (dev, ino));
+                            entry.client_state = ScanPathInfo {
+                                path_id,
+                                mount_id,
+                                ancestors: child_ancestors.clone(),
+                            };
                             let name = entry.file_name().as_bytes().to_vec();
                             let sent = tx
                                 .send(RawNode {
+                                    path_id,
+                                    parent_path_id,
+                                    mount_id,
                                     dev,
                                     inode: ino,
                                     parent_dev: pdev,
@@ -632,6 +1465,8 @@ fn parallel_stage(
                                     blocks,
                                     uid: m.uid() as i64,
                                     mtime: m.mtime(),
+                                    birth_ns,
+                                    cycle: is_cycle,
                                     name,
                                 })
                                 .is_ok();
@@ -646,24 +1481,56 @@ fn parallel_stage(
                             } else {
                                 nf.fetch_add(1, Ordering::Relaxed);
                             }
-                            nb.fetch_add(blocks, Ordering::Relaxed);
+                            let _ = nb.try_update(
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                                |total| Some(total.saturating_add(blocks)),
+                            );
                             // keep only directories so jwalk recurses; files already sent
-                            is_dir
+                            is_dir && !is_cycle
                         });
                     });
-                // drive the walk to completion; all work happens in the closure
-                for _ in walk {}
+                // jwalk attaches failures opening a directory to the yielded
+                // entry, outside process_read_dir. Ignoring these would label
+                // a partial index clean after EACCES or an unavailable mount.
+                for result in walk {
+                    if cancellation_requested(&walk_cancel) {
+                        break;
+                    }
+                    match result {
+                        Ok(entry) => {
+                            if let Some(ref error) = entry.read_children_error {
+                                let prior = walk_errors.fetch_add(1, Ordering::Relaxed);
+                                if prior < 32 {
+                                    tracing::warn!(path = %entry.path().display(), %error, "could not read directory during scan");
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            let prior = walk_errors.fetch_add(1, Ordering::Relaxed);
+                            if prior < 32 {
+                                tracing::warn!(%error, "filesystem walker could not read an entry");
+                            }
+                        }
+                    }
+                }
             } // walk + its tx clones dropped here -> channel closes
         });
 
         let mut batch = Vec::with_capacity(INSERT_BATCH);
         let mut write_error = None;
+        let mut cancelled = false;
         loop {
-            match rx.recv() {
+            if cancellation_requested(&cancel) {
+                cancelled = true;
+                break;
+            }
+            match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(node) => batch.push(node),
-                Err(_) => {
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                     if !batch.is_empty() {
-                        if let Err(e) = insert_stage_batch(stage, &mut batch) {
+                        if let Err(e) = insert_stage_batch(stage, &mut batch, &cancel) {
                             write_error = Some(e);
                         }
                     }
@@ -671,7 +1538,7 @@ fn parallel_stage(
                 }
             }
             if batch.len() >= INSERT_BATCH {
-                if let Err(e) = insert_stage_batch(stage, &mut batch) {
+                if let Err(e) = insert_stage_batch(stage, &mut batch, &cancel) {
                     write_error = Some(e);
                     break;
                 }
@@ -683,6 +1550,9 @@ fn parallel_stage(
         producer
             .join()
             .map_err(|_| anyhow::anyhow!("scan worker panicked"))?;
+        if cancelled || cancellation_requested(&cancel) {
+            return Err(ScanCancelled.into());
+        }
         if let Some(e) = write_error {
             return Err(e);
         }
@@ -690,16 +1560,26 @@ fn parallel_stage(
     })
 }
 
-fn insert_stage_batch(stage: &mut Connection, batch: &mut Vec<RawNode>) -> Result<()> {
+fn insert_stage_batch(
+    stage: &mut Connection,
+    batch: &mut Vec<RawNode>,
+    cancel: &Option<Arc<AtomicBool>>,
+) -> Result<()> {
     let tx = stage.transaction()?;
     {
         let mut stmt = tx.prepare(
             "INSERT INTO scan_nodes
-             (dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+             (path_id,parent_path_id,mount_id,dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name,birth_ns,cycle)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         )?;
-        for n in batch.iter() {
+        for (i, n) in batch.iter().enumerate() {
+            if i % 256 == 0 {
+                ensure_not_cancelled(cancel)?;
+            }
             stmt.execute(params![
+                n.path_id,
+                n.parent_path_id,
+                n.mount_id,
                 n.dev,
                 n.inode,
                 n.parent_dev,
@@ -710,6 +1590,8 @@ fn insert_stage_batch(stage: &mut Connection, batch: &mut Vec<RawNode>) -> Resul
                 n.uid,
                 n.mtime,
                 n.name,
+                n.birth_ns,
+                n.cycle,
             ])?;
         }
     }
@@ -737,14 +1619,570 @@ fn set_low_priority() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn stale_scan_cleanup_removes_only_generated_regular_stage_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "dux-stale-stage-cleanup-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let staging_db = dir.join("dux.db.new");
+        let stale = dir.join("dux.db.new.scan-123-456.tmp");
+        let stale_wal = dir.join("dux.db.new.scan-123-456.tmp-wal");
+        let unrelated = dir.join("dux.db.new.scan-not-a-stage.tmp");
+        let malformed = dir.join("dux.db.new.scan-123-456.backup");
+        let directory = dir.join("dux.db.new.scan-123-456.tmp-shm");
+        let symlink = dir.join("dux.db.new.scan-123-456.tmp-journal");
+        std::fs::write(&stale, b"partial stage").unwrap();
+        std::fs::write(&stale_wal, b"stale wal").unwrap();
+        std::fs::write(&unrelated, b"user data").unwrap();
+        std::fs::write(&malformed, b"user backup").unwrap();
+        std::fs::create_dir(&directory).unwrap();
+        std::os::unix::fs::symlink(&unrelated, &symlink).unwrap();
+
+        cleanup_stale_scan_files(&staging_db).unwrap();
+
+        assert!(!stale.exists());
+        assert!(!stale_wal.exists());
+        assert!(unrelated.exists());
+        assert!(malformed.exists());
+        assert!(directory.is_dir());
+        assert!(symlink.symlink_metadata().unwrap().file_type().is_symlink());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stale_scan_cleanup_allows_a_not_yet_created_database_parent() {
+        let dir = std::env::temp_dir().join(format!(
+            "dux-stale-stage-missing-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        cleanup_stale_scan_files(&dir.join("dux.db.new")).unwrap();
+    }
+
+    #[test]
+    fn stale_scan_cleanup_propagates_non_absence_directory_errors() {
+        let dir = std::env::temp_dir().join(format!(
+            "dux-stale-stage-not-directory-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let parent_file = dir.join("parent-file");
+        std::fs::write(&parent_file, b"not a directory").unwrap();
+
+        let error = cleanup_stale_scan_files(&parent_file.join("dux.db.new")).unwrap_err();
+        assert!(error.to_string().contains("listing scan staging directory"));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn staged_alias_count_uses_bounded_sqlite_state() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(kind TEXT,dev INTEGER,inode INTEGER,birth_ns INTEGER,cycle INTEGER);
+             INSERT INTO scan_nodes VALUES
+               ('d',1,1,100,0),('d',1,2,200,0),('d',1,2,200,0),('f',1,3,300,0),('f',1,3,300,0);",
+        )
+        .unwrap();
+        assert_eq!(count_repeated_directory_identities(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn staged_v7_path_graph_preserves_aliases_and_cycle_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(
+               path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,mount_id INTEGER,
+               dev INTEGER,inode INTEGER,parent_dev INTEGER,parent_inode INTEGER,
+               depth INTEGER,kind TEXT,name BLOB,blocks INTEGER,birth_ns INTEGER,cycle INTEGER
+             );
+             INSERT INTO scan_nodes VALUES
+               (1,-1,1,1,1,1,1,0,'d',X'2f',4096,1000,0),
+               (2,1,7,2,10,1,1,1,'d',X'6f726967696e616c',4096,2000,0),
+               (3,2,7,2,11,2,10,2,'d',X'6e6573746564',4096,3000,0),
+               (4,1,8,2,10,1,1,1,'d',X'616c696173',4096,2000,0),
+               (5,4,8,2,11,2,10,2,'d',X'6e6573746564',4096,3000,0),
+               (6,3,7,2,42,2,11,3,'f',X'70726f6265',8192,4000,0),
+               (7,5,8,2,42,2,11,3,'f',X'70726f6265',8192,4000,0),
+               (8,5,8,1,1,2,11,3,'d',X'6c6f6f70',4096,1000,1),
+               (9,1,8,2,42,1,1,1,'f',X'6f746865722d70726f6265',8192,5000,0);",
+        )
+        .unwrap();
+        conn.execute_batch(crate::store::PATH_GRAPH_TABLES_SQL)
+            .unwrap();
+
+        let (paths, alias_paths) = build_and_validate_staged_path_graph(&conn).unwrap();
+        assert_eq!(paths, 9);
+        assert_eq!(alias_paths, 2);
+        assert_eq!(count_repeated_directory_identities(&conn).unwrap(), 2);
+        assert_eq!(count_cycle_paths(&conn).unwrap(), 1);
+        assert_eq!(
+            conn.query_row("SELECT cycle FROM paths WHERE path_id=8", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            crate::store::path_graph_resolve(&conn, 7).unwrap().unwrap(),
+            Path::new("/alias/nested/probe")
+        );
+        let totals = build_staged_path_totals(&mut conn).unwrap();
+        assert_eq!(totals, (49_152, 9, 28_672, 5));
+        let alias_totals: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT visible_bytes,visible_entries,unique_bytes,unique_inodes
+                 FROM dir_totals WHERE path_id=4",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(alias_totals, (20_480, 4, 0, 0));
+    }
+
+    #[test]
+    fn conflicting_inode_parent_edges_fail_scan_coverage_check() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(parent_dev INTEGER,parent_inode INTEGER,name BLOB,dev INTEGER,inode INTEGER,birth_ns INTEGER);
+             INSERT INTO scan_nodes VALUES
+               (1,10,X'78',1,20,100),
+               (1,10,X'78',1,21,100),
+               (1,10,X'79',1,30,100),
+               (1,10,X'79',1,30,100);",
+        )
+        .unwrap();
+        assert_eq!(count_conflicting_inode_edges(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn scan_detects_allocation_changes_between_inode_path_instances() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(dev INTEGER,inode INTEGER,birth_ns INTEGER,blocks INTEGER);
+             INSERT INTO scan_nodes VALUES(1,10,100,4096),(1,10,100,8192),(1,11,200,4096);",
+        )
+        .unwrap();
+        assert_eq!(count_conflicting_inode_allocations(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn scan_detects_inode_number_reuse_even_when_allocations_match() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(dev INTEGER,inode INTEGER,birth_ns INTEGER,blocks INTEGER);
+             INSERT INTO scan_nodes VALUES(1,10,100,4096),(1,10,200,4096),(1,11,300,4096);",
+        )
+        .unwrap();
+        assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 1);
+        assert_eq!(count_conflicting_inode_allocations(&conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn scan_marks_repeated_inode_without_birth_time_as_uncertain() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(dev INTEGER,inode INTEGER,birth_ns INTEGER);
+             INSERT INTO scan_nodes VALUES
+               (1,10,0),(1,10,0),
+               (1,11,0),
+               (1,12,100),(1,12,100),
+               (1,13,0),(1,13,200);",
+        )
+        .unwrap();
+        assert_eq!(count_unknown_repeated_inode_identities(&conn).unwrap(), 1);
+        assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn incomplete_scan_reason_names_aliases_instead_of_calling_them_unreadable() {
+        let reason = incomplete_scan_reason(&ScanStats {
+            errors: 2,
+            repeated_directory_identities: 2,
+            conflicting_inode_incarnations: 1,
+            unknown_repeated_inode_identities: 1,
+            ..ScanStats::default()
+        });
+        assert!(reason.contains("2 repeated directory identities"));
+        assert!(reason.contains("1 conflicting inode incarnations"));
+        assert!(reason.contains("1 repeated inode identities with unknown incarnation"));
+        assert!(reason.contains("0 unreadable entries"));
+        assert!(!reason.contains("scan skipped"));
+    }
+
+    #[test]
+    fn ancestor_chain_stops_cycles_but_allows_non_ancestor_aliases() {
+        let root = extend_ancestors(&None, (1, 10));
+        let first_path_to_dir = extend_ancestors(&root, (1, 20));
+
+        assert!(has_ancestor(&first_path_to_dir, (1, 10)));
+        assert!(
+            !has_ancestor(&root, (1, 20)),
+            "a sibling alias is traversable"
+        );
+
+        let inside_first_path = extend_ancestors(&first_path_to_dir, (1, 30));
+        assert!(has_ancestor(&inside_first_path, (1, 20)));
+        assert!(has_ancestor(&inside_first_path, (1, 10)));
+        assert!(!has_ancestor(&inside_first_path, (1, 40)));
+    }
+
+    #[test]
+    fn v6_scan_projection_collapses_alias_edges_and_omits_cycle_edges() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "ATTACH DATABASE ':memory:' AS scan;
+             CREATE TABLE scan.scan_nodes(
+               path_id INTEGER PRIMARY KEY, parent_dev INTEGER, parent_inode INTEGER,
+               name BLOB, cycle INTEGER, depth INTEGER
+             );
+             INSERT INTO scan.scan_nodes VALUES
+               (1,1,1,X'2f',0,0),
+               (2,1,1,X'61',0,1),
+               (3,1,2,X'78',0,2),
+               (4,1,2,X'78',0,3),
+               (5,1,2,X'6c6f6f70',1,4);",
+        )
+        .unwrap();
+
+        conn.execute_batch(V6_SCAN_PROJECTION_SQL).unwrap();
+        let rows: Vec<(i64, Vec<u8>)> = conn
+            .prepare("SELECT path_id,name FROM scan_v6_nodes ORDER BY path_id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            rows,
+            vec![(1, b"/".to_vec()), (2, b"a".to_vec()), (3, b"x".to_vec())]
+        );
+    }
+
+    #[test]
+    fn jwalk_hands_each_directory_its_own_parallel_read_state() {
+        let root = std::env::temp_dir().join(format!(
+            "dux-jwalk-path-state-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        std::fs::create_dir_all(root.join("a/leaf")).unwrap();
+        std::fs::create_dir_all(root.join("b/leaf")).unwrap();
+        let next_id = Arc::new(AtomicI64::new(2));
+        let observed = Arc::new(std::sync::Mutex::new(std::collections::HashMap::<
+            PathBuf,
+            ScanPathInfo,
+        >::new()));
+        observed.lock().unwrap().insert(
+            root.clone(),
+            ScanPathInfo {
+                path_id: 1,
+                mount_id: Some(9),
+                ancestors: None,
+            },
+        );
+        let callback_observed = Arc::clone(&observed);
+        let callback_ids = Arc::clone(&next_id);
+        let walk = jwalk::WalkDirGeneric::<ScanPathState>::new(&root)
+            .root_read_dir_state(ScanPathInfo {
+                path_id: 1,
+                mount_id: Some(9),
+                ancestors: None,
+            })
+            .parallelism(jwalk::Parallelism::RayonNewPool(2))
+            .process_read_dir(move |depth, dir_path, read_state, children| {
+                if depth.is_none() {
+                    return;
+                }
+                assert_eq!(
+                    callback_observed.lock().unwrap().get(dir_path),
+                    Some(&*read_state),
+                    "child read state must match the path metadata assigned to this directory"
+                );
+                for entry in children
+                    .iter_mut()
+                    .filter_map(|result| result.as_mut().ok())
+                {
+                    if !entry.file_type().is_dir() {
+                        continue;
+                    }
+                    let path_id = allocate_scan_path_id(&callback_ids).unwrap();
+                    let path_info = ScanPathInfo {
+                        path_id,
+                        mount_id: Some(9),
+                        ancestors: extend_ancestors(
+                            &read_state.ancestors,
+                            (read_state.path_id, read_state.path_id),
+                        ),
+                    };
+                    entry.client_state = path_info.clone();
+                    callback_observed
+                        .lock()
+                        .unwrap()
+                        .insert(entry.path(), path_info);
+                }
+            });
+        for entry in walk {
+            entry.unwrap();
+        }
+        let observed = observed.lock().unwrap();
+        assert_eq!(observed.len(), 5, "root plus four directory instances");
+        let ids: std::collections::HashSet<_> =
+            observed.values().map(|path| path.path_id).collect();
+        assert_eq!(ids.len(), observed.len(), "each path has its own ID");
+        drop(observed);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scan_path_stage_rejects_missing_or_mismatched_parent_instances() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(
+               path_id INTEGER NOT NULL, parent_path_id INTEGER NOT NULL,
+               depth INTEGER NOT NULL, dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+               parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL, kind TEXT NOT NULL,
+               name BLOB NOT NULL
+             );
+             INSERT INTO scan_nodes VALUES(1,-1,0,1,1,1,1,'d',X'2f');
+             INSERT INTO scan_nodes VALUES(2,1,1,1,2,1,1,'d',X'61');
+             INSERT INTO scan_nodes VALUES(3,2,2,1,3,1,2,'f',X'62');",
+        )
+        .unwrap();
+        validate_scan_path_stage(&conn, 1, 1).unwrap();
+
+        conn.execute("UPDATE scan_nodes SET parent_path_id=1 WHERE path_id=3", [])
+            .unwrap();
+        let error = validate_scan_path_stage(&conn, 1, 1).unwrap_err();
+        assert!(error.to_string().contains("bad_parents=1"));
+    }
+
+    #[test]
+    fn scan_path_stage_rejects_duplicate_sibling_and_invalid_component_names() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(
+               path_id INTEGER NOT NULL, parent_path_id INTEGER NOT NULL,
+               depth INTEGER NOT NULL, dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+               parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL, kind TEXT NOT NULL,
+               name BLOB NOT NULL
+             );
+             INSERT INTO scan_nodes VALUES(1,-1,0,1,1,1,1,'d',X'2f');
+             INSERT INTO scan_nodes VALUES(2,1,1,1,2,1,1,'d',X'61');
+             INSERT INTO scan_nodes VALUES(3,1,1,1,3,1,1,'f',X'61');",
+        )
+        .unwrap();
+
+        let duplicate = validate_scan_path_stage(&conn, 1, 1).unwrap_err();
+        assert!(duplicate.to_string().contains("duplicate_names=1"));
+
+        conn.execute("UPDATE scan_nodes SET name=X'612f62' WHERE path_id=3", [])
+            .unwrap();
+        let invalid = validate_scan_path_stage(&conn, 1, 1).unwrap_err();
+        assert!(invalid.to_string().contains("invalid_names=1"));
+    }
+
+    #[test]
+    fn rpc_and_selinux_filesystems_are_pseudo_filesystems() {
+        assert!(is_pseudo_magic(Some(0x6759_6969)));
+        assert!(is_pseudo_magic(Some(0xf97c_ff8c)));
+        assert!(!is_pseudo_magic(Some(0x5846_5342))); // XFS
+    }
+
     fn tmp(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!("dux-scan-{tag}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn zero_byte_index_is_rebuilt_atomically_as_an_empty_initial_source() {
+        let db = tmp("zero-byte-index");
+        let root = tmp("zero-byte-root");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("payload"), b"baseline").unwrap();
+        fs::File::create(&db).unwrap();
+
+        assert!(Store::needs_rebuild(&db).unwrap());
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let store = Store::open_ro(&db).unwrap();
+        assert!(
+            crate::store::indexed_path(&store.conn, &root.join("payload"))
+                .unwrap()
+                .is_some()
+        );
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rebuild_refuses_zero_byte_main_with_recovery_sidecar() {
+        let db = tmp("zero-byte-main-with-wal");
+        let root = tmp("zero-byte-main-with-wal-root");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("payload"), b"baseline").unwrap();
+        fs::File::create(&db).unwrap();
+        let wal = PathBuf::from(format!("{}-wal", db.display()));
+        fs::write(&wal, b"nonempty recovery candidate").unwrap();
+
+        let error = match rebuild_atomic(&db, &root, &ScanOptions::default()) {
+            Ok(_) => panic!("rebuild must preserve an existing recovery sidecar"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("validating previous index"),
+            "{error:#}"
+        );
+        assert_eq!(fs::metadata(&db).unwrap().len(), 0);
+        let _ = fs::remove_file(&wal);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rebuild_preserves_dangling_database_symlink_on_first_install() {
+        let db = tmp("dangling-index-link");
+        let target = tmp("dangling-index-target");
+        let root = tmp("dangling-index-root");
+        rm_db(&db);
+        let _ = fs::remove_file(&target);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("payload"), b"baseline").unwrap();
+        std::os::unix::fs::symlink(&target, &db).unwrap();
+
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        assert!(fs::symlink_metadata(&db).unwrap().file_type().is_symlink());
+        assert!(target.exists());
+        let store = Store::open_ro(&db).unwrap();
+        assert!(
+            crate::store::indexed_path(&store.conn, &root.join("payload"))
+                .unwrap()
+                .is_some()
+        );
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_file(&target);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn explicit_pseudo_root_keeps_root_entries_but_prunes_nested_directories_by_default() {
+        // Use an explicit tmpfs root: temp_dir() is ext4 on some qualification
+        // guests and tmpfs on others, which made this policy test depend on the
+        // host's TMPDIR rather than the filesystem behavior under test.
+        let pseudo_root = Path::new("/dev/shm");
+        assert!(is_pseudo_fs(pseudo_root), "test requires /dev/shm tmpfs");
+        let suffix = std::process::id();
+        let root = pseudo_root.join(format!("dux-scan-pseudo-root-policy-{suffix}"));
+        let db = pseudo_root.join(format!("dux-scan-pseudo-root-policy-db-{suffix}"));
+        let _ = fs::remove_dir_all(&root);
+        rm_db(&db);
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("direct-file"), b"included at the explicit root").unwrap();
+        fs::write(root.join("nested/child-file"), b"pruned pseudo subtree").unwrap();
+
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let store = Store::open_ro(&db).unwrap();
+        assert!(crate::store::indexed_path(&store.conn, &root)
+            .unwrap()
+            .is_some());
+        assert!(
+            crate::store::indexed_path(&store.conn, &root.join("direct-file"))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            crate::store::indexed_path(&store.conn, &root.join("nested"))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            crate::store::indexed_path(&store.conn, &root.join("nested/child-file"))
+                .unwrap()
+                .is_none()
+        );
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(root);
     }
 
     fn rm_db(db: &Path) {
         for s in ["", "-wal", "-shm"] {
             let _ = fs::remove_file(format!("{}{s}", db.display()));
         }
+    }
+
+    #[test]
+    fn critical_pressure_cancels_rebuild_and_preserves_live_index() {
+        let root = tmp("cancel-root");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        for i in 0..20_000 {
+            fs::write(root.join(format!("f{i:05}")), b"fixture").unwrap();
+        }
+
+        let db = tmp("cancel-db");
+        rm_db(&db);
+        let old = Store::create_fresh(&db).unwrap();
+        old.set_meta("cancellation_fixture", "old-index-preserved")
+            .unwrap();
+        drop(old);
+        crate::util::clear_scan_progress(&db);
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_scan = Arc::clone(&cancel);
+        let progress_db = db.clone();
+        let canceller = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if crate::util::read_scan_progress_for(&progress_db).is_some() {
+                    cancel_scan.store(true, Ordering::SeqCst);
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            false
+        });
+        let opts = ScanOptions {
+            low_priority: true,
+            cancel: Some(cancel),
+            ..Default::default()
+        };
+        let result = rebuild_atomic(&db, &root, &opts);
+        assert!(
+            canceller.join().unwrap(),
+            "scan never reached active progress"
+        );
+        let error = match result {
+            Ok(_) => panic!("pressure cancellation must abort the private rebuild"),
+            Err(error) => error,
+        };
+        assert!(
+            error.downcast_ref::<ScanCancelled>().is_some(),
+            "unexpected cancellation error: {error:#}"
+        );
+        let old = Store::open_ro(&db).unwrap();
+        assert_eq!(
+            old.get_meta("cancellation_fixture").unwrap().as_deref(),
+            Some("old-index-preserved")
+        );
+        drop(old);
+        for suffix in [".new", ".new-wal", ".new-shm", ".new-journal"] {
+            assert!(
+                !PathBuf::from(format!("{}{suffix}", db.display())).exists(),
+                "cancelled staging file {suffix} must be removed"
+            );
+        }
+        crate::util::clear_scan_progress(&db);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(root);
     }
 
     fn write_file(p: &Path, kb: usize) {
@@ -767,7 +2205,13 @@ mod tests {
 
         let db = tmp("hardlink-db");
         rm_db(&db);
-        let opts = ScanOptions::default();
+        // The test harness puts fixture roots under TMPDIR on tmpfs. Opt in to
+        // that filesystem so this inode-accounting test exercises the tree,
+        // while pseudo-mount exclusion has a separate explicit-root test above.
+        let opts = ScanOptions {
+            include_pseudo: true,
+            ..Default::default()
+        };
         let stats = rebuild_atomic(&db, &root, &opts).unwrap();
 
         let store = Store::open_ro(&db).unwrap();
@@ -803,21 +2247,29 @@ mod tests {
             .unwrap();
         assert_eq!(primes, 1, "exactly one canonical link carries the blocks");
 
-        // The canonical link is the one under `aaa` (smaller name), not `zzz`.
-        let prime_name: Vec<u8> = store
+        // The canonical link is the minimum identity tuple, independent of the
+        // filesystem's inode allocation order (which need not follow path order).
+        let prime_link: (i64, i64, Vec<u8>) = store
             .conn
             .query_row(
-                "SELECT p.name FROM dirents d JOIN dirents p
-                   ON p.dev_id=d.parent_dev AND p.inode=d.parent_inode
-                 WHERE d.inode=?1 AND d.prime=1",
+                "SELECT parent_dev,parent_inode,name FROM dirents
+                 WHERE inode=?1 AND prime=1",
                 params![ino],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        let minimum_link: (i64, i64, Vec<u8>) = store
+            .conn
+            .query_row(
+                "SELECT parent_dev,parent_inode,name FROM dirents
+                 WHERE inode=?1 ORDER BY parent_dev,parent_inode,name LIMIT 1",
+                params![ino],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&prime_name),
-            "aaa",
-            "canonical link must be the min (parent,name), deterministically"
+            prime_link, minimum_link,
+            "canonical link must be the minimum (parent_dev,parent_inode,name) tuple"
         );
 
         // The shared 64K is counted once in the root total, not twice.
@@ -839,5 +2291,462 @@ mod tests {
         drop(store);
         rm_db(&db);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rebuild_preserves_existing_reader_snapshot() {
+        let dir = std::env::temp_dir().join(format!("dux-reader-{}", std::process::id()));
+        let db = dir.with_extension("db");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("old"), b"old").unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let reader = Store::open_ro(&db).unwrap();
+        reader.conn.execute_batch("BEGIN").unwrap();
+        let before: i64 = reader
+            .conn
+            .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
+            .unwrap();
+        std::fs::write(dir.join("new"), b"new").unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let during: i64 = reader
+            .conn
+            .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            before, during,
+            "an existing WAL reader keeps its complete snapshot"
+        );
+        reader.conn.execute_batch("COMMIT").unwrap();
+        let after: i64 = reader
+            .conn
+            .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            after,
+            before + 1,
+            "the same connection sees the rebuilt index after ending its snapshot"
+        );
+        assert!(reader.totals_consistent().unwrap());
+        drop(reader);
+        let _ = std::fs::remove_dir_all(dir);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+    }
+
+    #[test]
+    fn rebuilt_index_is_fsynced_in_wal_mode_without_staging_files() {
+        let dir = std::env::temp_dir().join(format!("dux-rebuild-mode-{}", std::process::id()));
+        let db = dir.with_extension("db");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("indexed"), b"durable").unwrap();
+
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let store = Store::open_ro(&db).unwrap();
+        let mode: String = store
+            .conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_ascii_lowercase(), "wal");
+        assert_eq!(
+            store
+                .conn
+                .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        drop(store);
+        let wal = PathBuf::from(format!("{}-wal", db.display()));
+        assert!(
+            !wal.exists() || fs::metadata(wal).unwrap().len() == 0,
+            "rebuilt index must not retain uncheckpointed WAL contents"
+        );
+        assert!(!PathBuf::from(format!("{}.new", db.display())).exists());
+
+        let _ = std::fs::remove_dir_all(dir);
+        rm_db(&db);
+    }
+
+    #[test]
+    fn rebuild_preserves_growth_history() {
+        let dir = std::env::temp_dir().join(format!("dux-history-{}", std::process::id()));
+        let db = dir.with_extension("db");
+        std::fs::create_dir_all(&dir).unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        {
+            let store = Store::open_rw(&db).unwrap();
+            store
+                .conn
+                .execute("INSERT INTO growth VALUES(123,1,42,0,8192)", [])
+                .unwrap();
+        }
+        std::fs::write(dir.join("during-reconcile"), vec![1; 8192]).unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let store = Store::open_ro(&db).unwrap();
+        let delta: i64 = store
+            .conn
+            .query_row(
+                "SELECT delta FROM growth WHERE bucket=123 AND dev_id=1 AND inode=42 AND birth_ns=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(delta, 8192);
+        let observed: i64 = store
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(delta),0) FROM growth WHERE bucket!=123",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            observed, 8192,
+            "new allocation observed by the baseline belongs in growth history"
+        );
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_file(db);
+    }
+
+    #[test]
+    fn rebuild_from_v5_preserves_growth_as_unknown_incarnations() {
+        let dir = tmp("v5-growth-upgrade-tree");
+        let db = tmp("v5-growth-upgrade-db");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("indexed-file"), vec![5; 8192]).unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+
+        // Convert only the growth table to the v5 layout. The inode and root
+        // metadata are preserved because v5 already had birth_ns on inodes,
+        // while its history rows did not carry an incarnation key.
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "DROP VIEW growth_current;
+                 DROP TRIGGER growth_delta_integer_insert;
+                 DROP TRIGGER growth_delta_integer_update;
+                 ALTER TABLE growth RENAME TO growth_v6;
+                 CREATE TABLE growth(
+                    bucket INTEGER NOT NULL,
+                    dev_id INTEGER NOT NULL,
+                    inode INTEGER NOT NULL,
+                    delta INTEGER NOT NULL,
+                    PRIMARY KEY(bucket,dev_id,inode)
+                 ) WITHOUT ROWID;
+                 INSERT INTO growth(bucket,dev_id,inode,delta)
+                    SELECT bucket,dev_id,inode,delta FROM growth_v6;
+                 DROP TABLE growth_v6;
+                 INSERT INTO growth(bucket,dev_id,inode,delta) VALUES(123,1,42,8192);
+                 UPDATE meta SET value='5' WHERE key='schema_version';",
+            )
+            .unwrap();
+        }
+
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let upgraded = Store::open_ro(&db).unwrap();
+        let (birth_ns, delta): (i64, i64) = upgraded
+            .conn
+            .query_row(
+                "SELECT birth_ns,delta FROM growth WHERE bucket=123 AND dev_id=1 AND inode=42",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(birth_ns, 0, "v5 history must remain unattributed");
+        assert_eq!(delta, 8192);
+        assert_eq!(
+            upgraded
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM growth_current WHERE bucket=123 AND dev_id=1 AND inode=42",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "legacy history must not be claimed by the current inode incarnation"
+        );
+        assert!(upgraded
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='growth_delta_integer_update')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+        drop(upgraded);
+        fs::remove_dir_all(dir).unwrap();
+        rm_db(&db);
+    }
+
+    #[test]
+    fn rebuild_preserves_birth_keyed_history_for_the_same_incarnation() {
+        let dir = tmp("history-birth-preserve-tree");
+        let db = tmp("history-birth-preserve-db");
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("history-target");
+        fs::write(&file, vec![8; 8192]).unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let metadata = fs::metadata(&file).unwrap();
+        let dev = metadata.dev() as i64;
+        let inode = metadata.ino() as i64;
+        let store = Store::open_rw(&db).unwrap();
+        let birth_ns: i64 = store
+            .conn
+            .query_row(
+                "SELECT birth_ns FROM inodes WHERE dev_id=?1 AND inode=?2",
+                params![dev, inode],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(birth_ns, 0, "the fixture filesystem must expose birth time");
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta) VALUES(123,?1,?2,?3,8192)",
+                params![dev, inode, birth_ns],
+            )
+            .unwrap();
+        drop(store);
+
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let upgraded = Store::open_ro(&db).unwrap();
+        let retained: i64 = upgraded
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(delta),0) FROM growth_current WHERE dev_id=?1 AND inode=?2",
+                params![dev, inode],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, 8192);
+        drop(upgraded);
+        fs::remove_dir_all(dir).unwrap();
+        rm_db(&db);
+    }
+
+    #[test]
+    fn rebuild_growth_overflow_keeps_previous_index_published() {
+        let dir = tmp("history-overflow-tree");
+        let db = tmp("history-overflow-db");
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("history-target");
+        fs::write(&file, vec![3; 4096]).unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+
+        let (dev, inode, birth_ns, old_blocks): (i64, i64, i64, i64) = {
+            let store = Store::open_rw(&db).unwrap();
+            let metadata = fs::metadata(&file).unwrap();
+            let identity = (metadata.dev() as i64, metadata.ino() as i64);
+            let row = store
+                .conn
+                .query_row(
+                    "SELECT birth_ns,blocks FROM inodes WHERE dev_id=?1 AND inode=?2",
+                    params![identity.0, identity.1],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            (identity.0, identity.1, row.0, row.1)
+        };
+        assert_ne!(birth_ns, 0, "the fixture filesystem must expose birth time");
+        let bucket = now_secs() / crate::store::GROWTH_BUCKET_SECS;
+        Store::open_rw(&db)
+            .unwrap()
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta) VALUES(?1,?2,?3,?4,?5)",
+                params![bucket, dev, inode, birth_ns, i64::MAX],
+            )
+            .unwrap();
+        fs::write(&file, vec![9; 1024 * 1024]).unwrap();
+
+        let error = match rebuild_atomic(&db, &dir, &ScanOptions::default()) {
+            Ok(_) => panic!("overflowing growth history must abort the rebuild"),
+            Err(error) => format!("{error:#}"),
+        };
+        assert!(
+            error.contains("growth delta must be an SQLite integer"),
+            "{error}"
+        );
+
+        let previous = Store::open_ro(&db).unwrap();
+        let (published_blocks, retained_delta, storage_type): (i64, i64, String) = previous
+            .conn
+            .query_row(
+                "SELECT i.blocks,g.delta,typeof(g.delta) FROM inodes i JOIN growth g
+                 ON g.dev_id=i.dev_id AND g.inode=i.inode
+                 WHERE i.dev_id=?1 AND i.inode=?2 AND g.bucket=?3 AND g.birth_ns=?4",
+                params![dev, inode, bucket, birth_ns],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            published_blocks, old_blocks,
+            "failed staging build replaced live state"
+        );
+        assert_eq!(retained_delta, i64::MAX);
+        assert_eq!(storage_type, "integer");
+        drop(previous);
+        fs::remove_dir_all(dir).unwrap();
+        rm_db(&db);
+    }
+
+    #[test]
+    fn v4_upgrade_preserves_ambiguous_history_without_attributing_it() {
+        let dir = tmp("upgrade-v4-tree");
+        let db = tmp("upgrade-v4-db");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("file"), b"retained through upgrade").unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        {
+            let previous = Store::open_rw(&db).unwrap();
+            previous
+                .conn
+                .execute_batch(
+                    "UPDATE meta SET value='4' WHERE key='schema_version';
+                 DROP VIEW temp.growth_current;
+                 DROP VIEW main.growth_current;
+                 DROP INDEX idx_growth_bucket_delta;
+                 DROP INDEX idx_growth_inode_bucket_delta;
+                 DROP TABLE growth;
+                 CREATE TABLE growth(bucket INTEGER NOT NULL,dev_id INTEGER NOT NULL,inode INTEGER NOT NULL,delta INTEGER NOT NULL,PRIMARY KEY(bucket,dev_id,inode)) WITHOUT ROWID;
+                 ALTER TABLE inodes DROP COLUMN birth_ns;
+                 INSERT INTO growth VALUES(123,1,42,8192);",
+                )
+                .unwrap();
+        }
+        assert!(Store::needs_rebuild(&db).unwrap());
+        let legacy = Store::open_ro(&db).unwrap();
+        assert_eq!(
+            legacy
+                .conn
+                .query_row("SELECT COUNT(*) FROM growth_current", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "legacy ambiguous growth is hidden until v6 migration"
+        );
+        drop(legacy);
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let upgraded = Store::open_ro(&db).unwrap();
+        assert_eq!(
+            upgraded.get_meta("schema_version").unwrap().as_deref(),
+            Some("6")
+        );
+        let history: i64 = upgraded
+            .conn
+            .query_row(
+                "SELECT delta FROM growth WHERE bucket=123 AND dev_id=1 AND inode=42 AND birth_ns=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history, 8192);
+        let attributed: i64 = upgraded.conn.query_row(
+            "SELECT COALESCE(SUM(delta),0) FROM growth_current WHERE bucket=123 AND dev_id=1 AND inode=42",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(attributed, 0, "legacy history must remain unattributed");
+        let born: i64 = upgraded
+            .conn
+            .query_row(
+                "SELECT birth_ns FROM inodes WHERE inode=?1",
+                params![fs::metadata(dir.join("file")).unwrap().ino() as i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            born,
+            crate::util::inode_birth_ns_at(
+                &fs::metadata(dir.join("file")).unwrap(),
+                &dir.join("file")
+            )
+        );
+        drop(upgraded);
+        std::fs::remove_dir_all(dir).unwrap();
+        rm_db(&db);
+    }
+
+    #[test]
+    fn v5_upgrade_keeps_legacy_history_unknown_and_tracks_current_incarnation() {
+        let dir = tmp("upgrade-v5-tree");
+        let db = tmp("upgrade-v5-db");
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("file");
+        fs::write(&file, vec![1; 4096]).unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        {
+            let previous = Store::open_rw(&db).unwrap();
+            previous.conn.execute_batch(
+                "UPDATE meta SET value='5' WHERE key='schema_version';
+                 DROP VIEW temp.growth_current;
+                 DROP VIEW main.growth_current;
+                 DROP INDEX idx_growth_bucket_delta;
+                 DROP INDEX idx_growth_inode_bucket_delta;
+                 DROP TABLE growth;
+                 CREATE TABLE growth(bucket INTEGER NOT NULL,dev_id INTEGER NOT NULL,inode INTEGER NOT NULL,delta INTEGER NOT NULL,PRIMARY KEY(bucket,dev_id,inode)) WITHOUT ROWID;
+                 INSERT INTO growth VALUES(123,1,42,8192);",
+            ).unwrap();
+        }
+        let before = fs::metadata(&file).unwrap();
+        let identity = (before.dev() as i64, before.ino() as i64);
+        let before_blocks = before.blocks() as i64 * 512;
+        fs::write(&file, vec![2; 16 * 1024 * 1024]).unwrap();
+        let after_blocks = fs::metadata(&file).unwrap().blocks() as i64 * 512;
+        assert!(
+            after_blocks > before_blocks,
+            "fixture must allocate additional blocks"
+        );
+
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let upgraded = Store::open_ro(&db).unwrap();
+        assert_eq!(upgraded.schema_version, crate::store::SCHEMA_VERSION);
+        let legacy: i64 = upgraded.conn.query_row(
+            "SELECT COALESCE(SUM(delta),0) FROM growth WHERE bucket=123 AND dev_id=1 AND inode=42 AND birth_ns=0",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(legacy, 8192);
+        let current: i64 = upgraded
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(delta),0) FROM growth_current WHERE dev_id=?1 AND inode=?2",
+                params![identity.0, identity.1],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(current, after_blocks - before_blocks);
+        drop(upgraded);
+        fs::remove_dir_all(dir).unwrap();
+        rm_db(&db);
+    }
+
+    #[test]
+    fn rebuild_refuses_future_schema_without_modifying_the_database() {
+        let dir = tmp("future-schema-tree");
+        let db = tmp("future-schema-db");
+        fs::create_dir_all(&dir).unwrap();
+        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        {
+            let source = Store::open_rw(&db).unwrap();
+            source
+                .set_meta(
+                    "schema_version",
+                    &(crate::store::SCHEMA_VERSION + 1).to_string(),
+                )
+                .unwrap();
+        }
+        let original = fs::read(&db).unwrap();
+        let error = rebuild_atomic(&db, &dir, &ScanOptions::default())
+            .err()
+            .unwrap();
+        assert!(format!("{error:#}").contains("destructive downgrade"));
+        assert_eq!(fs::read(&db).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+        rm_db(&db);
     }
 }

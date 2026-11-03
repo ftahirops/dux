@@ -1,9 +1,8 @@
 [Unit]
 Description=dux realtime disk-usage + file-search index
-Documentation=man:dux(1)
+Documentation=https://github.com/ftahirops/dux/blob/main/README.md
 After=local-fs.target
-# Never rate-limit recovery attempts. RestartSteps below prevents a tight loop
-# when the failure is persistent (bad capability/kernel/configuration).
+# Keep recovery attempts enabled without rapid restart loops on older systemd.
 StartLimitIntervalSec=0
 
 [Service]
@@ -11,16 +10,18 @@ Type=notify
 NotifyAccess=main
 WatchdogSec=45s
 WatchdogSignal=SIGABRT
-# Build the index ONLY if one doesn't exist yet (first install / fresh boot).
-# On restarts ExecStartPre skips the scan so the service becomes ready immediately.
-# The daemon then reconciles the downtime gap in the background into an atomic
-# replacement while queries continue using the previous index.
-ExecStartPre=/bin/sh -c '[ -s /var/lib/dux/dux.db ] || /usr/bin/dux scan / --quiet --low-priority'
+# The index contains sensitive path names; watchdog aborts must not persist a
+# process core image containing the in-memory index or queued event paths.
+LimitCORE=0
+# The daemon attaches watches first, then builds/reconciles in the background.
+# Queries keep the prior compatible snapshot while the baseline is replaced.
 # On a high-churn host the growth-history table dominates index size; shrink the
 # retention window if needed, e.g.: ExecStart=/usr/bin/dux daemon / --growth-days 2
 ExecStart=/usr/bin/dux daemon /
 Restart=always
-RestartSec=2s
+# Use native restart backoff where systemd supports it. Older releases ignore
+# these two keys and retain the compatible fixed 10s RestartSec fallback.
+RestartSec=10s
 RestartSteps=6
 RestartMaxDelaySec=1min
 # Liveness heartbeat lives in /run/dux (tmpfs), not SQLite, so an idle daemon
@@ -38,40 +39,67 @@ StateDirectory=dux
 StateDirectoryMode=0750
 # First-time scan can take a while on big/slow disks; give it room.
 TimeoutStartSec=3600
+# The daemon has a bounded event-drain path, but an in-flight SQLite batch can
+# outlive systemd's 90s default on a busy index. Allow its atomic commit/rollback
+# and durable dirty marker to finish before systemd escalates to SIGKILL.
+TimeoutStopSec=300s
 
-# Stay out of the way of real workloads. dux self-governs its CPU in-process
-# (`daemon --max-cpu`, default 25% of one core) and runs at idle I/O priority so
-# it never contends for disk; the cgroup limits below are a kernel-enforced
-# backstop in case the in-process governor is ever bypassed.
+# Stay out of the way of real workloads. `daemon --max-cpu` (default 25%) limits
+# only the fanotify event-loop thread; SQLite, scan and maintenance workers also
+# consume process CPU. The idle I/O priority is a best-effort scheduling hint.
+# CPUQuota and memory limits below are the process-wide hard ceilings. If CPUQuota
+# is saturated, event lag and fanotify overflow can still require reconciliation.
 Nice=10
 IOSchedulingClass=idle
 IOSchedulingPriority=7
 # cgroup-v2 weights: give dux the least CPU/IO share under contention.
 CPUWeight=10
 IOWeight=10
-# Hard ceiling (kernel-enforced). Sits ABOVE the in-process --max-cpu target so
-# the governor is the primary limiter and this only catches a runaway.
-CPUQuota=50%
+# Export per-service block I/O counters so operators can distinguish Dux I/O
+# from host-wide device activity during pressure incidents.
+IOAccounting=yes
+# Kernel-enforced process-wide ceiling. The event-loop governor does not cover
+# scanner, SQLite, or maintenance-worker CPU, so this bounds their combined use.
+CPUQuota=100%
 # Full scans use a bounded queue + disk-backed staging DB. These remain generous
 # backstops for SQLite, an extreme pending-event storm, and moved-in subtrees.
 MemoryHigh=2G
 MemoryMax=4G
 OOMPolicy=stop
+# Avoid biasing the long-lived daemon as a preferred global-OOM victim.
+OOMScoreAdjust=0
 
-# fanotify needs CAP_SYS_ADMIN; reading all files needs DAC override.
+# fanotify needs CAP_SYS_ADMIN; reading all files needs DAC override. Keep both
+# capabilities in the daemon's ambient set so the service retains them while
+# SecureBits=noroot prevents UID 0 from reacquiring them after exec. Alert hooks
+# clear ambient, effective, permitted, and inheritable capabilities by default.
 # NOTE: do NOT enable ProtectSystem/ProtectHome/PrivateTmp/PrivateMounts/
 # ReadOnlyPaths etc. — those put the service in a PRIVATE MOUNT NAMESPACE, and a
 # fanotify filesystem mark there would not see writes through the host's mounts.
-AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
-# Cap what the process can ever acquire to exactly the two it needs (CAP_SYS_ADMIN
-# is broad, so this is the main lever for reducing the privilege surface).
+#
+# Remote-access privileges belong only to the separate optional tunnel service.
 CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+SecureBits=noroot noroot-locked
 # Hardening that does NOT require a private mount namespace (all fanotify-safe):
 NoNewPrivileges=yes
 ProtectClock=yes
 ProtectHostname=yes
 ProtectKernelLogs=yes
-ProtectKernelModules=yes
+# ProtectKernelModules=yes also masks /usr/lib/modules in a private mount
+# namespace, making the disk index silently omit the host's kernel modules.
+# CAP_SYS_MODULE is already absent from CapabilityBoundingSet; keep the module
+# syscalls blocked without changing the filesystem view used by the scanner.
+# The daemon needs open_by_handle_at for fanotify FID resolution, but does not
+# mount filesystems or chroot. @mount contains only mount/chroot syscalls on
+# systemd 252 and 255; it does not include open_by_handle_at. Also deny syscall
+# groups with no Dux use: swap control, reboot/kexec, clock changes, obsolete
+# compatibility calls, raw port I/O, ptrace/perf debugging, and CPU emulation.
+# Keep @resources (nice/ioprio) and @privileged (fanotify and
+# open_by_handle_at) available as required.
+# clock_gettime and clock_nanosleep are implicitly allowed by systemd's filter;
+# ProtectClock and @clock deny wall-clock changes.
+SystemCallFilter=~@module @mount @swap @reboot @clock @obsolete @raw-io @debug @cpu-emulation
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictRealtime=yes
@@ -80,8 +108,10 @@ RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
-# The alert exec (--alert-exec) and nothing else needs the network; if you don't
-# use it you can also set: RestrictAddressFamilies=AF_UNIX
+# The packaged daemon opens no network sockets. Keep its address-family access
+# local by default. If a systemd override enables a networked --alert-exec hook,
+# explicitly expand this to AF_UNIX AF_INET AF_INET6 for that service.
+RestrictAddressFamilies=AF_UNIX
 
 # --- index exposure (READ THIS) -------------------------------------------
 # The index at /var/lib/dux/dux.db contains the FULL FILENAME LIST of the root

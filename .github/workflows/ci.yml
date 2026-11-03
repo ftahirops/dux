@@ -1,0 +1,52 @@
+name: Rust checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked
+      - run: cargo test --locked --all-features
+      - name: Python qualification harness regressions
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools shellcheck rpm cpio openssh-server
+      - name: Shell automation static checks
+        run: find scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -S warning -x
+      - name: Package maintainer script static checks
+        run: shellcheck -S warning packaging/secure-index-permissions.sh packaging/deb/postinst packaging/deb/prerm packaging/deb/postrm
+      - name: Verify systemd units and security exposure ceilings
+        run: systemd-analyze verify packaging/dux.service packaging/dux-tunnel.service
+      # systemd's integer threshold uses tenths of the displayed exposure score.
+      - run: systemd-analyze security --offline=yes --threshold=50 packaging/dux.service
+      - run: systemd-analyze security --offline=yes --threshold=45 packaging/dux-tunnel.service
+      - name: Smoke-test the fanotify-safe system-call filter
+        run: sudo python3 scripts/dux-systemd-filter-smoke.py
+      - name: Qualify tunnel host-key pinning and forwarding restrictions
+        run: sudo python3 scripts/dux-ssh-tunnel-qualification.py
+      - run: cargo build --locked --release
+      - run: cargo build --locked --release --features fault-injection
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --deny warnings
+      - run: cargo install cargo-auditable --version 0.7.7 --locked
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: CC_x86_64_unknown_linux_musl=musl-gcc cargo build --locked --release --target x86_64-unknown-linux-musl
+      - name: Build and verify DEB/RPM release artifacts
+        run: |
+          DUX_PACKAGE_RELEASE=22 scripts/build-release.sh target/ci-release-packages
+          (cd target/ci-release-packages && sha256sum --check SHA256SUMS)
+          test "$(dpkg-deb -f target/ci-release-packages/dux_0.6.3-22_amd64.deb Version)" = '0.6.3-22'
+          test "$(rpm -qp --qf '%{VERSION}-%{RELEASE}' target/ci-release-packages/dux-0.6.3-22.x86_64.rpm)" = '0.6.3-22'
+      - name: Verify and audit embedded release dependencies
+        run: |
+          audit_log=$(mktemp)
+          trap 'rm -f "$audit_log"' EXIT
+          cargo audit bin target/ci-release-packages/dux-0.6.3-x86_64-linux-static | tee "$audit_log"
+          grep -Fq "Found 'cargo auditable' data in" "$audit_log"

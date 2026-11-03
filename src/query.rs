@@ -1,9 +1,7 @@
 use crate::store::{PathResolver, Store};
-use crate::util::{human, now_secs};
+use crate::util::{human, indexed_identity, now_secs};
 use anyhow::{Context, Result};
-use rusqlite::params;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
+use rusqlite::{params, OptionalExtension};
 use std::path::Path;
 
 /// Resolve a filesystem path to its (dev, inode) and confirm it is in the index.
@@ -11,25 +9,24 @@ use std::path::Path;
 pub fn resolve_scope(store: &Store, path: &Path) -> Result<Option<(i64, i64)>> {
     let m = std::fs::symlink_metadata(path)
         .with_context(|| format!("cannot stat {}", path.display()))?;
-    let dev = m.dev() as i64;
-    let ino = m.ino() as i64;
-    let in_index = store
-        .conn
-        .query_row(
-            "SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2",
-            params![dev, ino],
-            |_| Ok(()),
-        )
-        .is_ok();
+    let (dev, ino) = indexed_identity(&m)
+        .with_context(|| format!("filesystem identity for {} is out of range", path.display()))?;
+    let in_index = match store.conn.query_row(
+        "SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2",
+        params![dev, ino],
+        |_| Ok(()),
+    ) {
+        Ok(()) => true,
+        Err(rusqlite::Error::QueryReturnedNoRows) => false,
+        Err(error) => return Err(error.into()),
+    };
     if !in_index {
         anyhow::bail!(
             "{} is not in the index — run `dux scan` over a parent path first",
             path.display()
         );
     }
-    let root_dev: Option<i64> = store.get_meta("root_dev")?.and_then(|s| s.parse().ok());
-    let root_ino: Option<i64> = store.get_meta("root_inode")?.and_then(|s| s.parse().ok());
-    if Some(dev) == root_dev && Some(ino) == root_ino {
+    if index_root(store)? == Some((dev, ino)) {
         Ok(None) // whole index — no subtree filter needed
     } else {
         Ok(Some((dev, ino)))
@@ -40,12 +37,12 @@ pub fn resolve_scope(store: &Store, path: &Path) -> Result<Option<(i64, i64)>> {
 /// walking the `dirents` parent→child edges. UNION (not UNION ALL) dedups so a
 /// hardlink or a corrupt cycle terminates; the depth bound mirrors the 4096
 /// cycle-guard used by the Rust tree walkers. The two bind params are dev, inode.
-pub(crate) const SUBTREE_CTE: &str = "WITH RECURSIVE sub(d,i,depth) AS (
-        SELECT ?,?,0
+pub(crate) const SUBTREE_CTE: &str = "WITH RECURSIVE sub(d,i) AS (
+        SELECT ?,?
         UNION
-        SELECT de.dev_id, de.inode, sub.depth+1 FROM dirents de
+        SELECT de.dev_id, de.inode FROM dirents de
         JOIN sub ON de.parent_inode=sub.i AND de.parent_dev=sub.d
-        WHERE NOT (de.dev_id=de.parent_dev AND de.inode=de.parent_inode) AND sub.depth<4096
+        WHERE NOT (de.dev_id=de.parent_dev AND de.inode=de.parent_inode)
     ) SELECT d,i FROM sub";
 
 /// The subtree CTE stopped at `max_depth` levels below the root (root = depth 0).
@@ -104,6 +101,54 @@ fn glob_escape(s: &str) -> String {
     out
 }
 
+/// Return literal runs which are guaranteed to occur in a GLOB pattern.
+/// Character classes are deliberately excluded: their contents are choices,
+/// not a literal substring. The trigram index is only a candidate filter; the
+/// original GLOB predicate remains authoritative for case and wildcard rules.
+fn glob_literal_runs(pattern: &str) -> Option<Vec<String>> {
+    if pattern.contains('[') || pattern.contains(']') {
+        return None;
+    }
+    let mut runs = Vec::new();
+    let mut run = String::new();
+    for c in pattern.chars() {
+        if c == '*' || c == '?' {
+            if !run.is_empty() {
+                runs.push(std::mem::take(&mut run));
+            }
+        } else {
+            run.push(c);
+        }
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    Some(runs)
+}
+
+/// Build a selective FTS5 trigram filter from fixed literal runs. Very common
+/// trigrams can match most of a large filesystem and make an AND query slower
+/// than the original GLOB. Three trailing grams from the longest fixed run
+/// usually discriminate well; the original GLOB remains the exact filter.
+fn trigram_match_query(runs: &[String]) -> Option<String> {
+    let run = runs.iter().max_by_key(|run| run.chars().count())?;
+    let chars: Vec<char> = run.chars().collect();
+    let mut terms = std::collections::BTreeSet::new();
+    for window in chars.windows(3).rev().take(3) {
+        terms.insert(window.iter().collect::<String>());
+    }
+    if terms.is_empty() {
+        return None;
+    }
+    Some(
+        terms
+            .into_iter()
+            .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" AND "),
+    )
+}
+
 pub struct Row {
     pub path: String,
     pub size: i64,
@@ -123,51 +168,15 @@ pub fn inspect(store: &Store, path: &Path) -> Result<Row> {
     } else {
         std::env::current_dir()?.join(path)
     };
-
-    // The root uses a self-parent dirent whose name is the full root path, so it
-    // needs a direct identity check before ordinary basename lookup.
-    if let Some((dev, inode)) = index_root(store) {
-        let root_path = store.path_of(dev, inode).unwrap_or_default();
-        if Path::new(&root_path) == requested {
-            return inode_row(store, dev, inode, root_path);
-        }
-    }
-
-    let basename = requested
-        .file_name()
-        .context("path has no filename")?
-        .as_bytes();
-    let mut stmt = store.conn.prepare(
-        "SELECT d.dev_id,d.inode,d.parent_dev,d.parent_inode,d.name
-         FROM dirents d WHERE d.name=?1",
-    )?;
-    let candidates = stmt.query_map(params![basename], |r| {
-        Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, i64>(1)?,
-            r.get::<_, i64>(2)?,
-            r.get::<_, i64>(3)?,
-            r.get::<_, Vec<u8>>(4)?,
-        ))
-    })?;
-    let mut resolver = PathResolver::new(&store.conn);
-    for candidate in candidates {
-        let (dev, inode, pdev, pino, raw_name) = candidate?;
-        let parent = resolver.resolve(pdev, pino);
-        let name = String::from_utf8_lossy(&raw_name);
-        let full = if parent.ends_with('/') {
-            format!("{parent}{name}")
-        } else {
-            format!("{parent}/{name}")
-        };
-        if Path::new(&full) == requested {
-            return inode_row(store, dev, inode, full);
-        }
-    }
-    anyhow::bail!(
-        "{} is not in the index — wait for the daemon or run `dux scan`",
-        path.display()
-    )
+    let Some((dev, inode)) = crate::store::indexed_path(&store.conn, &requested)? else {
+        anyhow::bail!(
+            "{} is not in the index — wait for the daemon or run `dux scan`",
+            path.display()
+        );
+    };
+    // Identity resolution above compares raw path-component bytes. Lossy UTF-8
+    // is used only for the user-facing path field, never to find the inode.
+    inode_row(store, dev, inode, requested.to_string_lossy().into_owned())
 }
 
 fn inode_row(store: &Store, dev: i64, inode: i64, path: String) -> Result<Row> {
@@ -247,7 +256,7 @@ pub fn top(
     for row in rows {
         let (dev, inode, size, inodes, mtime, kind, uid) = row?;
         out.push(Row {
-            path: pr.resolve(dev, inode),
+            path: pr.resolve(dev, inode)?,
             size,
             inodes: if kind == 'd' { inodes } else { 1 },
             mtime,
@@ -280,6 +289,8 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
     );
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
+    let mut fts_runs = Vec::new();
+    let mut patterns = Vec::new();
     if let Some(n) = &o.name {
         // GLOB natively supports * and ?; the trigram FTS accelerates it. The
         // external-content FTS shares dirents.rowid, so we match on rowid.
@@ -292,18 +303,39 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
             // GLOB silently matches against nothing. Mirrors the `--ext` path.
             format!("*{}*", glob_escape(n))
         };
-        sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
-        args.push(Box::new(pat));
+        if let Some(runs) = glob_literal_runs(&pat) {
+            fts_runs.extend(runs);
+        }
+        patterns.push(pat);
     }
     if let Some(e) = &o.ext {
         // an extension is LITERAL — escape GLOB metacharacters so `--ext c++` or
         // `--ext d]` match the real extension instead of being treated as a glob.
         let e = glob_escape(e.trim_start_matches('.'));
-        sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
-        args.push(Box::new(format!("*.{e}")));
+        let pat = format!("*.{e}");
+        if let Some(runs) = glob_literal_runs(&pat) {
+            fts_runs.extend(runs);
+        }
+        patterns.push(pat);
+    }
+    let match_query = trigram_match_query(&fts_runs);
+    let has_trigram_filter = match_query.is_some();
+    if let Some(match_query) = match_query {
+        sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE names_fts MATCH ?)");
+        args.push(Box::new(match_query));
+    }
+    for pat in patterns {
+        if has_trigram_filter {
+            sql.push_str(" AND CAST(d.name AS TEXT) GLOB ?");
+        } else {
+            // Keep FTS5's optimized GLOB path for short patterns that contain
+            // no complete trigram (and for patterns with character classes).
+            sql.push_str(" AND d.rowid IN (SELECT rowid FROM names_fts WHERE name GLOB ?)");
+        }
+        args.push(Box::new(pat));
     }
     if let Some(t) = o.newer_than {
-        let cutoff = now_secs() - t;
+        let cutoff = now_secs().saturating_sub(t);
         sql.push_str(" AND i.mtime >= ?");
         args.push(Box::new(cutoff));
     }
@@ -354,7 +386,7 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
         let path = if (pdev == dev && pino == inode) || pino == 0 {
             name
         } else {
-            let prefix = pr.resolve(pdev, pino);
+            let prefix = pr.resolve(pdev, pino)?;
             if prefix.ends_with('/') {
                 format!("{prefix}{name}")
             } else {
@@ -389,18 +421,78 @@ pub fn growth(
     // Round the bucket cutoff UP so the window never exceeds what was asked: a
     // floor here would include the whole bucket containing (now-window), handing
     // back up to ~5 min more than requested (e.g. `--since 10m` → ~15m).
-    let cutoff = (now_secs() - since_secs + crate::store::GROWTH_BUCKET_SECS - 1)
+    let cutoff = (now_secs()
+        .saturating_sub(since_secs)
+        .saturating_add(crate::store::GROWTH_BUCKET_SECS - 1))
         / crate::store::GROWTH_BUCKET_SECS;
-    let mut sql =
-        String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
-    let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];
-    if let Some((d, i)) = scope {
-        // reuse the scope predicate against the growth rows
-        sql.push_str(&scope_predicate());
-        args.push(Box::new(d));
-        args.push(Box::new(i));
+    // A single bucket has at most one row per current inode incarnation. Use
+    // the covering bucket/delta index to
+    // stop after the requested top rows instead of grouping and sorting every
+    // changed inode. Multi-bucket windows still aggregate exactly as before.
+    let (oldest_bucket, single_bucket) = if scope.is_none() {
+        let first: Option<i64> = store
+            .conn
+            .query_row(
+                "SELECT bucket FROM growth_current WHERE bucket>=?1 ORDER BY bucket LIMIT 1",
+                params![cutoff],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let last: Option<i64> = store
+            .conn
+            .query_row(
+                "SELECT bucket FROM growth_current WHERE bucket>=?1 ORDER BY bucket DESC LIMIT 1",
+                params![cutoff],
+                |row| row.get(0),
+            )
+            .optional()?;
+        (first, first.filter(|bucket| Some(*bucket) == last))
+    } else {
+        (None, None)
+    };
+    let mut sql = String::new();
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(bucket) = single_bucket {
+        sql.push_str(
+            "SELECT dev_id,inode,delta FROM growth_current
+             WHERE bucket=? AND delta!=0 ORDER BY delta DESC LIMIT ?",
+        );
+        args.push(Box::new(bucket));
+    } else if scope.is_none()
+        && oldest_bucket.is_some_and(|bucket| bucket >= cutoff)
+        && store
+            .conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_growth_inode_bucket_delta'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some()
+    {
+        // If the requested window covers the entire retained history, scan the
+        // inode-leading covering index. Rows for each inode are adjacent, so
+        // SQLite streams the SUM without building a GROUP BY temp B-tree. For a
+        // narrower window the bucket-leading index remains more selective.
+        sql.push_str(
+            "SELECT dev_id,inode,SUM(delta) AS d FROM growth_current
+             WHERE bucket >= ?
+             GROUP BY dev_id,inode HAVING d!=0 ORDER BY d DESC LIMIT ?",
+        );
+        args.push(Box::new(cutoff));
+    } else {
+        sql.push_str(
+            "SELECT dev_id,inode,SUM(delta) AS d FROM growth_current WHERE bucket >= ?",
+        );
+        args.push(Box::new(cutoff));
+        if let Some((d, i)) = scope {
+            // reuse the scope predicate against the growth rows
+            sql.push_str(&scope_predicate());
+            args.push(Box::new(d));
+            args.push(Box::new(i));
+        }
+        sql.push_str(" GROUP BY dev_id,inode HAVING d!=0 ORDER BY d DESC LIMIT ?");
     }
-    sql.push_str(" GROUP BY dev_id, inode HAVING d != 0 ORDER BY d DESC LIMIT ?");
     args.push(Box::new(lim(limit)));
     let mut stmt = store.conn.prepare(&sql)?;
     let pref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -416,7 +508,7 @@ pub fn growth(
     for row in rows {
         let (dev, inode, delta) = row?;
         out.push(GrowthRow {
-            path: pr.resolve(dev, inode),
+            path: pr.resolve(dev, inode)?,
             delta,
         });
     }
@@ -470,8 +562,12 @@ pub fn by_ext(store: &Store, limit: usize) -> Result<Vec<ExtRow>> {
             _ => "(none)".to_string(),
         };
         let e = map.entry(ext).or_insert((0, 0));
-        e.0 += size;
-        e.1 += 1;
+        e.0 =
+            e.0.checked_add(size)
+                .ok_or_else(|| anyhow::anyhow!("extension byte total exceeds i64 range"))?;
+        e.1 =
+            e.1.checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("extension file count exceeds i64 range"))?;
     }
     let mut v: Vec<ExtRow> = map
         .into_iter()
@@ -491,18 +587,26 @@ pub fn changed(
     limit: usize,
     scope: Option<(i64, i64)>,
 ) -> Result<Vec<GrowthRow>> {
-    let cutoff = (now_secs() - since_secs + crate::store::GROWTH_BUCKET_SECS - 1)
+    let cutoff = (now_secs()
+        .saturating_sub(since_secs)
+        .saturating_add(crate::store::GROWTH_BUCKET_SECS - 1))
         / crate::store::GROWTH_BUCKET_SECS;
     let mut sql =
-        String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth WHERE bucket >= ?");
+        String::from("SELECT dev_id, inode, SUM(delta) AS d FROM growth_current WHERE bucket >= ?");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(cutoff)];
     if let Some((d, i)) = scope {
         sql.push_str(&scope_predicate());
         args.push(Box::new(d));
         args.push(Box::new(i));
     }
-    // abs(d) DESC: rank by magnitude of change, sign preserved in the value.
-    sql.push_str(" GROUP BY dev_id, inode HAVING d != 0 ORDER BY abs(d) DESC LIMIT ?");
+    // Rank by magnitude without SQLite ABS(i64::MIN), which raises an integer
+    // overflow error. The minimum signed value has an unrepresentable positive
+    // magnitude, so clamp its sort key to i64::MAX while preserving `d`.
+    sql.push_str(
+        " GROUP BY dev_id, inode HAVING d != 0
+         ORDER BY CASE WHEN d=(-9223372036854775807-1)
+                       THEN 9223372036854775807 ELSE abs(d) END DESC LIMIT ?",
+    );
     args.push(Box::new(lim(limit)));
     let mut stmt = store.conn.prepare(&sql)?;
     let pref: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -518,7 +622,7 @@ pub fn changed(
     for row in rows {
         let (dev, inode, delta) = row?;
         out.push(GrowthRow {
-            path: pr.resolve(dev, inode),
+            path: pr.resolve(dev, inode)?,
             delta,
         });
     }
@@ -527,39 +631,20 @@ pub fn changed(
 
 /// (indexed node count, indexed bytes) — the root's recursive totals, or a
 /// whole-table fallback when the root marker is missing. Shared by status/metrics.
-pub fn index_totals(store: &Store) -> (i64, i64) {
-    let rd: Option<i64> = store
-        .get_meta("root_dev")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok());
-    let ri: Option<i64> = store
-        .get_meta("root_inode")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok());
-    if let (Some(d), Some(i)) = (rd, ri) {
-        if let Ok(t) = store.conn.query_row(
+pub fn index_totals(store: &Store) -> Result<(i64, i64)> {
+    if let Some((d, i)) = index_root(store)? {
+        return Ok(store.conn.query_row(
             "SELECT recursive_inodes, recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
             params![d, i],
             |r| Ok((r.get(0)?, r.get(1)?)),
-        ) {
-            return t;
-        }
+        )?);
     }
-    let count = store
-        .conn
-        .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
-        .unwrap_or(0);
-    let bytes = store
-        .conn
-        .query_row(
-            "SELECT recursive_bytes FROM inodes WHERE kind='d' ORDER BY recursive_bytes DESC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    (count, bytes)
+    // A never-scanned index is empty. A missing marker on a populated legacy
+    // index permits the historical fallback; SQL/decoding errors do not.
+    Ok(store.conn.query_row(
+        "SELECT COUNT(*), COALESCE((SELECT MAX(recursive_bytes) FROM inodes WHERE kind='d'),0) FROM inodes",
+        [], |r| Ok((r.get(0)?, r.get(1)?)),
+    )?)
 }
 
 #[derive(Debug)]
@@ -586,38 +671,73 @@ pub fn du(
     // Resolve the subtree root: explicit scope, else the index root marker.
     let root = match scope {
         Some(x) => Some(x),
-        None => {
-            let rd: Option<i64> = store.get_meta("root_dev")?.and_then(|s| s.parse().ok());
-            let ri: Option<i64> = store.get_meta("root_inode")?.and_then(|s| s.parse().ok());
-            rd.zip(ri)
-        }
+        None => index_root(store)?,
     };
-    let kind_filter = if all { "" } else { " AND kind='d'" };
+    let kind_filter = if all { "" } else { " AND i.kind='d'" };
     let cte = subtree_cte_depth(max_depth);
+    // A bounded listing is small relative to the complete index. Drive it from
+    // the pruned recursive CTE, then join each inode's canonical dirent in the
+    // same SQLite statement. PathResolver used to execute a separate indexed
+    // SELECT for every output row; at 10m scale, thousands of such random lookups
+    // turned a shallow `du` into an I/O bound query. The correlated rowid lookup
+    // preserves its prime-first path choice even if a damaged index has multiple
+    // primary dirents. Defer path construction until all returned edges are
+    // cached, so child rows never trigger lookups for ancestors.
+    let chosen_dirent = "LEFT JOIN dirents d ON d.rowid=(
+        SELECT de.rowid FROM dirents de
+        WHERE de.dev_id=i.dev_id AND de.inode=i.inode
+        ORDER BY de.prime DESC LIMIT 1
+    )";
     let (sql, use_scope) = match root {
-        Some(_) => (
-            format!(
-                "SELECT dev_id, inode, kind, recursive_bytes, blocks, mtime FROM inodes
-                 WHERE (dev_id,inode) IN ({cte}){kind_filter}"
-            ),
-            true,
-        ),
+        Some(_) => {
+            let relation = if max_depth.is_some() {
+                // The depth-aware CTE carries depth to prune recursion. Collapse
+                // repeated inode identities across aliases before the join, as
+                // the former tuple-IN predicate did implicitly.
+                format!("SELECT DISTINCT d,i FROM ({cte})")
+            } else {
+                cte
+            };
+            (
+                format!(
+                    "SELECT i.dev_id,i.inode,i.kind,i.recursive_bytes,i.blocks,i.mtime,
+                            d.name,d.parent_dev,d.parent_inode
+                     FROM ({relation}) scope
+                     JOIN inodes i ON i.dev_id=scope.d AND i.inode=scope.i
+                     {chosen_dirent}
+                     WHERE 1=1{kind_filter}"
+                ),
+                true,
+            )
+        }
         // No root marker: a degenerate index (never scanned, or the markers were
         // lost). There is no root to measure depth from, so the walk can't be
         // pruned — fall back to the whole table and filter by path depth below.
         None => (
             format!(
-                "SELECT dev_id, inode, kind, recursive_bytes, blocks, mtime FROM inodes
+                "SELECT i.dev_id,i.inode,i.kind,i.recursive_bytes,i.blocks,i.mtime,
+                        d.name,d.parent_dev,d.parent_inode
+                 FROM inodes i
+                 {chosen_dirent}
                  WHERE 1=1{kind_filter}"
             ),
             false,
         ),
     };
     let mut stmt = store.conn.prepare(&sql)?;
-    // `stmt` and `pr` both borrow `conn` immutably, so rows can be resolved as they
-    // stream — no intermediate Vec of the whole subtree.
     let mut pr = PathResolver::new(&store.conn);
-    let map = |r: &rusqlite::Row| -> rusqlite::Result<(i64, i64, String, i64, i64, i64)> {
+    type DuEntry = (
+        i64,
+        i64,
+        String,
+        i64,
+        i64,
+        i64,
+        Option<Vec<u8>>,
+        Option<i64>,
+        Option<i64>,
+    );
+    let map = |r: &rusqlite::Row| -> rusqlite::Result<DuEntry> {
         Ok((
             r.get(0)?,
             r.get(1)?,
@@ -625,6 +745,9 @@ pub fn du(
             r.get(3)?,
             r.get(4)?,
             r.get(5)?,
+            r.get(6)?,
+            r.get(7)?,
+            r.get(8)?,
         ))
     };
     let rows = if use_scope {
@@ -633,17 +756,33 @@ pub fn du(
     } else {
         stmt.query_map([], map)?
     };
-    let mut out: Vec<DuRow> = Vec::new();
+    let mut pending = Vec::new();
     for row in rows {
-        let (dev, inode, kind, rbytes, blocks, mtime) = row?;
+        let (dev, inode, kind, rbytes, blocks, mtime, name, parent_dev, parent_inode) = row?;
+        if let (Some(name), Some(parent_dev), Some(parent_inode)) = (name, parent_dev, parent_inode)
+        {
+            pr.remember(dev, inode, &name, parent_dev, parent_inode);
+        }
         let is_dir = kind == "d";
-        out.push(DuRow {
-            path: pr.resolve(dev, inode),
-            bytes: if is_dir { rbytes } else { blocks },
+        pending.push((
+            dev,
+            inode,
+            if is_dir { rbytes } else { blocks },
             is_dir,
             mtime,
-        });
+        ));
     }
+    let mut out: Vec<DuRow> = pending
+        .into_iter()
+        .map(|(dev, inode, bytes, is_dir, mtime)| -> Result<DuRow> {
+            Ok(DuRow {
+                path: pr.resolve(dev, inode)?,
+                bytes,
+                is_dir,
+                mtime,
+            })
+        })
+        .collect::<Result<_>>()?;
     // The pruned CTE already applied `max_depth`; only the rootless fallback above
     // still needs it, measured from the shallowest path in the set.
     if !use_scope {
@@ -660,65 +799,59 @@ pub fn du(
 }
 
 /// (dev,inode) of the index root, from the scan-time meta markers.
-pub fn index_root(store: &Store) -> Option<(i64, i64)> {
-    let d: Option<i64> = store
-        .get_meta("root_dev")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok());
-    let i: Option<i64> = store
-        .get_meta("root_inode")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok());
-    d.zip(i)
+pub fn index_root(store: &Store) -> Result<Option<(i64, i64)>> {
+    let d = store
+        .get_meta("root_dev")?
+        .map(|value| value.parse::<i64>().context("invalid root_dev metadata"))
+        .transpose()?;
+    let i = store
+        .get_meta("root_inode")?
+        .map(|value| value.parse::<i64>().context("invalid root_inode metadata"))
+        .transpose()?;
+    anyhow::ensure!(d.is_some() == i.is_some(), "incomplete index root metadata");
+    Ok(d.zip(i))
 }
 
 /// Sum of allocated bytes of the subtree rooted at (dev,inode) — used to size a
 /// container's writable layer / volume from paths, without re-walking the fs.
-pub fn subtree_bytes(store: &Store, dev: i64, inode: i64) -> i64 {
-    store
-        .conn
-        .query_row(
-            "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
-            params![dev, inode],
-            |r| r.get(0),
-        )
-        .unwrap_or(0)
+pub fn subtree_bytes(store: &Store, dev: i64, inode: i64) -> Result<i64> {
+    match store.conn.query_row(
+        "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+        params![dev, inode],
+        |r| r.get(0),
+    ) {
+        Ok(bytes) => Ok(bytes),
+        // A path can disappear between its filesystem stat and its index
+        // lookup. A missing row means unknown/not indexed; storage failures and
+        // malformed rows must remain visible to the caller.
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Index status summary.
 pub fn status(store: &Store, db: &Path) -> Result<String> {
-    let root = store.get_meta("last_scan_root")?.unwrap_or_default();
-    let ts: i64 = store
-        .get_meta("last_scan_ts")?
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let root_dev: Option<i64> = store.get_meta("root_dev")?.and_then(|s| s.parse().ok());
-    let root_inode: Option<i64> = store.get_meta("root_inode")?.and_then(|s| s.parse().ok());
-    let (count, total): (i64, i64) = match (root_dev, root_inode) {
-        (Some(d), Some(i)) => store
-            .conn
-            .query_row(
-                "SELECT recursive_inodes, recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
-                params![d, i],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap_or((0, 0)),
+    let root_path = crate::store::indexed_root_path(&store.conn)?;
+    let root = root_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ts = optional_timestamp(store, "last_scan_ts")?.unwrap_or(0);
+    let (count, total): (i64, i64) = match index_root(store)? {
+        Some((dev, inode)) => store.conn.query_row(
+            "SELECT recursive_inodes, recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![dev, inode],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?,
         _ => {
             let count = store
                 .conn
-                .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
-                .unwrap_or(0);
-            let total = store
-                .conn
-                .query_row(
-                    "SELECT recursive_bytes FROM inodes WHERE kind='d'
-                     ORDER BY recursive_bytes DESC LIMIT 1",
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap_or(0);
+                .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))?;
+            let total = store.conn.query_row(
+                "SELECT COALESCE(MAX(recursive_bytes),0) FROM inodes WHERE kind='d'",
+                [],
+                |r| r.get(0),
+            )?;
             (count, total)
         }
     };
@@ -736,7 +869,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
 
     let mut out = format!("root: {root}\n");
     // live filesystem capacity (df-style) for the scanned root
-    if let Some(fs) = crate::util::fs_stat(std::path::Path::new(&root)) {
+    if let Some(fs) = root_path.as_deref().and_then(crate::util::fs_stat) {
         out.push_str(&format!(
             "filesystem: root mount {} used / {} total  ({} free, {:.0}% used)\n",
             human(fs.used),
@@ -757,18 +890,19 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
         age
     ));
     // on-disk footprint of the index itself (db + WAL + reclaimable free pages)
-    let dbsz = std::fs::metadata(db).map(|m| m.len() as i64).unwrap_or(0);
-    let walsz = std::fs::metadata(format!("{}-wal", db.display()))
-        .map(|m| m.len() as i64)
-        .unwrap_or(0);
-    let psize: i64 = store
-        .conn
-        .query_row("PRAGMA page_size", [], |r| r.get(0))
-        .unwrap_or(4096);
+    let dbsz = i64::try_from(file_len_or_zero(db)?)
+        .context("database file size does not fit status representation")?;
+    let wal = Path::new(&format!("{}-wal", db.display())).to_path_buf();
+    let walsz = i64::try_from(file_len_or_zero(&wal)?)
+        .context("WAL file size does not fit status representation")?;
+    let psize: i64 = store.conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
     let free: i64 = store
         .conn
-        .query_row("PRAGMA freelist_count", [], |r| r.get(0))
-        .unwrap_or(0);
+        .query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+    anyhow::ensure!(
+        psize > 0 && free >= 0,
+        "invalid SQLite page/free-page metrics"
+    );
     // NB: the per-table FTS size used to come from `dbstat`, which visits EVERY
     // page of the database — ~18s cold on a multi-hundred-MB index. Dropped: the
     // db/WAL file sizes + reclaimable (freelist) are all O(1) PRAGMA/stat calls.
@@ -782,6 +916,9 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     if crate::util::daemon_live_for(db) {
         out.push_str("daemon:     live (tracks create/delete/rename/growth)");
         if let Some(w) = crate::util::read_watch_status(db) {
+            if w.uncertain && store.get_meta("dirty_since")?.is_none() {
+                out.push_str("\nstate:      DIRTY — event loss or incomplete reconciliation; volatile health remains uncertain");
+            }
             let resolve_pct = if w.events_seen == 0 {
                 100.0
             } else {
@@ -792,15 +929,28 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
             } else {
                 "receiving"
             };
+            let last_commit = if w.last_commit_at == 0 {
+                "never".to_string()
+            } else {
+                format!("{} ago", crate::util::ago(w.last_commit_at))
+            };
+            let overflow_note = match w.kernel_overflow_notifications {
+                Some(overflows) if overflows > 0 => {
+                    format!("; {} kernel queue overflow notifications", overflows)
+                }
+                None => "; kernel overflow count unavailable for legacy watcher status".into(),
+                _ => String::new(),
+            };
             out.push_str(&format!(
                 "\npipeline:   {queue_state}; {} pending / {} cap; {} events ({resolve_pct:.1}% resolved); \
-                 {} updates committed; {} dropped; {}ms since caught up",
+                 {} updates committed; {} userspace updates dropped; last commit {last_commit}; {}ms since caught up{}",
                 w.pending,
                 w.max_pending,
                 w.events_seen,
                 w.updates_committed,
                 w.updates_dropped,
                 w.behind_ms,
+                overflow_note,
             ));
         }
     } else {
@@ -810,26 +960,24 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     // under sustained event load so it never disturbs the host. The index is LIVE
     // but intentionally stale — explain why, and how stale, so the numbers aren't
     // mistaken for real-time. Self-clears when the daemon catches up.
-    if let Some(since) = store
-        .get_meta("throttled_since")?
-        .and_then(|s| s.parse::<i64>().ok())
-    {
+    if let Some(since) = throttled_since(store)? {
         out.push_str(&format!(
-            "\nstate:      THROTTLED (protecting host) — capping its own CPU/I/O under heavy \
-             filesystem activity, so live updates are delayed. Data is ~{} stale and \
-             catches up automatically when load eases. Raise the ceiling with \
-             `dux daemon --max-cpu N` for faster updates.",
+            "\nstate:      BEHIND — {} since the pipeline was last caught up. Check the pause reason, \
+             pending updates, and flush errors below; this is not the age of every indexed file.",
             crate::util::ago(since)
+        ));
+    }
+    if let Some(error) = store.get_meta("flush_error")? {
+        out.push_str(&format!(
+            "\nwrite error: {error} — pending changes retained for retry"
         ));
     }
     // Transient pause (self-clearing): the resource guardian paused writes because
     // the host is under pressure. Nothing is lost (pending is kept) — distinct from
     // DIRTY; it resumes automatically when the host recovers.
-    if let Some(since) = paused_since(store) {
+    if let Some(since) = paused_since(store)? {
         let reason = store
-            .get_meta("pause_reason")
-            .ok()
-            .flatten()
+            .get_meta("pause_reason")?
             .unwrap_or_else(|| "system pressure".into());
         out.push_str(&format!(
             "\nstate:      WRITES PAUSED ({reason}) since {} — resumes when the host recovers",
@@ -838,7 +986,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     }
     // Known event loss (fanotify overflow / dropped backlog / partial watch) makes
     // the index untrustworthy even while "live"; surface it and recommend a rescan.
-    if let Some(since) = store.get_meta("dirty_since")?.and_then(|s| s.parse().ok()) {
+    if let Some(since) = dirty_since(store)? {
         out.push_str(&format!(
             "\nstate:      DIRTY since {} — missed events; rescan with `dux scan <root>`",
             crate::util::ago(since)
@@ -846,11 +994,87 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     }
     // A scan running RIGHT NOW (initial build or rescan) publishes live progress —
     // surface it so the user knows to wait rather than trusting a stale snapshot.
-    if let Some(line) = scan_progress_line() {
+    if let Some(line) = scan_progress_line(db) {
         out.push('\n');
         out.push_str(&line);
     }
     Ok(out)
+}
+
+/// Stable machine-readable status for monitoring and support tooling.
+pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
+    let root = crate::store::indexed_root_path(&store.conn)?
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let last_scan_at = optional_timestamp(store, "last_scan_ts")?.unwrap_or(0);
+    let dirty_since = dirty_since(store)?;
+    let paused_since = paused_since(store)?;
+    let throttled_since = throttled_since(store)?;
+    let write_error = store.get_meta("flush_error")?;
+    let pause_reason = store.get_meta("pause_reason")?;
+    let dirty_reason = store.get_meta("dirty_reason")?;
+    let daemon_live = crate::util::daemon_live_for(db);
+    let watch = crate::util::read_watch_status(db);
+    let scan_progress = crate::util::read_scan_progress_for(db);
+    let scan_in_progress = scan_progress.is_some();
+    let scan_progress = scan_progress.map(|progress| {
+        serde_json::json!({
+            "started_at_seconds": progress.started,
+            "files_seen": progress.files,
+            "directories_seen": progress.dirs,
+            "allocated_bytes_seen": progress.bytes,
+            "indexing": progress.indexing,
+        })
+    });
+    let dirty = dirty_since.is_some() || watch.as_ref().is_some_and(|w| w.uncertain);
+    let paused = paused_since.is_some();
+    let caught_up = daemon_live
+        && watch
+            .as_ref()
+            .is_some_and(|w| w.kernel_empty && w.pending == 0 && !w.uncertain)
+        && !dirty
+        && !paused
+        && !scan_in_progress;
+    let (index_nodes, index_bytes) = index_totals(store)?;
+    let index_bytes_on_disk = file_len_or_zero(db)?;
+    let wal = Path::new(&format!("{}-wal", db.display())).to_path_buf();
+    let wal_bytes = file_len_or_zero(&wal)?;
+    Ok(serde_json::json!({
+        "status_version": 1,
+        "root": root,
+        "last_scan_timestamp_seconds": last_scan_at,
+        "last_scan_age_seconds": crate::util::now_secs().saturating_sub(last_scan_at).max(0),
+        "index_nodes": index_nodes,
+        "index_bytes": index_bytes,
+        "index_bytes_on_disk": index_bytes_on_disk,
+        "wal_bytes": wal_bytes,
+        "daemon_live": daemon_live,
+        "watch_status_available": watch.is_some(),
+        "watch_status_updated_at_seconds": watch.as_ref().map(|w| w.updated_at),
+        "last_event_commit_timestamp_seconds": watch.as_ref().map(|w| w.last_commit_at),
+        "pending_updates": watch.as_ref().map(|w| w.pending),
+        "max_pending_updates": watch.as_ref().map(|w| w.max_pending),
+        "events_seen": watch.as_ref().map(|w| w.events_seen),
+        "events_resolved": watch.as_ref().map(|w| w.events_resolved),
+        "updates_committed": watch.as_ref().map(|w| w.updates_committed),
+        "events_dropped": watch.as_ref().map(|w| w.updates_dropped),
+        "userspace_updates_dropped": watch.as_ref().map(|w| w.updates_dropped),
+        "kernel_overflow_notifications": watch
+            .as_ref()
+            .and_then(|w| w.kernel_overflow_notifications),
+        "behind_seconds": watch.as_ref().map(|w| w.behind_ms as f64 / 1000.0),
+        "dirty": dirty,
+        "dirty_since_timestamp_seconds": dirty_since,
+        "dirty_reason": dirty_reason,
+        "paused": paused,
+        "paused_since_timestamp_seconds": paused_since,
+        "pause_reason": pause_reason,
+        "throttled_since_timestamp_seconds": throttled_since,
+        "write_error": write_error,
+        "scan_in_progress": scan_in_progress,
+        "scan_progress": scan_progress,
+        "caught_up": caught_up,
+    }))
 }
 
 /// Format the live scan-progress file (`/run/dux/scan.progress`) into one human
@@ -858,14 +1082,16 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
 /// report) and by the no-index-yet path in `main` — on a fresh box the first
 /// scan hasn't produced a `dux.db` yet, so this is the ONLY way to show progress
 /// before the index exists.
-pub fn scan_progress_line() -> Option<String> {
-    Some(format_scan_progress(&crate::util::read_scan_progress()?))
+pub fn scan_progress_line(db: &Path) -> Option<String> {
+    Some(format_scan_progress(&crate::util::read_scan_progress_for(
+        db,
+    )?))
 }
 
 /// Pure formatter for a [`crate::util::ScanProgress`] snapshot (no I/O), so the
 /// wording is unit-testable without touching the live `/run/dux/scan.progress`.
 fn format_scan_progress(p: &crate::util::ScanProgress) -> String {
-    let elapsed = (crate::util::now_secs() - p.started).max(0);
+    let elapsed = crate::util::now_secs().saturating_sub(p.started).max(0);
     let phase = if p.indexing {
         "building index"
     } else {
@@ -881,31 +1107,41 @@ fn format_scan_progress(p: &crate::util::ScanProgress) -> String {
 }
 
 /// Epoch seconds the daemon paused writes for low disk (self-clearing), if set.
-pub fn paused_since(store: &Store) -> Option<i64> {
+pub(crate) fn optional_timestamp(store: &Store, key: &str) -> Result<Option<i64>> {
     store
-        .get_meta("paused_since")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok())
+        .get_meta(key)?
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .with_context(|| format!("invalid {key} timestamp in index metadata: {value:?}"))
+        })
+        .transpose()
+}
+
+/// File size for status metrics. A missing WAL is normal after checkpointing;
+/// permission, path, and I/O errors must remain visible instead of appearing as
+/// a zero-byte database or WAL.
+fn file_len_or_zero(path: &Path) -> Result<u64> {
+    match std::fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error).with_context(|| format!("cannot stat {}", path.display())),
+    }
+}
+
+pub fn paused_since(store: &Store) -> Result<Option<i64>> {
+    optional_timestamp(store, "paused_since")
 }
 
 /// Epoch seconds the daemon fell behind under CPU/IO governing (self-clearing).
 /// While set, the index is LIVE but intentionally stale to protect the host.
-pub fn throttled_since(store: &Store) -> Option<i64> {
-    store
-        .get_meta("throttled_since")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok())
+pub fn throttled_since(store: &Store) -> Result<Option<i64>> {
+    optional_timestamp(store, "throttled_since")
 }
 
 /// Epoch seconds the index was marked dirty (fanotify overflow), if set.
-pub fn dirty_since(store: &Store) -> Option<i64> {
-    store
-        .get_meta("dirty_since")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok())
+pub fn dirty_since(store: &Store) -> Result<Option<i64>> {
+    optional_timestamp(store, "dirty_since")
 }
 
 /// True when a watch daemon for THIS db has heart-beaten within the last 30s.
@@ -916,6 +1152,187 @@ pub fn daemon_live(db: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::MetadataExt;
+
+    #[test]
+    fn extension_byte_aggregation_reports_signed_overflow() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        store
+            .conn
+            .execute_batch(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,uid,mtime)
+                 VALUES(1,2,'f',9223372036854775807,0,0),(1,3,'f',1,0,0);
+             INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                 VALUES(1,1,X'612e62696e',1,2,1),(1,1,X'622e62696e',1,3,1);",
+            )
+            .unwrap();
+        let error = match by_ext(&store, 20) {
+            Ok(_) => panic!("overflowing extension total must return an error"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("extension byte total exceeds i64 range"));
+    }
+
+    #[test]
+    fn scope_and_status_queries_do_not_turn_sql_or_root_errors_into_empty_results() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        store.set_meta("root_dev", "1").unwrap();
+        store.set_meta("root_inode", "not-an-inode").unwrap();
+        let root_error = du(&store, None, false, None).unwrap_err().to_string();
+        assert!(root_error.contains("invalid root_inode metadata"));
+
+        store.set_meta("root_inode", "1").unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,uid,mtime)
+                 VALUES(1,1,'d',4096,4096,0,0)",
+                [],
+            )
+            .unwrap();
+        store.set_meta("last_scan_root", "/").unwrap();
+        store.set_meta("last_scan_ts", "not-a-timestamp").unwrap();
+        assert!(status(&store, Path::new("/nonexistent/dux.db"))
+            .unwrap_err()
+            .to_string()
+            .contains("invalid last_scan_ts timestamp"));
+
+        store.conn.execute_batch("DROP TABLE inodes").unwrap();
+        let path = tmp("scope-sql-error");
+        std::fs::create_dir_all(&path).unwrap();
+        let error = resolve_scope(&store, &path).unwrap_err().to_string();
+        assert!(error.contains("no such table: inodes"));
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn status_file_size_treats_only_missing_files_as_zero() {
+        let path = tmp("file-size-parent");
+        std::fs::write(&path, b"not a directory").unwrap();
+        let missing = path.join("dux.db");
+        let error = file_len_or_zero(&missing).unwrap_err().to_string();
+        assert!(error.contains("cannot stat"));
+        assert_eq!(
+            file_len_or_zero(&tmp("file-that-does-not-exist")).unwrap(),
+            0
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn status_timestamps_fail_visibly_instead_of_clearing_health_markers() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        assert_eq!(dirty_since(&store).unwrap(), None);
+        assert_eq!(paused_since(&store).unwrap(), None);
+        store.set_meta("root_dev", "1").unwrap();
+        store.set_meta("root_inode", "1").unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,uid,mtime)
+             VALUES(1,1,'d',4096,4096,0,0)",
+                [],
+            )
+            .unwrap();
+
+        store.set_meta("dirty_since", "not-a-timestamp").unwrap();
+        let error = dirty_since(&store).unwrap_err().to_string();
+        assert!(error.contains("invalid dirty_since timestamp"));
+        let error = status_json(&store, Path::new("/nonexistent/dux.db"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("invalid dirty_since timestamp"));
+
+        store.set_meta("dirty_since", "1730000000").unwrap();
+        store.set_meta("paused_since", "also-invalid").unwrap();
+        assert_eq!(dirty_since(&store).unwrap(), Some(1_730_000_000));
+        assert!(paused_since(&store).is_err());
+    }
+
+    #[test]
+    fn index_totals_fail_visibly_on_broken_metadata_and_rows() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        assert!(index_totals(&store).is_err());
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        assert_eq!(index_totals(&store).unwrap(), (0, 0));
+        store.set_meta("root_dev", "1").unwrap();
+        assert!(
+            index_totals(&store).is_err(),
+            "half a root identity is corrupt"
+        );
+        store.set_meta("root_inode", "bad").unwrap();
+        assert!(index_totals(&store).is_err());
+        store.set_meta("root_inode", "1").unwrap();
+        assert!(index_totals(&store).is_err(), "marked root must exist");
+        store.conn.execute_batch("INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime) VALUES(1,1,'d',4096,8192,2,0,0)").unwrap();
+        assert_eq!(index_totals(&store).unwrap(), (2, 8192));
+        store
+            .conn
+            .execute("UPDATE inodes SET recursive_bytes='bad'", [])
+            .unwrap();
+        assert!(
+            index_totals(&store).is_err(),
+            "bad totals cannot become zero"
+        );
+    }
+
+    #[test]
+    fn subtree_size_preserves_missing_row_semantics_and_propagates_sql_errors() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        assert!(subtree_bytes(&store, 1, 2).is_err());
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        assert_eq!(subtree_bytes(&store, 1, 2).unwrap(), 0);
+        store
+            .conn
+            .execute_batch(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,uid,mtime)
+                 VALUES(1,2,'d',4096,8192,0,0)",
+            )
+            .unwrap();
+        assert_eq!(subtree_bytes(&store, 1, 2).unwrap(), 8192);
+        store
+            .conn
+            .execute(
+                "UPDATE inodes SET recursive_bytes='malformed' WHERE dev_id=1 AND inode=2",
+                [],
+            )
+            .unwrap();
+        assert!(subtree_bytes(&store, 1, 2).is_err());
+    }
+
+    #[test]
+    fn trigram_prefilter_uses_only_guaranteed_literal_runs() {
+        assert_eq!(
+            glob_literal_runs("*artifact-42?.txt").unwrap(),
+            vec!["artifact-42".to_string(), ".txt".to_string()]
+        );
+        assert!(glob_literal_runs("pre[ab]post").is_none());
+        assert!(trigram_match_query(&["ab".to_string()]).is_none());
+        let query = trigram_match_query(&["artifact".to_string()]).unwrap();
+        assert!(query.contains("\"act\""));
+        assert!(query.contains("\"fac\""));
+        assert!(query.contains("\"ifa\""));
+        assert!(!query.contains("\"art\""));
+        assert!(query.contains(" AND "));
+    }
 
     // The scan-progress line must render sensibly during the FIRST scan (before an
     // index exists) — this is what `dux status` shows on a fresh box instead of a
@@ -943,6 +1360,135 @@ mod tests {
         );
     }
 
+    #[test]
+    fn inspect_resolves_non_utf8_path_components_by_raw_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let parent = tmp("inspect-nonutf8-parent");
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        let root = parent.join(std::ffi::OsString::from_vec(b"root-\xff".to_vec()));
+        let db = tmp("inspect-nonutf8-db");
+        rm(&db);
+        std::fs::create_dir_all(&root).unwrap();
+        let name = std::ffi::OsString::from_vec(b"bad-\xff-name".to_vec());
+        let file = root.join(name);
+        std::fs::write(&file, b"payload").unwrap();
+        crate::scan::rebuild_atomic(
+            &db,
+            &root,
+            &crate::scan::ScanOptions {
+                progress: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let store = Store::open_ro(&db).unwrap();
+        let row = inspect(&store, &file).unwrap();
+        assert_eq!(
+            row.size,
+            std::fs::symlink_metadata(&file).unwrap().blocks() as i64 * 512
+        );
+        assert_eq!(row.path, file.to_string_lossy());
+        let status = status_json(&store, &db).unwrap();
+        assert_eq!(status["root"], root.to_string_lossy().as_ref());
+
+        drop(store);
+        let _ = std::fs::remove_dir_all(&parent);
+        rm(&db);
+    }
+
+    #[test]
+    fn machine_status_separates_live_freshness_and_uncertainty() {
+        let root = tmp("machine-status-root");
+        let db = tmp("machine-status-db");
+        let _ = std::fs::remove_dir_all(&root);
+        for suffix in ["", "-wal", "-shm", ".new", ".new-wal", ".new-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("entry"), b"value").unwrap();
+        crate::scan::rebuild_atomic(
+            &db,
+            &root,
+            &crate::scan::ScanOptions {
+                progress: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::util::write_heartbeat(&db);
+        crate::util::write_watch_status_with_overflows(
+            &db,
+            0,
+            true,
+            10,
+            10,
+            1,
+            crate::util::now_secs(),
+            0,
+            0,
+            500_000,
+            2,
+            false,
+        );
+        let store = crate::store::Store::open_rw(&db).unwrap();
+        let healthy = status_json(&store, &db).unwrap();
+        assert_eq!(healthy["daemon_live"], true);
+        assert_eq!(healthy["watch_status_available"], true);
+        assert_eq!(healthy["caught_up"], true);
+        assert_eq!(healthy["kernel_overflow_notifications"], 2);
+        assert_eq!(healthy["userspace_updates_dropped"], 0);
+        assert!(
+            healthy["last_event_commit_timestamp_seconds"]
+                .as_i64()
+                .unwrap()
+                > 0
+        );
+
+        let status_path = crate::util::runtime_path(&db, "watch.status");
+        let canonical_db = db.canonicalize().unwrap_or_else(|_| db.clone());
+        std::fs::write(
+            &status_path,
+            format!(
+                "3 {} {} 0 1 10 10 1 0 0 500000 0 {}\n{}",
+                crate::util::now_secs(),
+                std::process::id(),
+                crate::util::now_secs(),
+                canonical_db.display()
+            ),
+        )
+        .unwrap();
+        let legacy = status_json(&store, &db).unwrap();
+        assert_eq!(legacy["watch_status_available"], true);
+        assert!(legacy["kernel_overflow_notifications"].is_null());
+
+        store
+            .set_meta("last_scan_ts", &i64::MIN.to_string())
+            .unwrap();
+        let extreme_timestamp = status_json(&store, &db).unwrap();
+        assert_eq!(
+            extreme_timestamp["last_scan_age_seconds"].as_i64(),
+            Some(i64::MAX)
+        );
+
+        store
+            .set_meta("dirty_since", &crate::util::now_secs().to_string())
+            .unwrap();
+        let uncertain = status_json(&store, &db).unwrap();
+        assert_eq!(uncertain["dirty"], true);
+        assert_eq!(uncertain["caught_up"], false);
+
+        drop(store);
+        let _ = std::fs::remove_file(crate::util::runtime_path(&db, "heartbeat"));
+        let _ = std::fs::remove_file(crate::util::runtime_path(&db, "watch.status"));
+        let _ = std::fs::remove_dir_all(&root);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+    }
+
     fn tmp(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("dux-query-{tag}-{}", std::process::id()))
     }
@@ -951,6 +1497,122 @@ mod tests {
         for s in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{s}", db.display()));
         }
+    }
+
+    #[test]
+    fn growth_single_bucket_fast_path_and_multi_bucket_aggregation_match() {
+        let db = tmp("growth-buckets");
+        rm(&db);
+        let store = Store::create_fresh(&db).unwrap();
+        store.conn.execute_batch(crate::store::INDEXES_SQL).unwrap();
+        store
+            .conn
+            .execute_batch(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns)
+                   VALUES(1,1,'d',0,80,3,0,0,100),(1,2,'f',30,30,1,0,0,200),(1,3,'f',50,50,1,0,0,300);
+                 INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                   VALUES(1,1,X'2f',1,1,1),(1,1,X'736d616c6c',1,2,1),(1,1,X'6c61726765',1,3,1);
+                 INSERT INTO meta(key,value) VALUES('root_dev','1'),('root_inode','1');",
+            )
+            .unwrap();
+
+        let bucket = crate::util::now_secs() / crate::store::GROWTH_BUCKET_SECS;
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta) VALUES(?1,1,2,200,30),(?1,1,3,300,50)",
+                params![bucket],
+            )
+            .unwrap();
+        let one_bucket = growth(&store, 3600, 10, None).unwrap();
+        assert_eq!(
+            one_bucket
+                .iter()
+                .map(|row| (row.path.as_str(), row.delta))
+                .collect::<Vec<_>>(),
+            vec![("/large", 50), ("/small", 30)]
+        );
+
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta) VALUES(?1,1,2,200,80),(?1,1,3,300,-10)",
+                params![bucket - 1],
+            )
+            .unwrap();
+        let multiple_buckets = growth(&store, 3600, 10, None).unwrap();
+        assert_eq!(
+            multiple_buckets
+                .iter()
+                .map(|row| (row.path.as_str(), row.delta))
+                .collect::<Vec<_>>(),
+            vec![("/small", 110), ("/large", 40)]
+        );
+
+        // When the requested window covers all retained buckets, the inode-
+        // ordered covering index must preserve the same exact aggregate. Once
+        // older buckets fall outside the window, the selective bucket-leading
+        // path must exclude them.
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta) VALUES(?1,1,2,200,999)",
+                params![bucket - 30],
+            )
+            .unwrap();
+        let recent = growth(&store, 3600, 10, None).unwrap();
+        assert_eq!(
+            recent
+                .iter()
+                .map(|row| (row.path.as_str(), row.delta))
+                .collect::<Vec<_>>(),
+            vec![("/small", 110), ("/large", 40)]
+        );
+        let full_history = growth(&store, 86_400, 10, None).unwrap();
+        assert_eq!(
+            full_history
+                .iter()
+                .map(|row| (row.path.as_str(), row.delta))
+                .collect::<Vec<_>>(),
+            vec![("/small", 1109), ("/large", 40)]
+        );
+
+        drop(store);
+        rm(&db);
+    }
+
+    #[test]
+    fn growth_history_for_reused_inode_is_filtered_by_birth_generation() {
+        let db = tmp("growth-incarnation");
+        rm(&db);
+        let store = Store::create_fresh(&db).unwrap();
+        store.conn.execute_batch(
+            "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns)
+             VALUES(1,1,'d',0,8,2,0,0,10),(1,2,'f',8,8,1,0,0,200);
+             INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+             VALUES(1,1,X'2f',1,1,1),(1,1,X'66',1,2,1);
+             INSERT INTO meta(key,value) VALUES('root_dev','1'),('root_inode','1');",
+        ).unwrap();
+        let bucket = crate::util::now_secs() / crate::store::GROWTH_BUCKET_SECS;
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta) VALUES
+             (?1,1,2,100,5000),(?1,1,2,200,30),(?1,1,2,0,9000)",
+                params![bucket],
+            )
+            .unwrap();
+
+        let rows = growth(&store, 3600, 10, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "/f");
+        assert_eq!(
+            rows[0].delta, 30,
+            "only the current incarnation is attributable"
+        );
+
+        drop(store);
+        rm(&db);
     }
 
     /// A linear tree: / -> a -> b -> c, each dir 4096 blocks, plus a file at /a/f.
@@ -1046,6 +1708,61 @@ mod tests {
         rm(&db);
     }
 
+    #[test]
+    fn du_shallow_bulk_paths_preserve_many_canonical_siblings() {
+        const CHILDREN: i64 = 5_000;
+        let db = tmp("du-many-siblings");
+        rm(&db);
+        let mut store = Store::create_fresh(&db).unwrap();
+        {
+            let tx = store.conn.transaction().unwrap();
+            tx.execute(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+                 VALUES(1,1,'d',4096,?1,?2,0,0)",
+                params![4096 * (CHILDREN + 1), CHILDREN + 1],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                 VALUES(1,1,X'2f',1,1,1)",
+                [],
+            )
+            .unwrap();
+            for inode in 2..=CHILDREN + 1 {
+                let name = format!("child-{inode:05}");
+                tx.execute(
+                    "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+                     VALUES(1,?1,'d',4096,4096,1,0,0)",
+                    params![inode],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                     VALUES(1,1,?1,1,?2,1)",
+                    params![name.as_bytes(), inode],
+                )
+                .unwrap();
+            }
+            tx.execute(
+                "INSERT INTO meta(key,value) VALUES('root_dev','1'),('root_inode','1')",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let rows = du(&store, None, false, Some(1)).unwrap();
+        assert_eq!(rows.len(), CHILDREN as usize + 1);
+        let paths: std::collections::HashSet<_> = rows.into_iter().map(|row| row.path).collect();
+        assert!(paths.contains("/"));
+        for inode in [2, CHILDREN / 2, CHILDREN + 1] {
+            assert!(paths.contains(&format!("/child-{inode:05}")));
+        }
+
+        drop(store);
+        rm(&db);
+    }
+
     /// `all=true` includes files, and files must respect the same depth bound.
     #[test]
     fn du_depth_applies_to_files_too() {
@@ -1067,5 +1784,143 @@ mod tests {
 
         drop(store);
         rm(&db);
+    }
+
+    #[test]
+    fn find_returns_blob_dirent_names_from_the_trigram_index() {
+        let db = tmp("find-trigram-blob-name");
+        rm(&db);
+        let store = Store::create_fresh(&db).unwrap();
+        store
+            .conn
+            .execute_batch(crate::store::FTS_TRIGGERS_SQL)
+            .unwrap();
+        store
+            .conn
+            .execute_batch(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+                   VALUES(1,1,'d',0,4096,2,0,0),(1,2,'f',4096,4096,1,0,0);
+                 INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                   VALUES(1,1,X'2f',1,1,1),(1,1,X'61727469666163742d303030303030343234322e747874',1,2,1);
+                 INSERT INTO meta(key,value) VALUES('root_dev','1'),('root_inode','1');",
+            )
+            .unwrap();
+
+        let rows = find(
+            &store,
+            &FindOpts {
+                name: Some("artifact-0000004242".into()),
+                ext: None,
+                newer_than: None,
+                larger_than: None,
+                owner_uid: None,
+                limit: 20,
+                scope: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "literal substring should find the indexed BLOB name"
+        );
+        assert_eq!(rows[0].path, "/artifact-0000004242.txt");
+
+        drop(store);
+        rm(&db);
+    }
+
+    #[test]
+    fn find_trigram_filter_preserves_case_extension_and_hardlink_paths() {
+        let db = tmp("find-trigram-semantics");
+        rm(&db);
+        let store = Store::create_fresh(&db).unwrap();
+        store
+            .conn
+            .execute_batch(crate::store::FTS_TRIGGERS_SQL)
+            .unwrap();
+        store
+            .conn
+            .execute_batch(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime)
+                   VALUES(1,1,'d',0,16384,4,0,0),(1,2,'f',4096,4096,1,0,0),
+                         (1,3,'d',0,8192,2,0,0),(1,4,'f',4096,4096,1,0,0);
+                 INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                   VALUES(1,1,X'2f',1,1,1),(1,1,X'737562',1,3,1),
+                         (1,1,X'61727469666163742d303030303030343234322e747874',1,2,1),
+                         (1,3,X'61727469666163742d303030303030343234322e747874',1,2,1),
+                         (1,1,X'41727469666163742d303030303030343234322e545854',1,2,0),
+                         (1,1,X'7265706f72745b66696e616c5d2d6c6f6e672e747874',1,4,1);
+                 INSERT INTO meta(key,value) VALUES('root_dev','1'),('root_inode','1');",
+            )
+            .unwrap();
+
+        let rows = find(
+            &store,
+            &FindOpts {
+                name: Some("artifact-0000004242".into()),
+                ext: None,
+                newer_than: None,
+                larger_than: None,
+                owner_uid: None,
+                limit: 20,
+                scope: None,
+            },
+        )
+        .unwrap();
+        let mut paths: Vec<_> = rows.into_iter().map(|row| row.path).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            ["/artifact-0000004242.txt", "/sub/artifact-0000004242.txt",]
+        );
+
+        let rows = find(
+            &store,
+            &FindOpts {
+                name: None,
+                ext: Some("TXT".into()),
+                newer_than: None,
+                larger_than: None,
+                owner_uid: None,
+                limit: 20,
+                scope: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1, "GLOB matching remains case-sensitive");
+        assert_eq!(rows[0].path, "/Artifact-0000004242.TXT");
+
+        let rows = find(
+            &store,
+            &FindOpts {
+                name: Some("report[final]".into()),
+                ext: None,
+                newer_than: None,
+                larger_than: None,
+                owner_uid: None,
+                limit: 20,
+                scope: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1, "literal brackets remain escaped");
+        assert_eq!(rows[0].path, "/report[final]-long.txt");
+
+        drop(store);
+        rm(&db);
+    }
+
+    #[test]
+    fn subtree_cycle_deduplicates_inodes() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE dirents(parent_dev,parent_inode,dev_id,inode); INSERT INTO dirents VALUES(1,10,1,20),(1,20,1,10);").unwrap();
+        let mut st = conn.prepare(SUBTREE_CTE).unwrap();
+        let rows: Vec<(i64, i64)> = st
+            .query_map(params![1, 10], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(rows.len(), 2);
     }
 }

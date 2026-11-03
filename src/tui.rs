@@ -1,6 +1,6 @@
 use crate::store::{PathResolver, Store};
 use crate::util::{ago, human};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -10,13 +10,14 @@ use ratatui::{
     prelude::*,
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use std::io::stdout;
 use std::time::{Duration, Instant};
 
 /// Max children loaded per directory in the tree view. A directory with more
 /// shows a visible "… more than N entries" marker instead of silently hiding.
 const CHILD_LIMIT: usize = 5000;
+const LARGE_PAGE_SIZE: usize = 100;
 
 /// What the tree graph visualizes.
 #[derive(Clone, Copy, PartialEq)]
@@ -40,6 +41,23 @@ enum Screen {
     Explore,
     Activity,
     Reclaim,
+    LargeFiles,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum LargeSort {
+    Size,
+    Growth,
+}
+
+#[derive(Clone)]
+struct LargeFileRow {
+    dev: i64,
+    inode: i64,
+    path: String,
+    allocated: i64,
+    modified: i64,
+    growth: i64,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -137,6 +155,12 @@ struct App {
     top_growth: Vec<(String, i64)>,
     recent_changes: Vec<(String, i64)>,
     top_files: Vec<(String, i64, i64, i64)>, // path, blocks, mtime, recent growth/h
+    large_files: Vec<LargeFileRow>,
+    large_total_count: usize,
+    large_total_bytes: i64,
+    large_page_offset: usize,
+    large_selection: usize,
+    large_sort: LargeSort,
     groups: Vec<GroupRow>,
     total_size: i64,
     last_scan: i64,
@@ -179,6 +203,12 @@ struct App {
     // background refresh result is only applied to the TREE if its generation
     // still matches (the user hasn't restructured since) — see the worker.
     view_gen: u64,
+    pending_child: Option<(i64, i64)>,
+    last_refresh: Option<Instant>,
+    refresh_error: Option<String>,
+    health_error: Option<String>,
+    last_storage: Option<Instant>,
+    storage_error: Option<String>,
 }
 
 /// Inputs the background worker needs to recompute the view off the input thread.
@@ -187,34 +217,31 @@ struct Snapshot {
     metric: Metric,
     window_secs: i64,
     distribution: Distribution,
+    group_view: GroupView,
+    screen: Screen,
+    large_page_offset: usize,
+    large_sort: LargeSort,
     gen: u64,
 }
 
 /// View data the worker produces (all owned/`Send`), applied by the UI thread.
 struct RefreshResult {
     gen: u64,
+    group_view: GroupView,
     distribution: Distribution,
     rows: Vec<Row>,
     growth_map: std::collections::HashMap<(i64, i64), i64>,
     top_growth: Vec<(String, i64)>,
     recent_changes: Vec<(String, i64)>,
     top_files: Vec<(String, i64, i64, i64)>,
+    large_files: Vec<LargeFileRow>,
+    large_total_count: usize,
+    large_total_bytes: i64,
     groups: Vec<GroupRow>,
     total_size: i64,
     items: i64,
     growth_per_day: i64,
     last_scan: i64,
-    fs: crate::util::FsStat,
-    daemon_live: bool,
-    dirty_since: Option<i64>,
-    paused_since: Option<i64>,
-    pause_reason: String,
-    throttled_since: Option<i64>,
-    watch: Option<crate::util::WatchStatus>,
-    scan: Option<crate::util::ScanProgress>,
-    containers: Vec<crate::containers::ContainerRow>,
-    waste: crate::containers::Waste,
-    cleanup: Vec<CleanupRow>,
 }
 
 /// Background refresh worker: owns its OWN read-only connection and a shadow App
@@ -222,81 +249,200 @@ struct RefreshResult {
 /// so the expensive recursive growth CTEs never run on the input thread. Reopens
 /// the connection if the DB is replaced under it (an atomic rescan renames a new
 /// file over the old). Exits when the snapshot sender is dropped (UI quit).
+type RefreshMessage = std::result::Result<RefreshResult, String>;
+
 fn refresh_worker(
     db: std::path::PathBuf,
     dev: i64,
     inode: i64,
     rx: crossbeam_channel::Receiver<Snapshot>,
-    tx: crossbeam_channel::Sender<RefreshResult>,
+    tx: crossbeam_channel::Sender<RefreshMessage>,
 ) {
-    let mut store = match Store::open_ro(&db) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let mut open_ino = db_inode(&db);
-    let mut shadow = App::new(&store, &db, dev, inode);
+    let mut context: Option<App> = None;
     while let Ok(mut snap) = rx.recv() {
-        // coalesce: skip to the most recent queued request
-        while let Ok(s) = rx.try_recv() {
-            snap = s;
+        while let Ok(next) = rx.try_recv() {
+            snap = next;
         }
-        // Reopen if a rescan swapped the db inode: a connection on the old unlinked
-        // inode serves stale panels with no error, so the reopen-on-error path below
-        // would never trigger for a clean swap.
-        let cur_ino = db_inode(&db);
-        if cur_ino != 0 && cur_ino != open_ino {
-            if let Ok(s) = Store::open_ro(&db) {
-                store = s;
-                open_ino = cur_ino;
+        // A fresh connection per request cannot stay pinned to an index that was
+        // atomically replaced. Open failures are reported and retried next time.
+        let outcome = (|| -> Result<RefreshResult> {
+            let mut store = Store::open_ro(&db)?;
+            let deadline = Instant::now() + Duration::from_secs(15);
+            store
+                .conn
+                .progress_handler(10000, Some(move || Instant::now() >= deadline))?;
+            let shadow = if let Some(shadow) = context.as_mut() {
+                shadow
+            } else {
+                context.insert(App::new(&store, &db, dev, inode)?)
+            };
+            shadow.expanded = snap.expanded;
+            shadow.metric = snap.metric;
+            shadow.window_secs = snap.window_secs;
+            shadow.distribution = snap.distribution;
+            shadow.group_view = snap.group_view;
+            shadow.screen = snap.screen;
+            shadow.large_page_offset = snap.large_page_offset;
+            shadow.large_sort = snap.large_sort;
+            let transaction = store.conn.unchecked_transaction()?;
+            shadow.refresh_growth_map(&store)?;
+            shadow.rebuild(&store)?;
+            shadow.refresh_panels(&store)?;
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "view computation exceeded its 15-second budget"
+            );
+            transaction.commit()?;
+            Ok(RefreshResult {
+                gen: snap.gen,
+                group_view: snap.group_view,
+                distribution: snap.distribution,
+                rows: std::mem::take(&mut shadow.rows),
+                growth_map: shadow.growth_map.clone(),
+                top_growth: std::mem::take(&mut shadow.top_growth),
+                recent_changes: std::mem::take(&mut shadow.recent_changes),
+                top_files: std::mem::take(&mut shadow.top_files),
+                large_files: std::mem::take(&mut shadow.large_files),
+                large_total_count: shadow.large_total_count,
+                large_total_bytes: shadow.large_total_bytes,
+                groups: std::mem::take(&mut shadow.groups),
+                total_size: shadow.total_size,
+                items: shadow.items,
+                growth_per_day: shadow.growth_per_day,
+                last_scan: shadow.last_scan,
+            })
+        })()
+        .map_err(|e| format!("{e:#}"));
+        if tx.send(outcome).is_err() {
+            break;
+        }
+    }
+}
+
+/// Health does not wait behind growth queries, container inspection or mounts.
+struct HealthUpdate {
+    error: Option<String>,
+    live: bool,
+    dirty: Option<i64>,
+    paused: Option<i64>,
+    behind: Option<i64>,
+    reason: String,
+    watch: Option<crate::util::WatchStatus>,
+    scan: Option<crate::util::ScanProgress>,
+}
+
+fn health_worker(db: std::path::PathBuf, tx: crossbeam_channel::Sender<HealthUpdate>) {
+    loop {
+        let opened = Store::open_ro(&db);
+        let mut errors = opened
+            .as_ref()
+            .err()
+            .map(|e| vec![format!("{e:#}")])
+            .unwrap_or_default();
+        let store = opened.ok();
+        if let Some(s) = &store {
+            let _ = s.conn.busy_timeout(Duration::from_millis(100));
+        }
+        let mut read_timestamp = |read: Result<Option<i64>>| match read {
+            Ok(value) => value,
+            Err(error) => {
+                errors.push(format!("{error:#}"));
+                None
             }
-        }
-        shadow.expanded = snap.expanded;
-        shadow.metric = snap.metric;
-        shadow.window_secs = snap.window_secs;
-        shadow.distribution = snap.distribution;
-        shadow.growth_calc = Instant::now() - Duration::from_secs(60); // force recompute
-        let ok = {
-            shadow.refresh_growth_map(&store);
-            shadow.rebuild(&store).is_ok() && shadow.refresh_panels(&store).is_ok()
         };
-        if !ok {
-            // likely a stale connection (db replaced by a rescan) — reopen once.
-            if let Ok(s) = Store::open_ro(&db) {
-                store = s;
-                shadow.growth_calc = Instant::now() - Duration::from_secs(60);
-                shadow.refresh_growth_map(&store);
-                let _ = shadow.rebuild(&store);
-                let _ = shadow.refresh_panels(&store);
+        let dirty = store
+            .as_ref()
+            .map(|s| read_timestamp(crate::query::dirty_since(s)))
+            .unwrap_or(None);
+        let paused = store
+            .as_ref()
+            .map(|s| read_timestamp(crate::query::paused_since(s)))
+            .unwrap_or(None);
+        let behind = store
+            .as_ref()
+            .map(|s| read_timestamp(crate::query::throttled_since(s)))
+            .unwrap_or(None);
+        let reason = match store.as_ref().map(|s| s.get_meta("pause_reason")) {
+            Some(Ok(reason)) => reason.unwrap_or_default(),
+            Some(Err(error)) => {
+                errors.push(format!("{error:#}"));
+                String::new()
             }
-        }
-        let result = RefreshResult {
-            gen: snap.gen,
-            distribution: snap.distribution,
-            rows: std::mem::take(&mut shadow.rows),
-            growth_map: shadow.growth_map.clone(),
-            top_growth: std::mem::take(&mut shadow.top_growth),
-            recent_changes: std::mem::take(&mut shadow.recent_changes),
-            top_files: std::mem::take(&mut shadow.top_files),
-            groups: std::mem::take(&mut shadow.groups),
-            total_size: shadow.total_size,
-            items: shadow.items,
-            growth_per_day: shadow.growth_per_day,
-            last_scan: shadow.last_scan,
-            fs: shadow.fs,
-            daemon_live: shadow.daemon_live,
-            throttled_since: shadow.throttled_since,
-            watch: shadow.watch.clone(),
-            scan: shadow.scan.clone(),
-            containers: shadow.containers.clone(),
-            waste: shadow.waste.clone(),
-            cleanup: shadow.cleanup.clone(),
-            dirty_since: shadow.dirty_since,
-            paused_since: shadow.paused_since,
-            pause_reason: std::mem::take(&mut shadow.pause_reason),
+            None => String::new(),
         };
-        if tx.send(result).is_err() {
-            break; // UI gone
+        let update = HealthUpdate {
+            error: (!errors.is_empty()).then(|| errors.join("; ")),
+            live: crate::util::daemon_live_for(&db),
+            dirty,
+            paused,
+            behind,
+            reason,
+            watch: crate::util::read_watch_status(&db),
+            scan: crate::util::read_scan_progress_for(&db),
+        };
+        drop(store);
+        if tx.send(update).is_err() {
+            break;
         }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+struct StorageUpdate {
+    fs: crate::util::FsStat,
+    containers: Vec<crate::containers::ContainerRow>,
+    waste: crate::containers::Waste,
+    cleanup: Vec<CleanupRow>,
+}
+
+fn storage_worker(
+    db: std::path::PathBuf,
+    dev: i64,
+    inode: i64,
+    tx: crossbeam_channel::Sender<std::result::Result<StorageUpdate, String>>,
+) {
+    loop {
+        let update = (|| -> Result<StorageUpdate> {
+            let store = Store::open_ro(&db)?;
+            let mut shadow = App::new(&store, &db, dev, inode)?;
+            // No read transaction is held during these potentially slow calls.
+            shadow.refresh_storage(&store)?;
+            let fs = crate::util::fs_stat_checked(std::path::Path::new(&shadow.root_path))?;
+            Ok(StorageUpdate {
+                fs,
+                containers: shadow.containers,
+                waste: shadow.waste,
+                cleanup: shadow.cleanup,
+            })
+        })()
+        .map_err(|e| format!("{e:#}"));
+        if tx.send(update).is_err() {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(30));
+    }
+}
+
+/// A one-slot mailbox stores the newest requested view, not an unbounded queue.
+fn request_refresh(
+    app: &App,
+    tx: &crossbeam_channel::Sender<Snapshot>,
+    queued: &crossbeam_channel::Receiver<Snapshot>,
+) {
+    let snapshot = Snapshot {
+        expanded: app.expanded.clone(),
+        metric: app.metric,
+        window_secs: app.window_secs,
+        distribution: app.distribution,
+        group_view: app.group_view,
+        screen: app.screen,
+        large_page_offset: app.large_page_offset,
+        large_sort: app.large_sort,
+        gen: app.view_gen,
+    };
+    if let Err(crossbeam_channel::TrySendError::Full(snapshot)) = tx.try_send(snapshot) {
+        let _ = queued.try_recv();
+        let _ = tx.try_send(snapshot);
     }
 }
 
@@ -311,7 +457,10 @@ pub fn run(db: &std::path::Path, start: Option<(i64, i64)>) -> Result<()> {
     // very deleted-but-open leak dux is built to find.
     let (dev, inode, mut app) = {
         let store = Store::open_ro(db)?;
-        let root = start.or_else(|| root_node(&store));
+        let root = match start {
+            Some(root) => Some(root),
+            None => root_node(&store)?,
+        };
         let (dev, inode) = match root {
             Some(v) => v,
             None => {
@@ -319,25 +468,34 @@ pub fn run(db: &std::path::Path, start: Option<(i64, i64)>) -> Result<()> {
                 return Ok(());
             }
         };
-        let mut app = App::new(&store, db, dev, inode);
+        let mut app = App::new(&store, db, dev, inode)?;
         // First frame = the TREE only (cheap, indexed per-dir queries). The
         // expensive growth-heat + panels are computed by the background worker and
         // applied when ready — so the TUI opens INSTANTLY even on a huge, high-churn
         // index instead of blocking ~30s on the recursive growth query.
         app.init_root(&store)?;
-        app.update_detail(&store);
+        app.update_detail();
         (dev, inode, app)
     };
 
     // Spawn the background refresh worker — it recomputes the heavy view data off
     // the input thread so navigation never blocks (M4). Channels: snapshots out,
     // results in. When `snap_tx` drops (run returns), the worker exits.
-    let (snap_tx, snap_rx) = crossbeam_channel::unbounded::<Snapshot>();
-    let (res_tx, res_rx) = crossbeam_channel::unbounded::<RefreshResult>();
+    let (snap_tx, snap_rx) = crossbeam_channel::bounded::<Snapshot>(1);
+    let (res_tx, res_rx) = crossbeam_channel::bounded::<RefreshMessage>(1);
     {
         let dbp = db.to_path_buf();
-        std::thread::spawn(move || refresh_worker(dbp, dev, inode, snap_rx, res_tx));
+        let worker_rx = snap_rx.clone();
+        std::thread::spawn(move || refresh_worker(dbp, dev, inode, worker_rx, res_tx));
     }
+
+    let (health_tx, health_rx) = crossbeam_channel::bounded(1);
+    let health_db = db.to_path_buf();
+    std::thread::spawn(move || health_worker(health_db, health_tx));
+
+    let (storage_tx, storage_rx) = crossbeam_channel::bounded(1);
+    let storage_db = db.to_path_buf();
+    std::thread::spawn(move || storage_worker(storage_db, dev, inode, storage_tx));
 
     // Restore the terminal even on panic (panic=abort still runs hooks).
     let prev_hook = std::panic::take_hook();
@@ -362,27 +520,25 @@ pub fn run(db: &std::path::Path, start: Option<(i64, i64)>) -> Result<()> {
     enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen)?;
     let mut term = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let res = event_loop(&mut term, &mut app, db, &snap_tx, &res_rx);
+    let res = event_loop(
+        &mut term,
+        &mut app,
+        &snap_tx,
+        &snap_rx,
+        &res_rx,
+        &health_rx,
+        &storage_rx,
+    );
     term.show_cursor().ok();
     res
 }
 
 /// Resolve the indexed root from stored meta, else a self-parent fallback.
-fn root_node(store: &Store) -> Option<(i64, i64)> {
-    let dev: Option<i64> = store
-        .get_meta("root_dev")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok());
-    let ino: Option<i64> = store
-        .get_meta("root_inode")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok());
-    if let (Some(d), Some(i)) = (dev, ino) {
-        return Some((d, i));
+fn root_node(store: &Store) -> Result<Option<(i64, i64)>> {
+    if let Some(root) = crate::query::index_root(store)? {
+        return Ok(Some(root));
     }
-    store
+    Ok(store
         .conn
         .query_row(
             "SELECT dev_id, inode FROM inodes WHERE kind='d'
@@ -390,15 +546,20 @@ fn root_node(store: &Store) -> Option<(i64, i64)> {
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .ok()
+        .optional()?)
 }
 
 impl App {
     /// Construct an App rooted at (dev,inode). Used by the UI and by the
     /// background refresh worker's shadow context (which reuses rebuild/
     /// refresh_panels to compute off the input thread — see RefreshWorker).
-    fn new(store: &Store, db: &std::path::Path, dev: i64, inode: i64) -> App {
-        App {
+    fn new(store: &Store, db: &std::path::Path, dev: i64, inode: i64) -> Result<App> {
+        let root_path = store.path_of(dev, inode)?;
+        anyhow::ensure!(
+            !root_path.starts_with("inode:"),
+            "indexed TUI root ({dev},{inode}) has no visible path"
+        );
+        Ok(App {
             rows: Vec::new(),
             expanded: std::collections::HashSet::new(),
             sel: 0,
@@ -407,15 +568,21 @@ impl App {
             top_growth: Vec::new(),
             recent_changes: Vec::new(),
             top_files: Vec::new(),
+            large_files: Vec::new(),
+            large_total_count: 0,
+            large_total_bytes: 0,
+            large_page_offset: 0,
+            large_selection: 0,
+            large_sort: LargeSort::Size,
             groups: Vec::new(),
             total_size: 0,
             last_scan: 0,
             window_secs: 3600,
             scroll: 0,
             metric: Metric::Size,
-            root_path: store.path_of(dev, inode).unwrap_or_else(|_| "/".into()),
+            root_path,
             db: db.to_path_buf(),
-            docker_paths: docker_paths(),
+            docker_paths: docker_paths()?,
             group_view: GroupView::Top,
             fs: crate::util::FsStat::default(),
             daemon_live: false,
@@ -445,7 +612,13 @@ impl App {
             reclaim_sel: 0,
             detail: String::new(),
             view_gen: 0,
-        }
+            pending_child: None,
+            last_refresh: None,
+            refresh_error: None,
+            health_error: None,
+            last_storage: None,
+            storage_error: None,
+        })
     }
 
     /// Apply a worker refresh. Panels/totals/states/growth-map are always taken
@@ -453,32 +626,33 @@ impl App {
     /// the user hasn't restructured since the request (`gen` still current) — else
     /// a synchronous rebuild already produced the up-to-date rows.
     fn apply_refresh(&mut self, r: RefreshResult) {
+        if r.gen != self.view_gen {
+            return;
+        }
+        self.last_refresh = Some(Instant::now());
+        self.refresh_error = None;
         self.growth_map = r.growth_map;
         self.top_growth = r.top_growth;
         self.recent_changes = r.recent_changes;
         self.top_files = r.top_files;
-        // The worker's shadow always computes TOP-level groups (Snapshot carries
-        // no group_view). Only adopt them while we're actually showing the top
-        // view — otherwise a refresh would clobber the drilled-in Detail groups
-        // (computed synchronously on drill) back to top-level every ~4s.
-        if self.group_view == GroupView::Top && self.distribution == r.distribution {
+        self.large_files = r.large_files;
+        self.large_total_count = r.large_total_count;
+        self.large_total_bytes = r.large_total_bytes;
+        self.large_selection = self
+            .large_selection
+            .min(self.large_files.len().saturating_sub(1));
+        // Group drill state travels with the request; only the matching view
+        // may replace these rows.
+        if self.group_view == r.group_view
+            && self.distribution == r.distribution
+            && self.view_gen == r.gen
+        {
             self.groups = r.groups;
         }
         self.total_size = r.total_size;
         self.items = r.items;
         self.growth_per_day = r.growth_per_day;
         self.last_scan = r.last_scan;
-        self.fs = r.fs;
-        self.daemon_live = r.daemon_live;
-        self.throttled_since = r.throttled_since;
-        self.watch = r.watch;
-        self.scan = r.scan;
-        self.containers = r.containers;
-        self.waste = r.waste;
-        self.cleanup = r.cleanup;
-        self.dirty_since = r.dirty_since;
-        self.paused_since = r.paused_since;
-        self.pause_reason = r.pause_reason;
         if r.gen == self.view_gen {
             let sel_id = self.rows.get(self.sel).map(|x| (x.dev, x.inode));
             self.rows = r.rows;
@@ -489,6 +663,15 @@ impl App {
             }
             if self.sel >= self.rows.len() {
                 self.sel = self.rows.len().saturating_sub(1);
+            }
+        }
+        if let Some(id) = self.pending_child.take() {
+            if let Some(parent) = self.rows.iter().position(|r| (r.dev, r.inode) == id) {
+                if parent + 1 < self.rows.len()
+                    && self.rows[parent + 1].depth > self.rows[parent].depth
+                {
+                    self.sel = parent + 1;
+                }
             }
         }
         self.asel = self.asel.min(self.groups.len().saturating_sub(1));
@@ -514,21 +697,17 @@ impl App {
     /// Recursive write-rate per node (bytes in the last hour) propagated up the
     /// tree from the change log, in ONE query. Cached ~3s so expanding stays
     /// snappy. This is why a directory shows its subtree's activity, not 0.
-    fn refresh_growth_map(&mut self, store: &Store) {
+    fn refresh_growth_map(&mut self, store: &Store) -> Result<()> {
         if self.growth_calc.elapsed() < Duration::from_secs(3) {
-            return;
+            return Ok(());
         }
-        let cutoff = (crate::util::now_secs() - 3600) / crate::store::GROWTH_BUCKET_SECS;
+        let cutoff =
+            crate::util::now_secs().saturating_sub(3600) / crate::store::GROWTH_BUCKET_SECS;
         let mut map = std::collections::HashMap::new();
-        // Bound the recursive ancestor walk to the HOTTEST changed inodes. On a
-        // high-churn host (e.g. a busy mail store) the last hour can have hundreds
-        // of thousands of changed inodes; walking every one to the root took tens
-        // of seconds. The heat bar is dominated by the top contributors, so cap
-        // the leaves — the long tail is visually negligible.
-        if let Ok(mut stmt) = store.conn.prepare(
+        let mut stmt = store.conn.prepare(
             "WITH RECURSIVE
                chg(dev,ino,d) AS (
-                 SELECT dev_id,inode,SUM(delta) s FROM growth WHERE bucket>=?1
+                 SELECT dev_id,inode,SUM(delta) s FROM growth_current WHERE bucket>=?1
                  GROUP BY dev_id,inode ORDER BY s DESC LIMIT 3000
                ),
                anc(dev,ino,d,depth) AS (
@@ -539,20 +718,20 @@ impl App {
                  WHERE NOT (n.dev_id=n.parent_dev AND n.inode=n.parent_inode) AND a.depth<4096
                )
              SELECT dev,ino,SUM(d) FROM anc GROUP BY dev,ino",
-        ) {
-            if let Ok(rows) = stmt.query_map(params![cutoff], |r| {
-                Ok((
-                    (r.get::<_, i64>(0)?, r.get::<_, i64>(1)?),
-                    r.get::<_, i64>(2)?,
-                ))
-            }) {
-                for x in rows.flatten() {
-                    map.insert(x.0, x.1);
-                }
-            }
+        )?;
+        let rows = stmt.query_map(params![cutoff], |r| {
+            Ok((
+                (r.get::<_, i64>(0)?, r.get::<_, i64>(1)?),
+                r.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, delta) = row?;
+            map.insert(id, delta);
         }
         self.growth_map = map;
         self.growth_calc = Instant::now();
+        Ok(())
     }
 
     fn rebuild(&mut self, store: &Store) -> Result<()> {
@@ -564,14 +743,11 @@ impl App {
         let mut out: Vec<Row> = Vec::new();
 
         // root row (name is the scan root path; totals live on the inode)
-        let (size, inodes): (i64, i64) = store
-            .conn
-            .query_row(
-                "SELECT recursive_bytes, recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
-                params![self.root_dev, self.root_inode],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap_or((0, 0));
+        let (size, inodes): (i64, i64) = store.conn.query_row(
+            "SELECT recursive_bytes, recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![self.root_dev, self.root_inode],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         let name = crate::util::display_path(&self.root_path);
         let root_expanded = self.expanded.contains(&(self.root_dev, self.root_inode));
         out.push(Row {
@@ -620,7 +796,7 @@ impl App {
         Ok(())
     }
 
-    fn refresh_groups(&mut self, store: &Store) {
+    fn refresh_groups(&mut self, store: &Store) -> Result<()> {
         self.groups = if self.distribution == Distribution::Apps {
             compute_groups(
                 store,
@@ -631,11 +807,12 @@ impl App {
                 &self.docker_paths,
                 self.group_view,
                 &self.growth_map,
-            )
+            )?
         } else {
-            aggregate_groups(store, self)
+            aggregate_groups(store, self)?
         };
         self.asel = self.asel.min(self.groups.len().saturating_sub(1));
+        Ok(())
     }
 
     /// Recursively append a directory's children (and any expanded descendants)
@@ -755,7 +932,7 @@ impl App {
         Ok(())
     }
 
-    fn toggle(&mut self, store: &Store) -> Result<()> {
+    fn toggle(&mut self) -> Result<()> {
         let r = match self.rows.get(self.sel) {
             Some(r) => r,
             None => return Ok(()), // defensive: never index an empty/short row list
@@ -768,11 +945,12 @@ impl App {
             self.expanded.insert(id);
         }
         self.view_gen += 1; // structure changed: stale worker rows must not apply
-        self.rebuild(store)
+        self.collapse_cached();
+        Ok(())
     }
 
     /// Move to the parent of the selection and collapse it.
-    fn ascend(&mut self, store: &Store) -> Result<()> {
+    fn ascend(&mut self) -> Result<()> {
         let depth = match self.rows.get(self.sel) {
             Some(r) => r.depth,
             None => return Ok(()),
@@ -787,7 +965,7 @@ impl App {
         let id = (self.rows[i].dev, self.rows[i].inode);
         self.expanded.remove(&id);
         self.view_gen += 1;
-        self.rebuild(store)?;
+        self.collapse_cached();
         self.sel = self
             .rows
             .iter()
@@ -796,89 +974,68 @@ impl App {
         Ok(())
     }
 
+    fn collapse_cached(&mut self) {
+        let mut hidden_below = None;
+        self.rows.retain_mut(|row| {
+            if hidden_below.is_some_and(|depth| row.depth > depth) {
+                return false;
+            }
+            hidden_below = None;
+            row.expanded = self.expanded.contains(&(row.dev, row.inode));
+            if row.kind == 'd' && !row.expanded {
+                hidden_below = Some(row.depth);
+            }
+            true
+        });
+        self.sel = self.sel.min(self.rows.len().saturating_sub(1));
+    }
+
     /// When the TUI is opened at a subtree (not the whole index root), the
     /// largest-files / fastest-growth panels must be scoped to that subtree too,
     /// or they'd show unrelated global entries. Returns the ` AND (...) IN (...)`
     /// clause + bind params, or empty strings when viewing the whole index.
-    fn panel_scope(&self, store: &Store) -> (String, Vec<i64>) {
-        let rdev: Option<i64> = store
-            .get_meta("root_dev")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse().ok());
-        let rino: Option<i64> = store
-            .get_meta("root_inode")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse().ok());
-        if rdev == Some(self.root_dev) && rino == Some(self.root_inode) {
-            (String::new(), Vec::new()) // viewing the whole index — no filter
+    fn panel_scope(&self, store: &Store) -> Result<(String, Vec<i64>)> {
+        if crate::query::index_root(store)? == Some((self.root_dev, self.root_inode)) {
+            Ok((String::new(), Vec::new())) // viewing the whole index — no filter
         } else {
-            (
+            Ok((
                 format!(" AND (dev_id,inode) IN ({})", crate::query::SUBTREE_CTE),
                 vec![self.root_dev, self.root_inode],
-            )
+            ))
         }
     }
 
     fn refresh_panels(&mut self, store: &Store) -> Result<()> {
-        self.total_size = store
-            .conn
-            .query_row(
-                "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
-                params![self.root_dev, self.root_inode],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-        self.last_scan = store
-            .get_meta("last_scan_ts")?
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        // live filesystem capacity (refreshes as disk fills/empties)
-        if let Some(fs) = crate::util::fs_stat(std::path::Path::new(&self.root_path)) {
-            self.fs = fs;
-        }
-        self.daemon_live = crate::query::daemon_live(&self.db);
-        self.dirty_since = crate::query::dirty_since(store);
-        self.paused_since = crate::query::paused_since(store);
-        self.throttled_since = crate::query::throttled_since(store);
-        self.watch = crate::util::read_watch_status(&self.db);
-        self.scan = crate::util::read_scan_progress();
-        self.pause_reason = store
-            .get_meta("pause_reason")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "system pressure".into());
-
+        self.total_size = store.conn.query_row(
+            "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![self.root_dev, self.root_inode],
+            |r| r.get(0),
+        )?;
+        self.last_scan = crate::query::optional_timestamp(store, "last_scan_ts")?.unwrap_or(0);
         // status-bar aggregates
-        self.items = store
-            .conn
-            .query_row(
-                "SELECT recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
-                params![self.root_dev, self.root_inode],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        self.items = store.conn.query_row(
+            "SELECT recursive_inodes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            params![self.root_dev, self.root_inode],
+            |r| r.get(0),
+        )?;
         // growth/day = bytes written in the last hour, extrapolated (×24).
         // Only meaningful with a running daemon + history; 0 otherwise.
-        let hour_ago = (crate::util::now_secs() - 3600) / crate::store::GROWTH_BUCKET_SECS;
-        let last_hour: i64 = store
-            .conn
-            .query_row(
-                "SELECT COALESCE(SUM(delta),0) FROM growth WHERE bucket>=?1 AND delta>0",
-                params![hour_ago],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-        self.growth_per_day = last_hour * 24;
+        let hour_ago =
+            crate::util::now_secs().saturating_sub(3600) / crate::store::GROWTH_BUCKET_SECS;
+        let last_hour: i64 = store.conn.query_row(
+            "SELECT COALESCE(SUM(delta),0) FROM growth_current WHERE bucket>=?1 AND delta>0",
+            params![hour_ago],
+            |r| r.get(0),
+        )?;
+        self.growth_per_day = last_hour.saturating_mul(24);
 
-        let cutoff =
-            (crate::util::now_secs() - self.window_secs) / crate::store::GROWTH_BUCKET_SECS;
-        let (scope_sql, scope_args) = self.panel_scope(store);
+        let cutoff = crate::util::now_secs().saturating_sub(self.window_secs)
+            / crate::store::GROWTH_BUCKET_SECS;
+        let (scope_sql, scope_args) = self.panel_scope(store)?;
         let mut pr = PathResolver::new(&store.conn);
         // pull extra rows; we drop unresolved/duplicate paths then take 6
         let gsql = format!(
-            "SELECT dev_id, inode, SUM(delta) d FROM growth WHERE bucket>=?1{scope_sql}
+            "SELECT dev_id, inode, SUM(delta) d FROM growth_current WHERE bucket>=?1{scope_sql}
              GROUP BY dev_id, inode HAVING d>0 ORDER BY d DESC LIMIT 60"
         );
         let mut gs = store.conn.prepare(&gsql)?;
@@ -892,22 +1049,22 @@ impl App {
             ))
         })?;
         let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-        self.top_growth = g
-            .filter_map(|x| x.ok())
-            .filter_map(|(d, i, delta)| {
-                let p = pr.resolve(d, i);
-                // skip rows whose node is gone (path can't be resolved) and dups
-                if p.starts_with("inode:")
-                    || crate::util::is_index_artifact(std::path::Path::new(&p), &self.db)
-                    || !seen_paths.insert(p.clone())
-                {
-                    None
-                } else {
-                    Some((crate::util::display_path(&p), delta))
-                }
-            })
-            .take(6)
-            .collect();
+        let mut top_growth = Vec::new();
+        for row in g {
+            let (d, i, delta) = row?;
+            let path = pr.resolve(d, i)?;
+            if path.starts_with("inode:")
+                || crate::util::is_index_artifact(std::path::Path::new(&path), &self.db)
+                || !seen_paths.insert(path.clone())
+            {
+                continue;
+            }
+            top_growth.push((crate::util::display_path(&path), delta));
+            if top_growth.len() == 6 {
+                break;
+            }
+        }
+        self.top_growth = top_growth;
 
         // Activity is sourced entirely from the compact, bucketed change log.
         // It never scans the filesystem and is bounded to 30 resolved paths.
@@ -916,8 +1073,7 @@ impl App {
         } else {
             Some((self.root_dev, self.root_inode))
         };
-        self.recent_changes = crate::query::changed(store, self.window_secs, 30, activity_scope)
-            .unwrap_or_default()
+        self.recent_changes = crate::query::changed(store, self.window_secs, 30, activity_scope)?
             .into_iter()
             .filter(|r| {
                 !r.path.starts_with("inode:")
@@ -939,20 +1095,22 @@ impl App {
                 r.get::<_, i64>(3)?,
             ))
         })?;
-        self.top_files = f
-            .filter_map(|x| x.ok())
-            .filter_map(|(d, i, blocks, mtime)| {
-                // recent write rate for this file (leaf growth from the map)
-                let growth = self.growth_map.get(&(d, i)).copied().unwrap_or(0);
-                let path = pr.resolve(d, i);
-                if crate::util::is_index_artifact(std::path::Path::new(&path), &self.db) {
-                    return None;
-                }
-                Some((crate::util::display_path(&path), blocks, mtime, growth))
-            })
-            .collect();
-        self.refresh_groups(store);
-        self.refresh_storage(store);
+        let mut top_files = Vec::new();
+        for row in f {
+            let (d, i, blocks, mtime) = row?;
+            let growth = self.growth_map.get(&(d, i)).copied().unwrap_or(0);
+            let path = pr.resolve(d, i)?;
+            if !crate::util::is_index_artifact(std::path::Path::new(&path), &self.db) {
+                top_files.push((crate::util::display_path(&path), blocks, mtime, growth));
+            }
+        }
+        self.top_files = top_files;
+        if self.screen == Screen::LargeFiles {
+            self.refresh_large_files(store, &scope_sql, &scope_args)?;
+        } else {
+            self.large_files.clear();
+        }
+        self.refresh_groups(store)?;
         // keep panel selections in range as panels change
         self.asel = self.asel.min(self.groups.len().saturating_sub(1));
         self.gsel = self.gsel.min(self.top_growth.len().saturating_sub(1));
@@ -964,13 +1122,91 @@ impl App {
         Ok(())
     }
 
-    fn refresh_storage(&mut self, store: &Store) {
+    fn refresh_large_files(
+        &mut self,
+        store: &Store,
+        scope_sql: &str,
+        scope_args: &[i64],
+    ) -> Result<()> {
+        let cutoff = (crate::util::now_secs()
+            .saturating_sub(self.window_secs)
+            .saturating_add(crate::store::GROWTH_BUCKET_SECS - 1))
+            / crate::store::GROWTH_BUCKET_SECS;
+        let filter = if scope_sql.is_empty() {
+            String::new()
+        } else {
+            format!(" AND (i.dev_id,i.inode) IN ({})", crate::query::SUBTREE_CTE)
+        };
+        let (order, secondary) = match self.large_sort {
+            LargeSort::Size => ("i.blocks DESC", "i.blocks DESC"),
+            LargeSort::Growth => (
+                "CASE WHEN COALESCE(c.delta,0)=(-9223372036854775807-1)
+                 THEN 9223372036854775807 ELSE ABS(COALESCE(c.delta,0)) END DESC",
+                "COALESCE(c.delta,0) DESC",
+            ),
+        };
+        let count_args = scope_args.to_vec();
+        let count_sql = format!(
+            "SELECT COUNT(*),COALESCE(SUM(i.blocks),0) FROM inodes i
+             WHERE i.kind!='d'{filter}"
+        );
+        let (count, bytes): (i64, i64) = store.conn.query_row(
+            &count_sql,
+            rusqlite::params_from_iter(count_args.iter()),
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        self.large_total_count = count.max(0) as usize;
+        self.large_total_bytes = bytes.max(0);
+        let sql = format!(
+            "WITH c AS (
+               SELECT dev_id,inode,SUM(delta) delta FROM growth_current WHERE bucket>=?1 GROUP BY dev_id,inode
+             )
+             SELECT i.dev_id,i.inode,i.blocks,i.mtime,COALESCE(c.delta,0)
+             FROM inodes i LEFT JOIN c ON c.dev_id=i.dev_id AND c.inode=i.inode
+             WHERE i.kind!='d'{filter}
+             ORDER BY {order}, {secondary}, i.dev_id, i.inode LIMIT ? OFFSET ?"
+        );
+        let mut args = vec![cutoff];
+        args.extend_from_slice(scope_args);
+        args.push(LARGE_PAGE_SIZE as i64);
+        args.push(self.large_page_offset.min(i64::MAX as usize) as i64);
+        let mut stmt = store.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        })?;
+        let mut resolver = PathResolver::new(&store.conn);
+        self.large_files = rows
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .map(
+                |(dev, inode, allocated, modified, growth)| -> Result<LargeFileRow> {
+                    Ok(LargeFileRow {
+                        dev,
+                        inode,
+                        path: crate::util::display_path(&resolver.resolve(dev, inode)?),
+                        allocated,
+                        modified,
+                        growth,
+                    })
+                },
+            )
+            .collect::<Result<_>>()?;
+        Ok(())
+    }
+
+    fn refresh_storage(&mut self, store: &Store) -> Result<()> {
         if self.storage_calc.elapsed() < Duration::from_secs(30) {
-            return;
+            return Ok(());
         }
         self.storage_calc = Instant::now();
-        self.containers = crate::containers::list(store).unwrap_or_default();
-        self.waste = crate::containers::waste(store, &self.containers);
+        self.containers = crate::containers::list(store)?;
+        self.waste = crate::containers::waste(store, &self.containers)?;
         let mut rows = Vec::new();
         let mut add = |name: &str, size: i64, safety: &'static str, action: &str| {
             if size > 0 {
@@ -1009,7 +1245,9 @@ impl App {
         ]
         .iter()
         .map(|p| indexed_path_size(store, p))
-        .sum();
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .fold(0i64, i64::saturating_add);
         add(
             "Package download caches",
             package_cache,
@@ -1018,21 +1256,23 @@ impl App {
         );
         add(
             "systemd journal",
-            indexed_path_size(store, "/var/log/journal"),
+            indexed_path_size(store, "/var/log/journal")?,
             "policy",
             "journalctl --disk-usage; journalctl --vacuum-time=14d",
         );
         let temp: i64 = ["/tmp", "/var/tmp"]
             .iter()
             .map(|p| indexed_path_size(store, p))
-            .sum();
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .fold(0i64, i64::saturating_add);
         add(
             "Temporary areas (upper bound)",
             temp,
             "review",
             "review age/owners; remove only stale files, never the directories",
         );
-        let trash = indexed_path_size(store, "/root/.local/share/Trash");
+        let trash = indexed_path_size(store, "/root/.local/share/Trash")?;
         add(
             "Root user's trash",
             trash,
@@ -1040,14 +1280,10 @@ impl App {
             "review /root/.local/share/Trash before emptying",
         );
 
-        let page_size: i64 = store
-            .conn
-            .query_row("PRAGMA page_size", [], |r| r.get(0))
-            .unwrap_or(4096);
+        let page_size: i64 = store.conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
         let free_pages: i64 = store
             .conn
-            .query_row("PRAGMA freelist_count", [], |r| r.get(0))
-            .unwrap_or(0);
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
         add(
             "Unused pages inside dux index",
             page_size.saturating_mul(free_pages),
@@ -1056,11 +1292,12 @@ impl App {
         );
         rows.sort_by_key(|r| std::cmp::Reverse(r.size));
         self.cleanup = rows;
+        Ok(())
     }
 
     /// Full path of the current selection (focused section) — shown in the footer
     /// so long/truncated names are always fully visible.
-    fn update_detail(&mut self, _store: &Store) {
+    fn update_detail(&mut self) {
         self.detail = match self.focus {
             // path is cached on each Row during rebuild — no per-keypress query.
             Focus::Tree => self
@@ -1087,14 +1324,19 @@ impl App {
     }
 }
 
-fn indexed_path_size(store: &Store, path: &str) -> i64 {
-    use std::os::unix::fs::MetadataExt;
-    let Ok(m) = std::fs::symlink_metadata(path) else {
-        return 0;
+fn indexed_path_size(store: &Store, path: &str) -> Result<i64> {
+    let Some((dev, ino)) = crate::store::indexed_path(&store.conn, std::path::Path::new(path))?
+    else {
+        return Ok(0);
     };
-    node_totals(store, m.dev() as i64, m.ino() as i64)
-        .map(|v| v.0)
-        .unwrap_or(0)
+    node_totals(store, dev, ino)?
+        .map(|totals| totals.0)
+        .with_context(|| {
+            format!(
+                "indexed path {} references missing inode ({dev},{ino})",
+                path
+            )
+        })
 }
 
 fn owner_name(uid: i64) -> String {
@@ -1114,8 +1356,8 @@ fn owner_name(uid: i64) -> String {
 
 /// Alternate Explore distributions. These are aggregate SQL queries over the
 /// compact index, executed by the background worker only for the selected tab.
-fn aggregate_groups(store: &Store, app: &App) -> Vec<GroupRow> {
-    let (scope, scope_args) = app.panel_scope(store);
+fn aggregate_groups(store: &Store, app: &App) -> Result<Vec<GroupRow>> {
+    let (scope, scope_args) = app.panel_scope(store)?;
     let now = crate::util::now_secs();
     let (sql, mut args): (String, Vec<i64>) = match app.distribution {
         Distribution::Owners => (
@@ -1142,35 +1384,31 @@ fn aggregate_groups(store: &Store, app: &App) -> Vec<GroupRow> {
             ),
             Vec::new(),
         ),
-        Distribution::Apps => return Vec::new(),
+        Distribution::Apps => return Ok(Vec::new()),
     };
     args.extend(scope_args);
-    let Ok(mut stmt) = store.conn.prepare(&sql) else {
-        return Vec::new();
-    };
-    let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+    let mut stmt = store.conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, i64>(1)?,
             r.get::<_, i64>(2)?,
         ))
-    }) else {
-        return Vec::new();
-    };
-    rows.flatten()
-        .map(|(mut name, size, count)| {
-            if app.distribution == Distribution::Owners {
-                name = name.parse::<i64>().map(owner_name).unwrap_or(name);
-            }
-            GroupRow {
-                name: format!("{name} · {} items", count_human(count)),
-                size,
-                growth: 0,
-                targets: Vec::new(),
-                drill: None,
-            }
+    })?;
+    rows.map(|row| -> Result<GroupRow> {
+        let (mut name, size, count) = row?;
+        if app.distribution == Distribution::Owners {
+            name = name.parse::<i64>().map(owner_name).unwrap_or(name);
+        }
+        Ok(GroupRow {
+            name: format!("{name} · {} items", count_human(count)),
+            size,
+            growth: 0,
+            targets: Vec::new(),
+            drill: None,
         })
-        .collect()
+    })
+    .collect()
 }
 
 struct GroupDef {
@@ -1506,25 +1744,51 @@ const FALLBACK_GROUPS: &[GroupDef] = &[
     },
 ];
 
-fn docker_paths() -> Vec<String> {
+fn docker_paths() -> Result<Vec<String>> {
     let mut paths = DOCKER_PATHS
         .iter()
         .map(|p| (*p).to_string())
         .collect::<Vec<_>>();
-    if let Ok(cfg) = std::fs::read_to_string("/etc/docker/daemon.json") {
-        if let Some(root) = parse_docker_data_root(&cfg) {
+    let config_path = std::path::Path::new("/etc/docker/daemon.json");
+    let cfg = match std::fs::read_to_string(config_path) {
+        Ok(config) => Some(config),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", config_path.display()))
+        }
+    };
+    if let Some(cfg) = cfg {
+        if let Some(root) = parse_docker_data_root(&cfg)? {
             if !paths.iter().any(|p| p == &root) {
                 paths.insert(0, root);
             }
         }
     }
-    paths
+    Ok(paths)
 }
 
-fn parse_docker_data_root(cfg: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(cfg).ok()?;
-    let root = v.get("data-root")?.as_str()?;
-    root.starts_with('/').then(|| root.to_string())
+fn parse_docker_data_root(cfg: &str) -> Result<Option<String>> {
+    let value: serde_json::Value =
+        serde_json::from_str(cfg).context("parsing Docker daemon config")?;
+    let object = value
+        .as_object()
+        .context("Docker daemon configuration must be a JSON object")?;
+    for key in ["data-root", "graph"] {
+        if let Some(value) = object.get(key) {
+            let root = value
+                .as_str()
+                .with_context(|| format!("Docker {key} must be a string"))?;
+            if root.is_empty() {
+                continue;
+            }
+            anyhow::ensure!(
+                std::path::Path::new(root).is_absolute(),
+                "Docker {key} must be absolute"
+            );
+            return Ok(Some(root.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 #[derive(Clone)]
@@ -1547,7 +1811,7 @@ fn compute_groups(
     docker_paths: &[String],
     view: GroupView,
     growth_map: &std::collections::HashMap<(i64, i64), i64>,
-) -> Vec<GroupRow> {
+) -> Result<Vec<GroupRow>> {
     let mut assigned: Vec<ResolvedTarget> = Vec::new();
     let mut groups = Vec::new();
     let root_cmp_path = canonical_path_string(root_path);
@@ -1569,7 +1833,7 @@ fn compute_groups(
                     &mut assigned,
                     &mut groups,
                     profile,
-                );
+                )?;
             }
             for def in FALLBACK_GROUPS {
                 add_def_group(
@@ -1583,7 +1847,7 @@ fn compute_groups(
                     &mut groups,
                     def,
                     None,
-                );
+                )?;
             }
         }
         GroupView::Detail(id) => {
@@ -1591,13 +1855,13 @@ fn compute_groups(
                 return compute_user_groups(store, &root_cmp_path, growth_map);
             }
             let Some(profile) = TOP_PROFILES.iter().find(|p| p.id == id) else {
-                return vec![GroupRow {
+                return Ok(vec![GroupRow {
                     name: "Other".into(),
                     size: total_size,
                     growth: root_growth,
                     targets: Vec::new(),
                     drill: None,
-                }];
+                }]);
             };
             for def in profile.segments {
                 add_def_group(
@@ -1611,16 +1875,22 @@ fn compute_groups(
                     &mut groups,
                     def,
                     None,
-                );
+                )?;
             }
         }
     }
 
     if view == GroupView::Top {
-        let assigned_size: i64 = groups.iter().map(|g| g.size.max(0)).sum();
+        let assigned_size: i64 = groups
+            .iter()
+            .map(|g| g.size.max(0))
+            .fold(0i64, i64::saturating_add);
         let other_size = total_size.saturating_sub(assigned_size);
-        let assigned_growth: i64 = groups.iter().map(|g| g.growth).sum();
-        let other_growth = root_growth - assigned_growth;
+        let assigned_growth: i64 = groups
+            .iter()
+            .map(|g| g.growth)
+            .fold(0i64, i64::saturating_add);
+        let other_growth = root_growth.saturating_sub(assigned_growth);
         if other_size > 0 || other_growth != 0 || groups.is_empty() {
             groups.push(GroupRow {
                 name: "Other".into(),
@@ -1634,77 +1904,75 @@ fn compute_groups(
 
     groups.sort_by_key(|g| std::cmp::Reverse(g.size.max(0)));
     groups.truncate(12);
-    groups
+    Ok(groups)
 }
 
 fn compute_user_groups(
     store: &Store,
     root_cmp_path: &str,
     growth_map: &std::collections::HashMap<(i64, i64), i64>,
-) -> Vec<GroupRow> {
-    use std::os::unix::fs::MetadataExt;
+) -> Result<Vec<GroupRow>> {
     let mut out = Vec::new();
     if path_contains(root_cmp_path, "/home") {
-        if let Ok(meta) = std::fs::symlink_metadata("/home") {
-            if let Ok(mut stmt) = store.conn.prepare(
+        if let Some(meta) = optional_metadata(std::path::Path::new("/home"))? {
+            let (dev, inode) = crate::util::indexed_identity(&meta)?;
+            let mut stmt = store.conn.prepare(
                 "SELECT d.name,d.dev_id,d.inode,i.recursive_bytes
                  FROM dirents d JOIN inodes i
                    ON i.dev_id=d.dev_id AND i.inode=d.inode
                  WHERE d.parent_dev=?1 AND d.parent_inode=?2 AND i.kind='d'
                  ORDER BY i.recursive_bytes DESC LIMIT 1000",
-            ) {
-                if let Ok(rows) =
-                    stmt.query_map(params![meta.dev() as i64, meta.ino() as i64], |r| {
-                        Ok((
-                            r.get::<_, Vec<u8>>(0)?,
-                            r.get::<_, i64>(1)?,
-                            r.get::<_, i64>(2)?,
-                            r.get::<_, i64>(3)?,
-                        ))
-                    })
-                {
-                    for row in rows.flatten() {
-                        let (name, dev, inode, size) = row;
-                        let shown = crate::util::display_name(&name);
-                        out.push(GroupRow {
-                            name: shown.clone(),
-                            size,
-                            growth: growth_map.get(&(dev, inode)).copied().unwrap_or(0),
-                            targets: vec![GroupTarget {
-                                path: format!("/home/{shown}"),
-                            }],
-                            drill: None,
-                        });
-                    }
-                }
+            )?;
+            let rows = stmt.query_map(params![dev, inode], |r| {
+                Ok((
+                    r.get::<_, Vec<u8>>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (name, dev, inode, size) = row?;
+                let shown = crate::util::display_name(&name);
+                out.push(GroupRow {
+                    name: shown.clone(),
+                    size,
+                    growth: growth_map.get(&(dev, inode)).copied().unwrap_or(0),
+                    targets: vec![GroupTarget {
+                        path: format!("/home/{shown}"),
+                    }],
+                    drill: None,
+                });
             }
         }
     }
     if path_contains(root_cmp_path, "/root") {
-        if let Some((size, growth)) = std::fs::symlink_metadata("/root").ok().and_then(|m| {
-            node_totals(store, m.dev() as i64, m.ino() as i64).map(|v| {
-                (
-                    v.0,
-                    growth_map
-                        .get(&(m.dev() as i64, m.ino() as i64))
-                        .copied()
-                        .unwrap_or(0),
-                )
-            })
-        }) {
-            out.push(GroupRow {
-                name: "root".into(),
-                size,
-                growth,
-                targets: vec![GroupTarget {
-                    path: "/root".into(),
-                }],
-                drill: None,
-            });
+        if let Some(meta) = optional_metadata(std::path::Path::new("/root"))? {
+            let id = crate::util::indexed_identity(&meta)?;
+            if let Some((size, _)) = node_totals(store, id.0, id.1)? {
+                let growth = growth_map.get(&id).copied().unwrap_or(0);
+                out.push(GroupRow {
+                    name: "root".into(),
+                    size,
+                    growth,
+                    targets: vec![GroupTarget {
+                        path: "/root".into(),
+                    }],
+                    drill: None,
+                });
+            }
         }
     }
     out.sort_by_key(|g| std::cmp::Reverse(g.size));
-    out
+    Ok(out)
+}
+
+fn optional_metadata(path: &std::path::Path) -> Result<Option<std::fs::Metadata>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("cannot inspect {}", path.display())),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1718,7 +1986,7 @@ fn add_profile_group(
     assigned: &mut Vec<ResolvedTarget>,
     groups: &mut Vec<GroupRow>,
     profile: &AppProfile,
-) {
+) -> Result<()> {
     let mut row = GroupRow {
         name: profile.name.into(),
         size: 0,
@@ -1737,11 +2005,12 @@ fn add_profile_group(
             assigned,
             &mut row,
             def,
-        );
+        )?;
     }
     if row.size > 0 || row.growth != 0 {
         groups.push(row);
     }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1756,7 +2025,7 @@ fn add_def_group(
     groups: &mut Vec<GroupRow>,
     def: &GroupDef,
     drill: Option<&'static str>,
-) {
+) -> Result<()> {
     let mut row = GroupRow {
         name: def.name.into(),
         size: 0,
@@ -1774,10 +2043,11 @@ fn add_def_group(
         assigned,
         &mut row,
         def,
-    );
+    )?;
     if row.size > 0 || row.growth != 0 {
         groups.push(row);
     }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1791,7 +2061,7 @@ fn add_targets(
     assigned: &mut Vec<ResolvedTarget>,
     row: &mut GroupRow,
     def: &GroupDef,
-) {
+) -> Result<()> {
     let paths = if def.name == "Docker/Containers" || def.name == "other docker" {
         docker_paths.to_vec()
     } else {
@@ -1805,7 +2075,8 @@ fn add_targets(
             root_inode,
             &path,
             growth_map,
-        ) else {
+        )?
+        else {
             continue;
         };
         let mut covered_by_existing = false;
@@ -1818,19 +2089,20 @@ fn add_targets(
                 && (target.dev, target.inode) != (prev.dev, prev.inode)
             {
                 target.size = target.size.saturating_sub(prev.size);
-                target.growth -= prev.growth;
+                target.growth = target.growth.saturating_sub(prev.growth);
             }
         }
         if covered_by_existing || (target.size <= 0 && target.growth == 0) {
             continue;
         }
-        row.size += target.size;
-        row.growth += target.growth;
+        row.size = row.size.saturating_add(target.size);
+        row.growth = row.growth.saturating_add(target.growth);
         row.targets.push(GroupTarget {
             path: target.path.clone(),
         });
         assigned.push(target);
     }
+    Ok(())
 }
 
 fn resolve_group_target(
@@ -1840,13 +2112,15 @@ fn resolve_group_target(
     root_inode: i64,
     target_path: &str,
     growth_map: &std::collections::HashMap<(i64, i64), i64>,
-) -> Option<ResolvedTarget> {
+) -> Result<Option<ResolvedTarget>> {
     let target_cmp_path = canonical_path_string(target_path);
     // If the TUI is already scoped inside a known category, charge the whole
     // scoped tree to that category without resolving the ancestor directory.
     if path_contains(&target_cmp_path, root_cmp_path) {
-        let (size, _) = node_totals(store, root_dev, root_inode)?;
-        return Some(ResolvedTarget {
+        let Some((size, _)) = node_totals(store, root_dev, root_inode)? else {
+            return Ok(None);
+        };
+        return Ok(Some(ResolvedTarget {
             path: target_path.to_string(),
             cmp_path: target_cmp_path,
             dev: root_dev,
@@ -1856,35 +2130,47 @@ fn resolve_group_target(
                 .get(&(root_dev, root_inode))
                 .copied()
                 .unwrap_or(0),
-        });
+        }));
     }
     if !path_contains(root_cmp_path, &target_cmp_path) {
-        return None;
+        return Ok(None);
     }
-    let m = std::fs::metadata(target_path).ok()?;
-    use std::os::unix::fs::MetadataExt;
-    let dev = m.dev() as i64;
-    let inode = m.ino() as i64;
-    let (size, _) = node_totals(store, dev, inode)?;
-    Some(ResolvedTarget {
+    let Some((dev, inode)) =
+        crate::store::indexed_path(&store.conn, std::path::Path::new(target_path))?
+    else {
+        return Ok(None);
+    };
+    let Some((size, _)) = node_totals(store, dev, inode)? else {
+        return Ok(None);
+    };
+    Ok(Some(ResolvedTarget {
         path: target_path.to_string(),
         cmp_path: target_cmp_path,
         dev,
         inode,
         size,
         growth: growth_map.get(&(dev, inode)).copied().unwrap_or(0),
-    })
+    }))
 }
 
 fn canonical_path_string(path: &str) -> String {
-    std::fs::canonicalize(path)
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string())
+    // Lexical normalization only: grouping must never trigger mount I/O. Common
+    // merged-/usr aliases are resolved by their explicit profile targets.
+    let mut normalized = std::path::PathBuf::new();
+    for part in std::path::Path::new(path).components() {
+        match part {
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::CurDir => {}
+            part => normalized.push(part.as_os_str()),
+        }
+    }
+    normalized.to_string_lossy().into_owned()
 }
 
-fn node_totals(store: &Store, dev: i64, inode: i64) -> Option<(i64, i64)> {
-    store
+fn node_totals(store: &Store, dev: i64, inode: i64) -> Result<Option<(i64, i64)>> {
+    Ok(store
         .conn
         .query_row(
             "SELECT CASE WHEN kind='d' THEN recursive_bytes ELSE blocks END,
@@ -1893,7 +2179,7 @@ fn node_totals(store: &Store, dev: i64, inode: i64) -> Option<(i64, i64)> {
             params![dev, inode],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .ok()
+        .optional()?)
 }
 
 fn path_contains(parent: &str, child: &str) -> bool {
@@ -1921,66 +2207,123 @@ fn group_detail(g: &GroupRow) -> String {
 
 /// Inode of the db file (0 if unreadable). A rescan renames a NEW inode over the
 /// db, so a change here means our open connection is now on the stale old inode.
-fn db_inode(db: &std::path::Path) -> u64 {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(db).map(|m| m.ino()).unwrap_or(0)
-}
-
 fn event_loop<B: Backend>(
     term: &mut Terminal<B>,
     app: &mut App,
-    db: &std::path::Path,
     snap_tx: &crossbeam_channel::Sender<Snapshot>,
-    res_rx: &crossbeam_channel::Receiver<RefreshResult>,
-) -> Result<()> {
-    // Own a REOPENABLE read connection: an in-place rescan (daemon SIGHUP or a
-    // manual `dux scan`) renames a new db inode over the old one, and a connection
-    // bound to the old (now-unlinked) inode keeps serving STALE data with no error.
-    // We detect the inode change below and reopen, instead of freezing on the
-    // pre-rescan snapshot until the user quits.
-    let mut store = Store::open_ro(db)?;
-    let mut open_ino = db_inode(db);
-    let request = |app: &App, tx: &crossbeam_channel::Sender<Snapshot>| {
-        let _ = tx.send(Snapshot {
-            expanded: app.expanded.clone(),
-            metric: app.metric,
-            window_secs: app.window_secs,
-            distribution: app.distribution,
-            gen: app.view_gen,
-        });
-    };
-    request(app, snap_tx); // kick off the first background refresh
+    queued: &crossbeam_channel::Receiver<Snapshot>,
+    res_rx: &crossbeam_channel::Receiver<RefreshMessage>,
+    health_rx: &crossbeam_channel::Receiver<HealthUpdate>,
+    storage_rx: &crossbeam_channel::Receiver<std::result::Result<StorageUpdate, String>>,
+) -> Result<()>
+where
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
+    request_refresh(app, snap_tx, queued);
     let mut last_input = Instant::now() - Duration::from_secs(10);
     let mut last_request = Instant::now();
     let mut needs_draw = true;
     let mut last_clock_draw = Instant::now();
     loop {
-        // Reopen if a rescan swapped the db inode, so the tree stops serving stale
-        // data (the worker does the same for panels). One stat per loop is cheap.
-        let cur_ino = db_inode(db);
-        if cur_ino != 0 && cur_ino != open_ino {
-            if let Ok(s) = Store::open_ro(db) {
-                store = s;
-                open_ino = cur_ino;
-                app.view_gen += 1;
-                let _ = app.rebuild(&store);
-                app.update_detail(&store);
-                request(app, snap_tx);
-                needs_draw = true;
+        // Poll and acknowledge input before consuming refresh-worker results or
+        // drawing background updates. Those operations can take noticeable time
+        // on a large index, so putting them first made a queued key wait behind
+        // otherwise useful but non-interactive work.
+        if event::poll(Duration::from_millis(16))? {
+            loop {
+                if let Event::Key(k) = event::read()? {
+                    if k.kind == KeyEventKind::Press {
+                        if is_interrupt_key(k.code, k.modifiers) {
+                            return Ok(());
+                        } else if matches!(k.code, KeyCode::Char('R') | KeyCode::F(5)) {
+                            app.view_gen += 1;
+                            request_refresh(app, snap_tx, queued);
+                            last_request = Instant::now();
+                        } else {
+                            let before = (
+                                app.view_gen,
+                                app.window_secs,
+                                app.distribution,
+                                app.group_view,
+                                app.screen,
+                                app.large_page_offset,
+                                app.large_sort,
+                            );
+                            if handle_key(app, k.code)? {
+                                return Ok(());
+                            }
+                            if before
+                                != (
+                                    app.view_gen,
+                                    app.window_secs,
+                                    app.distribution,
+                                    app.group_view,
+                                    app.screen,
+                                    app.large_page_offset,
+                                    app.large_sort,
+                                )
+                            {
+                                app.view_gen += 1;
+                                request_refresh(app, snap_tx, queued);
+                                last_request = Instant::now();
+                            }
+                        }
+                    }
+                }
+                if !event::poll(Duration::from_millis(0))? {
+                    break;
+                }
             }
-        }
-        // Apply any background refresh results (panels/states always; tree rows
-        // only if the structure hasn't changed since the request). Never blocks.
-        let mut applied = false;
-        while let Ok(r) = res_rx.try_recv() {
-            app.apply_refresh(r);
-            applied = true;
-        }
-        if applied {
-            app.update_detail(&store);
-            needs_draw = true;
+            last_input = Instant::now();
+            // Render the acknowledgement immediately. Defer worker updates to
+            // the next iteration so a large result cannot delay visible input.
+            term.draw(|f| draw(f, app))?;
+            needs_draw = false;
+            last_clock_draw = Instant::now();
+            continue;
         }
 
+        while let Ok(update) = health_rx.try_recv() {
+            app.health_error = update.error;
+            if app.health_error.is_some() {
+                needs_draw = true;
+                continue;
+            }
+            app.daemon_live = update.live;
+            app.dirty_since = update.dirty;
+            app.paused_since = update.paused;
+            app.throttled_since = update.behind;
+            app.pause_reason = update.reason;
+            app.watch = update.watch;
+            app.scan = update.scan;
+            needs_draw = true;
+        }
+        while let Ok(result) = storage_rx.try_recv() {
+            match result {
+                Ok(data) => {
+                    app.fs = data.fs;
+                    app.containers = data.containers;
+                    app.waste = data.waste;
+                    app.cleanup = data.cleanup;
+                    app.last_storage = Some(Instant::now());
+                    app.storage_error = None;
+                }
+                Err(error) => app.storage_error = Some(error),
+            }
+            needs_draw = true;
+        }
+        while let Ok(result) = res_rx.try_recv() {
+            match result {
+                Ok(result) => {
+                    app.apply_refresh(result);
+                    app.update_detail();
+                }
+                Err(error) => {
+                    app.refresh_error = Some(error);
+                }
+            }
+            needs_draw = true;
+        }
         // Redraw only when something changed, plus a low-rate clock tick for
         // "ago"/ETA labels. The old fixed 120ms repaint loop burned CPU in idle
         // TUIs on large terminals even when no input or refresh result arrived.
@@ -1990,40 +2333,6 @@ fn event_loop<B: Backend>(
             last_clock_draw = Instant::now();
         }
 
-        // Block up to 120ms for input. If keys arrive, drain the WHOLE burst and
-        // redraw once — navigation never waits on a background refresh.
-        if event::poll(Duration::from_millis(120))? {
-            loop {
-                if let Event::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press {
-                        // Raw mode turns Ctrl+C into a key event; it does not send
-                        // SIGINT. Preserve the modifiers so Ctrl+C quits instead of
-                        // being mistaken for the plain 'c' Storage shortcut.
-                        if is_interrupt_key(k.code, k.modifiers) {
-                            return Ok(());
-                        } else if matches!(k.code, KeyCode::Char('R') | KeyCode::F(5)) {
-                            // Manual refresh: rebuild the tree from the DB (cheap,
-                            // no fs I/O) and ask the background WORKER to recompute
-                            // panels off this thread. Refreshing panels inline here
-                            // would block the UI on fs::metadata() of a hung mount
-                            // (autofs/NFS) — even 'q' would stop responding.
-                            app.rebuild(&store).ok();
-                            request(app, snap_tx);
-                            last_request = Instant::now();
-                        } else if handle_key(app, &store, k.code)? {
-                            return Ok(()); // quit
-                        }
-                    }
-                }
-                if !event::poll(Duration::from_millis(0))? {
-                    break; // burst drained
-                }
-            }
-            last_input = Instant::now();
-            needs_draw = true;
-            continue; // redraw immediately
-        }
-
         // Idle: ask the worker to recompute live data periodically. The recompute
         // happens off this thread, so the next keypress is never delayed by it.
         // ~4s cadence (not 1.2s): on a high-churn index the recompute is not free,
@@ -2031,7 +2340,7 @@ fn event_loop<B: Backend>(
         if last_input.elapsed() >= Duration::from_millis(250)
             && last_request.elapsed() >= Duration::from_secs(4)
         {
-            request(app, snap_tx);
+            request_refresh(app, snap_tx, queued);
             last_request = Instant::now();
         }
     }
@@ -2042,7 +2351,7 @@ fn is_interrupt_key(code: KeyCode, modifiers: KeyModifiers) -> bool {
 }
 
 /// Handle one keypress. Returns Ok(true) to quit.
-fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
+fn handle_key(app: &mut App, code: KeyCode) -> Result<bool> {
     // Global keys
     match code {
         KeyCode::Char('q') => return Ok(true),
@@ -2058,7 +2367,7 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
         KeyCode::Char('2') | KeyCode::Char('e') => {
             app.screen = Screen::Explore;
             app.explore_distribution = false;
-            app.update_detail(store);
+            app.update_detail();
             return Ok(false);
         }
         KeyCode::Char('3') | KeyCode::Char('a') => {
@@ -2069,9 +2378,14 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
             app.screen = Screen::Reclaim;
             return Ok(false);
         }
+        KeyCode::Char('5') | KeyCode::Char('f') => {
+            app.screen = Screen::LargeFiles;
+            app.large_page_offset = 0;
+            app.large_selection = 0;
+        }
         KeyCode::Esc if app.screen != Screen::Overview => {
             app.screen = Screen::Overview;
-            app.update_detail(store);
+            app.update_detail();
             return Ok(false);
         }
         KeyCode::Tab => {
@@ -2084,7 +2398,7 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                 Focus::Growth => Focus::Files,
                 Focus::Files => Focus::Tree,
             };
-            app.update_detail(store);
+            app.update_detail();
             return Ok(false);
         }
         _ => {}
@@ -2116,17 +2430,19 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                 if let Some(id) = app.groups.get(app.asel).and_then(|g| g.drill) {
                     app.group_view = GroupView::Detail(id);
                     app.asel = 0;
-                    app.refresh_groups(store);
+                    app.view_gen += 1;
+                    app.groups.clear();
                 }
             }
             KeyCode::Left | KeyCode::Char('h') if app.group_view != GroupView::Top => {
                 app.group_view = GroupView::Top;
                 app.asel = 0;
-                app.refresh_groups(store);
+                app.view_gen += 1;
+                app.groups.clear();
             }
             _ => {}
         }
-        app.update_detail(store);
+        app.update_detail();
         return Ok(false);
     }
     if app.screen == Screen::Activity {
@@ -2159,6 +2475,55 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
             }
             _ => {}
         }
+        return Ok(false);
+    }
+    if app.screen == Screen::LargeFiles {
+        match code {
+            KeyCode::Down | KeyCode::Char('j')
+                if app.large_selection + 1 < app.large_files.len() =>
+            {
+                app.large_selection += 1;
+            }
+            KeyCode::Up | KeyCode::Char('k') if app.large_selection > 0 => {
+                app.large_selection -= 1;
+            }
+            KeyCode::PageDown | KeyCode::Right
+                if app.large_page_offset + app.large_files.len() < app.large_total_count =>
+            {
+                app.large_page_offset = app.large_page_offset.saturating_add(LARGE_PAGE_SIZE);
+                app.large_selection = 0;
+            }
+            KeyCode::PageUp | KeyCode::Left if app.large_page_offset > 0 => {
+                app.large_page_offset = app.large_page_offset.saturating_sub(LARGE_PAGE_SIZE);
+                app.large_selection = LARGE_PAGE_SIZE.saturating_sub(1);
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                app.large_page_offset = 0;
+                app.large_selection = 0;
+            }
+            KeyCode::Char('[') => {
+                app.window_secs = 3600;
+            }
+            KeyCode::Char(']') => {
+                app.window_secs = match app.window_secs {
+                    0..=3600 => 86_400,
+                    3601..=86_400 => 604_800,
+                    _ => 604_800,
+                };
+            }
+            KeyCode::Char('s') => {
+                app.large_sort = LargeSort::Size;
+                app.large_page_offset = 0;
+                app.large_selection = 0;
+            }
+            KeyCode::Char('G') => {
+                app.large_sort = LargeSort::Growth;
+                app.large_page_offset = 0;
+                app.large_selection = 0;
+            }
+            _ => {}
+        }
+        app.update_detail();
         return Ok(false);
     }
     if app.screen == Screen::Reclaim {
@@ -2202,7 +2567,8 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                     if let Some(id) = app.groups.get(app.asel).and_then(|g| g.drill) {
                         app.group_view = GroupView::Detail(id);
                         app.asel = 0;
-                        app.refresh_groups(store);
+                        app.view_gen += 1;
+                        app.groups.clear();
                     }
                 }
                 KeyCode::Left | KeyCode::Esc | KeyCode::Char('h')
@@ -2210,26 +2576,27 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                 {
                     app.group_view = GroupView::Top;
                     app.asel = 0;
-                    app.refresh_groups(store);
+                    app.view_gen += 1;
+                    app.groups.clear();
                 }
                 _ => {}
             }
-            app.update_detail(store);
+            app.update_detail();
         }
         // ---- tree ----
         Focus::Tree => {
             match code {
                 KeyCode::Down | KeyCode::Char('j') if app.sel + 1 < app.rows.len() => app.sel += 1,
                 KeyCode::Up | KeyCode::Char('k') => app.sel = app.sel.saturating_sub(1),
-                KeyCode::Enter | KeyCode::Char(' ') => app.toggle(store)?,
+                KeyCode::Enter | KeyCode::Char(' ') => app.toggle()?,
                 KeyCode::Right | KeyCode::Char('l') => {
                     if let Some(r) = app.rows.get(app.sel) {
                         if r.kind == 'd' && !r.expanded {
+                            app.pending_child = Some((r.dev, r.inode));
                             app.expanded.insert((r.dev, r.inode));
                             app.view_gen += 1;
-                            app.rebuild(store)?;
-                        }
-                        if app.sel + 1 < app.rows.len() {
+                            app.collapse_cached();
+                        } else if app.sel + 1 < app.rows.len() {
                             app.sel += 1;
                         }
                     }
@@ -2239,9 +2606,9 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                         let id = (r.dev, r.inode);
                         app.expanded.remove(&id);
                         app.view_gen += 1;
-                        app.rebuild(store)?;
+                        app.collapse_cached();
                     }
-                    Some(_) => app.ascend(store)?,
+                    Some(_) => app.ascend()?,
                     None => {}
                 },
                 // 'r' (manual refresh) is handled in the event loop, which owns
@@ -2253,7 +2620,7 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                         Metric::Size
                     };
                     app.view_gen += 1;
-                    app.rebuild(store)?;
+                    app.collapse_cached();
                 }
                 KeyCode::Char('d') => {
                     app.explore_distribution = true;
@@ -2263,7 +2630,7 @@ fn handle_key(app: &mut App, store: &Store, code: KeyCode) -> Result<bool> {
                 KeyCode::End | KeyCode::Char('G') => app.sel = app.rows.len().saturating_sub(1),
                 _ => {}
             }
-            app.update_detail(store);
+            app.update_detail();
         }
     }
     Ok(false)
@@ -2301,6 +2668,15 @@ fn rate_str(per_h: i64) -> String {
     } else {
         // small per-hour: express per day for readability
         format!("{arrow}{}/d", human(a * 24))
+    }
+}
+
+/// Signed allocation change for a selected history window (not a rate).
+fn growth_delta(delta: i64) -> String {
+    match delta.cmp(&0) {
+        std::cmp::Ordering::Greater => format!("+{}", human(delta)),
+        std::cmp::Ordering::Less => format!("-{}", human(delta.saturating_abs())),
+        std::cmp::Ordering::Equal => "0".to_owned(),
     }
 }
 
@@ -2395,44 +2771,93 @@ fn group_view_total(app: &App) -> i64 {
     if app.group_view == GroupView::Top {
         app.total_size
     } else {
-        app.groups.iter().map(|g| g.size.max(0)).sum()
+        app.groups
+            .iter()
+            .map(|g| g.size.max(0))
+            .fold(0i64, i64::saturating_add)
     }
 }
 
 fn freshness_text(app: &App) -> String {
+    if let Some(error) = &app.health_error {
+        return format!("index health unavailable · {}", short(error, 90));
+    }
+    if let Some(error) = &app.refresh_error {
+        return format!("refresh failed · {} · retrying", short(error, 100));
+    }
+    if app.watch.as_ref().is_some_and(|watch| watch.uncertain) && app.scan.is_none() {
+        return "DIRTY · incomplete index · reconciliation required".into();
+    }
     if let Some(p) = &app.scan {
         format!(
-            "scanning · {} files · {} dirs · {} · {}s",
+            "reconciling · displayed data may be stale · {} files · {} dirs · {} · {}s",
             count_human(p.files.min(i64::MAX as u64) as i64),
             count_human(p.dirs.min(i64::MAX as u64) as i64),
             human(p.bytes),
-            (crate::util::now_secs() - p.started).max(0)
+            crate::util::now_secs().saturating_sub(p.started).max(0)
+        )
+    } else if app.last_refresh.is_none() {
+        "loading indexed data…".into()
+    } else if app
+        .last_refresh
+        .is_some_and(|t| t.elapsed() >= Duration::from_secs(15))
+    {
+        format!(
+            "view refresh delayed · last success {}s ago",
+            app.last_refresh
+                .map(|time| time.elapsed().as_secs())
+                .unwrap_or(0)
         )
     } else if let Some(since) = app.dirty_since {
         format!("DIRTY {} · reconciliation required", ago(since))
     } else if let Some(since) = app.paused_since {
         format!("writes paused {} · {}", ago(since), app.pause_reason)
     } else if let Some(since) = app.throttled_since {
-        format!("throttled · about {} stale", ago(since))
+        format!("backlog · {} since last caught up", ago(since))
     } else if app.daemon_live {
         app.watch
             .as_ref()
-            .map(|w| {
-                if w.pending == 0 && w.kernel_empty {
-                    format!(
-                        "live · caught up · {} updates",
-                        count_human(w.updates_committed as i64)
-                    )
-                } else {
-                    format!(
-                        "live · queue {}/{} · {}ms lag",
-                        w.pending, w.max_pending, w.behind_ms
-                    )
-                }
-            })
-            .unwrap_or_else(|| "live · incremental index".into())
+            .map(watch_status_label)
+            .unwrap_or_else(|| "live · watcher status unavailable".into())
     } else {
         format!("snapshot · {} old · daemon off", ago(app.last_scan))
+    }
+}
+
+fn watch_status_label(w: &crate::util::WatchStatus) -> String {
+    if w.uncertain {
+        match w.kernel_overflow_notifications {
+            Some(overflows) if overflows > 0 => format!(
+                "live · {} kernel queue overflows · reconciliation needed",
+                count_human(overflows as i64)
+            ),
+            None => {
+                "live · event state uncertain · overflow count unavailable · reconciliation needed"
+                    .into()
+            }
+            _ => "live · event state uncertain · reconciliation needed".into(),
+        }
+    } else if w.pending == 0 && w.kernel_empty {
+        let count_note = if w.kernel_overflow_notifications.is_none() {
+            " · overflow count unavailable"
+        } else {
+            ""
+        };
+        format!(
+            "live · caught up · {} updates{}",
+            count_human(w.updates_committed as i64),
+            count_note
+        )
+    } else {
+        let count_note = if w.kernel_overflow_notifications.is_none() {
+            " · overflow count unavailable"
+        } else {
+            ""
+        };
+        format!(
+            "live · queue {}/{} · {}ms lag{}",
+            w.pending, w.max_pending, w.behind_ms, count_note
+        )
     }
 }
 
@@ -2477,7 +2902,7 @@ fn draw_nav(f: &mut Frame, area: Rect, app: &App, title: &str) {
     }
     f.render_widget(Paragraph::new(Line::from(brand)), sections[0]);
 
-    // Keep the four choices visually grouped instead of stretching four giant
+    // Keep the five choices visually grouped instead of stretching five giant
     // empty tiles across an ultrawide terminal.
     let nav_width = sections[1].width.min(144);
     let nav_area = Rect {
@@ -2489,10 +2914,11 @@ fn draw_nav(f: &mut Frame, area: Rect, app: &App, title: &str) {
     let tabs = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Ratio(1, 4),
-            Constraint::Ratio(1, 4),
-            Constraint::Ratio(1, 4),
-            Constraint::Ratio(1, 4),
+            Constraint::Ratio(1, 5),
+            Constraint::Ratio(1, 5),
+            Constraint::Ratio(1, 5),
+            Constraint::Ratio(1, 5),
+            Constraint::Ratio(1, 5),
         ])
         .split(nav_area);
     let choices = [
@@ -2500,6 +2926,7 @@ fn draw_nav(f: &mut Frame, area: Rect, app: &App, title: &str) {
         (Screen::Explore, "2", "EXPLORE", "Where space is"),
         (Screen::Activity, "3", "ACTIVITY", "What changed"),
         (Screen::Reclaim, "4", "RECLAIM", "Free safely"),
+        (Screen::LargeFiles, "5", "LARGE FILES", "Size and growth"),
     ];
     for (idx, (screen, number, name, purpose)) in choices.into_iter().enumerate() {
         let selected = app.screen == screen;
@@ -2636,7 +3063,11 @@ fn draw_overview(f: &mut Frame, app: &App) {
             ])
             .split(rows[2])
     };
-    let reclaimable: i64 = app.cleanup.iter().map(|r| r.size.max(0)).sum();
+    let reclaimable: i64 = app
+        .cleanup
+        .iter()
+        .map(|r| r.size.max(0))
+        .fold(0i64, i64::saturating_add);
     let largest_width = cards[0].width.saturating_sub(38) as usize;
     let largest_lines: Vec<Line<'static>> = app
         .top_files
@@ -3107,7 +3538,15 @@ fn draw_storage(f: &mut Frame, app: &App) {
             Constraint::Length(1),
         ])
         .split(area);
-    draw_nav(f, rows[0], app, "Reclaim");
+    let storage_title = match (&app.storage_error, app.last_storage) {
+        (Some(error), _) => format!("Reclaim · refresh failed: {}", short(error, 80)),
+        (_, Some(time)) => format!(
+            "Reclaim · storage evidence {}s old",
+            time.elapsed().as_secs()
+        ),
+        _ => "Reclaim · loading storage evidence…".into(),
+    };
+    draw_nav(f, rows[0], app, &storage_title);
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
@@ -3664,6 +4103,285 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
+/// A true area-proportional treemap for the current ranked page. Keeping the
+/// treemap page-local makes size semantics honest and avoids loading a
+/// multi-million-file index into UI memory; all files remain reachable through
+/// deterministic 100-row pages.
+fn split_treemap(weighted: &[(usize, i64)], area: Rect, output: &mut Vec<(usize, Rect)>) {
+    if weighted.is_empty() || area.width == 0 || area.height == 0 {
+        return;
+    }
+    if weighted.len() == 1 {
+        output.push((weighted[0].0, area));
+        return;
+    }
+    if area.width == 1 && area.height == 1 {
+        // There is one terminal cell for several sub-cell entries; keep the
+        // largest ranked entry and leave the rest discoverable in the table.
+        output.push((weighted[0].0, area));
+        return;
+    }
+    let total: i128 = weighted
+        .iter()
+        .map(|(_, size)| i128::from((*size).max(1)))
+        .sum();
+    let mut accumulated = 0i128;
+    let mut split = 1usize;
+    for (index, (_, size)) in weighted.iter().enumerate().take(weighted.len() - 1) {
+        accumulated += i128::from((*size).max(1));
+        split = index + 1;
+        if accumulated * 2 >= total {
+            break;
+        }
+    }
+    let first_total: i128 = weighted[..split]
+        .iter()
+        .map(|(_, size)| i128::from((*size).max(1)))
+        .sum();
+    let vertical = area.width >= area.height;
+    let extent = if vertical { area.width } else { area.height };
+    if extent <= 1 {
+        output.push((weighted[0].0, area));
+        return;
+    }
+    let first_extent = ((i128::from(extent) * first_total + total / 2) / total)
+        .clamp(1, i128::from(extent - 1)) as u16;
+    let (first, second) = if vertical {
+        (
+            Rect {
+                width: first_extent,
+                ..area
+            },
+            Rect {
+                x: area.x + first_extent,
+                width: area.width - first_extent,
+                ..area
+            },
+        )
+    } else {
+        (
+            Rect {
+                height: first_extent,
+                ..area
+            },
+            Rect {
+                y: area.y + first_extent,
+                height: area.height - first_extent,
+                ..area
+            },
+        )
+    };
+    split_treemap(&weighted[..split], first, output);
+    split_treemap(&weighted[split..], second, output);
+}
+
+fn file_tile_color(row: &LargeFileRow, selected: bool) -> Color {
+    if selected {
+        return Color::Rgb(28, 105, 142);
+    }
+    let extension = std::path::Path::new(&row.path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let palette = [
+        Color::Rgb(49, 89, 134),
+        Color::Rgb(47, 112, 104),
+        Color::Rgb(117, 83, 135),
+        Color::Rgb(147, 90, 51),
+        Color::Rgb(105, 112, 54),
+        Color::Rgb(58, 105, 138),
+        Color::Rgb(126, 72, 82),
+        Color::Rgb(72, 103, 119),
+    ];
+    let slot = extension.bytes().fold(0usize, |hash, byte| {
+        hash.wrapping_mul(31).wrapping_add(byte as usize)
+    });
+    palette[slot % palette.len()]
+}
+
+fn draw_large_files(f: &mut Frame, app: &App) {
+    let compact = f.area().height < 29;
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Length(2),
+            Constraint::Min(if compact { 6 } else { 8 }),
+            Constraint::Length(if compact { 8 } else { 11 }),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+    draw_nav(f, rows[0], app, "Large Files / Treemap");
+
+    let page = app.large_page_offset / LARGE_PAGE_SIZE + 1;
+    let pages = app.large_total_count.div_ceil(LARGE_PAGE_SIZE).max(1);
+    let ranking = match app.large_sort {
+        LargeSort::Size => "largest allocated size",
+        LargeSort::Growth => "largest absolute change",
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(" {} files ", app.large_total_count),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "· {} allocated · page {page}/{pages} · {ranking} · {} window · ",
+                human(app.large_total_bytes),
+                window_label(app.window_secs)
+            )),
+            Span::styled(
+                if app.daemon_live {
+                    "live history"
+                } else {
+                    "history requires daemon"
+                },
+                Style::default().fg(if app.daemon_live {
+                    RATE_COLOR
+                } else {
+                    Color::Yellow
+                }),
+            ),
+        ])),
+        rows[1],
+    );
+
+    let map_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(format!(
+            " Disk map · area proportional within page {page} · ↑↓ select "
+        ));
+    let map_area = map_block.inner(rows[2]);
+    f.render_widget(map_block, rows[2]);
+    if app.large_files.is_empty() {
+        f.render_widget(
+            Paragraph::new("Index warming up, or no files in this scope."),
+            map_area,
+        );
+    } else {
+        let weighted: Vec<(usize, i64)> = app
+            .large_files
+            .iter()
+            .enumerate()
+            .map(|(index, row)| (index, row.allocated.max(1)))
+            .collect();
+        let mut tiles = Vec::with_capacity(weighted.len());
+        split_treemap(&weighted, map_area, &mut tiles);
+        for (index, area) in tiles {
+            let row = &app.large_files[index];
+            let style = Style::default()
+                .fg(Color::White)
+                .bg(file_tile_color(row, index == app.large_selection));
+            let name = std::path::Path::new(&row.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&row.path);
+            let label = if area.width >= 18 {
+                format!(
+                    "{}\n{}",
+                    short(name, area.width as usize - 1),
+                    human(row.allocated)
+                )
+            } else if area.width >= 8 {
+                short(name, area.width as usize)
+            } else {
+                String::new()
+            };
+            f.render_widget(Paragraph::new(label).style(style), area);
+        }
+    }
+
+    let table_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Ranked files · allocated · growth in selected window · modified ");
+    let table_area = table_block.inner(rows[3]);
+    f.render_widget(table_block, rows[3]);
+    let visible = table_area.height as usize;
+    let body_rows = visible.saturating_sub(1);
+    let start = app
+        .large_selection
+        .saturating_sub(body_rows.saturating_sub(1));
+    let mut lines = vec![Line::from(vec![
+        Span::styled("ALLOCATED ", Style::default().fg(SIZE_COLOR)),
+        Span::styled("GROWTH ", Style::default().fg(RATE_COLOR)),
+        Span::raw("AGE  PATH"),
+    ])];
+    for (index, row) in app
+        .large_files
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(body_rows)
+    {
+        let growth = if app.daemon_live {
+            growth_delta(row.growth)
+        } else {
+            "—".to_owned()
+        };
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{} ", fixw(&human(row.allocated), 10, true)),
+                Style::default().fg(SIZE_COLOR).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{} ", fixw(&growth, 11, false)),
+                Style::default().fg(if row.growth < 0 {
+                    Color::Green
+                } else {
+                    RATE_COLOR
+                }),
+            ),
+            Span::styled(
+                format!("{} ", fixw(&ago(row.modified), 5, true)),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(short(
+                &row.path,
+                table_area.width.saturating_sub(32) as usize,
+            )),
+        ]);
+        lines.push(if index == app.large_selection {
+            line.style(Style::default().bg(Color::Rgb(38, 44, 66)))
+        } else {
+            line
+        });
+    }
+    if app.large_files.is_empty() {
+        lines.push(Line::from("No matching indexed files."));
+    }
+    f.render_widget(Paragraph::new(lines), table_area);
+
+    let selected = app.large_files.get(app.large_selection);
+    let footer = selected.map_or_else(
+        || "PgUp/PgDn page · [/] time window · s size rank · G growth rank".to_owned(),
+        |row| {
+            format!(
+                "{} · {} allocated · {} growth / {} · inode {}:{} · PgUp/PgDn page",
+                row.path,
+                human(row.allocated),
+                if app.daemon_live {
+                    growth_delta(row.growth)
+                } else {
+                    "—".into()
+                },
+                window_label(app.window_secs),
+                row.dev,
+                row.inode
+            )
+        },
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            short(&footer, f.area().width as usize),
+            Style::default().fg(Color::DarkGray),
+        )),
+        rows[4],
+    );
+}
+
 fn draw_help(f: &mut Frame) {
     let area = centered_rect(72, 62, f.area());
     f.render_widget(Clear, area);
@@ -3678,8 +4396,10 @@ fn draw_help(f: &mut Frame) {
         Line::from("       d             Toggle Tree ↔ Apps/OS/Users distribution."),
         Line::from("3 / a  Activity     What changed? [ and ] select 1h / 24h / 7d."),
         Line::from("4 / r  Reclaim      What may be freed? Inspect evidence and safety."),
+        Line::from("5 / f  Large files  Treemap + ranked files, size and growth window."),
         Line::from(""),
-        Line::from("↑↓ / j k move · Enter/→ expand or drill · ← collapse/back"),
+        Line::from("↑↓ / j k move · Enter/→ expand or drill · PgUp/PgDn page files"),
+        Line::from("Large Files: [/] time · s size rank · G growth rank."),
         Line::from("Tab changes Explore section · i toggles size/inode heat"),
         Line::from("F5 or R refreshes from the index · q or Ctrl-C exits"),
         Line::from(""),
@@ -3701,15 +4421,22 @@ fn draw_help(f: &mut Frame) {
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
+    // Help is a modal screen. Avoid rebuilding the underlying dashboard on
+    // every keypress while the modal is open; large indexes can otherwise
+    // make the help acknowledgement miss the interactive latency budget.
+    // Ratatui's diff renderer will repaint the dashboard when help closes.
+    if app.show_help {
+        draw_help(f);
+        return;
+    }
+
     match app.screen {
         Screen::Overview => draw_overview(f, app),
         Screen::Explore if app.explore_distribution => draw_apps(f, app),
         Screen::Explore => draw_explore(f, app),
         Screen::Activity => draw_activity(f, app),
         Screen::Reclaim => draw_storage(f, app),
-    }
-    if app.show_help {
-        draw_help(f);
+        Screen::LargeFiles => draw_large_files(f, app),
     }
 }
 
@@ -3719,14 +4446,246 @@ mod tests {
     use crate::scan::{self, ScanOptions};
 
     #[test]
+    fn indexed_path_size_distinguishes_absent_path_from_broken_inode_reference() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        store.set_meta("root_dev", "1").unwrap();
+        store.set_meta("root_inode", "1").unwrap();
+        store.set_meta("last_scan_root", "/").unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                 VALUES(1,1,?1,1,99,1)",
+                [b"broken".as_slice()],
+            )
+            .unwrap();
+
+        assert_eq!(indexed_path_size(&store, "/not-indexed").unwrap(), 0);
+        let error = indexed_path_size(&store, "/broken")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("references missing inode (1,99)"), "{error}");
+    }
+
+    #[test]
+    fn invalid_root_metadata_does_not_fall_back_to_another_directory() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        store.set_meta("root_dev", "1").unwrap();
+        store.set_meta("root_inode", "not-an-inode").unwrap();
+        assert!(root_node(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid root_inode metadata"));
+
+        store.set_meta("last_scan_root", "/").unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,uid,mtime)
+             VALUES(1,1,'d',4096,4096,0,0)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+             VALUES(1,1,X'2f',1,1,1)",
+                [],
+            )
+            .unwrap();
+        let app = App::new(&store, std::path::Path::new("unused-index"), 1, 1).unwrap();
+        assert!(app
+            .panel_scope(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid root_inode metadata"));
+    }
+
+    #[test]
+    fn app_creation_propagates_unresolvable_indexed_root() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,uid,mtime)
+             VALUES(1,7,'d',4096,4096,0,0)",
+                [],
+            )
+            .unwrap();
+        let error = App::new(&store, std::path::Path::new("unused-index"), 1, 7)
+            .err()
+            .expect("unresolvable root must fail App creation")
+            .to_string();
+        assert!(error.contains("has no visible path"), "{error}");
+    }
+
+    #[test]
+    fn optional_metadata_suppresses_only_absence() {
+        let path = tmp("metadata-not-directory");
+        std::fs::write(&path, b"file").unwrap();
+        assert!(optional_metadata(&path.join("child")).is_err());
+        assert!(optional_metadata(&tmp("metadata-missing"))
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn long_running_scan_status_explains_indexed_view_may_be_stale() {
+        let db = std::env::temp_dir().join(format!("dux-tui-freshness-{}", std::process::id()));
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        let store = Store::create_fresh(&db).unwrap();
+        install_test_root(&store, "/");
+        let mut app = App::new(&store, &db, 1, 1).unwrap();
+        app.last_refresh = Some(Instant::now() - Duration::from_secs(60));
+        app.scan = Some(crate::util::ScanProgress {
+            started: crate::util::now_secs() - 30,
+            files: 1234,
+            dirs: 56,
+            bytes: 4096,
+            indexing: false,
+        });
+
+        let status = freshness_text(&app);
+        assert!(status.contains("reconciling"), "{status}");
+        assert!(status.contains("displayed data may be stale"), "{status}");
+        assert!(
+            status.contains(&format!("{} files", count_human(1234))),
+            "{status}"
+        );
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+    }
+
+    #[test]
+    fn uncertain_watch_status_never_looks_caught_up() {
+        let uncertain = crate::util::WatchStatus {
+            pending: 0,
+            kernel_empty: true,
+            uncertain: true,
+            updates_committed: 5,
+            ..Default::default()
+        };
+        assert_eq!(
+            watch_status_label(&uncertain),
+            "live · event state uncertain · overflow count unavailable · reconciliation needed"
+        );
+
+        let caught_up = crate::util::WatchStatus {
+            pending: 0,
+            kernel_empty: true,
+            updates_committed: 5,
+            kernel_overflow_notifications: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(
+            watch_status_label(&caught_up),
+            "live · caught up · 5 updates"
+        );
+    }
+
+    #[test]
+    fn legacy_watch_status_labels_overflow_count_as_unavailable() {
+        let legacy = crate::util::WatchStatus {
+            pending: 0,
+            kernel_empty: true,
+            updates_committed: 5,
+            kernel_overflow_notifications: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            watch_status_label(&legacy),
+            "live · caught up · 5 updates · overflow count unavailable"
+        );
+    }
+
+    #[test]
     fn ctrl_c_quits_but_plain_c_remains_storage_shortcut() {
         assert!(is_interrupt_key(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!is_interrupt_key(KeyCode::Char('c'), KeyModifiers::NONE));
     }
 
+    #[test]
+    fn treemap_tiles_are_non_overlapping_and_allocate_area_by_size() {
+        let mut tiles = Vec::new();
+        split_treemap(
+            &[(0, 90), (1, 10)],
+            Rect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            &mut tiles,
+        );
+        assert_eq!(tiles.len(), 2);
+        let areas: std::collections::HashMap<_, _> = tiles
+            .iter()
+            .map(|(index, rect)| (*index, usize::from(rect.width) * usize::from(rect.height)))
+            .collect();
+        assert_eq!(areas.get(&0), Some(&90));
+        assert_eq!(areas.get(&1), Some(&10));
+        for (i, (_, left)) in tiles.iter().enumerate() {
+            for (_, right) in tiles.iter().skip(i + 1) {
+                let overlap = left.x < right.x + right.width
+                    && right.x < left.x + left.width
+                    && left.y < right.y + right.height
+                    && right.y < left.y + left.height;
+                assert!(!overlap, "treemap rectangles overlap: {left:?} {right:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn growth_delta_is_signed_window_total_not_a_rate() {
+        assert_eq!(growth_delta(0), "0");
+        assert_eq!(growth_delta(1024), "+1 KiB");
+        assert_eq!(growth_delta(-2048), "-2 KiB");
+    }
+
     fn tmp(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("dux-tui-{tag}-{}", std::process::id()))
     }
+
+    fn install_test_root(store: &Store, path: &str) {
+        store.set_meta("last_scan_root", path).unwrap();
+        store.set_meta("root_dev", "1").unwrap();
+        store.set_meta("root_inode", "1").unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT OR IGNORE INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,uid,mtime)
+             VALUES(1,1,'d',4096,4096,0,0)",
+                [],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT OR IGNORE INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+             VALUES(1,1,?1,1,1,1)",
+                [path.as_bytes()],
+            )
+            .unwrap();
+    }
+
     fn id_of(p: &std::path::Path) -> (i64, i64) {
         use std::os::unix::fs::MetadataExt;
         let m = std::fs::symlink_metadata(p).unwrap();
@@ -3756,22 +4715,24 @@ mod tests {
                 &dir,
                 &ScanOptions {
                     progress: false,
+                    // The test fixture lives under tmpfs-backed TMPDIR.
+                    include_pseudo: true,
                     ..Default::default()
                 },
             )
             .unwrap();
         }
         let store = Store::open_ro(&db).unwrap();
-        let (rdev, rino) = root_node(&store).unwrap();
+        let (rdev, rino) = root_node(&store).unwrap().unwrap();
         let mut expanded = std::collections::HashSet::new();
         expanded.insert((rdev, rino));
         expanded.insert(id_of(&dir.join("a")));
         expanded.insert(id_of(&dir.join("a/aa")));
 
         let build = |exp: &std::collections::HashSet<(i64, i64)>| {
-            let mut app = App::new(&store, &db, rdev, rino);
+            let mut app = App::new(&store, &db, rdev, rino).unwrap();
             app.expanded = exp.clone();
-            app.refresh_growth_map(&store);
+            app.refresh_growth_map(&store).unwrap();
             app.rebuild(&store).unwrap();
             app.refresh_panels(&store).unwrap();
             (
@@ -3799,6 +4760,175 @@ mod tests {
         }
     }
 
+    #[test]
+    fn large_files_are_ranked_paged_and_join_the_selected_growth_window() {
+        let dir = tmp("large-files");
+        let db = tmp("large-files-db");
+        let _ = std::fs::remove_dir_all(&dir);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        for index in 0..205 {
+            std::fs::write(
+                dir.join(format!("file-{index:03}.dat")),
+                vec![index as u8; 2048 + index],
+            )
+            .unwrap();
+        }
+        let mut store = Store::open_rw(&db).unwrap();
+        scan::scan(
+            &mut store,
+            &dir,
+            &ScanOptions {
+                progress: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let fast = id_of(&dir.join("file-201.dat"));
+        let slow = id_of(&dir.join("file-202.dat"));
+        let boundary = id_of(&dir.join("file-203.dat"));
+        store
+            .conn
+            .execute(
+                "UPDATE inodes SET birth_ns=100
+             WHERE (dev_id=?1 AND inode=?2) OR (dev_id=?3 AND inode=?4)
+                OR (dev_id=?5 AND inode=?6)",
+                params![fast.0, fast.1, slow.0, slow.1, boundary.0, boundary.1],
+            )
+            .unwrap();
+        let bucket = crate::util::now_secs() / crate::store::GROWTH_BUCKET_SECS;
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta)
+                 SELECT ?1,?2,?3,birth_ns,?4 FROM inodes WHERE dev_id=?2 AND inode=?3 AND birth_ns!=0",
+                params![bucket, slow.0, slow.1, 2 * 1024 * 1024],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta)
+                 SELECT ?1,?2,?3,birth_ns,?4 FROM inodes WHERE dev_id=?2 AND inode=?3 AND birth_ns!=0",
+                params![bucket, fast.0, fast.1, 3 * 1024 * 1024],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta)
+                 VALUES(?1,?2,?3,100,(-9223372036854775807-1))",
+                params![bucket, boundary.0, boundary.1],
+            )
+            .unwrap();
+        let (root_dev, root_inode) = root_node(&store).unwrap().unwrap();
+        let mut app = App::new(&store, &db, root_dev, root_inode).unwrap();
+        app.screen = Screen::LargeFiles;
+        app.refresh_panels(&store).unwrap();
+        assert_eq!(app.large_total_count, 205);
+        assert_eq!(app.large_files.len(), LARGE_PAGE_SIZE);
+        assert!(app
+            .large_files
+            .windows(2)
+            .all(|rows| rows[0].allocated >= rows[1].allocated));
+        let expected_total: i64 = store
+            .conn
+            .query_row("SELECT SUM(blocks) FROM inodes WHERE kind!='d'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(app.large_total_bytes, expected_total);
+        let first_page: std::collections::HashSet<_> = app
+            .large_files
+            .iter()
+            .map(|row| (row.dev, row.inode))
+            .collect();
+        app.large_page_offset = LARGE_PAGE_SIZE;
+        app.refresh_panels(&store).unwrap();
+        assert_eq!(app.large_files.len(), 100);
+        assert!(app
+            .large_files
+            .iter()
+            .all(|row| !first_page.contains(&(row.dev, row.inode))));
+        app.large_sort = LargeSort::Growth;
+        app.large_page_offset = 0;
+        app.refresh_panels(&store).unwrap();
+        assert!(app.large_files[0].path.ends_with("file-203.dat"));
+        assert_eq!(app.large_files[0].growth, i64::MIN);
+        assert!(app
+            .recent_changes
+            .iter()
+            .any(|(path, delta)| path.ends_with("file-203.dat") && *delta == i64::MIN));
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+    }
+
+    #[test]
+    fn large_file_refresh_reports_row_conversion_failure() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        // SQLite's non-STRICT schema permits a malformed value. A failed
+        // conversion must fail the refresh, rather than hide an indexed file.
+        conn.execute_batch(
+            "INSERT INTO inodes(dev_id,inode,kind,blocks,uid,mtime)
+             VALUES(1,2,'f',4096,0,'malformed')",
+        )
+        .unwrap();
+        let store = Store {
+            conn,
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        install_test_root(&store, "/");
+        let mut app = App::new(&store, std::path::Path::new("unused-memory-index"), 1, 1).unwrap();
+        let error = app.refresh_large_files(&store, "", &[]).unwrap_err();
+        assert!(
+            error.to_string().contains("Invalid column type"),
+            "unexpected failure: {error:#}"
+        );
+    }
+
+    #[test]
+    fn distribution_refresh_propagates_sql_failures() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        let store = Store {
+            conn,
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        install_test_root(&store, "/");
+        let mut app = App::new(&store, std::path::Path::new("unused-memory-index"), 1, 1).unwrap();
+        app.distribution = Distribution::Owners;
+        assert_eq!(aggregate_groups(&store, &app).unwrap().len(), 1);
+        store.conn.execute_batch("DROP TABLE inodes").unwrap();
+        assert!(app.refresh_groups(&store).is_err());
+    }
+
+    #[test]
+    fn application_group_refresh_propagates_index_lookup_failures() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "INSERT INTO meta(key,value) VALUES
+             ('last_scan_root','/'),('root_dev','1'),('root_inode','1');
+             DROP TABLE dirents;",
+        )
+        .unwrap();
+        let store = Store {
+            conn,
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        let growth = std::collections::HashMap::new();
+        let error = compute_groups(&store, "/", 1, 1, 0, &[], GroupView::Top, &growth)
+            .err()
+            .expect("broken index lookups must fail the group refresh");
+        assert!(error.to_string().contains("no such table: dirents"));
+    }
+
     fn mkrow(dev: i64, inode: i64) -> Row {
         Row {
             dev,
@@ -3819,28 +4949,21 @@ mod tests {
     fn result(gen: u64, rows: Vec<Row>, total: i64) -> RefreshResult {
         RefreshResult {
             gen,
+            group_view: GroupView::Top,
             distribution: Distribution::Apps,
             rows,
             growth_map: std::collections::HashMap::new(),
             top_growth: Vec::new(),
             recent_changes: Vec::new(),
             top_files: Vec::new(),
+            large_files: Vec::new(),
+            large_total_count: 0,
+            large_total_bytes: 0,
             groups: Vec::new(),
             total_size: total,
             items: 0,
             growth_per_day: 0,
             last_scan: 0,
-            fs: crate::util::FsStat::default(),
-            daemon_live: false,
-            dirty_since: None,
-            paused_since: None,
-            pause_reason: String::new(),
-            throttled_since: None,
-            watch: None,
-            scan: None,
-            containers: Vec::new(),
-            waste: crate::containers::Waste::default(),
-            cleanup: Vec::new(),
         }
     }
 
@@ -3859,6 +4982,12 @@ mod tests {
             top_growth: Vec::new(),
             recent_changes: Vec::new(),
             top_files: Vec::new(),
+            large_files: Vec::new(),
+            large_total_count: 0,
+            large_total_bytes: 0,
+            large_page_offset: 0,
+            large_selection: 0,
+            large_sort: LargeSort::Size,
             groups: Vec::new(),
             total_size: 0,
             last_scan: 0,
@@ -3897,6 +5026,12 @@ mod tests {
             reclaim_sel: 0,
             detail: String::new(),
             view_gen: 5,
+            pending_child: None,
+            last_refresh: None,
+            refresh_error: None,
+            health_error: None,
+            last_storage: None,
+            storage_error: None,
         };
         // matching generation: rows replaced, total applied, selection kept by id
         app.apply_refresh(result(5, vec![mkrow(1, 9), mkrow(1, 2), mkrow(1, 3)], 111));
@@ -3911,26 +5046,32 @@ mod tests {
         // stale generation: rows untouched, but panels/total still applied
         app.apply_refresh(result(4, vec![mkrow(7, 7)], 222));
         assert_eq!(app.rows.len(), 3, "stale gen must NOT replace rows");
-        assert_eq!(app.total_size, 222, "panels/total apply regardless of gen");
+        assert_eq!(
+            app.total_size, 111,
+            "an obsolete view must not overwrite current panels"
+        );
     }
 
     #[test]
     fn parses_docker_data_root() {
         assert_eq!(
             parse_docker_data_root(r#"{ "debug": true, "data-root": "/mnt/docker-data" }"#)
+                .unwrap()
                 .as_deref(),
             Some("/mnt/docker-data")
         );
         assert_eq!(
-            parse_docker_data_root("{\"data-root\":\"/mnt/docker\\u002ddata\"}").as_deref(),
+            parse_docker_data_root("{\"data-root\":\"/mnt/docker\\u002ddata\"}")
+                .unwrap()
+                .as_deref(),
             Some("/mnt/docker-data")
         );
+        assert!(parse_docker_data_root(r#"{ "data-root": "relative/path" }"#).is_err());
+        assert!(parse_docker_data_root(r#"{ "data-root": 42 }"#).is_err());
         assert_eq!(
-            parse_docker_data_root(r#"{ "data-root": "relative/path" }"#),
+            parse_docker_data_root(r#"{ "log-level": "warn" }"#).unwrap(),
             None
         );
-        assert_eq!(parse_docker_data_root(r#"{ "data-root": 42 }"#), None);
-        assert_eq!(parse_docker_data_root(r#"{ "log-level": "warn" }"#), None);
     }
 
     #[test]
@@ -3952,5 +5093,44 @@ mod tests {
         assert!(os.segments.iter().any(|s| s.name == "kernel/boot"));
         assert!(os.segments.iter().any(|s| s.name == "libraries"));
         assert!(os.segments.iter().any(|s| s.name == "package db/cache"));
+    }
+
+    #[test]
+    fn worker_reports_open_failures_and_recovers() {
+        let dir = tmp("worker-recovery");
+        let db = tmp("worker-recovery-db");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&db);
+        std::fs::create_dir_all(&dir).unwrap();
+        let id = id_of(&dir);
+        let (requests, rx) = crossbeam_channel::bounded(1);
+        let (results, output) = crossbeam_channel::bounded(1);
+        let worker_db = db.clone();
+        let worker = std::thread::spawn(move || refresh_worker(worker_db, id.0, id.1, rx, results));
+        let snapshot = || Snapshot {
+            expanded: std::collections::HashSet::from([id]),
+            metric: Metric::Size,
+            window_secs: 3600,
+            distribution: Distribution::Apps,
+            group_view: GroupView::Top,
+            screen: Screen::Explore,
+            large_page_offset: 0,
+            large_sort: LargeSort::Size,
+            gen: 0,
+        };
+        requests.send(snapshot()).unwrap();
+        assert!(output
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .is_err());
+        scan::rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        requests.send(snapshot()).unwrap();
+        let recovered = output.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(recovered.is_ok());
+        drop(requests);
+        worker.join().unwrap();
+        drop(output);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_file(db);
     }
 }

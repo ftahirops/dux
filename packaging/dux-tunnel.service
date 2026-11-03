@@ -1,0 +1,49 @@
+[Unit]
+Description=dux optional remote-access tunnel (operator enabled)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/dux/ed25519
+ConditionPathExists=/etc/dux/tunnel.conf
+ConditionPathExists=/etc/dux/known_hosts
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/dux tunnel run
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=15s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes
+# The tunnel and its Dropbear child need only standard pseudo-devices; do not
+# expose host block devices or device nodes to this optional remote-access unit.
+PrivateDevices=yes
+# This unit does not manage kernel state. Restrict its view and interfaces even
+# though the process retains only the capabilities needed for SSH logins.
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+# The SSH supervisor and Dropbear child do not manage kernel state, mount
+# filesystems, change the clock, reboot, or inspect other processes. Deny these
+# syscall groups while retaining the setuid/setgid calls required by Dropbear.
+SystemCallFilter=~@module @mount @swap @reboot @clock @obsolete @raw-io @debug @cpu-emulation open_by_handle_at
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+# The supervisor and optional dropbear endpoint only need local sockets and
+# TCP/IPv6 for SSH. Do not expose packet, netlink, or other socket families.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# The optional dropbear child establishes authenticated login sessions.
+# These capabilities are deliberately absent from the filesystem indexer.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE
+CPUQuota=10%
+MemoryMax=128M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

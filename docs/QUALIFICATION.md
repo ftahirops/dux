@@ -1,0 +1,3313 @@
+# Release qualification operations
+
+## Active VM resource policy — 2026-10-27
+
+Qualification guests must use 2–4 GiB RAM. The VM manager exposes a 2 GiB
+`standard` profile and a 4 GiB `qualification4` profile; it refuses to start
+them unless host `MemAvailable` is at least 6 GiB and 12 GiB respectively.
+Their QEMU cgroups are capped at 2.5 GiB / 75% CPU and 6 GiB / 50% CPU. These
+cgroup limits include QEMU overhead; guest RAM stays at the selected 2 or 4
+GiB. Host admission also requires load1<=10, I/O PSI some avg10<=10%, and
+memory PSI some avg10<=5%. CPU PSI some avg10 up to 35% is admitted only when
+aggregate load1<=10 and CPU PSI full avg10<=5%; PSI some above 55% always
+blocks admission. This distinguishes quota-related runnable wait from broad
+host saturation while retaining hard load, memory, and I/O gates. During a
+run, two consecutive samples above CPU PSI some 40% stop the guest when
+load1>10 or CPU PSI full>5%; CPU PSI some above 70%, CPU PSI full above 10%,
+load1>12, I/O PSI above 40%, or memory PSI above 20% always stop only the
+disposable guest. For P0 on a busy shared host,
+override the qualification4 CPU quota to 25%; keep guest RAM at 4 GiB and its
+6 GiB cgroup memory ceiling. Do not use historical measurements from larger
+guests as release qualification. Run the complete 100k/1m/10m suite within the
+4 GiB guest and its explicit worker limits, even when that takes longer.
+
+The `watch-unit` guest name provisions a fresh Ubuntu 24.04 instance for Rust
+watcher regressions. Its per-run qcow2 overlay, cloud-init seed, SSH identity,
+and console log live in a unique `/dev/shm/dux-watch-unit-vm/<run-id>` directory,
+outside the host's watched workspace. Use the `standard` 2 GiB profile; the
+guest's ext4 `/tmp` preserves allocation-sensitive test semantics. The guest
+state manifest remains in `target/readiness/vms/watch-unit/state.json` and
+records the exact per-run tmpfs directory. Treat tmpfs guest state as ephemeral;
+persist test logs and exact binaries separately before stopping the guest.
+
+Keep worker limits separate from the VM limits. The consolidated P0 worker is
+capped at 4 GiB, has swap disabled, and uses a 25–75% CPU quota. The calibrated
+scale worker uses a 3 GiB cgroup, one scan job, and the measured profile's
+explicit CPU quota. Never raise the guest RAM or its QEMU cgroup limit to make
+a test pass.
+
+The scale fixture defaults to isolated tmpfs. The 10m image requires 12 GiB of
+workspace headroom, which exceeds the 4 GiB guest's tmpfs budget. In the
+dedicated KVM guest only, `--disk-workspace` permits an ext4 fixture under
+`/mnt/dux-readiness`; it refuses this mode outside KVM or elsewhere on disk.
+The scan process remains independently measured and must meet the 256 MiB RSS
+budget. The guest's isolated virtual disk holds the large fixture while guest
+RAM remains at 4 GiB.
+Fixture creation syncs and advises completed image pages away every 100,000
+paths, then drops page, dentry, and inode caches in the disposable guest. The
+scale memory cap therefore measures live working set instead of retaining the
+large fixture as guest cache. This cache drop is never enabled for ordinary
+tmpfs runs or outside the dedicated KVM guest.
+
+Run scale jobs through `scripts/dux-scale-monitor.py` from the host. It polls
+the guest's atomically written report and heartbeat over loopback SSH and
+persists each complete snapshot beside the host evidence, so a safety stop or
+guest failure does not erase the last measured phase. Preserve the host `.json`,
+`.progress.json`, `.monitor.json`, and `.log` together. Example, after copying
+the candidate and harness into the guest:
+
+```sh
+python3 scripts/dux-scale-monitor.py \
+  --guest ubuntu24 \
+  --guest-report /root/dux-scale-current.json \
+  --host-report target/readiness/scale-current.json \
+  --interval 15 -- \
+  python3 /root/dux-scale.py --private-worker \
+    --binary /root/dux-candidate --report /root/dux-scale-current.json \
+    --sizes 10000000 --samples 10 --scan-jobs 1 \
+    --worker-memory-mib 3072 --cpu-quota-percent 100 \
+    --workspace-parent /mnt/dux-readiness --disk-workspace
+```
+
+The wrapper does not make an interrupted run pass: only the guest's terminal
+report and all budget assertions can qualify a level. A missing final fetch,
+stale heartbeat, nonzero remote exit, or lost VM is recorded as incomplete and
+keeps the gate open.
+
+## Current candidate checkpoint — 2026-10-26 10:38 UTC
+
+### Live continuation — 2026-10-26 10:46 UTC
+
+The 10m scale fixture is generated and the exact candidate scan is running in
+the isolated Ubuntu guest on ext4. At 10:46 UTC it had run for 1m55s under the
+50% CPU quota; cgroup memory current/peak were 10.15/10.25 GiB with a 12 GiB
+live cap and zero pressure/OOM events. Its report remains at the fixture phase
+until the scan exits, so no 10m budget is passed yet.
+
+The installed legacy daemon reproduced the accounting failure again at
+10:44:58 UTC and started a whole-root reconciliation. At 10:46:07 it showed
+2,670 pending paths, DIRTY state, 78 seconds since catch-up and zero dropped
+events while scanning 1,121,148 files. The read-only candidate exact observer
+is tracking this recovery but has not obtained a stable caught-up window or
+completed an exact filesystem comparison. Live accounting remains a release
+blocker.
+
+That observer reached its original 600-second deadline while the daemon was
+still reconciling; it recorded `STABLE_CATCHUP_TIMEOUT` with 2,964 pending paths,
+zero dropped events, and the scan active. The report and progress sidecar are
+preserved in `target/readiness/live-accounting-candidate-stable-timeout-20261026T1047Z.json`
+and its `.progress.json` companion. A follow-up uses the same 15-second stable
+gate with a 1,800-second timeout; the longer wait does not relax the exactness
+criteria.
+
+### Scale follow-up — 2026-10-26 10:59 UTC
+
+The first full 100k/1m/10m run is terminal **failed** at the 10m RSS gate.
+The 10m scan took 673.431s and passed its reported exact aggregate and sample
+checks, while the query and TUI p95s shown in the report met their limits. Peak
+RSS was 909,528 KiB against the 256 MiB budget, so the level does not qualify.
+The complete report is `target/readiness/scale-ceba3c3-100k-1m-10m-20261026.json`
+(SHA-256 `431c03941b2eca12b66c520388be5dcee555d4ea055a20ba3f5760fc44073cf3`).
+A one-job RSS-profile rescan is running over the same preserved ext4 fixture to
+identify whether walker parallelism is the dominant memory cost. It is
+diagnostic evidence only; the passing scale qualification still requires all
+budgets, including memory, at the intended four-job configuration.
+
+The 11:00:58 live capture localized the recurring failure before the atomic
+rebuild replaced the old index: `/tmp` recursive totals exceeded its prime
+children by 573 inodes and 15,183,872 bytes, while
+`/root/.codex/packages/app-server-daemon/auto-update-version` was short by
+12,288 bytes. The root aggregate was therefore high by 573 inodes and
+15,171,584 bytes. No dangling child, invalid parent or bad leaf predicate was
+present; exactly two directory rollups and the root aggregate failed. Captured
+predicate report SHA-256 is
+`1404fe74d93bd4c7728a3f8b66208de0665d35fefbe584bcababc8307b97e24a`; directory
+detail SHA-256 is
+`88959c1dde3679b69b6ee8b983c68ba5dd01bed888fff98b576c01c9eb1092c7`. The
+subsequent full scan restored caught-up status, but this does not identify the
+event sequence or prove a candidate fix. Exact comparison against the live
+filesystem remains open.
+
+The candidate binary pair remains production SHA-256
+`ceba3c3c2b1d830ef7d7869dfac2a1376ddd991fe4701313cb6aab07c9aa5a93` and
+fault-injection SHA-256
+`5fe81f81c6585b99dd57f980a156be29a4e52922942cbc3a98b995e16388b5aa`. The
+readiness harness now has SHA-256
+`86d81df3cf84c35e10d408fb3a3c08d07876efbdfd09d746b3216c8de42d1226`.
+
+A full P0 matrix using the prior harness passed its first nine suites but timed
+out the pressure-recovery check at 180 seconds. The 100k-file reconciliation
+finished about two seconds after that deadline, before the test could verify
+exact recovery. Raising that suite deadline to 600 seconds yielded an isolated
+pressure pass: cancellation preserved the old generation, Elevated pressure
+continued incremental commits, Critical pressure retained and replayed events,
+and exact recovery ended with zero pending/dropped events and intact growth
+history. Report SHA-256 is
+`b1b1721a9eb0dfc54afe937f7cfe33e861568fbfa58a1ac91d3c5040b74aa595`.
+
+A separate four-suite run passed mount recovery, long-reader WAL reclamation,
+watch-first startup plus v4 upgrade, and root scan (69,630 files, 9,249
+directories, 85,394 dirents, complete coverage). Final report SHA-256 is
+`425a59969f429669241e38100443af334c20340bc3aaa9057fdfbfdc571fffe6`.
+
+A consolidated 14-suite P0 run completed crash (30/30), overflow, and CPU,
+then was OOM-killed during the churn suite's second 100k-file baseline scan.
+The worker cgroup was capped at 768 MiB and systemd recorded a 768 MiB peak;
+the scan progress marker shows 31,013 files / 73 directories / 130,199,552
+allocated bytes at interruption, before churn assertions. This is a
+qualification-worker resource failure, not evidence of a candidate accounting
+defect. Preserved failure artifacts are under
+`target/readiness/p0-churn-oom-failure-20261026/`.
+
+The last persisted interim report SHA-256 is
+`9271dec2673fdf761b7696ef04cda7a090c6995a3c0a055a437ceaf824fd3c64`.
+Crash passed in 1,847.137s; overflow passed in 1,595.101s (1,557.262s
+recovery); CPU passed with 12,142 events, 5.706s production, 39.514s catch-up,
+107.198s exact validation, and 0.209 CPU fraction. The CPU suite recovered
+from an Elevated-pressure scan cancellation while retaining the previous
+index.
+
+The P0 qualification has pass evidence for all 13 defined suites across two
+reports. The first run passed ten suites but failed at mount recovery because
+pressure-suite cleanup leaked a daemon holding the database flock. Failure report
+`target/readiness/p0-full-4g-20261026-mount-failure.json`, SHA-256
+`8ef611ad4a3d3cbea209c31ab5275a9ea8d829afbb09ecda4ee606b2c5eb6b6e`. Fixed
+`pressure_reconciliation_test` to stop its daemon in `finally`; updated harness
+SHA-256 `e6b28346f741873066f4e59473538f62572299deb5e91d95cdc74971118f4861`.
+`py_compile`, readiness workflow tests (9/9), and `git diff --check` pass. The
+focused rerun passed pressure, mount, WAL, root, and startup in 10m 1.920s.
+Report `target/readiness/p0-tail-cleanup-20261026.json`, SHA-256
+`53db21e6f61bd454d3a6fb838875f3d6a637b7b047974c6012b77c589daa515f`. All 13
+suites have pass evidence for the same candidate/fault binaries, but not as one
+consolidated report.
+
+The scale harness now lets the run specify and records worker MemoryMax and
+CPUQuota instead of hard-coding 768 MiB. Workflow tests pass 10/10. Current
+candidate scale run is active as `dux-scale-51395.service` in the Ubuntu 24.04
+scale16 guest: binary SHA-256
+`ceba3c3c2b1d830ef7d7869dfac2a1376ddd991fe4701313cb6aab07c9aa5a93`, harness
+SHA-256 `3db4139a81a875c7b28d53c1d7f56cb46bf39016ef9755a2bb19c95a4e381a35`,
+10,240 MiB worker cap, 50% CPU quota, four scan jobs. The 100k and 1m levels
+passed scan, exact, query and TUI budgets. At 1m, scan took 42.960s / 144,080
+KiB peak RSS; exact state contained 991,964 inodes, 56,188,928 allocated bytes
+and 1,001,964 entries. The 10m fixture reached 3.5m/10m at 10:36:46 UTC; scan
+and exact/query/TUI checks remain pending. Progress report
+`target/readiness/scale-ceba3c3-100k-1m-10m-20261026-progress.json`.
+
+The installed legacy daemon remains unchanged and still rebuilds after accounting
+invariant failures logged at 10:29:53 and 10:34:54 UTC. At 10:36:19 it remained
+in `reload-notify` with 1,120,558 files scanned, 1,424 pending, DIRTY and zero
+dropped events. A read-only exact audit is waiting for 15 stable caught-up
+seconds. Report target
+`/run/dux/live-accounting-stable-exact-20261026T1035Z.json`; progress sidecar
+`/run/dux-live-observer-live-accounting-stable-exact-20261026T1035Z-1544020.progress.json`.
+No stable exact result is available yet. This reproduces the stale-data issue
+and keeps the live accounting gate open.
+
+Package lifecycle/security/rollback, 72-hour endurance, and 24-hour canary also
+remain open. Production readiness is not qualified.
+
+### Updated measured evidence — 2026-10-26 11:18 UTC
+
+The four-job 10m profile completed in 673.431s but peaked at 909,528 KiB, so it
+failed the 256 MiB RSS budget. A diagnostic rescan of the preserved ext4 fixture
+with one walker job passed in 18m13.86s and peaked at 170,348 KiB (166.4 MiB),
+with zero swaps. The production daemon's background rebuild uses the
+low-priority worker count, which resolves to one job on the four-vCPU
+qualification guest. The diagnostic is not a complete scale pass because it did
+not rerun all level-specific exactness, query and TUI gates together. Run the
+full `dux-scale.py` profile with `--scan-jobs 1`, preserve its report, and
+require every budget to pass before closing scale qualification.
+
+The legacy live daemon failed the accounting invariant again at 11:15:06 UTC.
+The captured rows all resolve to existing `/tmp/xgs-staticcheck-cache` paths;
+two non-directory inode rows had nonzero allocation but zero cached recursive
+totals. Reconciliation restored the internal SQL invariants by 11:18 UTC, then
+the index changed during the capture window, so path-level equivalence remains
+unproven. A candidate unit regression now injects that zero-total leaf shape
+and passes. The candidate remains uninstalled.
+
+A corrected consolidated 14-suite P0 run is active in the isolated Ubuntu
+guest as `dux-readiness-full-e6-20261026.service`. It uses the corrected
+pressure-suite cleanup harness and the existing production/fault binary hashes.
+Wait for the final guest report before treating the matrix as passed. The same
+guest completed the one-job memory diagnostic before the P0 rerun began; no
+scale rerun is running concurrently with P0.
+
+At 11:20:45 UTC the installed legacy watcher reported fanotify queue overflow
+and started another reconciliation. At 11:22 UTC it was still dirty, scanning,
+about 100 seconds behind, with 12,257 pending paths. The concurrent exact audit
+walk finished with one filesystem walk error and differences, but its starting
+index changed during the audit and the daemon was rebuilding. Preserve those
+counts as unstable evidence only; do not label them persistent drift or a pass.
+The 15-second stable-catch-up observer timed out because the service remained
+in reconciliation. A new live exact comparison can be meaningful only after
+the queue drains, dirty state clears and a stable window is obtained.
+
+The next post-reconciliation check at 11:24 UTC found a false-clean interval:
+the candidate-readable status said caught-up with zero pending/dropped events,
+but read-only SQL found the root rollup 59,375,616 bytes below inode totals and
+five bad directory rollups. The legacy v4 index resolves 28 existing regular
+files under `/tmp/xgs-staticcheck-cache` as directories with matching
+device/inode identities; that schema has no `birth_ns` field. The candidate
+already detects kind/incarnation changes in `upsert_path`, and its focused
+stale-directory-reuse regression passes. At 11:25:08 the legacy periodic
+verifier marked the index dirty and began another rebuild. This explains why a
+simple caught-up status can disagree with the indexed tree; the candidate fix
+still needs the consolidated high-churn qualification and deployment gates.
+
+### Current-source release artifact qualification — 2026-10-26 11:35 UTC
+
+Built `0.6.3-14` static-pie musl binary, DEB and RPM under
+`target/readiness/release-20261026/`. Their shared payload binary SHA-256 is
+`65c635c45feac49f15793015bdb0666107740b04f6299e1b491ddd42b65718e6`; the
+manifest binds source tree SHA-256
+`ff2f3a942ffe51d255145516ceb6184bc19ddc6c474b6fdf0f828e72f49743a8` and
+records the worktree as dirty. Verify those hashes before using the artifacts.
+
+The DEB lifecycle is running in a newly provisioned, controller-marked Ubuntu
+24.04 guest against `0.6.3-12` → `0.6.3-14`. Its interim record confirms the
+static v14 payload is installed after upgrade and that an operator-disabled
+service stays disabled. Rollback, remove/purge, clean install, default tunnel
+state and effective security policy remain pending until the final lifecycle
+report says `passed`. The first attempt against an older guest was rejected at
+the marker precondition before package mutation; a fresh guest alias was added
+and its workflow tests pass 11/11.
+
+The consolidated P0 run is at crash round 14/30 on dynamic candidate SHA
+`ceba3c3c2b1d830ef7d7869dfac2a1376ddd991fe4701313cb6aab07c9aa5a93`. Since the
+release package contains static musl SHA `65c635c4…`, its P0 and complete scale
+gates must also be run against that exact packaged binary before release.
+Latest live observation at 06:16 UTC: installed legacy PID 900 has three more
+`materialized index totals disagree with inode rows` triggers (06:03:57,
+06:08:57, 06:13:59). The first two zero-error scans each replayed 29k/42k paths
+and later reported caught-up; a third root reconciliation was still active at
+the checkpoint with 40,639 pending paths. No exact live filesystem comparison
+was run during this active reconciliation. This is recurring production
+evidence, not a candidate qualification result.
+
+At 06:19:01 UTC the invariant failed again. A read-only SQLite snapshot during
+that rebuild found the root inode 11,501,568 bytes / 2,232 inodes above the
+inode-row aggregates, four bad directory rollups, one bad leaf rollup, and no
+dangling dirents. The stale rows form `/tmp/go-build3697154896` and its
+`b001`/`b142` descendants, all absent on disk; the root of that subtree has a
+stale recursive total of 151,605,248 bytes / 293 inodes versus 162,304,000
+bytes / 1,107 prime-child inodes. Read-only query artifact:
+`/run/dux/live-rollup-mismatch-20261026T0620Z.json`, SHA-256
+`2666050b14987ee99777a1803aba5e8df6372be495d5f09ac92827a072aa111b`. This
+was captured during an active dirty rebuild, so it reproduces the mismatch
+shape but is not a stable post-recovery exact audit. Candidate Rust regression
+`deleting_live_sized_stale_build_tree_restores_exact_rollups` models this
+deleted Go-build subtree; candidate source tests passed earlier, but the
+installed legacy service has not been changed.
+
+A subsequent read-only exact audit could not start its filesystem walk because
+the required 15-second stable caught-up window did not occur within 180 seconds:
+the indexed allocated-byte total continued to change despite zero pending
+events and a caught-up status. Report
+`target/readiness/live-exact-recovery-20261026T0621Z.json`, SHA-256
+`52e3c71b100f2d3c1801b2050f0ae56fd79cc64e91962265f99afaba748b2194`, records
+`STABLE_CATCHUP_TIMEOUT`; it is not an exact pass or comparison result.
+
+The 06:19 rebuild did complete. A read-only SQLite snapshot at 06:26:12 UTC
+then found internal accounting totals consistent and the previously stale
+Go-build inode removed. Report
+`target/readiness/live-rollup-after-reconciliation-20261026T0625Z.json`,
+SHA-256 `0983fadf2ac84da0ba795b6abc1c3ba78598cc9616ac575f6bbdd6d1e0c814eb`.
+This confirms the rebuild repairs that snapshot; the recurrent cause and an
+exact stable filesystem comparison remain unverified.
+
+A single low-priority whole-root snapshot completed from 06:27:57 to 06:31:14
+UTC but overlapped active `/tmp` churn. The indexed structure changed during
+the audit, and the filesystem walker saw two `ENOENT` races on temporary test
+paths. It observed 1,217,077 filesystem paths versus 1,195,595 indexed paths,
+22,287 missing paths, 805 stale paths, one identity mismatch, and 93 allocation
+mismatches. Report
+`target/readiness/live-exact-single-snapshot-20261026T0627Z.json`, SHA-256
+`1f6180bc75b772ede0e343cb7ed13bfc096124bd8f59572457d8b502c3675de4`, records
+the full samples and `CATCHUP_TIMEOUT`. These are transient diagnostic counts,
+not a stable exactness verdict.
+
+The consolidated P0 attempt is terminal and failed in CPU-suite cleanup after
+1h02m19s. Preserved report `target/readiness/p0-full-final-failure-20261026/report.json`
+SHA-256 `41c34d65cda7e1a7b79fc270fd6a29e398c8e740157583ff0d3c193bb1408045`
+records crash 30/30 and real overflow as passed; overflow took 1,376.9s. CPU
+production/catch-up/primary exactness met their budgets, but cleanup had a
+60-second deadline while one full exact snapshot itself took 69.992s. The
+preserved frozen CPU-cleanup index and filesystem truth compare with zero path,
+inode/allocation, rollup, orphan and prime-attribution mismatches; SQLite
+integrity is `ok`. Details and hashes are in
+`target/readiness/p0-full-final-failure-20261026/exactness-verification.json`.
+
+The harness cleanup bound is now 180s and the complete matrix wall limit is
+four hours. New local/guest harness SHA-256 is
+`dd5700981a7a085381098a86a4db9a647b032f0c1c35b226aee24ec7dad3a3c9`.
+Compilation, whitespace validation and workflow checks pass (9/9). A first
+CPU-only rerun passed on the candidate but provenance showed the guest still
+had the old harness; it does not verify the timeout fix. A second run with the
+corrected, hash-verified harness is active as `dux-readiness-29417.service`,
+outer session 99351. The full P0 rerun awaits this focused result. Live exact
+accounting, calibrated scale, package/security/rollback, 72-hour endurance and
+24-hour canary remain open.
+
+At 06:33:59 UTC the installed legacy daemon logged
+`cannot resolve ancestor parent`, then reported a materialized-total invariant
+failure and started another root reconciliation. The zero-error scan completed
+at 06:36:34 with 1,104,049 files / 104,791 directories / 118.19 GiB, but
+replayed 71,031 pending paths and immediately reported a persistent backlog.
+The candidate source's `ensure_ancestors` now captures parent identities during
+the shallow-first walk and installs from those captured identities to avoid a
+concurrent-rename re-stat race. This aligns with the legacy error path, but the
+active candidate run has not yet completed and a focused race regression is
+still desirable; no live fix is claimed.
+
+## Earlier candidate checkpoint — 2026-10-26 02:42 UTC
+
+The 02:37 exact whole-root comparison completed its filesystem walk (1,199,093
+paths, zero traversal errors) but did not pass: the index changed during the
+walk, accounting invariants were false, and the transient comparison recorded
+18,352 missing paths, 408 stale paths, 6 identity mismatches, and 1,411
+allocation mismatches. These counts are not a stable exactness verdict. The
+four-minute post-walk wait returned `CATCHUP_TIMEOUT`; no second walk was
+started. At timeout the service was again reconciling after the 02:43:19
+invariant failure, with 6,535 pending updates and 34.2 seconds behind. Report
+SHA-256 is
+`0de439946ea12438fed1471968ba8d2f36f6cc4447d26ca98f3bc41e927e5136`. During reconciliation, the installed service logged a further
+fanotify overflow at 02:40:22. Its 02:40:52 scan completed and it logged
+caught-up at 02:40:59, but candidate-readable status is again dirty with zero
+pending/dropped and reason `incomplete coverage or changes lost during
+reconciliation`. The exact report is
+`target/readiness/live-exact-current-20261026T0237Z.json`; installed service
+remains the legacy binary and has not been modified.
+
+## Earlier candidate checkpoint — 2026-10-26 02:36 UTC
+
+The latest Rust source includes periodic watch-status refreshes during long
+flush transactions. `cargo fmt --all` and `cargo test` pass (106 Rust tests).
+Current production and fault-injection build hashes are respectively
+`ceba3c3c2b1d830ef7d7869dfac2a1376ddd991fe4701313cb6aab07c9aa5a93` and
+`5fe81f81c6585b99dd57f980a156be29a4e52922942cbc3a98b995e16388b5aa`.
+
+The full P0 run `dux-readiness-136755.service` was stopped after 10/30
+crash/recovery rounds, before any suite completed. Partial evidence is
+`target/readiness/p0-interrupted-20261026.json`, SHA-256
+`e4c67231c27670c4b010bd51ff92c6e66ceddcf5d350587c439f364e0188fdb3`. It used
+the previous `/tmp` harness and cannot qualify the corrected harness.
+
+The installed legacy service logged eight materialized-accounting invariant
+events at 01:58, 02:03, 02:08, 02:13, 02:18, 02:23, 02:28 and 02:33 UTC, plus
+two fanotify overflows at 02:25 and 02:27. Following the first overflow, the
+02:26:33 scan saw 1,082,249 files / 103,342 directories / 114.81 GiB, replayed
+30,148 paths and caught up at 02:26:54. The second overflow occurred after the
+P0 worker stopped and before an exact observer began. After the 02:28:12
+invariant failure, candidate-readable status at 02:28:45 reported dirty state
+(`directory accounting invariant failed`), scan in progress and 950 pending
+paths. At 02:30:21 it was still dirty and scanning, with 9,268 pending, 128.2
+seconds behind, and 1,088,632 files / 102,871 directories visited. It briefly
+returned clean/caught-up at 02:30:51, then failed the invariant again at
+02:33:16. At 02:36:22 it remained dirty with 51,364 pending and 201.7 seconds
+behind. These are recurring events, not eight proven distinct root causes.
+
+A read-only exact diagnostic walk was stopped during reconciliation. Partial
+report `target/readiness/live-exact-diagnostic-interrupted-20261026T0228Z.json`,
+SHA-256 `22886a8d53cfc98630ed9a03025b23dcb5e443446ad82d584ba1afec1447a9ea`,
+records 295,368 paths / 31,212 directories / zero walk errors, but no exact
+path/allocation comparison completed. A second attempt,
+`target/readiness/live-exact-stable-window-20261026T0232Z.json` (SHA-256
+`89c683ac4ea61d8b46b8bb7cc7386141ea4e486f9defef1935e551b66203957e`), returned
+`STABLE_CATCHUP_TIMEOUT` after 240 seconds. It recorded dirty state, reason
+`directory accounting invariant failed`, 51,071 pending, 191.7 seconds behind;
+the full filesystem walk never started. Exact live accounting remains open.
+
+Both qualification harnesses require disposable workspaces on a `tmpfs`
+filesystem separate from `/`, determined from mountinfo. They record workspace
+identity and reject insufficient space instead of falling back to the watched
+root. The readiness harness requires image size plus 512 MiB headroom; the
+scale harness requires image size plus 4 GiB. Targeted workflow tests pass
+7/7. Readiness harness SHA-256 is
+`ff18df02ae1815a20d99ea6f3b3af5c5ca7b2801acfe1893b3e14412c66ce7f3`; scale
+harness SHA-256 is
+`6030cb58ddee2b930471a3ec520932f45ae1895d9fc2e24475e13f19f2766f20`. `/run`
+is tmpfs on device 26, separate from root device 64512, with about 3.35 GB
+free; that is insufficient for the scale harness's 4.75 GiB minimum even at
+100k files. The stopped P0 worker used old harness SHA
+`3cfecb63291246bf5b07b11646ea6efb2365d0cbb86eac6e7b325f631828c48e`; its
+partial results do not qualify the updated harness.
+
+The VM manager is now constrained to `standard` (2 GiB) and `qualification4`
+(4 GiB) guests, with vCPU count, cgroup limit, and minimum host memory
+recorded. Run 1m and 10m calibration in `qualification4`; prior scale16/scale32
+guidance and results are historical only. VM manager SHA-256 is refreshed with
+the resource-policy change in the current audit entry.
+
+The status-refresh change has build and unit evidence but still needs a
+dedicated long-transaction test. Current P0, scale budgets, package lifecycle,
+security review, 72-hour endurance, and 24-hour canary remain open.
+
+This runbook covers the isolated release qualification guests and their host-side
+evidence archiver. It supplements `OPERATIONS.md`; it does not authorize a
+production rollout. Qualification uses an exact candidate binary in a
+disposable guest, separate from the installed production service.
+
+## Candidate evidence and remaining gates
+
+Current host observation, 2026-10-25 10:16 UTC: the installed legacy service
+has repeatedly failed its materialized accounting invariant check (five times
+from 09:46 to 10:11), reconciled the root each time, and logged fanotify queue
+overflow after the 10:13 scan. Its systemd restart count is zero, but its
+accounting state is DIRTY; zero pending/dropped counters do not override that
+state. A read-only snapshot report
+`target/readiness/live-accounting-repro-20261025T1014Z.json` (SHA-256
+`da8a0bf8495ed223bada4f415bc262159db8a9537056e4c2501c0b23422f71dd`) recorded
+root totals 135,644,311,552 bytes / 1,144,749 entries versus inode aggregate
+135,652,413,440 bytes / 1,144,748 unique inode rows. SQLite integrity passed,
+with zero orphan dirents and invalid prime attribution, but six sampled
+directory rollups disagreed. The samples were stale entries under `/tmp` from
+temporary qualification/test trees that no longer exist. Because the snapshot
+was taken during DIRTY state immediately after fanotify overflow, it is a
+confirmed live accounting mismatch under churn, not proof of persistent drift
+after recovery. Leave the installed service and DB unchanged; wait for its
+autonomous recovery, then require a stable caught-up exact path/inode/allocation
+audit before deciding whether a product defect remains.
+
+Current checkpoint, 2026-10-25 10:15 UTC: all currently defined P0 suite
+categories have individual pass evidence on the same production/fault binary
+pair, across several bounded runs; a single uninterrupted full-matrix run has
+not passed. The late residual run passed mount, WAL, startup, and root with
+current harness hash `3cfecb63291246bf5b07b11646ea6efb2365d0cbb86eac6e7b325f631828c48e`.
+It scanned 1,042,647 root files, 104,540 directories, and 1,168,004 entries;
+the report is `target/readiness/p0-late-suites-20261025.json`, SHA-256
+`f9824b30c9967ff7d2490fdfb620b58bffb1cd13251a8e66e7e42aaee906bef1`. The
+pressure suite also passes after two harness defects were fixed. Its report is
+`target/readiness/pressure-repro-fixed2-20261025.json`, SHA-256
+`37c352984706513b8eacfeb6b4fc901103f3b315f8f649d407907d085a9ea9ab`; it
+records Elevated cancellation with the current generation retained,
+incremental update under Elevated pressure, Critical write pause and event
+replay, exact recovery, and preserved growth history. The cancellation test
+now snapshots its baseline generation only after startup reconciliation; the
+recovery check now consumes `Daemon.exact()`'s metadata return and reads watch
+status separately.
+
+The 100k-file CPU catch-up suite separately passed at 12,181 events, 4.40s
+production, 58.49s exact catch-up, daemon CPU fraction 0.15. Crash recovery
+passed 30/30 and the fanotify overflow/dirty-metadata failure suite passed in
+the earlier P0 run. The combined P0 run before the pressure correction passed
+churn, disk, coverage, bounded soak, capability, and cgroup OOM; the rerun
+after fixing pressure was interrupted by disk capacity constraints (the root
+filesystem reached 100% during qualification). Therefore do not describe this
+as a one-run complete P0 pass. Free substantial host space, then perform one
+full candidate-bound matrix or retain the individual reports as component
+evidence. The exact production candidate pair is SHA-256
+`389fc316b9fc523ed8603d85fe89d273c5b02503683830c7c40c578ba6edd062` and
+`6337328efdc319b6612d74bbf4bd57c6cf99be45b5d0a6ac20fdb53882649e5c`.
+There is no current 72-hour soak or 24-hour canary. The 09:24 source manifest
+predates the latest harness changes and does not bind the current harness.
+
+Historical checkpoint, 2026-10-25 09:05 UTC: pressure suite then passed on a
+100k-file ext4 fixture after two harness defects were fixed. The cancellation
+test now snapshots its baseline generation only after startup reconciliation;
+the recovery check now consumes `Daemon.exact()`'s metadata return and reads
+watch status separately. Report
+`target/readiness/pressure-repro-fixed2-20261025.json`, SHA-256
+`37c352984706513b8eacfeb6b4fc901103f3b315f8f649d407907d085a9ea9ab`, records
+Elevated cancellation with the current generation retained, incremental update
+under Elevated pressure, Critical write pause and event replay, exact recovery,
+and preserved growth history. This is an isolated suite pass, not a full P0
+matrix pass.
+
+Production candidate SHA-256
+`389fc316b9fc523ed8603d85fe89d273c5b02503683830c7c40c578ba6edd062` and
+fault-injection candidate SHA-256
+`6337328efdc319b6612d74bbf4bd57c6cf99be45b5d0a6ac20fdb53882649e5c` are built
+from the current Rust source. The 100k-file crash suite passed 30/30 rounds and
+the real fanotify overflow/dirty-metadata failure suite passed. The full P0
+matrix stopped at the 10k-event performance case: its 62.306s result included
+serial creation of 12,000 fixture files, so it did not isolate catch-up
+latency. The harness now records producer and catch-up time separately; the
+corrected isolated CPU suite is pending. Report
+`target/readiness/p0-cpu-recovery-4b729cb4-20261025.json` preserves the run and
+its evidence. No current 72-hour soak or 24-hour canary is active. Older
+qualification reports and soak archives belong to different binaries and do
+not count toward this candidate's gates.
+
+That qualification statement applies only to the binary and source revision
+recorded by those reports. The current worktree has since changed: it adds
+critical-pressure scan deferral and cooperative cancellation, a fault-build
+pressure override, a pressure cancellation/recovery suite, and a TUI freshness
+message correction, and removal of the daemon's artificial `oom_score_adj=800`
+override. The package policy now checks both effective unit `OOMScoreAdjust=0`
+and the running process's `/proc/<MainPID>/oom_score_adj`; the next package
+revision is 14. The earlier reports do **not** qualify these changes. The
+current worktree passes 106 Rust tests, 65 lightweight Python harness tests,
+formatting, Python bytecode compilation, whitespace validation, and systemd
+unit verification. The complete P0 matrix is not qualified: it stopped at the
+performance-budget assertion before pressure, churn, storage, permission,
+cgroup OOM, capability, mount, WAL, startup, and root suites ran. Rebuild both
+release binaries after the harness timing change, rerun the isolated CPU
+scenario, then complete the P0 matrix. Keep exact source, harness, and binary
+hashes with every report.
+The `pressure` scenario verifies cancellation and staging cleanup under
+Elevated high-load pressure, continued incremental event commits in that band,
+and that a running scan continues under Elevated I/O pressure. It also verifies
+write retention under Critical pressure, replay after pressure recedes, and
+final exact path/inode/allocation/rollup/history recovery. Injected CPU-only
+Elevated pressure remains active while an automatic retry starts and completes
+a full reconciliation, proving CPU contention alone cannot starve recovery.
+
+The crash-recovery scenario also qualifies an important CPU-pressure case:
+CPU-only Elevated pressure may run a low-priority rebuild and must not
+repeatedly cancel and restart it. Other Elevated pressure defers new rebuilds
+and cancels active ones; active rebuilds are also cancelled for Critical
+pressure.
+
+The packaged service includes systemd restart ramping (10 seconds up to a
+one-minute cap) on systemd 254 and newer; older releases ignore the ramp
+settings and use the fixed 10-second fallback. Verify the effective restart
+policy in the qualification guest and retain its unit hash.
+
+Before starting a dedicated soak, close and record the current release
+preconditions: exact live accounting, calibrated 100k/1m/10m scale results,
+Debian and Rocky package lifecycle, and final security/default-privilege
+review. Start only with the exact production candidate hash from the release
+manifest, a separate disposable guest, and a run-specific evidence directory.
+
+Run package install/upgrade/rollback/remove/purge checks only inside a disposable
+guest created by `scripts/dux-qualification-vm.py`. The controller provisions
+`/etc/dux-qualification-sandbox`; `scripts/dux-package-lifecycle.py` refuses to
+run without that root-owned, read-only marker and KVM/QEMU virtualization. VM
+overlays created before this marker was added must be recreated from the
+controller rather than manually marked. The lifecycle runner removes package
+state during its purge phase, so never bypass this guard or point it at a
+production host.
+
+The stress and mount-qualification entry points use the shared
+`scripts/dux_qualification_sandbox.py` guard and also require this controller
+marker before starting loop mounts, transient daemons, scale workloads, or TUI
+latency sampling. This applies to `dux-bind-alias-qualification.py`,
+`dux-live-test.py`, `dux-live-quota-comparison.py`, `dux-live-quota-worker.py`,
+`dux-scale.py`, `dux-scale-query-recheck.py`, and `dux-tui-latency.py`.
+The heavier `dux-readiness.py` matrix also runs on the repository's ephemeral
+GitHub Actions runner. Its workflow explicitly creates the same root-owned,
+read-only marker before qualification; the bounded worker checks that marker
+again before creating its fixture. CI environment variables alone never grant
+admission. The direct `dux-systemd-status-test.py` scan/replay fixture requires
+the marked KVM guest.
+
+## Monitor a dedicated soak
+
+Record the run-specific archive directory and systemd unit in its qualification
+manifest. The tracked, parameterized collector is
+`scripts/dux-soak-archive.py`. Check the collector and latest checkpoint using
+the names recorded in that manifest:
+
+```sh
+archive_unit=dux-soak-archive-RUN_ID.service
+archive_dir=target/readiness/soak-archive-RUN_ID
+sudo systemctl show "$archive_unit" \
+  -p ActiveState -p MainPID -p NRestarts -p ExecMainStatus
+tail -n 1 "$archive_dir/checkpoints.jsonl" |
+  python3 -c 'import json,sys; d=json.load(sys.stdin); print({k:d.get(k) for k in ("observed_at_utc","status","progress_freshness","progress_age_seconds","soak","qualification")}); g=d.get("guest",{}); print("worker:",g.get("worker",{}).get("fields")); print("controller:",g.get("controller",{}).get("fields")); print("memory events:",g.get("memory_events"))'
+```
+
+Start the collector with `--expected-candidate-sha256` set to the production
+binary hash in the qualification manifest. The soak progress record binds its
+candidate binary hash. Archive `status=ok` means collection succeeded; it does
+not mean the endurance gate passed. Require `qualification.state=qualified`,
+which checks the expected binary hash, at least 259,200 recorded seconds,
+scheduled mutation bursts, reader/WAL phases, controlled restarts, exactness
+samples, explicit final exact/history/SQLite pass markers, zero unit restarts,
+and zero cgroup OOM counters. Reader samples must include an inode snapshot and
+successful WAL reclamation; every restart record must bind distinct old/new
+PIDs and at least 64 downtime writes; exactness samples must include ordered
+operation counts, process RSS/FDs, and convergence time. While progress says
+`running`, the worker must be active. Once progress says `passed`, the worker
+may have exited normally; require `ActiveState=inactive`, `Result=success`,
+`ExecMainStatus=0`, and `NRestarts=0`. Keep the VM and soak controller active
+through the final archive checkpoint.
+`ActiveState=active` alone is not a health result. Also require archive `status=ok`,
+`progress_freshness=fresh`, a recent checkpoint, the appropriate worker state
+above, controller active with zero restarts, and zero cgroup `oom`, `oom_kill`,
+and `oom_group_kill` counters. The guest updates progress at least once per minute;
+the collector marks progress older than 300 seconds stale and rejects material
+guest clock skew. A stale or invalid report is a failed observation even when
+systemd still shows the guest worker as active.
+
+If the collector fails or its checkpoint goes stale, preserve the last
+checkpoint and journal, restore connectivity or collector operation, then
+verify a new checkpoint is fresh. The collector can be restarted independently;
+do not restart the guest worker to repair an archive-only failure. A gap in
+archival evidence must be investigated and documented before the soak can pass.
+
+## Soak gates
+
+The dedicated endurance run is 72 continuous hours on the exact recorded
+candidate hash. The runner checks the complete path/inode/allocation state and
+growth history every 100 mutations. It also schedules 500-file atomic mutation
+bursts each hour, holds a SQLite reader snapshot for five minutes every six
+hours starting at hour six, and performs a controlled worker restart every
+twelve hours starting at hour twelve while 64 files are changed during
+downtime. Each reader phase must prove snapshot
+stability and reclaim the WAL after release. The restart phase must reconcile
+all downtime writes and preserve history.
+
+Do not count the soak as passed based on elapsed wall time or a live systemd
+unit. Require the guest report to say `passed`, at least 259,200 seconds of
+recorded run time, successful final exactness and SQLite integrity checks, the
+scheduled reader and controlled restart records, and complete host archive
+evidence for the candidate hash. Any exactness failure, unrecorded phase,
+unexpected worker restart, OOM event, stale archive gap, or candidate hash
+mismatch against the qualification manifest keeps the gate open. Preserve
+failed workspaces and reports; do not silently resume or reset a failed run and
+count the combined durations.
+
+The 24-hour production canary is a separate, later gate. Start it only when the
+release manifest's preconditions pass, including a fresh exact live accounting
+baseline immediately before deployment. Keep the candidate and rollback package
+hashes, verified database backup and restore procedure, monitor output, and
+rollback result together in the canary evidence bundle. A passing disposable
+guest rehearsal does not count as a production canary.
+
+## Evidence refresh — 2026-10-26 11:59 UTC
+
+- Current static release candidate: `0.6.3-14`, binary SHA-256 `65c635c45feac49f15793015bdb0666107740b04f6299e1b491ddd42b65718e6`.
+- DEB and RPM lifecycle runs each passed in fresh marker-provisioned Ubuntu 24.04 and Rocky Linux 9 guests. Reports are `target/readiness/package-lifecycle-deb-v14-20261026.json` and `target/readiness/package-lifecycle-rpm-v14-20261026.json`.
+- The installed legacy host has a one-snapshot SQL invariant pass, but an exact filesystem comparison found its v4 index omitted all of `/usr/lib/modules` (15,490 paths including that directory). The current static candidate's one-off root scan included that complete subtree. The legacy exact audit was unstable because bytes and commits changed during the walk; do not use either one-snapshot result as a canary baseline.
+- The consolidated P0 run on dynamic candidate `ceba3c3c` has passed 30/30 crash-recovery rounds and true fanotify queue overflow with dirty-metadata write failure. Other suites are running. It does not qualify static release hash `65c635c4`; repeat P0 against the static artifact.
+- The 72-hour endurance and 24-hour canary gates remain unstarted. Existing interrupted or shorter soaks do not count toward either duration. Preserve a fresh exact baseline and candidate/rollback hashes before any future canary deployment.
+
+## Packaged-static 4 GiB scale result — 2026-10-26 15:27 UTC
+
+The current packaged static binary passed the complete 100k and 1m scale
+levels. At 10m, the scan completed in 1,042.7081s, under the 1,800s wall-time
+limit; fixture totals, sampled paths, SQLite integrity, query p95s and TUI
+responsiveness all passed. Peak scan RSS was 909,936 KiB, above the 256 MiB
+limit, so the complete scale report is **failed**. Report:
+`target/readiness/scale-static-e6-20261026-4g-1job-r3-final.json`, SHA-256
+`344f95958e43f3357f3e38ed0d52316271a4a3746a151a47a4d1a5f1576d852e`; packaged
+binary SHA-256 `65c635c45feac49f15793015bdb0666107740b04f6299e1b491ddd42b65718e`.
+
+## Evidence refresh — 2026-10-26 17:30 UTC
+
+- The false RSS failure above was traced to `wait4()` returning the fixture
+  worker's inherited high-water mark. The sampler now records the Dux child
+  process `VmHWM`; its focused measurement regression passed 1/1.
+- Corrected packaged scale rerun r5 passed the 100k, 1m, and 10m levels in a
+  4 GiB Ubuntu 24.04 guest, one scan job, 3 GiB worker memory cap, and zero
+  observed cgroup OOM/OOM-kill events. The 10m scan took 1,029.9497s and peaked
+  at 153,612 KiB RSS. The report records truth totals, SQLite integrity,
+  sampled path checks, all query p95s, and TUI response budgets passing.
+  Report: `target/readiness/scale-static-e6-20261026-4g-1job-r5-final.json`,
+  SHA-256 `53c191bbcb6641582f813b751f4b0a43de2ea26e978b85cd5759fbeb5267418b`;
+  binary SHA-256 `65c635c45feac49f15793015bdb0666107740b04f6299e1b491ddd42b65718e6`.
+- An isolated one-job root scan on the same Ubuntu guest using both the exact
+  installed legacy host binary (`ccdffd4a…`) and the packaged static candidate
+  completed with zero errors. Both indexed `/usr/lib/modules` with matching
+  device/inode identity and 1,310 recursive inodes. This rules out a universal
+  exclusion of that path by either binary on this guest; it does not reproduce
+  the host-specific live omission or prove whole-root equality.
+- The running 4 GiB guest's writable qcow2 overlay was moved to `/dev/shm` to
+  stop test disk growth from changing the host's watched tree. The original
+  overlay is preserved at
+  `target/readiness/vms/ubuntu24/disk.qcow2.host-root-backup`, and both copies
+  had SHA-256 `b976d6bd262c849ea01f713b01482634029fda2745e7073f6257a6db75c9e759`
+  before guest restart. Future qualification runs must continue using the
+  tmpfs-backed symlink while it is available.
+- The installed legacy service triggered another materialized-total invariant
+  failure at 17:26:33 UTC and completed a zero-walk-error rebuild at 17:28:55.
+  A read-only exact observer could not obtain five seconds of stable caught-up
+  index structure: after the rebuild it observed `pending_updates=0` while
+  `index_nodes` and `index_bytes` kept changing, then timed out. This remains a
+  live production blocker; no candidate deployment or endurance/canary run is
+  claimed. The 72-hour runbook precondition of a fresh exact live baseline has
+  not been met.
+
+A one-job diagnostic rescan of the preserved, read-only ext4 fixture completed
+in 999.1s and reported 153,452 KiB maximum RSS, with zero swaps. Its process
+samples and `/usr/bin/time -v` output are retained in
+`target/readiness/scale-static-e6-20261026-rss-profile-samples.txt` and
+`target/readiness/scale-static-e6-20261026-rss-profile-time.txt`. It used a new
+destination DB and atomic rename installation. The failed scale run already
+had an existing destination DB from its 1m level, and therefore used SQLite
+online backup to install the 10m index. That difference is the leading
+testable explanation for the observed 909,936 KiB peak; it is not confirmed.
+The failed workspace is preserved. A second diagnostic scanned into a copy of
+its existing DB using the exact packaged binary and `wait4` measurement path;
+the helper is `target/readiness/scale-static-e6-20261026-rss-profile.py`
+(SHA-256 `3d8b6b61bb5953c71cb6098cdc8be895f7b47eee5000a9c5300e63fdd4ae482e`).
+It exercised online-backup installation and completed at 154,092 KiB peak RSS
+with zero OOM events. This diagnostic is not a qualification pass. The fresh
+full rerun is active in the 4 GiB guest with one scan job and a 3 GiB worker
+cap. Its 100k level passed end-to-end (3.771s scan, 33,828 KiB peak RSS), and
+1m passed end-to-end (46.1762s, 122,328 KiB); exact aggregate/sample checks,
+query p95s and TUI checks passed at both levels. The 10m fixture is complete
+and its scan is active. The latest progress sidecar reports 328.891s elapsed,
+4,689,993 files, and ~24 MiB instantaneous RSS; this is not a final peak. Progress artifact
+`target/readiness/scale-static-e6-20261026-4g-1job-r4-progress.json` SHA-256
+`7b0cff5efe0d7c75cb834b3e99db8d7a3c3246dd76d766a860750ab89b7c2191`. The
+complete three-level suite still must pass the 256 MiB RSS gate.
+
+## Evidence refresh — 2026-10-26 17:37 UTC
+
+- The corrected r5 scale run supersedes the failed r3 report and intermediate
+  r4/r5 progress notes above: packaged static binary
+  `65c635c45feac49f15793015bdb0666107740b04f6299e1b491ddd42b65718e6` passed
+  the full 100k/1m/10m suite. Final report SHA-256 is
+  `53c191bbcb6641582f813b751f4b0a43de2ea26e978b85cd5759fbeb5267418b`.
+- A later legacy accounting invariant snapshot during an active reconciliation
+  found 63 dirents with non-directory parents, 4 bad directory rollups and one
+  bad leaf; stored root totals were high by 14,979,072 bytes and 278 inodes.
+  The sample bad leaf was indexed as a file with descendants at
+  `/root/.local/share/Trash/files/xgs-router-smoke.aTRjAU/data/global`, while
+  a later filesystem stat found a directory at that path. The `/tmp` rollup was
+  high by 15,093,760 bytes and 278 inodes. Evidence is
+  `target/readiness/live-invariant-probe-detailed-20261026T1736Z.json`,
+  SHA-256 `95971d7774dd0985cbf02c87a4caf827cf176c2d8cc5438e8b62692aca0f5bba`.
+  No user Trash contents were changed. The finding is consistent with a stale
+  directory/file inode incarnation and strengthens the candidate fix
+  hypothesis, but a full exact stable live comparison and same-event candidate
+  reproduction remain open.
+- The invariant probe now includes bad directory/leaf path samples from the
+  same read transaction. Its five focused regression tests passed in the
+  isolated 4 GiB guest; probe SHA-256
+  `8c196ad5f05a490553a6fb3ac9e22cdc514fd68a11b9361b79f5a6223cd5b58d`, test
+  SHA-256 `d50fb55b5758874ea0a214e07f165956d9eb5184cdc6fc0b54ba1985115b60a7`.
+- Added the reverse-direction inode reuse regression: the filesystem has a
+  directory while the stale index calls the same identity a leaf with 43 old
+  children. It removes the stale subtree and restores exact fixture accounting.
+  The full Rust unit suite then passed 107/107 in the 4 GiB guest with a 3 GiB
+  test-unit cap. After formatting, the exact source was rebuilt and rerun:
+  107/107 passed. Test binary SHA-256
+  `2fea12322e36e3bde30232674eb4e59f93acd771ec45bcfcf180b5ee3f1de7eb`; output
+  SHA-256 `e7861174b6c18db4ae1eddd231ba7e3a831be7ba0bc525c08e2b815a6abc0185`.
+- The post-overlay exact observer still cannot get a stable baseline. It timed
+  out after 120 seconds when the next invariant failure started reconciliation
+  and pending updates rose to 4,438. Report
+  `target/readiness/live-exact-post-overlay-r2-20261026.json`, SHA-256
+  `f325375615f54f6e56ccd602e1bf6b9f4ab8d5d3cdd1822930490e550ba0300c`.
+  Endurance and canary remain unstarted because the required exact-live
+  precondition is unmet.
+
+## Focused startup and inode reuse rerun — 2026-10-26 17:47 UTC
+
+Rebuilt the exact current source in tmpfs and ran the focused startup suite in
+the isolated Ubuntu 24.04 4 GiB guest. Candidate binary SHA-256:
+`be1e7fca34a51804aeb947eca21e036882b522e7173c9e2ff927bd72b52829d0`; fault
+binary SHA-256:
+`c475d666c8fd301cdd1103aec3c716330d79bb48d2860c14756d9d258ec7dedb`.
+The suite passed on a disposable 768 MiB ext4 loop image in 1.155 seconds,
+under a 50% CPU quota and 4 GiB worker limit. It verified fanotify watches
+before initial scan and schema upgrade, exact replay of 64 startup-window
+changes, old-reader query availability, history continuity, and cleanup of a
+deliberately stale directory inode with a phantom child. Report:
+`target/readiness/dux-startup-live-shape-20261026.json`, SHA-256
+`ad07b54aaa7ccec285c9ade36705e8d2cf54c1d3777c85aac055f748ddbf9d55`.
+Harness SHA-256:
+`d3793396e72f667eb42f04cbc6f18ba1e6d04cb6d54832a334c379bd914df63e`.
+
+This is isolated candidate evidence. It does not prove an exact replay of the
+production fanotify race, stable full-live accounting, the endurance run, or
+the canary. Those release gates remain open.
+
+### Live fanotify reproduction added — 2026-10-26 17:49 UTC
+
+Extended and reran that focused suite with a runtime event-path reproduction.
+While the candidate watcher was active, the disposable index was changed so an
+actual directory inode appeared as a file and had a phantom child dirent. A
+real child creation generated fanotify activity. The candidate repaired the
+inode kind and stale subtree, and the harness required two fresh snapshots to
+match all paths, inode allocations, root totals, and directory rollups. It
+passed without relying on a periodic full-root integrity sweep.
+
+Report `target/readiness/dux-live-fanotify-inode-reuse-20261026.json`, SHA-256
+`f619bfaf8e8cf54ecee072b1ef6ff105d96af0b9b99b37209620d94ffd4b4a31`.
+Candidate binary SHA-256:
+`be1e7fca34a51804aeb947eca21e036882b522e7173c9e2ff927bd72b52829d0`;
+harness SHA-256:
+`102a4059f22b73b53eb8b212bf3386c1b0efd4f0d6a9ab41c6e11c9eaef2d735`.
+This directly exercises the candidate repair path for the observed mismatch
+class. It does not establish that every live invalid-parent row had that cause,
+or prove stable full-live accounting on the installed legacy service.
+
+## Fresh live accounting and exact-window attempt — 2026-10-26 17:55 UTC
+
+A read-only same-snapshot diagnostic of the installed legacy index found root
+totals high by 8,192 bytes and 3 inodes. The only bad directory rollup was
+`/tmp`, high by the same 8,192 bytes and 3 inodes; there were no invalid parent
+dirents, dangling children, or bad leaf totals. A separate recursive `/tmp`
+walk found all current paths, identities, and allocations matched, consistent
+with a stale cached rollup. Diagnostic report:
+`target/readiness/live-accounting-current-20261026T1750Z.json`, SHA-256
+`97a97568b02a71678d2d9183a82a96ebb78e447931f5b0f45cb5e1bc192b1147`.
+
+A bounded read-only observer then required 30 seconds of stable caught-up state
+before a whole-root exact comparison. It timed out after 180 seconds because
+index nodes/bytes continued changing; the whole-root walk did not start. At
+timeout, the status fallback reported zero pending updates and zero dropped
+events even though the service status still said it was reconciling. Report:
+`target/readiness/live-exact-current-r3-20261026.json`, SHA-256
+`ee5c8e155ca913348c2cf99b7d686a32ee0a8b722cc22567a0faca72f2b16d38`; observer
+SHA-256
+`23aa9a9352c9f61e5cb64f4e6abd7de8be6a5af2290d7d683595b591bcba5cf4`.
+This is a failed stable-window precondition, not a full exact audit. The
+installed legacy service remains active; full-live exactness, endurance, and
+canary gates remain open.
+
+## Candidate heavy churn qualification — 2026-10-26 18:08 UTC
+
+The current candidate passed the production-shaped churn suite in the Ubuntu
+24.04 4 GiB guest with a 50% CPU quota. It used a 100,000-file baseline on a
+disposable 2 GiB ext4 image with a 3 GiB tmpfs workspace, then completed 20,000
+operations across ten exactness checkpoints. The mix included atomic replace,
+rapid create/delete path reuse, rename overwrite, hardlink writes and unlink,
+in-place size changes, and transient files. A full rebuild was forced during
+the midpoint mutation batch. Every checkpoint verified paths, inode identity
+and allocation, root totals, and all directory rollups; growth history remained
+continuous and zero events were dropped. It completed in 556.047 seconds with
+1.1 GiB peak worker memory.
+
+Report `target/readiness/dux-churn-100k-20k-r2-20261026.json`, SHA-256
+`01874f53210deb058f8afec465d584b568cfa9f0bf183c1ba9cb812a80c633c9`.
+Candidate binary SHA-256:
+`be1e7fca34a51804aeb947eca21e036882b522e7173c9e2ff927bd72b52829d0`;
+harness SHA-256:
+`88dff12be778e9f3709400deffb92dfd7bd3b70beb5689d9218143f7c2194fe4`.
+The harness now automatically promotes churn to a 100k baseline and 2 GiB
+image so normal churn does not cross Dux's 256 MiB low-disk reserve. The
+workflow regression suite passed 13/13 after this guard was added.
+
+This candidate test does not establish exact full-live accounting on the
+installed legacy daemon. Endurance and canary remain unstarted pending that
+gate.
+
+## Live exact walk and observer correction — 2026-10-26
+
+A read-only full filesystem walk completed across 1,260,007 paths with no walk
+errors. It was not a passing exact audit: the installed index changed during
+the walk (`index_nodes` moved from 1,241,391 to 1,242,472), and the one-snapshot
+comparison reported 16,571 paths missing from the index, 2 identity
+mismatches, and 23 allocation mismatches. The largest samples included a
+transient `/tmp/go-build2675857445` tree. A later sample observed 8,919 paths
+present without index entries, but the whole temporary tree was gone at a
+subsequent stat; 11 of 23 allocation samples still differed in that later
+point check. These changing snapshots cannot distinguish persistent index
+drift from transient build churn.
+
+The read-only observer had a retry flaw: after the first full walk, it could
+repeat another million-path comparison each time its two-second recovery loop
+saw the old service caught up. It now performs only one full filesystem walk
+and uses a database-only snapshot for recovery. It reports an exact audit as
+unstable unless that original path comparison passed on a structurally stable
+snapshot. The live observer and readiness workflow unit suites passed 40/40;
+`py_compile` and `git diff --check` passed. Observer SHA-256:
+`7159d8ca8f4c5c1044f5d35dc4d39f318ffd16e808f031ee7bf2465f2950d404`.
+
+Evidence reports:
+`target/readiness/live-exact-r5-unstable-20261026.json` (SHA-256
+`ff1815cb434def5b8898072a145617d7e6217368b62b1a1702283fd2a742a317`) and
+`target/readiness/live-exact-r5-recheck-20261026.json` (SHA-256
+`76d904fa80b170d99c0021b41e64ab460cfa1748f711df9d8e4193c62f6b968b`).
+Neither report qualifies the installed live index. The endurance and canary
+gates remain open.
+
+With the retry amplification removed, a bounded 120-second audit then waited
+for 20 seconds of unchanged caught-up state. It timed out because `index_bytes`
+continued to change, despite zero pending and dropped events; it did not start
+another full walk. Report
+`target/readiness/live-exact-after-observer-fix-r6-20261026.json`, SHA-256
+`c4d79c8b3eac950c09272f73ef7bf9c9a2c192553a7fce4be4b7dd8fd3e55528`.
+
+A separate read-only internal invariant snapshot at 18:26 UTC passed: root
+totals exactly matched 1,241,403 inode rows at 140,135,067,648 allocated
+bytes, with no bad directory rollups, bad leaves, invalid parents, or dangling
+children. This does not establish path or inode-allocation equality with the
+filesystem. Full-live exactness, endurance, and canary remain open.
+
+### Bind-mount alias coverage limitation
+
+A 4 GiB Ubuntu guest repro created a bind alias to a directory and a bind mount
+cycle back to the scan root. A temporary per-branch cycle guard let the scanner
+reach both aliases but failed on schema v5's unique
+`(parent_dev,parent_inode,name)` key with SQLite error 2067. The scan change was
+reverted. Dux currently cannot represent separate path instances beneath two
+bind-mounted names of the same directory inode; a correct full-path solution
+needs path-instance-aware dirent parents (and a migration) or a documented
+alias policy. This does not establish the cause of the independently observed
+missing `/usr/lib/modules` subtree.
+
+Evidence: `target/readiness/scan-bind-cycle-test-20261026.json` (SHA-256
+`1892588476d9d53914c3023f059e3c271b46e9f48aeaff0b7e472024e45cd6fc`) and
+`target/readiness/scan-bind-cycle-test-20261026.sh` (SHA-256
+`fb1439ed2bf38518b9b702598dd54dace07349ccc7175d21dd013759c53b8eb1`).
+
+The tracked bind-alias harness creates loop-backed filesystems and bind mounts.
+It refuses to run unless the caller is root inside a KVM/QEMU guest carrying the
+controller-provisioned `/etc/dux-qualification-sandbox` marker. Its report uses
+exclusive creation so a typo cannot overwrite an existing artifact. Run it only
+with a candidate binary and evidence path dedicated to that qualification run.
+
+### Live host subtree scanner comparison
+
+The VM manager can export a selected host directory read-only over virtio-9p to
+a 2–4 GiB qualification guest. A write probe in the guest confirmed the host
+export rejects writes. Against the actual host `/usr/lib/modules` subtree, the
+packaged static candidate scanned 13,034 files and 2,456 directories with zero
+errors. Exact verification matched all 15,490 paths and their device/inode and
+allocated-byte values, with no extras or traversal errors. This proves direct
+subtree scanning works for the candidate; it does not prove a full-root scan
+will include it or explain the existing live omission.
+
+Report `target/readiness/live-modules-candidate-exact-20261026.json`, SHA-256
+`46d2c6bb5665036f07aa6667bf872d11a35596dac5b67cf6cc7b05c06fe43d0f`; binary
+SHA-256 `65c635c45feac49f15793015bdb0666107740b04f6299e1b491ddd42b65718e6`.
+The broader installed-legacy `/usr` scan was still active at the latest
+checkpoint and remains unqualified until its exact report is complete.
+
+The installed legacy 0.6.2 binary was then scanned over the complete real host
+`/usr` subtree in a separate guest database: 158,175 files, 20,342 directories,
+zero scan errors. An exact comparison of the existing database's `lib/modules`
+branch against the read-only host subtree matched all 15,490 paths, identities,
+and allocations, with zero omissions/extras/errors. Report
+`target/readiness/live-modules-legacy-fullusr-exact-20261026.json`, SHA-256
+`f06f12a4e2308e6f89de11a97924bcaece2de2c702ac98afde75835e9477e846`.
+This confirms the legacy scanner handles the subtree under a `/usr` scan root;
+the omission remains reproducible only in the installed index built by a `/`
+root scan. The first all-`/usr` verifier was stopped after scan completion due
+slow 9p metadata reads, so it is not claimed as a full `/usr` exact audit.
+
+## Qualification state refresh — 2026-10-27 02:25 UTC
+
+This section supersedes the older historical statements above that no 72-hour
+run is active. The hash-bound R16 endurance run started at 2026-10-27 01:59:30
+UTC in the dedicated Ubuntu 24.04 4 GiB guest. At 02:23:42 UTC, its host archive
+reported fresh progress at 1,440.6 seconds and 31,058 operations; the candidate
+binary SHA-256 is
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`, worker and
+controller were active with zero restarts, and all guest OOM counters were
+zero. No 100,000-operation exactness sample has completed yet, and none of the
+72-hour duration, scheduled hourly burst, held-reader, or controlled-restart
+gates is complete. This is an active run, not a passed endurance gate.
+
+The installed legacy service still has recurring accounting-invariant failures.
+The latest point-in-time capture was taken during a full reconciliation and
+found incorrect directory and leaf totals; the full-root exact observer has
+not produced a stable filesystem comparison. Keep the canary unstarted until a
+fresh stable exact baseline is established immediately before deployment, as
+required above. Current all-suite regression evidence (108 Rust tests and 94
+Python harness tests) is recorded in `PRODUCTION_READINESS_AUDIT.md`; these
+unit/harness passes do not substitute for live exactness, endurance, or canary
+qualification.
+
+### Live event-loss incident update — 2026-10-27 02:25 UTC
+
+At 02:24:30 UTC the installed legacy daemon logged an accounting-invariant
+failure, began a root reconciliation, and logged `fanotify queue overflow` 26ms
+later. The read-only status snapshot showed the reconciliation active and 306
+pending updates; its legacy `events_dropped=0` field does not override the
+explicit kernel overflow warning. Incident evidence is
+`target/readiness/live-overflow-20261027T022430Z.json` (SHA-256
+`153dc09935ab67324ec9d41e6c7b061eef0aa775724837528a1e754f715d69e5`). This
+makes live event coverage and exactness an active release blocker. Do not start
+the production canary until recovery is established and a fresh exact baseline
+passes.
+
+### Post-overflow accounting remains dirty — 2026-10-27 02:31 UTC
+
+The 02:24:30 live overflow's reconciliation finished at 02:28:08 and replayed
+16,300 pending paths, but the daemon remained dirty after pending reached zero.
+A bounded read-only SQL check found four incorrect directory rollups and an
+8,077,312-byte root allocation deficit. Its deepest sampled row was
+`/tmp/go-build2387714199/b047/tmp`; that Go-build directory was absent from the
+filesystem when `lstat` rechecked it, while its indexed row remained. See
+`target/readiness/live-postoverflow-sql-audit-20261027T0228.json` (SHA-256
+`b5e74c5c454fc82c1ec43e9a3172e2fbaf703d6a0c4c87cc5de5e8141b301dd2`). The
+post-overflow live recovery and exact full-root baseline therefore remain
+failed/open; the canary precondition is still unmet.
+
+### Endurance checkpoint — 2026-10-27 02:31 UTC
+
+The same hash-bound 4 GiB guest run was still healthy at 02:30:42 UTC: fresh
+archive status, 1,861 seconds elapsed, 39,697 operations, active worker, zero
+restarts, and zero guest OOM counters. It has not reached its first 100,000-
+operation exactness sample, so it remains in progress and unqualified.
+
+### Host reboot invalidated the active endurance run — 2026-10-27 05:01 UTC
+
+The operator force-rebooted the host after load average became extremely high.
+The Dux endurance guest and archive collector were stopped at 04:49:02 UTC.
+Their last fresh checkpoint, 04:48:42, records 10,115.9 seconds elapsed, 210,444
+operations and two exact samples; it does not satisfy the uninterrupted 72-hour
+gate. Preserve this partial archive and start a new full-duration run only after
+the production Dux scan loop and host load are stabilized.
+
+After reboot the installed legacy daemon completed a startup root scan, then
+repeatedly failed its accounting invariant and initiated additional root scans
+at 04:55:04 and 05:00:04. During one scan a 10-second measurement recorded up
+to 10,025 device reads/s, 421 writes/s and 82.5% device utilization; Dux PID
+samples reached 225,324 KiB/s read and 247,596 KiB/s written. I/O dropped
+sharply after a scan finished, then rose again when the next began. The host
+was responsive at 05:00:55 (12 CPUs, load 0.70/1.75/1.21, 27 GiB available
+RAM, 39 GiB disk free), but Dux's recurring accounting mismatch and scan loop
+remain production blockers. See
+`target/readiness/server-health-after-reboot-20261027T050055Z.json` (SHA-256
+`84f81b78c507b15abde20f027cbea232d9038a089d33e9a92b53ee15bc7522c2`).
+
+### Post-reboot scan loop rechecked — 2026-10-27 05:06 UTC
+
+A third successful whole-root reconciliation after boot still did not hold:
+Dux reported caught up at 05:03:35, then failed the same accounting invariant
+at 05:05:06 and began another full scan. The first two seconds of that scan
+showed 1,638–1,775 disk reads/s, 157–868 writes/s, and 33–44% device utilization
+while host load remained about 1.04/1.45/1.23. The R16 run remains stopped after
+the reboot interruption; it was not restarted during this I/O incident check.
+Evidence: `target/readiness/live-reconcile-loop-20261027T050511Z.json`,
+SHA-256 `67f6d6debd949ce13467be7c38a8a828a1451189be836dc82f39aebccd6d7e1d`.
+
+### Candidate churn gate passed in isolated 4 GiB guest — 2026-10-27 05:33 UTC
+
+A fresh static-musl build from the current worktree exactly matches candidate
+SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`.
+In Ubuntu 24.04 KVM limited to 4 GiB RAM / 2 vCPUs, the candidate passed the
+production-shaped churn suite on a disposable 2 GiB ext4 image with 100,000
+baseline files and 20,000 mixed operations. All ten 2,000-operation batches,
+including concurrent reconciliation, passed exact paths, inodes, allocations,
+directory rollups and history; 38,671 kernel events were observed, 14,788
+updates committed and zero events dropped. Worker runtime was 20m28.6s, memory
+peak 1.1 GiB, with no swap, restart or OOM. Evidence:
+`target/readiness/r16-100k-20k-churn-20261027T0533Z.json` (SHA-256
+`b414fe4ca5872910ed9c5b774a242515345a67380ca186a6f8a22f293708cc2f`).
+
+This closes one isolated churn gate only. The host exactness check, remaining
+fault suites, 100k/1m/10m calibrated performance budgets, package lifecycle,
+security/default-privilege review, uninterrupted 72-hour soak and 24-hour
+canary remain open. The installed legacy service is still stopped while these
+gates proceed; no production canary is claimed.
+
+### Candidate root-scan gate passed — 2026-10-27 05:34 UTC
+
+The same hash-bound candidate also passed a read-only one-filesystem scan of
+`/` in the 4 GiB Ubuntu 24.04 guest. It indexed 69,806 files, 9,288 directories
+and 85,609 dirents with exact materialized accounting, complete coverage, no
+dirty reason, and SQLite integrity. Runtime was 36.781s under the 25% CPU
+worker quota. Evidence:
+`target/readiness/r16-ubuntu24-root-scan-20261027T0534Z.json` (SHA-256
+`b5ee3d341a43c660943fdc24e36f33840c2c1c9ebfc363a9761aa9550de50329`).
+
+Together with the 100k/20k churn result above, these are two current isolated
+passes. The production root has over 1.1 million files and still lacks a stable
+exact candidate comparison; all release, long-duration soak, and canary gates
+remain open. The host legacy service remains stopped.
+
+### R17 background accounting check and ext4 churn — 2026-10-27 06:25 UTC
+
+R17 moves periodic and post-reconciliation full accounting verification off the
+watcher thread. The read-only worker has a 10%-of-one-CPU duty budget and is
+interrupted when new queue/backlog work, a rescan request, or Critical host
+pressure returns. Post-scan status stays dirty until the background consistency
+check passes. The source SHA-256 is
+`713eb5e0cbca4cf5c197e86797478b46fde861f4f216bd18333fbd82c48ea7ce`; its static
+musl candidate SHA-256 is
+`e34a5c8759d004102de634b4b8dbe1766dfe8f48755b9e4d981258b2ba98d970`.
+
+On Ubuntu 24.04 limited to 4 GiB RAM / 2 vCPUs, this binary passed 100,000-file
+and 20,000-operation churn on a disposable 2 GiB ext4 image. All ten exact
+batch checks passed for paths, inodes, allocated blocks, directory rollups and
+history; a concurrent rebuild also completed with two post-reconciliation
+accounting checks passing. The run saw 38,223 events, committed 14,541 updates,
+dropped zero, took 1,115.493 seconds, peaked at 1.1 GiB memory, used no swap,
+and had no restart/OOM. Report:
+`target/readiness/r17-source-candidate/100k-20k-churn.json`, SHA-256
+`b697f80c9b7965cd67d8069f7a43e4ea6242cfb4d6ae4986187165d9529c93bc`.
+
+This is not a release qualification. R17 has no DEB/RPM package yet. The full
+Rust watcher suite still needs an ext4 run; six allocation-sensitive tests
+cannot be meaningfully evaluated on tmpfs, where `st_blocks` is zero. Periodic
+check cancellation, the full fault suites, scale budgets, package lifecycle,
+security/default-privilege review, live-host exactness, 72-hour endurance and
+24-hour canary remain open. R16 remains installed, active, and not caught up;
+no production canary or host-exactness result is claimed.
+
+### R17 package and lifecycle gates — 2026-10-27 06:30 UTC
+
+Built R17 release 17 DEB and RPM packages from the tested static-musl binary.
+Manifest `target/readiness/r17-source-candidate/package/build-manifest.json`
+(SHA-256 `cf612a612c4bc4ed77c15e6d84e565ee9edaf287870666330312d4e37136cda1`)
+binds source tree SHA-256
+`e9925c956d85f8bb336c201f81a8934fe4831f349db7e76fc93d1ccabd5c6ab3`, binary
+SHA-256 `e34a5c8759d004102de634b4b8dbe1766dfe8f48755b9e4d981258b2ba98d970`,
+DEB SHA-256 `09ee2f4bf5593368e9dd9da61e08e4a65dc2c8ed11d44a79885367aac53f2557`,
+and RPM SHA-256 `6704b314db98448f51c4e9ee8d9fb2ce77630f629200a3ff97aedf70ebd13981`.
+All artifact checksum entries pass.
+
+Both packages passed the six-step lifecycle in their disposable qualification
+guests: legacy baseline, upgrade preserving disabled services, rollback,
+re-upgrade, remove/purge, and clean install. The DEB ran on Ubuntu 24.04 in
+11.097s (report SHA-256
+`2d3a9fa5f229d33e85683fb06efaca3e0bafd5d4be206c8b129592aa552d54fd`); the RPM
+ran on Rocky 9 in 20.245s (report SHA-256
+`7ddb56c0ee0882292a08bdfdbd80fbe07df377a90d0088be972f8d5296b43efe`). The
+reports verify the service security properties, disabled tunnel state, and
+root:dux 0640 database/WAL/SHM permissions. These are package lifecycle passes,
+not overall release approval. R17 fault-matrix and performance reruns,
+dependency/security review, live-host exactness, runbook closure, 72-hour
+endurance and 24-hour canary remain open. The installed service remains R16 and
+is dirty/not caught up after mount-topology changes; all qualification VMs are
+stopped.
+
+### R17 active verifier cancellation and current package hashes — 2026-10-27 06:46 UTC
+
+Added an integration regression that cancels the background verifier while it
+is processing a 500,000-row SQLite snapshot. It passed in 16.58s. The complete
+current-worktree Rust test binary passed 111/111 tests in 63.84s in a 2 GiB,
+2-vCPU Ubuntu 24.04 guest with no swap. Test binary SHA-256:
+`63b9bec2f376f9a03c676bb6bffaff6c660a51c7b0bf3605e898497b01b36888`. Result
+summary: `target/readiness/r17-source-candidate/rust-tests-ubuntu24-2g-ext4.json`
+(SHA-256 `297c9937807d4519638ab01c3b55359b325ba18597a43bc1b78eb87c00cd2f2c`).
+
+Rebuilt release-17 packages after the test-only source addition; the release
+binary payload remains the previously qualified R17 candidate. The updated
+build manifest has SHA-256
+`c2f47b8c7f38d80d18a1cce78f975c7956952cec6104e86856c7946612a1dbee` and source
+tree SHA-256 `12cf565e10aa5a4b5cc01c5d5067537f0921bd20ad84cb03d782a256cf9f3309`.
+New DEB SHA-256 `8e894c495fafb565d54f9eabf82689acaa7ea88efc7b3a86e727a4e2bec6104e`;
+new RPM SHA-256 `4c435d5fa14305436c8398a36683775597bc110f3f29c7517c3ae22f1cae4384`.
+All six lifecycle steps passed again against those exact hashes in 2 GiB
+Ubuntu 24.04 and Rocky 9 guests. Reports:
+`target/readiness/r17-source-candidate/deb-lifecycle-updated.json` (SHA-256
+`378ea61b380e089494c437e35faddd77db3e261b568941e4753d43377b3463b9`) and
+`target/readiness/r17-source-candidate/rpm-lifecycle-updated.json` (SHA-256
+`9d8c19c5589d5e8ca34993a367323606a3a130531336708aec5f3e27ad69e30f`).
+Neither guest remained active after qualification. R16 remains the installed
+production service; live exactness, the R17 fault matrix, performance budgets,
+security review, runbooks, 72-hour endurance and 24-hour canary are still open.
+
+### Current R17 gates — 2026-10-27 08:49 UTC
+
+The current R17 source candidate has a hash-bound 13/13 selected-suite P0
+matrix pass. Its soak suite was not included. The refreshed Cargo.lock advisory
+scan covered all 231 packages against 1,378 advisories and found no known
+vulnerabilities. `cargo audit bin` recovered only 44 dependencies because the
+binary lacks embedded audit metadata; this is not a complete binary inventory.
+The unit security analyzer reports 5.1 MEDIUM exposure because the daemon
+requires root and fanotify capabilities for host-wide indexing.
+
+A separate 72-hour R17 endurance run is in progress in a 4 GiB Ubuntu 24.04
+qualification guest. It uses bounded host/worker CPU and memory, a 100,000-file
+ext4 fixture, exactness checks every 100,000 mutations, and archived resource,
+restart, OOM, WAL-reader and recovery evidence. Its recorded start is
+2026-10-27 08:45:52 UTC; the latest checkpoint at 08:48:45 reports 180 seconds
+and 3,766 operations with zero restarts/OOMs. This is early progress, not a
+soak pass. R17 1m/10m scale evidence, stable live host exactness, and the
+separate 24-hour canary remain open. Production still runs R16 and remains
+behind/dirty; do not interpret the candidate's isolated results as live-host
+recovery.
+
+### Live host pressure and queue follow-up — 2026-10-27 08:51 UTC
+
+At 08:50 UTC both the installed R16 client and the R17 status reader report
+64,529 pending paths and a dirty reason of `non-watched filesystem mounts
+changed; reconciling visible paths`. No scan is active. The pending count rose
+by 3,478 between 08:47 and 08:50. A two-second per-process sample shows Dux
+using its 50%-of-one-core systemd quota, with zero physical block I/O in that
+sample. Host load is 4.68 on 12 CPUs, storage utilization is low in sampled
+intervals, and CPU PSI remains elevated without full CPU pressure. The index is
+still behind/dirty and is not exactness evidence. `docs/OPERATIONS.md` now has a
+repeatable host pressure capture procedure. The 72-hour R17 endurance remains
+in progress and has not yet reached its first 100,000-operation exact sample.
+
+At 08:51:43 UTC, the same R17 endurance run is active at 300.2 seconds and
+6,260 operations. Its archive is fresh; worker/controller/VM restart counts and
+guest OOM counters remain zero. At 08:51:50, host load is 3.45 on 12 CPUs and
+I/O PSI is below 1%; CPU PSI has receded from a transient elevated sample.
+There are no exact endurance samples yet, and no duration gate is passed.
+
+### R21 qualification checkpoint — 2026-10-28 05:15 UTC
+
+The R21 static-musl candidate (`0e61da726b784b9b7d75299bb864758284097106d7741c370c3c360cb8b4e3ab`)
+now has all 14 selected P0 recovery suites passed across two bound reports,
+including 30 crash boundaries, overflow, 100k-file churn with 20,000
+mutations, storage/permission/capability/OOM/pressure/mount/WAL/startup/retry,
+and root recovery. Exact DEB and RPM lifecycle runs also passed all six stages
+on Ubuntu 24.04 and Rocky 9 guests with 2 GiB RAM. Candidate dependency audit
+found zero known vulnerabilities across 231 locked dependencies. The R21
+refreshed 100k and 1m scale tiers passed under a 4 GiB guest and 50-sample query
+measurements (scan 10.68s / 154.97s; peak RSS 27.6 / 114.0 MiB).
+
+These results do not close the full 10m scale gate: its prior full report failed
+the `du --max-depth 1` p95 budget, and the corrected 50-sample full rerun remains
+open. Production remains the unchanged R16 daemon and is still stale/uncertain;
+a fresh CPU-only no-progress interval was recorded. The Rocky clean-install
+runtime also exposed duplicate `/efi` and `/boot/efi` mount-root identity that
+correctly leaves coverage uncertain. Exact live production convergence,
+duplicate-mount path semantics, final security risk acceptance, 72-hour
+endurance, and 24-hour canary remain open. The qualification evidence and
+individual hashes are in `PRODUCTION_READINESS_AUDIT.md` and
+`target/readiness/r21-incremental-rollup/`.
+
+### Later artifact reconciliation — 2026-10-28 13:19 UTC
+
+The R21 checkpoint above predates later archived evidence and is incomplete as
+a summary. R25 DEB and RPM lifecycle reports both record `status=passed` for the
+six lifecycle stages (legacy baseline, upgrade preserving service state,
+rollback, re-upgrade, remove/purge, and clean install). They bind binary SHA-256
+`51ba80db68646b948695ecf868a5fc74bf3d4801c1a954a0147d0c218f87e5b8` and source
+tree SHA-256 `d0235e6d81a600ebcaaa45aa32016c821be39b7d15e9815dae7a0631bb88ec7e`.
+Reports:
+`target/readiness/r25-startup-recovery/package-lifecycle-r25-deb-20261028.json`
+(SHA-256 `7ea6ee23eb30cb49d118c76229f6ef6f0534a6a2896b9af42a4840fc3b403f7c`)
+and `target/readiness/r25-startup-recovery/package-lifecycle-r25-rpm-20261028.json`
+(SHA-256 `05aa0b74bf9ec80d9fe002e4b60f01aff0b311f19ac3fa74d2fc3c83e9d0f306`).
+These are package lifecycle results; they do not qualify runtime scan coverage
+or fix the duplicate `/efi` and `/boot/efi` identity issue.
+
+The 100k and 1m tiers remain passed on R21 binary SHA-256
+`0e61da726b784b9b7d75299bb864758284097106d7741c370c3c360cb8b4e3ab`. A later
+R23 query/TUI recheck also records `status=passed`, 50 samples per query, no
+budget failures, and exact truth/history rechecks over the preserved 10m index.
+It reused exactness evidence from the R21 scan and ran the R23 query binary
+`d4c50683a9dc7229e5caa1eb8a0680d4358770261607796503d05ea9557e32e4`; its
+source tree SHA differs from R21's. This is query/TUI evidence for R23 against
+the immutable R21 index, but it does not replace a complete single-source,
+single-binary 10m qualification. The R21 full rerun remains `status=failed` on
+its depth-1 `du` query budget; repeat the complete 10m tier on the exact
+source/binary intended for release. Recheck report SHA-256
+`2d828681dab2297a4f77b0caa36486319683267d53e95f7097730d9d93555112`.
+
+At this checkpoint, only the pressure-gated static-musl build controller is
+running; no 72-hour endurance worker or 24-hour canary is active. The installed
+production service remains R16 and reports an uncertain, nonempty watcher
+backlog. Current-source release build, exact live convergence, duplicate-mount
+coverage semantics, a same-binary 10m result, the new-source fault matrix,
+endurance, and canary are still open.
+
+### R27/R28 mount-identity follow-up — 2026-10-28 13:24 UTC
+
+The latest packaged artifact found during this review is R28, not R25. R27's
+DEB lifecycle passed, but R28 explicitly does not inherit that pass. R28 adds
+`statx` mount-ID diagnostics when the v5 scanner encounters the same directory
+identity through multiple paths; it does not change the v5 path identity model
+and the summary explicitly says alias correctness is not fixed. Its build used
+`MemoryMax=2G`, `CPUQuota=20%`, no swap, and peaked at 458,700,000 bytes. Two
+focused tests passed (real mount-ID identity and scanner diagnostic wiring),
+but R28 package lifecycle and guest scan are both marked not run.
+
+R28 binary SHA-256 is
+`651c1cf3b8de7f76b5e6471f6eff56f35dd70160a3cc88b706bf30d2721b8f2b`; source
+tree SHA-256 is `ce4981cbd34944a9026f89c1fbbf8d98957ad4cd51abbc35a23d3e716f4fb453`.
+Build manifest SHA-256 is
+`a8b604d6b4fb236671f895aa87f5b63d68f500625233ef204ff2601f3247fd98`, and
+build summary SHA-256 is
+`01586b80c374eec1ec851964b7f80c1e37728fb510a62533d64456e5e89e6eea`. This
+source tree is not the current worktree: R28's `src/watch.rs` hash is
+`675e2ff6cb43d7cd8e8aced8e8a801336242d4952084c3a3a8ecbe700bccac16`, while
+current `src/watch.rs` is `dc8481937a17d75c97fb69b0227a8c21c9ef1b8859634a37745a66108bb54224`.
+Do not treat R28 as current-source release qualification.
+
+## Current release checkpoint — 2026-11-01 09:37 UTC
+
+The source worktree has no completed current-source R22 release artifact yet.
+The version-probe regression is fixed and the full Python harness passes
+194/194, but two capped native build attempts on the production host were
+stopped while compiling bundled SQLite because host CPU pressure was high and
+the worker made little progress. The latest worker was capped at 15% CPU,
+6 GiB memory, no swap, I/O weight 10, Nice 19, and one Cargo job; it ran for
+2m54s, used 26.1 CPU-seconds, peaked at 443.4 MiB, and produced no package or
+binary. Its transient unit is inactive. Resume release building on a separate
+builder or during a measured lower-contention window; do not treat preflight or
+mocked tests as package qualification.
+
+The active production daemon is still the older installed build, dirty and not
+caught up: the 09:37 UTC sample has 32,681 pending updates, 166,282 seconds
+behind, no scan active, and 1,001,079 cumulative dropped events. The live
+index is not a stable exactness baseline. The published index schema remains
+v6; the path-instance graph is private scan staging only, so duplicate mount
+aliases remain incomplete and the Rocky `/efi` plus `/boot/efi` behavior is not
+closed.
+
+For current release planning, nine major gate groups remain open: live exact
+recovery; published path-instance/schema-v7 semantics; signed, provenance-bound
+auditable release plus binary dependency scan; current-source full fault and
+recovery matrix; same-binary 100k/1m/10m performance qualification; formal
+current-package Debian/Ubuntu and Rocky lifecycle/readiness; residual
+root/`CAP_SYS_ADMIN` security risk acceptance or qualified redesign; the full
+hash-bound 72-hour endurance run; and the 24-hour production canary with stable
+exact baseline and rollback evidence. These are release gate groups rather
+than a count of individual bugs. Older binary tests and historical package
+lifecycles do not close current-source gates.
+
+### Current-source Rust regression update — 2026-11-01 09:50 UTC
+
+The governor regression was made deterministic under strict CPU quotas by
+injecting synthetic cycle debt instead of busy-spinning. The focused test
+passed 1/1, then the rebuilt all-features Rust suite passed 241/241 under a
+10% CPU / 2 GiB memory / no-swap cap. All-target/all-feature Clippy with
+warnings denied, formatting, and whitespace checks passed. This closes the
+local Rust unit/lint check for this source snapshot only; it does not close the
+current release artifact, production recovery, alias-schema, package, scale,
+security-risk acceptance, endurance, or canary gates recorded above.
+
+## Live readiness refresh — 2026-11-01 13:40 UTC
+
+The production executable is Debian package `dux 0.6.3-16`, PID 4093354,
+SHA-256
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`.
+Its embedded revision prefix matches the current Git `HEAD`, but it reports
+`+modified`; the exact source tree used to build it is not hash-bound to this
+worktree. The worktree itself has extensive uncommitted changes and no completed
+current-source release package. Do not describe this as a simple old-version vs
+new-version comparison.
+
+The live database is schema v5 (`PRAGMA quick_check` returned `ok`); current
+source declares schema v6. Its v5-to-v6 path requires an atomic full-root
+rebuild, not a metadata-only migration. The proposed path-instance graph is
+still private staging state, so schema-v7 mount-alias semantics are not
+published. Production remains dirty and not caught up: the 13:39 sample has
+92,559 pending updates, about 115 minutes of lag, no reconciliation scan, and
+the reported dirty reason is `non-watched filesystem mounts changed;
+reconciling visible paths`. Counters progressed during one longer interval,
+then remained flat across several short samples while lag increased. The index
+is not an exact baseline and no production package, service, database, or index
+was changed.
+
+Current-source qualification is incomplete. The all-features test binary
+reported 121 of 248 tests passing; 127 were not verified after the full run was
+stopped to limit impact on the production host. `cargo check --locked
+--all-features` passed, but no current-source release artifact/package,
+current-binary dependency inventory, exact schema upgrade, or separate-host
+runtime qualification has been completed. No more stress or qualification
+tests should run on this production host after the observed fanotify queue
+overflows and growing event backlog.
+
+The current planning count remains **nine open release-gate groups**, not nine
+individual source defects:
+
+1. Exact live convergence and recovery.
+2. Published path-instance/mount-alias semantics and schema v7.
+3. Current-source auditable artifact, complete binary dependency inventory,
+   provenance, and cryptographic signing.
+4. Complete current-binary crash, overflow, OOM, WAL, pressure, coverage, and
+   retry fault matrix.
+5. Same-binary 100k/1m/10m scale and performance budgets.
+6. Current-package Debian/Ubuntu and Rocky lifecycle/readiness.
+7. Acceptance or qualified reduction of root and `CAP_SYS_ADMIN` privilege
+   exposure.
+8. Hash-bound 72-hour endurance with exactness, readers, mutations, restarts,
+   and integrity phases.
+9. A 24-hour production canary with stable exact baseline and rollback
+   evidence.
+
+The count and scopes follow QUAL-78 in `PRODUCTION_READINESS_AUDIT.md`; gates
+remain open until evidence is tied to the exact source and package under test.
+
+## Live readiness refresh — 2026-11-01 14:06 UTC
+
+The production service remains package `dux 0.6.3-16`, PID `4093354`, executable
+SHA-256
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`. The
+production database is schema v5 and passed SQLite `quick_check`, but it is
+dirty and is not a verified semantic baseline. At 14:06:35 UTC, status showed
+**115,064 pending updates**, **1,660,171 seen / 396,718 resolved / 13,184
+committed**, **8,510 seconds (~142 minutes) behind**, no active scan, and dirty
+reason `non-watched filesystem mounts changed; reconciling visible paths`.
+The daemon's main thread remains at approximately 99% of one CPU. A fanotify
+queue overflow was logged at 13:54:35 UTC; no later overflow appeared in the
+sampled journal window, but this does not prove that all earlier lost events
+have been recovered.
+
+A fresh online rollback snapshot was created at
+`/var/backups/dux-index/dux.db.schema5.pre-rescan-20261101T1351Z.sqlite` and
+verified as schema v5 with `quick_check=ok`, mode 0600, and SHA-256
+`99cc9874f1fe89ccccebd79055a75504a47a37dd86968deab63816d502faccf9`. One
+documented `dux scan /` request was sent to the live daemon. The CLI remained
+waiting for over two minutes while status showed no active scan progress; the
+generation value was not captured in the read-only observations, so the exact
+trigger disposition is unresolved. The wait-only client was stopped; the
+daemon was not restarted and the request was not repeated. Do not infer that
+current source has the same recovery-trigger behavior as this dirty-source
+installed binary.
+
+The current worktree adds a 60-second daemon-rescan start deadline and focused
+unit coverage in `src/main.rs`; the operational behavior is documented in
+`docs/OPERATIONS.md`. That change remains **uncompiled and untested**. Two
+resource-capped attempts to compile just the focused unit on the production
+host were stopped after host CPU PSI crossed 20%; neither reached test
+execution. The partial targets were removed. `git diff --check` and Rust
+formatting pass only. The configured SSH alias `192.168.5.106:2222` is
+unreachable, no verified guest image exists for the local QEMU/KVM manager, and
+the available Docker containers are unrelated workloads. Current-source
+runtime/package qualification therefore still needs a reachable isolated
+builder/guest. The repository's push/PR CI workflow includes formatting,
+all-target/all-feature Clippy, default and all-feature Rust tests, Python
+qualification regressions, unit/security checks, release builds, and package
+artifact verification. No CI run for this uncommitted worktree is recorded.
+Given the two PSI-triggered stops, do not start another build or test on the
+production host.
+
+The nine release-gate groups listed above remain open: exact live convergence
+and recovery; production path-instance/schema-v7 publication; provenance-bound
+signed artifact and binary dependency audit; current-source fault/recovery
+matrix; same-binary 100k/1m/10m scale; Debian/Ubuntu/Rocky package lifecycle;
+root/`CAP_SYS_ADMIN` risk signoff or qualified reduction; 72-hour hash-bound
+endurance; and the 24-hour production canary. The older 241/241 Rust result
+recorded at 09:50 predates the current scan-start change and does not qualify
+it. Historical package and scale reports remain tied to their stated source
+and binary hashes.
+
+## Live readiness refresh — 2026-11-01 14:13 UTC
+
+Read-only production status at **14:13:21 UTC** reports the service active
+without restarts, but the live index remains dirty and not caught up:
+**115,707 pending updates**, **1,688,867 events seen / 409,159 resolved /
+13,696 committed**, **8,914 seconds (~148.6 minutes) behind**, no scan in
+progress, and no reported write error. `events_dropped` currently reports
+zero, but the previously logged fanotify overflow means this does not establish
+that all lost events have been recovered. The daemon process remains at **99%
+of one CPU**. Root is **93% used with 14 GiB available**; current host CPU PSI
+some avg10 is **0.56%**, and I/O PSI some/full avg10 is **0.11%/0.10%**. No
+production service, executable, database, index, or configuration was changed.
+
+This is a newer observation of the existing live-recovery blocker, not a new
+confirmed source defect. The release accounting remains **nine open major
+gate groups** and **14 tracked blockers**, with the latter explicitly not a
+count of proven bugs. Current source remains an unqualified candidate: it has
+uncommitted changes and the scan-start timeout adjustment has not compiled or
+run. No production-host build/test was attempted in this refresh.
+
+### Qualification VM pressure guard hardening — 2026-11-01 14:15 UTC
+
+The disposable qualification-VM controller previously treated unavailable or
+malformed host load/PSI telemetry as no pressure blockers. It now records
+missing/invalid `/proc/loadavg` and required `/proc/pressure/{cpu,io,memory}`
+readings as blockers, refuses VM admission when those readings are absent, and
+stops only its own VM after the existing two-sample critical-pressure rule if
+telemetry disappears during a run. PSI and load values must be finite and
+non-negative. This changes only qualification orchestration, not the live Dux
+service.
+
+The focused VM-guard suite passes **23/23**; the repository's full Python
+qualification regression suite passes **221/221** in **5.75 seconds**. The
+tests use temporary files and mocked systemd/service operations. `git diff
+--check` passes. Rust build/tests, VM startup, package tests, and live Dux
+recovery remain unqualified. A post-suite read-only check at **14:15 UTC** still
+showed production dirty/not caught up, **121,282 pending**, **9,045 seconds
+behind**, no active scan, and zero reported write errors; the service remained
+active without restarts. The test run did not change production state.
+
+### Current static and dependency checks — 2026-11-01 14:16 UTC
+
+`cargo fmt --all -- --check`, `systemd-analyze verify` for both packaged
+units, and `git diff --check` pass. `cargo audit --no-fetch --deny warnings`
+passes for the **229 locked crate dependencies** against the locally cached
+RustSec advisory database (commit `2295466c`, last updated **2026-10-30**); it
+found no advisory affecting the lockfile in that snapshot. This is not a
+current online advisory refresh or a binary dependency scan. No verified
+`images.json` or qcow2 guest image exists under `target/readiness/vms`, so
+isolated VM qualification is still unavailable here. Root storage remains
+**14 GiB free / 93% used**. No release build or package qualification ran.
+
+### Live CPU-bound no-progress recheck — 2026-11-01 14:17 UTC
+
+The latest read-only status still reports **121,282 pending updates**, dirty and
+not caught up, no active scan, and no write error. A five-second service cgroup
+sample measured **4.876 CPU-seconds consumed in 5 seconds**, with **1 of 50
+periods throttled**. The sole Dux thread was runnable (`wchan` reports running),
+and CPU PSI remained low; this is evidence of a userspace CPU-bound no-progress
+condition, not proof of the internal hot function. No safe source-matched
+profiler or symbols are available for the installed executable. No signal,
+restart, profile, or index mutation was attempted.
+
+An online `cargo audit --deny warnings` attempt exited successfully and found no
+affected locked crates, but the local RustSec DB commit did not change from
+`2295466c` dated October 30. Treat the result as an October 30 advisory
+snapshot; the remote database refresh remains unverified.
+
+### Current-source Rust suite attempt deferred at host-pressure threshold — 2026-11-01 14:19 UTC
+
+A current-source `cargo test --offline --locked --all-features` was started in a
+systemd scope capped at **10% CPU, 2 GiB memory, no swap, and IOWeight 10**, with
+build/temp output under `/dev/shm`. A concurrent unrelated Go race-test/link
+workload was present; host CPU PSI rose to **22.79% avg10**, crossing the
+predeclared **20% stop threshold**. I stopped only the Rust test scope; it exited
+143 after compiling dependencies and before compiling the Dux crate or running
+any tests. The attempt's partial target directory was removed. This is
+**incomplete, not a test failure or pass**. Production remained active (PID
+4093354, zero restarts), dirty/not caught up with **121,521 pending**, **9,297
+seconds behind**, no scan, and no write error. Root remained **14 GiB free**;
+CPU PSI fell to **12.85% avg10** in the immediate post-stop sample. The current
+Rust source remains unqualified.
+
+### Orphaned qualification-VM tmpfs cleanup — 2026-11-01 14:23 UTC
+
+Inspection found **30** numeric per-run VM directories under the dedicated
+`/dev/shm/dux-watch-unit-vm` and `/dev/shm/dux-qualification-vm` roots, all from
+October 29–30. No QEMU process or corresponding active systemd guest unit was
+running. Several legacy directories were root-owned mode **0755**, so the
+existing strict cleanup helper correctly refused them. The VM controller now
+requires `systemctl is-active` to confirm the guest is stopped before a new
+ephemeral run, then removes only numeric per-run directories under its exact
+tmpfs roots. It closes legacy root-owned directories to mode 0700 first and
+fails closed on writable, symlinked, non-directory, or foreign-owned entries.
+
+Focused qualification-VM tests pass **26/26**, including preservation of
+non-numeric evidence, symlink rejection, and legacy permission handling. Using
+the same verified cleanup helper after confirming no QEMU or active guest unit
+removed the **30 stale run directories**, reclaiming **2,979,688,448 bytes** of
+tmpfs (free space rose from **2,777,587,712** to **5,757,276,160 bytes**).
+`/dev/shm` now reports **59% used**. The root filesystem also changed from 14
+GiB/93% used to 16 GiB/92% used during this interval; attribution for that root
+change is unknown, since tmpfs cleanup alone does not explain it.
+
+The full Python suite was not rerun after these changes. A fresh Rust suite
+attempt remains stopped before compiling Dux because host CPU PSI exceeded the
+20% guard during a concurrent unrelated Go race test. The production daemon
+remains active, dirty and not caught up; cleanup did not touch its database or
+service.
+
+### Second capped Rust-suite retry — 2026-11-01 14:25 UTC
+
+After CPU PSI temporarily fell below the threshold, retried
+`cargo test --offline --locked --all-features` with **10% CPU, 2 GiB memory,
+no swap, IOWeight 10**, one Cargo job, and output in a separate `/dev/shm`
+directory. CPU PSI rose to **23.78% avg10** before the Dux crate compiled; the
+scope was stopped and exited **143**. This remains an incomplete build, not a
+Rust test result. The scope is inactive, no Cargo/rustc child remains, and only
+a **12 MiB** partial dependency cache remains at
+`/dev/shm/dux-current-source-rust-20261101b` for a possible later retry. The
+production service remains active with no restart, dirty/not caught up, **125,640
+pending**, no active scan, and no write error. The host CPU PSI sample after
+stopping was **25.76% avg10**; no more compilation was started.
+
+### Live host pressure and Dux backlog recheck — 2026-11-01 14:26 UTC
+
+The specific concurrent workload `go test -race -count=1 ./agent/core
+./agent/tunnel` is still active (PID 477166) and has spawned multiple Go compiler
+processes. At **14:26:51 UTC**, host load average was **33.70 on 12 CPUs** and
+CPU PSI some avg10/avg60 was **73.95% / 59.78%**. Production remained active
+without restart, but status was dirty/not caught up with **125,934 pending**,
+**9,726 seconds (~162 minutes) behind**, no scan, and no write error. Counters
+continued to move; this does not establish exactness. The Rust scope is
+inactive. No compilation or test was started under this pressure.
+
+### Major production-readiness blockers — 14 active blockers and 1 resolved item across nine gates
+
+These are release blockers, **not 15 confirmed source bugs**. The installed
+binary's exact source snapshot is unavailable, so its CPU and scan-trigger
+failures cannot be assigned to the current worktree without further evidence.
+
+| ID | Blocker and evidence | Exit condition |
+|---|---|---|
+| B01 | **Live index is untrustworthy.** At 15:01:03 UTC on Nov. 2 production was dirty/not caught up with **321,287 pending**, **98,177.356 seconds behind**, and **502,309 userspace updates dropped**. JSON reports **no scan in progress**, `write_error=null`, and last scan age **99,358 seconds**. Since 14:56:36, pending rose **3,587** while **896** additional updates were committed; behind time increased about **265 seconds** over 267 seconds, so the daemon remains behind its live event stream. `watch.status` v3 has no kernel-overflow counter; prior candidate code incorrectly exposed a compatibility default of zero. Current source now represents the v3 count as unavailable, but release 0.6.3-62 still needs a rebuilt binary with this fix. Journal review found **57 explicit fanotify-overflow warnings today**, latest at **14:21:11 UTC**. No stable exact filesystem comparison exists. The SQLite `meta.schema_version` is **5**. | Recover, drain, independently compare the complete indexed tree/accounting, and qualify distinct user-space drop and kernel-overflow recovery paths. |
+| B02 | **Kernel event loss has recurred.** Journal review found **57 explicit fanotify queue-overflow warnings since midnight UTC Nov. 2**, latest at **14:21:11 UTC**. The v3 watcher status cannot count overflow episodes; separately, it records **502,309 known userspace updates dropped**. Exact recovery after either loss path is not established. | Demonstrate overflow visibility and exact recovery after fault-injected queue overflow on the final binary; reestablish an exact live baseline. |
+| B03 | **Installed CPU behavior is source-unmatched and contradicts its help.** `pidstat` measured R16 at **100% of one CPU averaged over five seconds at 13:44 UTC**; at **14:46:02 UTC**, Dux used **94.2% process CPU** while no scan was active and Go compilation was concurrently using up to **387% CPU**. A five-second `/proc` thread sample beginning **14:46:51 UTC** measured the daemon main thread at **99.8% of one CPU**; status still showed no active scan and 317,486 pending. This confirms the event/main thread is CPU-saturated on the installed binary, but the source mismatch prevents attribution to current code. A `perf stat` sample at 14:47:27 measured 3.005 seconds of task-clock across 3.002 seconds elapsed (1.001 CPUs), 11.51 billion cycles and 21.39 billion instructions. A 49 Hz five-second profile lost no samples but reported only raw addresses because the installed static-PIE executable is stripped and has no `.symtab`/debug sections; the hot function cannot be identified from this artifact. The standard build-ID debug path is absent, and none of the five retained `dux.debug` files has the installed build ID `2e2d4557ac578ce614c1b48cfb6b53a389b27330`. Earlier samples also showed 100%. Systemd's control drop-in sets `CPUQuota=100%` (the packaged unit says 50%). Installed `/usr/bin/dux` is 0.6.3 R16, SHA-256 `9433d56d…4e87f64`; its help explicitly promises a hard cap with a 25% default, but measured usage reached the cgroup ceiling. Exact installed source is unavailable. Current source has a different governor contract; its exact-binary event-burst behavior has not been requalified. | Reproduce with an exact binary/source identity; establish whether the help or governor is wrong, then pass event-burst, backlog, and overflow budgets with matching symbols on an isolated host. Reconcile configured quota and intended cap. |
+| B04 | **Automatic recovery remains unresolved.** At 14:35:36 systemd reported “Reconciliation deferred; waiting for normal host pressure” and no scan was active. At 14:36 host load was about **2 on 12 CPUs**, available memory **15.3 GiB**, root free space **11 GiB**, CPU PSI some avg10 **0.54%**, I/O PSI some avg10 **0.28%**, and memory PSI some avg10 **0.28%**; these readings are below current-source admission thresholds. By 14:38, an unrelated XGen Go compile/vet workload was active and host CPU PSI some avg10 reached **61.68%**, so a later deferral would be expected. No scan was active and status remained deferred; the last Dux deferral log was at **14:34:44**, so the systemd status text may be stale and does not reveal the current internal pressure reason. Installed R16 is source-unmatched. The unreadable `/run/dux-ext4-inspection` test mount remains a possible scan contaminant; causality is unproven. | Reproduce with exact binary/source identity, remove or deliberately exclude stale test mounts, observe request → scan start → install → queue replay, and verify error/timeout behavior without repeating requests blindly. |
+| B05 | **Production schema migration is unqualified.** The live DB is v5; current source declares v6, which requires a full-root atomic rebuild. A protected online backup of the live v5 DB was created at `/root/dux-prequalification-20261102T1503Z.sqlite`: **755,593,216 bytes**, **184,471 pages**, `quick_check=ok` and later read-only `PRAGMA integrity_check=ok`, SHA-256 `21bc898fd23496fe257ab20d28a9a2b9de55e6cb86a94781ab43e556f0a28425`, file/manifest mode 0600. Its source was still dirty with **321,482 pending**, **502,309 drops**, and no active scan; this is a transaction-consistent DB snapshot, not an exact filesystem baseline. A previous v5 backup with **2,151,205 inode rows** passed integrity; release 0.6.3-61 rebuilt a tmpfs copy against the small, different `/home/dux/.github` root, producing v6 with exact four-edge coverage. Neither measures a `/` scan, same-root growth-history transfer, migration space/runtime, rollback, or exact recovery. | Rehearse v5→candidate migration from a verified backup on a production-sized isolated host, including disk, runtime, interruption, rollback, and exactness checks. |
+| B06 | **Mount aliases are not represented in the live schema.** The v7 path graph is built only in private scan staging; queries, event updates, and migration still use v6 inode-parent edges. | Publish and qualify path-instance identities, directory totals, event semantics, queries, cycles, and duplicate-mount exactness as one schema-v7 design. |
+| B07 | **No production release is qualified.** On pinned Rust **1.99.1**, the current source with the telemetry fix passed the all-feature Rust suite **256/256** at 14:14 UTC. Full Python discovery passed **249/249** on Nov. 2 in 97.799 seconds under a 5% CPU / 1 GiB / no-swap scope, including 46 package lifecycle tests and 12 backup-helper tests. Static-musl release **0.6.3-62** at `target/readiness/current-source-release-20261102T1320Z/` is bound to source SHA-256 `d0bfef3c0838fc3f29916d60e61d1dc93a4900650a0bf42b86c53739969c4cce`; executable SHA-256 `e878cb4c5e82c1055977cc4af1cf60dc16a41e4ca4c3f7418920e8976384a43f`. Source handoff `current-source-handoff-20261102T1416Z` captured tree SHA-256 `0d130f999fdc03fe0dda6190660f24c3d993777414ac3182f8c309feb6a0c9b9`; it differs from release-62 in `src/util.rs`, `src/main.rs`, `src/query.rs`, `src/tui.rs`, and documentation. Its member hashes verify, but newer documentation updates may make it an older snapshot. Release-62 predates the legacy-overflow telemetry fix and is stale for promotion. DEB/RPM payloads match the manifest's helpers and service units, the standalone candidate hash matches both package binaries, and package checksums verify. Candidate E2E scans matched four nested normal-filesystem edges exactly; the pseudo-filesystem hardlink fixture passed with `--include-pseudo`. After the telemetry fix, the current all-feature Rust test suite passed **256/256** on Nov. 2 at 14:14 UTC (99.45 seconds test time, one build job, 20% CPU quota, 2 GiB memory cap, no swap). This is debug unit-test evidence; it does not close release, package, migration, scale, endurance, or canary gates. The latest upstream advisory database scan reported zero lockfile vulnerabilities and zero candidate-binary findings. No installed-package lifecycle, exact-candidate event/overflow/scale matrix, 72-hour endurance, 24-hour canary, signing, or owner acceptance is complete. As of 15:02 UTC there is no active QEMU/libvirt guest and no qcow image under `target/readiness`; `/dev/kvm` and QEMU binaries are present, but qualification guest directories in `/dev/shm` are empty and only 1.7 GiB is free there. A same-source **fault-enabled binary with a different hash** survived two test-injected kill boundaries against disposable copies of a v5 backup; this is limited crash evidence, not a release gate. Root had **7.4 GiB free / 96% used** at 13:38:41 UTC, but space and host load fluctuate. | Rebuild and requalify from a source snapshot that includes current docs, then qualify exact package install/upgrade/rollback/removal, candidate fault and scale gates, production-root migration, 72-hour endurance, and 24-hour canary; add signing and owner acceptance. |
+| B08 | **Installed artifact provenance is partial, not absent.** The retained 0.6.3-16/R16 build manifest binds the live binary SHA-256 to source-tree digest `3fa91992…78224cc8` and records 57 inputs from a dirty worktree; its package payload matches `/usr/bin/dux`, but the exact source archive and matching symbols are unavailable. The latest hash-verified unqualified source handoff is recorded in the audit log; it contains no binary. New source-bound 0.6.3-59 artifacts include matching symbols and an audited build manifest, but they predate QUAL-231 and do not reconstruct the installed R16 source. | Retain/reconstruct the exact installed binary source/symbols, and retain signed/reproducible provenance for the final qualified candidate. |
+| B09 | **Current-binary fault matrix is incomplete.** A same-source fault-enabled binary (SHA-256 `18d43c094eb1e9378fb312340dec84c673bc0b9d71f2eb6239cf17f9de20537f`) was SIGKILLed at `scan.install_started` and after one page at `scan.install_midway`; both disposable v5 DB copies reopened with all **2,151,205 inode rows**, schema v5, and `integrity_check=ok`. This does not qualify the production binary/package and does not cover overflow, OOM, WAL, pressure, coverage, retries, or full-root recovery. | Pass the complete fault/recovery matrix against the exact final binary and package. |
+| B10 | **Same-binary scale/performance budgets are open.** Historical 100k/1m/10m results use different source or binary hashes; no complete current-candidate result exists. | Pass the full 100k/1m/10m correctness, CPU, memory, query, and TUI budgets on one hash-bound candidate. |
+| B11 | **Installed package lifecycle is not qualified.** The current package-helper/lifecycle Python module passed **46/46**, and the full Python harness passed **249/249** on Nov. 2; the full run used a 5% CPU, 1 GiB, no-swap transient scope and peaked at 185 MiB. Coverage includes mode-000 ownership transfer and SQLite sidecar symlink/hardlink rejection. Installed-package upgrade/rollback/removal remains untested. The only 0.6.3-59 DEB/RPM predate those helper fixes and are stale. A 14:49 UTC effective-unit recheck confirms live drift from the current packaged source: `SecureBits=0`, `LimitCORE=infinity` / soft 0, a narrower syscall filter, and effective `CPUQuota=100%`; the current package unit syntax passes `systemd-analyze verify`. | Rebuild current DEB/RPM; pass clean install, upgrade, rollback, permissions, readiness, and removal tests on Debian/Ubuntu and Rocky; verify effective unit properties after installation. |
+| B12 | **Residual privilege needs owner sign-off or reduction.** Rechecked at 14:49 UTC: the live process runs as root with exactly `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`; its effective systemd unit scores **5.1 MEDIUM**. It has `NoNewPrivs=1`, `SecureBits=0`, `LimitCORE=infinity` (soft 0), and only a three-syscall deny filter; the checked-in unit has stronger `SecureBits`, core-limit, and syscall-group settings. The database is 0640 root:dux. These controls do not remove the inherent root/`CAP_SYS_ADMIN` risk. | Obtain explicit risk acceptance or qualify a design that reduces root/capability exposure without losing filesystem coverage. |
+| B13 | **72-hour endurance is not complete for the final candidate.** Interrupted or shorter historical soaks do not count. | Complete the hash-bound 72-hour run with exactness, reader, mutation, restart, integrity, and resource checks. |
+| B14 | **24-hour production canary has not started.** The live index is not a stable exact baseline and rollback/candidate evidence is incomplete. Root had **11 GiB free / 94% used** at 15:01:03 UTC. This remains below the documented **10 GiB workspace + 8 GiB reserve** qualification preflight. Headroom fluctuates by multiple GiB within minutes and must be rechecked immediately before any build. | Only after preceding gates pass and disk headroom meets the measured workspace-plus-reserve requirement, run the 24-hour canary with exact baseline, monitored rollback, and owner sign-off. |
+| B15 | **RESOLVED 2026-11-03: orphaned test filesystem removed.** The read-only `/run/dux-ext4-inspection` mount on `/dev/loop0` came from the deleted sparse test image `/tmp/dux-scale-f2azn2f8/filesystem.img`; Dux was its only process holder. Dux shut down gracefully and flushed before a normal `umount`; `/dev/loop0` was then normally detached. `findmnt` now resolves the path to `/run` tmpfs and the loop mapping is absent. On restart Dux reported two filesystems (previously three) and completed a fresh scan of **1,234,823 files, 111,289 directories, 89.64 GiB, zero errors**. The current index is still not caught up: at 12:00:14 it had **841 pending paths**, so this closes the stale-mount item but not B01/B02 exactness gates. No lazy unmount or forced detach was used. | Closed for the orphan test mount; retain B01/B02 recovery and exactness verification as separate open gates. |
+
+**Live evidence refresh — 2026-11-02 15:33 UTC:** the R16 status remained dirty
+and not caught up, with **337,556 pending updates**, **100,145.736 seconds
+behind**, **502,309 userspace updates dropped**, `write_error=null`, no active
+scan, and no changes in the event-seen/resolved/committed counters since
+15:32. Journal entries record additional fanotify overflow and memory-pressure
+pause warnings at **15:25:04 UTC**. This refresh supersedes the older B01/B02
+time samples above; the exit conditions are unchanged.
+
+### Fail closed on future scan-progress mtimes — 2026-11-01 14:28 UTC
+
+Code review found that `read_scan_progress_for` treated a future file mtime as
+age zero: `SystemTime::elapsed()` returned an error and the old fallback
+converted that to a fresh scan. Missing mtimes were handled the same way. The
+reader now returns no progress unless it can compute a non-negative age of at
+most ten seconds. Added a regression that writes valid progress then moves its
+mtime sixty seconds into the future and requires it to be ignored.
+
+`rustfmt +1.99.1 --check --edition 2021 src/util.rs` and `git diff --check`
+pass. The Rust regression is **not compiled or run**: host load was **13.97 on
+12 CPUs**, CPU PSI avg60 was **22.55%**, and an unrelated Go race test remained
+active. Production status at 14:28 was dirty/not caught up with **125,986
+pending**, **9,796 seconds behind**, no scan, and no write error. The installed
+daemon was not changed; current source remains unqualified.
+
+The nine gate groups remain the release accounting categories; this 15-item
+register splits their distinct observed failures and required evidence. No item
+is closed by a unit-test count or a historical artifact from another hash.
+
+### Recheck current artifact identity, live recovery, and build headroom — 2026-11-01 14:28 UTC
+
+The installed service is package `dux 0.6.3-16`, running `/usr/bin/dux` with
+SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`.
+Its version string reports commit prefix `a42739776bbd+modified`; the exact
+source snapshot and matching symbols for that installed binary are unavailable.
+The installed database is schema v5; the current worktree declares schema v6.
+
+The latest read-only `dux --json status` sample reports dirty/not caught up,
+**126,022 pending**, **1,878,904 seen / 446,851 resolved / 14,976 committed**,
+**9,864 seconds behind**, no active scan, and `write_error=null`. The service
+status is “Reconciliation deferred; waiting for normal host pressure.” Its log
+contains additional fanotify overflow warnings at 13:27, 13:32, and 14:22 UTC.
+The main process remains runnable at about **99% of one CPU**. This is live
+recovery evidence, not a source-matched diagnosis or exactness proof.
+
+The already-built `0.6.3-58` artifact is not the current worktree: its manifest
+binds commit `a42739776bbd6ef30441936e4d5b28574b971344`, source-tree SHA-256
+`b9b82da73beb85eed65d08a39bc0399546dc700993cfcf375084977f1ffbde7d`, and
+binary SHA-256 `85009675f502c232b80374a524eb9d98eed97f96d1b603c7e26e848aae89104d`.
+A direct manifest-to-worktree comparison finds **23 changed source files**,
+including runtime files `main.rs`, `scan.rs`, `store.rs`, `tunnel.rs`, `util.rs`,
+and `watch.rs`. Therefore this older package cannot qualify the present source.
+
+At the sample time, root had **17 GiB free** and `/dev/shm` **5.4 GiB free**;
+`target/` already occupied **15 GiB**, including **8.6 GiB** of retained
+readiness evidence. Host CPU PSI some avg10 was **11.43%**, while an unrelated Go
+test/compiler workload and the production daemon were active. No current-source
+build was started: earlier similarly capped attempts crossed the established
+20% PSI stop threshold, and available evidence does not establish a safe,
+source-matched output space. The isolated VM image/manifest and reachable VPS
+are still unavailable. No production service, executable, database, or index
+was changed. Current-source Rust build/tests and release qualification remain
+open.
+
+### Current-source all-features test stopped after PSI guard — 2026-11-01 14:31 UTC
+
+A third current-source attempt used the existing Cargo cache with
+`cargo test --offline --locked --all-features`, one Cargo job, and a dedicated
+systemd scope limited to **10% CPU**, **2 GiB memory**, no swap, and IOWeight 10.
+It reached `Compiling dux v0.6.3 (/home/dux)`, but host CPU PSI some avg10 rose
+from **3.42%** before start to **34.47%**, above the predeclared **20% stop
+threshold**. I stopped only `dux-current-source-tests-c.scope`; the command
+exited **143**. The Dux crate compile did not complete and no Rust tests ran.
+This is an interrupted attempt, not a failure or pass. The scope is inactive,
+with no Cargo or rustc process remaining.
+
+A separate Go migration/test workload became CPU-heavy during the attempt; the
+production Dux daemon also remained active at about one CPU. The post-stop host
+sample had CPU PSI some avg10 **37.53%**. Root had **17 GiB free** and `/dev/shm`
+**5.4 GiB free**. Production remained active with zero restarts, dirty/not
+caught up, **126,144 pending**, **9,986 seconds behind**, no scan, and no write
+error. Its systemd status read “Mount topology changed; reconciling visible
+paths.” No production service, executable, database, or index was changed.
+The current-source binary and all test results remain unqualified.
+
+### Fourth current-source all-features test attempt stopped at PSI guard — 2026-11-01 14:34 UTC
+
+Retried `cargo test --offline --locked --all-features` with the warm target,
+one Cargo job, and a dedicated systemd scope capped at **5% CPU**, **2 GiB
+memory**, no swap, and IOWeight 10. Host CPU PSI some avg10 was **6.71%** before
+start; it rose to **26.97%** within ten seconds, exceeding the established
+**20% stop threshold**. Only `dux-current-source-tests-d.scope` was stopped;
+the command exited **143** without reporting Dux compilation completion or
+starting tests. This is incomplete, not a failure or pass. The scope is
+inactive with no Cargo or rustc process remaining.
+
+At **14:34:32 UTC**, after the stop, CPU PSI some avg10 remained **26.17%**.
+Production stayed active with zero restarts but remained dirty/not caught up:
+**127,201 pending**, **10,184 seconds behind**, no active scan, and
+`write_error=null`. Event totals were **1,944,891 seen / 455,124 resolved /
+15,616 committed**. The service status again read “Reconciliation deferred;
+waiting for normal host pressure.” Root had **16 GiB free** and `/dev/shm`
+**5.4 GiB free**. No production service, executable, configuration, database,
+or index was changed. Current-source Rust build/tests and live exact recovery
+remain open.
+
+### Fifth current-source all-features test attempt stopped at PSI guard — 2026-11-01 14:35 UTC
+
+A fifth attempt used `cargo test --offline --locked --all-features` with the
+warm target, one Cargo job, and a dedicated scope capped at **5% CPU**, **2 GiB
+memory**, no swap, and IOWeight 10. CPU PSI some avg10 was **2.37%** immediately
+before start and rose to **23.15%** within ten seconds. I stopped only
+`dux-current-source-tests-e.scope` at the established **20%** threshold; it
+exited **143** without output indicating Dux compilation or test execution.
+This is not a build/test failure or pass. The scope is inactive with no Cargo
+or rustc process remaining. PSI remained **24.17% avg10** after the stop, when
+no Go compiler was present in the process list; Dux itself remained near one
+CPU. The cause of the host-wide PSI rise is not attributed to the test alone.
+
+At **14:35:31 UTC**, production was active with zero restarts, dirty/not caught
+up, **127,572 pending**, **10,245 seconds behind**, no scan, and
+`write_error=null`. Event totals were flat from the 14:34 sample; the daemon
+was still runnable near one CPU. Root had **18 GiB free** and `/dev/shm` **5.4
+GiB free**. Its database and service were not changed. Current-source build,
+Rust tests, exact recovery, and isolated release qualification remain open.
+
+### Current-source all-features Rust unit suite passed — 2026-11-01 14:39 UTC
+
+The current worktree compiled successfully with
+`cargo test --offline --locked --all-features`, one Cargo job, under a dedicated
+systemd scope. The initial Cargo-driven run used CPU 50%, memory 2 GiB, swap
+disabled, IOWeight 10, and CPU affinity 7; it built the test binary in **11.19
+seconds** and discovered **250 tests**, but host CPU PSI later reached 31.46%
+avg10 during test execution, so that scope was stopped before its summary.
+
+After PSI recovered, ran the already-compiled test binary directly on CPU 7 with
+one test thread under the same memory/swap/IO constraints. Result:
+**250 passed, 0 failed, 0 ignored**, **64.80 seconds**. Binary SHA-256 is
+`b1fd43033c645b1ea313865b1cfa0bdd204164408fe9b9dedf2bc54e3ab5e9a5`. This
+includes regressions for future scan-progress timestamps, daemon-rescan timeout,
+inode-number reuse, repeated identities without birth time, v5 history migration,
+path aliases/cycles, fault/pressure handling, subprocess paths, and accounting
+rollback. Host CPU PSI avg10 was 0.38% at completion; the systemd test scope is
+inactive. This qualifies the current Rust **unit** suite only; it does not close
+integration, package, scale, soak, production exactness, or canary gates.
+
+### Current-source release packaging attempt stopped at PSI guard — 2026-11-01 14:40 UTC
+
+Started `scripts/build-release.sh target/readiness/current-source-r59-20261101`
+for package revision 59 with `CARGO_NET_OFFLINE=true`, one job, CPU affinity 7,
+CPUQuota 50%, MemoryMax 4 GiB, swap disabled, and IOWeight 10. The script began
+building the auditable static-musl release and compiled several dependencies.
+Host CPU PSI some avg10 reached **20.92%**, above the 20% stop threshold. Only
+the release-build scope was stopped; exit 143 while still compiling dependencies,
+before the Dux crate or any package artifact was produced. Its isolated cache
+at `target/dux-auditable` now occupies **488 MiB** and can support a later retry.
+This attempt is incomplete, not a build failure or pass. No production service,
+binary, database, or index changed.
+
+At **14:40:30 UTC**, production remained dirty/not caught up with **130,610
+pending**, **10,546 seconds behind**, no active scan, and `write_error=null`.
+Current-source release packaging, exact live recovery, scale/fault package
+qualification, endurance, and the production canary remain open.
+
+### Third current-source static-musl release build stopped at PSI guard — 2026-11-01 14:43 UTC
+
+Retried the complete `scripts/build-release.sh` for package revision 59 with
+`CARGO_NET_OFFLINE=true`, one Cargo job, CPU affinity 7, CPUQuota **10%**,
+MemoryMax **4 GiB**, swap disabled, and IOWeight 10. The partial
+`target/dux-auditable` dependency cache was reused. Host CPU PSI some avg10 rose
+to **27.21%** during the attempt, above the 20% stop threshold. I stopped only
+the release-build scope; it exited **143** while compiling dependencies
+(`signal-hook-mio`, `digest`, and `derive_more` were among the current jobs),
+before compiling Dux or producing any package. No release output exists in
+`target/readiness/current-source-r59-20261101/`; the reusable partial dependency
+target is now **519 MiB**. The attempt is incomplete, not a build failure/pass.
+
+At **14:43:07 UTC**, production remained active with zero restarts, dirty/not
+caught up, **131,914 pending**, **10,702 seconds behind**, no scan, and
+`write_error=null`. Host PSI was still **27.76% avg10** after stopping. Root had
+**18 GiB free**, `/dev/shm` **5.4 GiB free**. No production service, executable,
+configuration, database, or index was touched. A reachable isolated builder is
+still needed to finish static-musl packaging and test the package lifecycle.
+
+### Refreshed Rust dependency and binary audit — 2026-11-01 14:44 UTC
+
+- Ran `cargo audit --deny warnings` against Cargo.lock SHA-256
+  `fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`.
+  `cargo-audit 0.22.2` exited **0**, scanning **229 dependencies**, with **0
+  vulnerabilities and no warnings**. Confirmed local RustSec DB HEAD
+  `2295466c4e9df26647fd67d8fa1c705ac2fc7f81` equals upstream GitHub `main` at
+  the time of the check; the upstream database's latest commit is dated Oct 30
+  and contains 1,395 advisories. The fresh-fetch command returned success, and
+  a subsequent `--no-fetch` JSON scan against the verified same commit also
+  returned success.
+- Audited installed `/usr/bin/dux`, SHA-256
+  `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`. It has
+  no `.dep-v0` section and was not built with cargo-auditable. The binary scan
+  recovered only **44 dependencies** and found no known advisories among those;
+  Cargo Audit explicitly warns the report is incomplete. This is not a full
+  installed-binary dependency audit.
+- The older R58 static candidate SHA-256
+  `85009675f502c232b80374a524eb9d98eed97f96d1b603c7e26e848aae89104d` has
+  embedded cargo-auditable metadata. Its scan recovered **202 dependencies**
+  with no known advisories and a complete inventory, but R58 is stale against
+  current source and does not qualify the present worktree.
+- Machine-readable evidence is in `target/readiness/security-audit-20261101/`:
+  lockfile JSON, per-binary JSON/terminal reports, and metadata binding binary
+  hashes, advisory DB HEAD, and lockfile hash. These results do not cover OS
+  packages, source-level flaws, or the unbuilt current release artifact.
+
+At the same **14:44 UTC** read-only production sample, Dux remained active with
+zero restarts but dirty/not caught up: **132,148 pending**, **10,796 seconds
+behind**, no scan, `write_error=null`. No production files, service, database,
+or index changed.
+
+### QUAL-143 Paired read-only production progress and pressure sample — 2026-11-01 14:50 UTC
+
+- Captured two samples 15 seconds apart in `target/readiness/live-host-samples-20261101T1450Z.txt` (SHA-256 `9a28071f7378a26fce6cd9fff66223efe684a1f55162e12fe524c17b1f1821ff`). Host load1 fell **11.35 → 10.12** on 12 CPUs and host CPU PSI some avg10 fell **27.81% → 11.09%**; competing Go compilation/test processes were active. I/O PSI some/full avg10 rose **2.00%/0.69% → 4.83%/3.86%**.
+- Production PID **4093354** remained active with zero restarts and one-core CPU quota. Its cgroup consumed about **15.0 CPU-seconds** across the 15-second interval; Dux used about **98.6% CPU**. The status counters remained flat at **2,215,922 seen / 513,193 resolved / 17,536 committed / 138,525 pending**, with **11,125 seconds** behind at the last sample, no scan, and no write error. The commit timestamp advanced by 14 seconds even though the counters did not; this short interval does not establish durable pipeline progress or a root cause.
+- The systemd status remains `Reconciliation deferred; waiting for normal host pressure`. The runbook prohibits another scan/restart while queue overflows or host pressure persist. No production service, executable, configuration, database, or index was changed. Keep live recovery/exactness open; continue read-only monitoring and do not treat transiently falling CPU PSI as a recovery gate.
+
+### QUAL-144 Classify the production daemon's CPU-bound no-progress interval — 2026-11-01 14:51 UTC
+
+- A further 25-second read-only sample is preserved at `target/readiness/dux-stall-followup-20261101T1451Z.jsonl` (SHA-256 `eedaf0cbeeb5253dba571edfb0f56425ec68bd3f365dd9d26c103a5a9cff16f6`). Host load1 fell **5.97 → 4.41**; host CPU PSI some avg10 fell **0.33% → 0.02%**. Production PID **4093354** consumed **25.0 CPU-seconds** under its one-core quota. The Dux cgroup's `io.stat` counters did not change.
+- Dux status counters remained exactly **2,215,922 seen / 513,193 resolved / 17,536 committed / 138,525 pending**; the last-event-commit timestamp remained fixed while `behind_seconds` grew **11,177 → 11,203**. It remained dirty, not caught up, with no active scan and `write_error=null`. Together with the no-I/O interval this meets the operations runbook's **CPU-bound no-progress incident** classification; it does not identify the loop's source-level cause.
+- `/usr/bin/dux` remains SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`, Build-ID `2e2d4557ac578ce614c1b48cfb6b53a389b27330`, with no useful Dux function symbols. Kernel `perf_event_paranoid=4` disallows the runbook's short `perf` profile, so profiling was not attempted. The installed artifact's exact source and matching symbols remain unavailable; the current worktree cannot be used to attribute this live binary's CPU loop.
+- No production state changed. The runbook says preserve status/checksum/counters and keep the incident open until watcher progress and exact accounting recover. Do not raise quota, scan, restart, or claim recovery from low host PSI alone. This strengthens B03/B04 diagnosis but closes no release gate.
+
+### QUAL-145 Confirm intermittent ingestion progress, backlog growth, and effective CPU quota drift — 2026-11-01 14:53 UTC
+
+- Read-only paired service/host samples 30 seconds apart are preserved in `target/readiness/dux-recovery-followup-20261101T1452Z.jsonl` (SHA-256 `83b431f42b1441a83ee57d1730b310ef8a007f12b43c876a63b3bfa25a6cfc0b`). Host CPU PSI some avg10 rose **27.37% → 33.21%** while unrelated work resumed. Dux consumed **28.3 CPU-seconds** over 30 seconds, with both cgroup I/O counters and watcher counters advancing.
+- Over the interval, events seen rose **7,082**, resolved **4,592**, updates committed **128**, and pending increased **3,246** (**138,935 → 142,181**); `behind_seconds` increased **11,267 → 11,297**. The earlier CPU-bound no-progress interval was transient. Current service behavior is **intermittent progress without convergence**; dirty/not-caught-up remains true, there is no active scan, and `write_error=null`.
+- Effective cgroup quota is **100%** (`cpu.max=100000 100000`; systemd `CPUQuotaPerSecUSec=1s`), while the installed host fragment `/usr/lib/systemd/system/dux.service` says **50%**. The current worktree package definition `packaging/dux.service` says **100%**, matching the effective systemd control drop-in; this is installed-base/worktree drift, not a mismatch between the current worktree quota and effective quota. `/etc/systemd/system.control/dux.service.d/50-CPUQuota.conf`, timestamped 11:13:50 UTC, is a systemd `set-property` control drop-in setting 100%; no audit entry or evidence here identifies who set it or why. The installed CLI reports `--max-cpu` default **25% of one core**, yet the live process is near **99% of one CPU**. This confirms the production CPU budget is not behaving as its documented in-process target, but the installed binary's exact source is unavailable, so the implementation cause is unresolved.
+- No quota, service, configuration, executable, database, or index change was made. Do not remove/alter the control drop-in during this recovery incident; no authority or evidence establishes its intended owner. B03 is confirmed as a production behavior gap; the root cause and remediation still require a source-bound candidate test.
+
+
+### QUAL-146 Correct quota provenance and observe recovery after the latest fanotify overflow — 2026-11-01 14:56 UTC
+
+- Corrected QUAL-145's ambiguous phrase “packaged unit file”: the installed host fragment `/usr/lib/systemd/system/dux.service` declares **50%**, the current worktree package definition `packaging/dux.service` declares **100%**, and `/etc/systemd/system.control/dux.service.d/50-CPUQuota.conf` sets the effective cgroup quota to **100%**. Thus the effective quota matches the current worktree definition, while the installed base unit differs. The drop-in's creator/rationale and the installed binary's source remain unknown. The installed CLI reports a 25% in-process default; runtime CPU use near 100% remains unexplained and unqualified.
+- Journal confirms a fanotify queue overflow at **14:55:13 UTC**, which matches `dirty_since`. Paired samples at **14:56:12** and **14:56:32** are preserved at `target/readiness/dux-overflow-followup-20261101T1456Z.jsonl` (SHA-256 `cde9f50bf9cc86dcd4bb210be718c882ca42b7fc32aedb73240b8a7a9d8511a7`). In the first sample counters were still flat since the overflow. Over the next 20 seconds Dux consumed **19.9 CPU-seconds**, read about **356 KiB**, wrote about **34 MiB**, and processed **4,485 seen / 3,830 resolved / 128 committed** events; pending grew **68** and lag grew **20 seconds**. Host CPU PSI avg10 remained below **0.25%**. This confirms temporary post-overflow no-progress followed by intermittent processing, not exact recovery or convergence.
+- Production remains active, dirty/not caught up, with **143,631 pending**, no active scan, `write_error=null`, and zero restarts at 14:56:32. No service/configuration/quota/database/index action was taken. The no-scan/no-restart runbook gate remains applicable; exact live accounting and recovery are still open.
+
+### QUAL-147 Fail closed on missing or malformed daemon pressure telemetry — 2026-11-01 14:58 UTC
+
+- Static review found a verified admission fail-open in `guard::sample`/`Health::level`: unreadable `MemAvailable`/filesystem capacity were represented as negative values that the classifier ignored; missing `/proc/loadavg` defaulted to 0; and floating-point parsers accepted `NaN`, infinity, and negative PSI values, whose threshold comparisons could all be false. An inconsistent caller could also pass `Pressure::Normal` to reconciliation admission despite invalid current health.
+- Updated the current worktree so missing required memory/disk/load/CPU-count telemetry marks host health unavailable and classifies it Critical; reconciliation admission independently rejects this state. Load and PSI parsers reject non-finite/negative values; PSI percentages above 100 are invalid and map to Critical. Missing PSI files (`NotFound`) remain optional for older/disabled-PSI kernels, while unreadable or malformed existing PSI files fail closed. This changes current source only; the installed production daemon is untouched.
+- Added four Rust regressions for numeric parsing, each required telemetry field, fail-closed classification/admission (including a stale Normal argument), and malformed CPU PSI. **These Rust tests have not been compiled or run.** `cargo fmt --all -- --check`, `rustfmt +1.99.1 --check --edition 2021 src/guard.rs`, and `git diff --check` pass. The analogous Python VM pressure-guard tests pass **26/26 in 0.009 seconds**; they validate the existing VM controller, not the new Rust behavior.
+- Release build, Rust regression execution, and broader fault/pressure qualification remain open pending an isolated builder. No production service, binary, index, or database changed.
+
+### QUAL-148 Stop Rust regression build after CPU-pressure guard; production overflow observed concurrently — 2026-11-01 15:03 UTC
+
+- Attempted to compile/run `guard::tests` from the current source using a transient scope with `CPUQuota=5%`, `MemoryMax=2 GiB`, swap disabled, and `CARGO_TARGET_DIR=/dev/shm/dux-guard-target-20261101`. The target is only **15 MiB**; the scope reached about **3.5 CPU-seconds / 248 MiB** and had compiled dependencies but not Dux. It did **not** compile or execute the new Rust tests.
+- Stopped the exact scope after host CPU PSI some avg10 reached **20.86%** (15:02:55 UTC); systemd reports it inactive and no cargo/rustc worker remains. Host CPU PSI fell to **7.78%** afterward. Memory PSI stayed at 0%; `/dev/shm` still had **5.4 GiB free**.
+- Production journal recorded `fanotify queue overflow — index may have missed events` at **15:02:52 UTC**, during the build; `dirty_since` matches that timestamp. An unrelated `safefs.test` process used ~180% CPU and PostgreSQL work was also active. The evidence does not establish whether the test's tmpfs output, competing workload, or another source caused this overflow. Therefore `/dev/shm` output cannot be assumed safe from this installed daemon's watcher, despite being intended as an isolated path in current qualification procedures. Do not build/test on this production host again during this incident.
+- Production remained active with zero restarts but dirty/not caught up, **148,009 pending**, **11,922 seconds behind**, no scan and no write error. No production executable, unit, database, or index was modified. Current-source Rust build/tests require the offered isolated VPS; all release gates remain open.
+
+### QUAL-149 Run exact guard-module Rust tests without Cargo — 2026-11-01 15:04 UTC
+
+- Compiled the exact current `src/guard.rs` with Rust **1.99.1** via `rustc --test` in a 508-byte standalone harness under `/dev/shm`; test output binary also stayed in tmpfs. All **18/18** guard-module tests passed in **0.10 seconds**, including four regressions added in QUAL-147. The isolated scope had CPUQuota **5%**, MemoryMax **512 MiB**, no swap; it exited successfully with host CPU PSI avg10 **4.34%** and memory PSI **0%** after completion.
+- Hash-bound report: `target/readiness/current-source-guard-module-tests-20261101.json`, SHA-256 `1b9a10b527a32e06df00db53f694afca00555853ef5f4e5a06eeaef0a100758a`. It records guard source SHA-256 `33ac7776d9242b1874aa209b04e30ed490f55e962a96e0358d3b74f9de946fe3`, harness SHA-256 `f663e98aed2c2773adb231c509bc8956d91541c9bc183984c6e70f6a99b2907f`, and test-binary SHA-256 `9ee0c78f598cc566cd879cd4e3692cd4b37037c0587c2abf6387a68c5a3e1fd6`.
+- Scope limit: this compiles the real guard source module but stubs `crate::util::fs_stat` and four fault-injection functions; tests do not call those interfaces. It does **not** compile the full Dux crate, run integration tests, qualify package/runtime behavior, or replace the still-incomplete Cargo/release build. The separate Cargo attempt in QUAL-148 remains incomplete; no further Cargo build was run.
+- Production remains active but dirty/not caught up: **149,603 pending**, **12,008 seconds behind**, no scan, no write error, zero restarts at the latest read-only sample. No production service or index mutation occurred.
+
+
+### QUAL-150 Record another overflow after test workloads ended and refresh live blockers — 2026-11-01 15:06 UTC
+
+- At **15:06:18 UTC**, the production journal logged another `fanotify queue overflow — index may have missed events`; persisted `dirty_since=1793545578` matches that second. The event occurred 3m23s after the isolated guard-module test ended and over three minutes after the CPU-capped Cargo attempt had been stopped. No Dux build/test process was active then. This weakens—but does not eliminate—the hypothesis that our test activity caused the earlier overflow; attribution remains unknown.
+- At **15:06:32 UTC**, service PID **4093354** was active with zero restarts, dirty/not caught up, **151,637 pending**, **12,106 seconds behind**, no scan, and `write_error=null`. Counters: **2,600,287 events seen / 549,665 resolved / 19,584 committed**. Last commit timestamp equals the latest overflow second, so activity was intermittent; exactness and convergence remain unproven. No scan, restart, quota change, DB/index change, or executable replacement occurred.
+- Refreshed B01/B02/B07 in the 14-blocker register: B01 uses this live status; B02 includes repeated overflow times; B07 records that only the guard module has standalone test evidence, while the full crate/package remain unbuilt. No release gate closed.
+
+### QUAL-151 Refresh production status without touching the service — 2026-11-01 15:07 UTC
+
+- At **15:07:58 UTC**, `dux --json status` remained dirty/not caught up with **152,049 pending updates**, **12,193 seconds behind**, **2,149,864 indexed nodes**, **755,593,216 bytes on disk**, **128 MiB WAL**, no active scan, zero reported dropped events, and `write_error=null`. The status counters were unchanged from the 15:06:32 sample while lag increased by 87 seconds; this interval shows no counter progress, but is too short alone to establish a new CPU-bound incident. Service PID **4093354** remained active with **zero restarts** and was consuming about **99% of one CPU**.
+- The latest journal still shows fanotify overflows at **15:02:52** and **15:06:18 UTC**. Root had **15 GiB free (92% used)**; `/dev/shm` had **5.4 GiB free**. No scan, restart, build, backup, quota change, or index mutation was performed. B01 is refreshed; B02/B03 remain open. The prior verified v5 backups remain in `/var/backups/dux-index`; no additional copy was made because a recovery snapshot already exists and additional read/write load is not justified during the active incident.
+
+### QUAL-152 Validate pressure telemetry at the classifier boundary — 2026-11-01 15:10 UTC
+
+- Follow-up source review found that `Health::sample` marked missing required telemetry unavailable, but `Health::level` trusted that marker and did not independently validate public fields. A directly constructed/default `Health` with unknown memory/disk (`-1`), NaN load, or invalid CPU count could therefore classify as Normal and allow a reconciliation if paired with a stale `Pressure::Normal` argument. Updated `src/guard.rs` so classification and its reason string fail closed on missing/invalid required memory, disk, load, and CPU-count values, and on an invalid disk threshold. Added regressions for the default unknown snapshot and seven malformed direct constructions. This closes the interface-level fail-open; the production call path still requires full-crate verification.
+- Exact current `src/guard.rs` was compiled with `rustc +1.99.1 --test` using the existing 508-byte harness, which stubs `util::fs_stat` and fault flags. **19/19 tests passed** in 0.14s with `--test-threads=1`, under a transient scope capped at **5% CPU / 512 MiB memory / no swap**. Current source SHA-256: `bda0e7c651655031c9c9556efec3c429b82f74a9925b9f8da7d3b2f5d5d3f8a0`; harness SHA-256 unchanged at `f663e98aed2c2773adb231c509bc8956d91541c9bc183984c6e70f6a99b2907f`; test binary SHA-256 `e0764a0f0789f034309a5ef08a9ad31d25c8daef34f64720eb86a20f41618008`. `rustfmt +1.99.1 --check --edition 2021 src/guard.rs` and `git diff --check` pass.
+- Scope remains module-only: the full Dux crate, Cargo tests, integration behavior, package, and live production behavior are not verified by this harness. Production remained active (PID 4093354, zero restarts), dirty/not caught up, with **156,003 pending**, **12,326 seconds behind**, no scan, and `write_error=null` at 15:10:10 UTC. Status counters advanced during the interval; a new dirty timestamp at 15:08:56 was attributed by status to changed mount topology. No build, scan, restart, or service/index mutation was made. B01/B07 refreshed; no release gate closed.
+
+### QUAL-153 Attribute the current CPU ceiling symptom and correct stale quota comments — 2026-11-01 15:11 UTC
+
+- At **15:11:29 UTC**, `ps -L` showed the installed daemon's sole thread (TID 4093354) at **98.7% CPU**. Effective systemd `CPUQuotaPerSecUSec=1s` is **100% of one CPU**; the service remained active with zero restarts and no scan. Between 15:10:10 and 15:11:29, watcher counters and pending work were unchanged (**156,003 pending**) while reported lag rose from **12,326 to 12,404 seconds**. This confirms a contemporaneous main-thread CPU/no-progress interval in the installed service, while its exact source remains unavailable; do not assign the cause to current source based on this observation.
+- Current worktree documentation said the packaged CPU quota was 50% in two `src/watch.rs` comments, but `packaging/dux.service` and current README specify a 100% process-wide ceiling. Corrected those comments to say the event-thread target is separate and scan/accounting workers share the one-CPU cgroup limit. This is comment-only; behavior is unchanged. `rustfmt +1.99.1 --check --edition 2021 src/watch.rs` and `git diff --check` pass. No full crate build or test was run.
+- B03 remains open: source-matched diagnosis and a controlled event-storm/backlog/overflow budget are still required. No service, quota, binary, database, or index change was made.
+
+### QUAL-154 Rescan current source snapshot for secrets — 2026-11-01 15:12 UTC
+
+- Rebuilt a deterministic snapshot of **124 tracked and non-ignored untracked source files**, then scanned its extraction with Gitleaks default rules (`dir`, full redaction, 5 MiB file cap, 60-second timeout). Result: exit 0, **no leaks found**; 2.30 MB scanned in 547 ms. This source snapshot was captured immediately before adding this qualification entry. Tree SHA-256 `cf0b71ee8f8fbd580318a724ff3bddb5172ea685feba13f8446a76e9b6162a8e`; archive SHA-256 `cf6b22f5cae6bf18eb5a5398131565722ffd8cb948256171b91e03a0281a4acd` (577,932 bytes); empty report SHA-256 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`. Preserved archive, manifest, and report under `target/readiness/source-security-review-20261101T1512Z/`; SHA-256 checksums were reverified after copying.
+- Scope excludes Git history, ignored files, `PRODUCTION_READINESS_AUDIT.md` (explicitly excluded from release inputs), host configuration, installed binaries, and production secrets outside the source snapshot. This is source-snapshot secret scanning only, not a complete security assessment. No production service or index changes occurred.
+
+### QUAL-155 Run focused backup and source-archive regression suites — 2026-11-01 15:13 UTC
+
+- Python **3.12.3** test suites passed: `test_dux_backup_index.py` **7/7** in 0.200s (including WAL-aware online backup, integrity/hash/mode verification, no-clobber publication, unsafe parent/database/sidecar rejection, schema validation, and disk reserve); `test_dux_source_archive.py` **4/4** in 1.500s (including deterministic bytes/normalized metadata, source-change detection, tree digest binding, and symlink-escape rejection). Total **11/11**. Both ran separately under transient limits **CPUQuota=5%, MemoryMax=512 MiB, MemorySwapMax=0**, with `TMPDIR=/dev/shm/dux-focused-tests-20261101`.
+- Exact test inputs: `scripts/dux-backup-index.py` SHA-256 `8ed6ed1b5befa2c6381821b610bf6e3faad37547a296c0c62e0a5f8d217ef726`; its test SHA-256 `fdaaaf8f11b5dc5f3c7a77cf4f9fe29a6a1db065b5c507cd82e28e0d5fc1075f`; `scripts/dux_source_archive.py` SHA-256 `c89f01d8920f1235764e5b0b102c192d3c8f10c690b4737dd0ada0c7bb2f28da`; its test SHA-256 `e2c77affcc7e1b28736ddd8158833715605daa650ee0b7119f8a19413bf9cd00`.
+- Post-test read-only check at **15:13:28 UTC**: production PID 4093354 active, zero restarts, dirty/not caught up, **156,317 pending**, **12,524 seconds behind**, no scan, and no write error. Counters did not move during the tests; CPU PSI avg10 was **3.55%**, memory PSI **0%**, and I/O PSI **0.01%**. Disk had **17 GiB free (91% used)**; `/dev/shm` had **5.4 GiB free**. No production database, service, binary, or quota was changed. These helper-suite passes do not qualify the daemon crate, release package, or live index exactness.
+
+### QUAL-156 Stop current-lock advisory audit after host CPU PSI crossed the stop threshold — 2026-11-01 15:14 UTC
+
+- Started `cargo audit --db /dev/shm/dux-advisory-db-20261101 --format json --file Cargo.lock` in a transient user scope capped at **5% CPU, 1 GiB memory, no swap**. Before an audit result was emitted, host CPU PSI avg10 rose above the established **20% stop threshold** (observed peak **55.96%**); interrupted that exact process. Subsequent process inspection confirmed no Cargo Audit process remained. At 15:14:55 UTC CPU PSI avg10 had fallen to **21.31%**, still above threshold. The tmpfs advisory database had reached about **44 MiB**; the incomplete run produced **no vulnerability result**, and no clean audit is claimed.
+- Production remained active with zero restarts, dirty/not caught up, **156,492 pending**, **12,610 seconds behind**, no active scan, and `write_error=null` at 15:14:55 UTC. Counters advanced intermittently but convergence and exactness remain unproven. Do not retry Cargo Audit on this host while CPU PSI is above threshold; use a reachable isolated builder or wait for a measured low-pressure window. No production database/service mutation occurred.
+
+### QUAL-157 Deny unused syscall groups while preserving fanotify FID resolution — 2026-11-01 15:17 UTC
+
+- Extended the **candidate package unit** syscall denylist to include `@swap`, `@reboot`, `@raw-io`, `@debug`, and `@cpu-emulation`, in addition to existing `@module` and `@mount`. Review of source and group members found no Dux use of those syscalls. `@resources` remains available for `nice`/`ioprio_set`, and `@privileged` remains available for fanotify and `open_by_handle_at`. The earlier decision to retain `@clock` for `clock_gettime` was based on an incorrect reading of systemd's group: `@clock` contains clock-changing syscalls, while clock reads and sleeps are implicitly allowed. The current unit denies `@clock`; a transient syscall smoke now verifies clock changes fail while `clock_gettime` succeeds. Alert hooks inherit this filter and still need compatibility review in the VPS rehearsal.
+- Expanded `scripts/dux-systemd-filter-smoke.py` to probe representative calls in each denied group and verify `open_by_handle_at` still reaches the kernel. Runtime transient-unit smoke passed: **restricted syscall groups denied; open_by_handle_at permitted**. `systemd-analyze verify packaging/dux.service packaging/dux-tunnel.service` exits 0. Offline `systemd-analyze security` score for the candidate package unit improved from **5.1 MEDIUM** (effective installed unit) to **4.2 OK**. Focused package lifecycle/policy suite passed **39/39** in 1.099s under CPUQuota 5%, MemoryMax 512 MiB, no swap, tmpfs test directory; `py_compile` passed. Unit SHA-256 `e3701f0978b278286c3fff9d31a77616d3d4b1182affa6f8991e0acdf824f8bf`; lifecycle policy SHA-256 `429007598dfdf07cf83ca56477d65a8ac7becd651a62ff82af509169fd7f0be7`; filter smoke SHA-256 `30895d37bc3991ef7c95f7acaf4108f97f525f1955b15446de8ee9d81e980ce4`.
+- This does not reduce required root/`CAP_SYS_ADMIN` exposure and is not yet qualified across Debian/Ubuntu/Rocky packages or user alert hooks. Production remains on its installed unit; at 15:17:16 UTC it was active with zero restarts, dirty/not caught up, **156,907 pending**, **12,751 seconds behind**, no scan, and no write error. CPU/memory/I/O PSI avg10 was 0.96%/0%/0.12%; root had **17 GiB free (91% used)** and `/dev/shm` **5.3 GiB free**. No live service/index/quota change occurred; B12 remains open.
+- Follow-up at **15:17:38 UTC**: production remained active with zero restarts, dirty/not caught up, **156,912 pending**, **12,774 seconds behind**, no scan, and no write error. Host CPU/memory/I/O PSI avg10 was **0.10%/0%/0.23%**; disk remained **17 GiB free (91% used)**. Counters advanced, but the backlog and lag continued to grow. The effective installed unit is still unchanged.
+
+### QUAL-158 Complete current Cargo.lock advisory audit after pressure subsided — 2026-11-01 15:18 UTC
+
+- Rechecked host pressure before retry: CPU PSI some avg10 was **0.15%** at 15:17:57 UTC. The earlier partial advisory database had reached 44 MiB. The fetch completed and a no-fetch confirmation then ran in scopes capped at **5% CPU, 1 GiB/512 MiB memory, no swap**. `cargo audit` **0.22.2** exited **0** against current `Cargo.lock` SHA-256 `fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`: **229 dependencies**, **1,395 advisories in the database**, **0 vulnerabilities**, **0 warnings**. Advisory database commit `2295466c4e9df26647fd67d8fa1c705ac2fc7f81`, dated 2026-10-30T12:12:39+01:00.
+- JSON report and manifest are preserved in `target/readiness/cargo-audit-current-20261101/`. Report SHA-256 `b36b975af14f4ba9382064952b4c74f6f9c93630e2693686233a175d0587dd7f`; manifest SHA-256 `5a360b3881afbca824d375c2becfa9543fd8d4d5825fd644f0eb4708b7d8bd16`. This closes only the dependency-advisory check for the recorded lockfile; it does not cover the installed binary, full supply chain, crate tests, or release package.
+- At 15:18:59 UTC production remained active with zero restarts, dirty/not caught up, **157,096 pending**, **12,854 seconds behind**, no scan, and `write_error=null`. CPU/memory/I/O PSI avg10 was **2.12%/0%/0.06%**; root had **18 GiB free (91% used)**. No production service or index action occurred; B01 remains open.
+
+### QUAL-159 Re-run loopback SSH tunnel restrictions in both GatewayPorts modes — 2026-11-01 15:20 UTC
+
+- Ran `scripts/dux-ssh-tunnel-qualification.py` with `GatewayPorts=no` and `GatewayPorts=clientspecified`, each in a transient scope limited to **5% CPU / 512 MiB / no swap**, with temp files in `/dev/shm`. Both runs passed all eight checks: unknown/mismatched host keys rejected; verified key accepted; forced command suppresses requested shell; permitted reverse forward carries a real payload; listener remains loopback; unlisted remote listener and local forward are denied. OpenSSH **9.6p1**. Test creates a temporary sshd on `127.0.0.1` only; post-run process inspection confirmed all temporary sshd/ssh processes exited and temp dirs were removed.
+- Preserved report: `target/readiness/ssh-tunnel-loopback-qualification-20261101/manifest.json`, SHA-256 `97fc4207c33582fe9ca41c84705b415f6ab664f1d982cb4da07fc5f61c00b465`. It binds test source SHA `c5a228d5e912274bb3c9d06d78d2ba66e6806b6c5ef66d0d98ac73fccc71a19d`, workflow-test SHA `7cf27f0c68d333213de6f0379f12601f7df1250672a7326acab007dbbf490ffa`, and current `src/tunnel.rs` SHA `dc75f7bca03b6975e10e45e6511bbacdf7f81cada81e61c5d2d93981a3f170fd`.
+- Scope limit: the live OpenSSH test builds the authorized-keys policy in its Python fixture; it does not invoke the unbuilt current Dux binary. Rust tunnel unit tests and package integration remain pending full-crate/guest qualification. Production at 15:20:29 UTC remained active with zero restarts, dirty/not caught up, **157,020 pending**, **12,944 seconds behind**, no scan, and no write error. CPU/memory/I/O PSI avg10 was 14.07%/0%/0.38%; root had **18 GiB free (91% used)**. No production service, key, config, quota, or index changed.
+
+### QUAL-160 Run the broad host Python suite and offline Rust compile check — 2026-11-01 15:25 UTC
+
+- The constrained broad Python discovery suite passed **209 tests in 18.701s**. It deliberately excluded four live-quota tests that stop a systemd unit, the release-builder CLI suite (11 tests), and one debug-artifact test; this is not the complete Python suite. Earlier output from an unbounded release-builder test run was interrupted and is not counted as a pass.
+- `cargo metadata --locked --no-deps` passed. `cargo check --locked --offline --jobs 1` passed for the current source in **26.60s**, under a transient user scope capped at **10% CPU, 2 GiB memory, no swap, 600s runtime**. This is a type-check, not a linked/tested release binary, and it does not qualify packaging or runtime behavior.
+- Attempted `cargo test --locked --offline --jobs 1 --bin dux` under **5% CPU, 1.5 GiB memory, no swap, 900s runtime**. Host CPU PSI avg10 crossed the documented **20% stop threshold** (peak observed **22.64%**) while the test build was active; an unrelated Go compiler and the production Dux daemon were also consuming CPU, so attribution is mixed. The exact Cargo process was interrupted and exited 130 before any Rust tests ran. The run is incomplete, not a failure/pass of Rust tests. A preceding `--lib` attempt exited 101 because this package has a binary target and no library target; it made no test changes.
+- Retried once after PSI temporarily returned to 1.79%; another unrelated Go compile started during the retry. Stopped the exact Cargo process at **19.64% avg10** before crossing the 20% threshold; it exited 130 before running Rust tests. This retry also provides no Rust test result and confirms on-host cargo tests are unsafe to continue while competing host builds are active.
+- After stopping, CPU PSI avg10 returned to **15.00%**; no Cargo/rustc test process remained. Production service stayed active at PID **4093354**, **zero restarts**. Read-only status at 15:25:52 UTC: dirty/not caught up, **158,872 pending**, **13,268 seconds behind**, no scan, `write_error=null`, and `events_dropped=0`; root had **17 GiB free (91% used)**. No production service, quota, index, or configuration mutation occurred.
+- Gate remains open for full Rust tests, linked release build, reproducible artifact provenance, package/upgrade/rollback tests, v5→v6 migration on a copied production index, exactness and fault matrix, scale and endurance qualification, and canary. Current source is still not a production-qualified candidate.
+- Post-stop recheck at 15:27:08 UTC: service remained active with zero restarts; `dux --json status` showed **159,108 pending**, **13,342 seconds behind**, dirty/not caught up, no scan, no write error, and zero reported dropped events. CPU PSI avg10 was **12.98%**; root had **17 GiB free (91% used)**. No test process remained.
+
+### QUAL-161 Static packaging checks and refreshed disk inventory — 2026-11-01 15:29 UTC
+
+- `cargo fmt --all -- --check`, `shellcheck` on the release builder and Debian helper scripts, `bash -n`, `dash -n`, `systemd-analyze verify` for both units, Python `compileall`, and `git diff --check` all exited successfully.
+- Refreshed `/home/dux/target` usage: **16 GiB total**, including **8.6 GiB `target/readiness`** and **3.7 GiB `target/debug`**. The largest identified retained qualification artifacts include the **2 GiB** `p0-churn-oom-failure-20261026/filesystem.img`, the **1.4 GiB** `production-review-20261030`, and the **534 MiB** `canary-r16-20261027` rollback evidence. `/home/dux/target/readiness/vms` is absent. These failure/rollback artifacts were preserved; no cleanup was performed in this check.
+- A third capped `cargo test --bin dux` attempt was stopped at **19.81% CPU PSI avg10** before the documented 20% threshold when a separate Go compiler consumed ~115% CPU. It exited 130 before any Rust test executed. At 15:29:47 UTC CPU PSI avg10 remained 18.85%; Dux stayed active at PID **4093354**, zero restarts, with dirty/not-caught-up state, **161,510 pending**, **13,503 seconds behind**, no scan, no write error, and zero reported dropped events. Root had **16 GiB free (92% used)**. No production service/index/configuration changes occurred.
+- The full Rust test and release build remain unqualified on this host because unrelated recurring builds repeatedly raise CPU pressure. Continue these gates in the isolated guest/VPS.
+
+### QUAL-162 Run release CLI and debug-artifact packaging regressions — 2026-11-01 15:32 UTC
+
+- Ran `test_build_release_cli.py` under a 5% CPU / 512 MiB / no-swap transient scope with `/dev/shm` as `TMPDIR`: **11/11 passed** in 29.099s. It exercises release CLI argument validation, source/version/revision provenance rejection, unpinned `cargo-auditable` rejection, and rollback of previous artifacts after injected publication failure. The first invocation used a nonexistent TMPDIR subdirectory and failed during setup; the corrected invocation above is the valid test result.
+- Ran `test_build_release_debug_artifact.py` under the same limits: **1/1 passed** in 15.000s. It builds a small static C fixture and verifies build-ID-bound debug symbols and package payload hashes. This does not build or qualify the Dux Rust release binary.
+- These are additional to the earlier constrained 209-test selection, for **221 passing selected Python tests** total. Four service-stopping live-quota tests remain excluded. Exact inputs: `test_build_release_cli.py` SHA-256 `3cbe41c0e6c1f3497803e0a877e146682867d7f6a72edf66220c1d66c8d98771`; `test_build_release_debug_artifact.py` SHA-256 `064990bb25ea94bfc0c9ba3d38a777a033ade24859f3de3ae4b6145c697f7528`; `build-release.sh` SHA-256 `861210cb11111401528ea720791ee74e6586b0ed72f2da51eff18d099efda848`; source archive helper SHA-256 `c89f01d8920f1235764e5b0b102c192d3c8f10c690b4737dd0ada0c7bb2f28da`.
+- At 15:32:19 UTC production remained active, PID **4093354**, zero restarts, dirty/not caught up, **164,981 pending**, **13,655 seconds behind**, no scan, `write_error=null`, and zero reported dropped events. CPU PSI avg10 was **5.78%**; root had **15 GiB free (92% used)**. No production mutation occurred. Current-source Rust tests/build and production qualification remain open.
+
+### QUAL-163 Rebuild pressure-guard module tests against the current source hash — 2026-11-01 15:33 UTC
+
+- Hash review found the older QUAL-149 test binary did **not** match the then-current `src/guard.rs`; its 18 passing tests were historical evidence only. Rebuilt from the preserved 508-byte harness against current `src/guard.rs` using Rust **1.99.1**, under **5% CPU / 512 MiB / no swap**. The exact current source passed **19/19** tests in **0.12s**, including fail-closed direct telemetry and unknown-health regressions.
+- Current guard source SHA-256 `bda0e7c651655031c9c9556efec3c429b82f74a9925b9f8da7d3b2f5d5d3f8a0`; harness SHA-256 `f663e98aed2c2773adb231c509bc8956d91541c9bc183984c6e70f6a99b2907f`; test binary SHA-256 `e0764a0f0789f034309a5ef08a9ad31d25c8daef34f64720eb86a20f41618008`. Machine report `target/readiness/current-source-guard-module-tests-20261101/current-source-guard-module-tests-r2.json` SHA-256 `4e8423a1b17d493c2b56096ad4789e03152df3d8850a1ca189c074c18d1d0cee`.
+- This is exact module-level coverage only; stubs replace `crate::util::fs_stat` and four fault flags, and no full Cargo tests or production binary are covered. At 15:33:19 UTC production remained active with zero restarts, dirty/not caught up, **164,981 pending**, **13,715 seconds behind**, no scan, no write error, zero reported dropped events, and root **15 GiB free (93% used)**. No production mutation occurred.
+
+### QUAL-164 Abort temporary live-index snapshot when host pressure approached the limit — 2026-11-01 15:35 UTC
+
+- A first attempt to place the backup directly in shared `/dev/shm` was correctly rejected by `dux-backup-index.py` because that directory is world-writable. Retried in a private mode-0700 `TemporaryDirectory` on tmpfs, with the helper in a 5% CPU / 1.5 GiB RAM / no-swap scope. The copy reached the database's ~755 MiB size, but CPU PSI avg10 rose to **19.54%** during verification; stopped before the 20% limit. Therefore this attempt yields **no integrity/backup pass**.
+- The temporary Python context cleaned the private snapshot directory; `/dev/shm` returned to its prior 5.3 GiB free, no backup helper/scope remained, and the production SQLite files were not modified. After stopping, host CPU PSI avg10 reached **30.68%**; a subsequent process sample showed separate Go vet and Python certification tests active. Dux remained active, PID **4093354**, zero restarts; status showed dirty/not caught up, **167,551 pending**, **13,834 seconds behind**, no scan, no write error, and zero reported dropped events. Root had **15 GiB free (92% used)**. No production service/index/configuration action occurred.
+- The v5 database still has only prior read-only structural evidence (`PRAGMA quick_check=ok` at the earlier audit timestamp); the incomplete snapshot attempt must not be presented as a current integrity result. Reattempt on an isolated host when available.
+
+### QUAL-165 Re-scan the current source archive for embedded secrets — 2026-11-01 15:36 UTC
+
+- Rebuilt a deterministic archive of **124 tracked/non-ignored source inputs** and scanned its extraction with default Gitleaks rules, redacted JSON, 5 MiB file cap, and 60-second timeout. Gitleaks exited **0** with report `[]` (no findings). Tree SHA-256 `dc34090ce84869e43b622ca05c039ab3aed1ec73d62fbda7c45827eba7493b13`; archive SHA-256 `4cd8c24608c43f638be30eec221df3920637afb381c7ca1f843500fccb71d3ea` (584,907 bytes); report SHA-256 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`; manifest SHA-256 `b68bf259bdecdf1bc8f160d50729ea8e3eaf27cd1b9b6d658a21e6e371c02a94`. Evidence is under `target/readiness/source-security-review-20261101T1536Z/`.
+- Scope excludes Git history, ignored build output/`target`, host files outside the archive, and other users' homes; it is not a host credential audit. At 15:36:51 UTC production remained active with zero restarts but dirty/not caught up, **168,060 pending**, **13,926 seconds behind**, no scan, no write error, and zero reported dropped events. Root had **15 GiB free (92% used)**. No production mutation occurred.
+
+### QUAL-166 Bind the installed v5 database and executable state — 2026-11-01 15:37 UTC
+
+- Read-only SQLite metadata inspection confirms `/var/lib/dux/dux.db` has schema version **5**, indexed root `/`, 8 tables, 9 indexes, and 3 triggers. Main DB is **755,593,216 bytes**, WAL **134,217,728 bytes**, SHM **65,536 bytes**, all mode **0640**. No fresh `quick_check` was run in this step; the snapshot/integrity attempt in QUAL-164 was aborted.
+- Installed package reports **0.6.3-16**; `/usr/bin/dux --version` reports `0.6.3 (a42739776bbd+modified) [production]`; installed binary SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`. Current worktree still declares database schema version **6**. This binds the deployed package/index mismatch but does not establish provenance of the installed build or qualify v5→v6 rebuild/rollback. No service or index mutation occurred.
+- Latest read-only status at 15:37:33 UTC: active service PID **4093354**, zero restarts; dirty/not caught up, **168,060 pending**, **13,968 seconds behind**, no scan, no write error, zero reported dropped events. CPU PSI avg10 **0.17%**; root **15 GiB free (92% used)**.
+
+### QUAL-167 Review the vendored jwalk patch and its dependency provenance — 2026-11-01 15:38 UTC
+
+- `cargo tree --offline -i jwalk` confirms Dux resolves `jwalk 0.8.1` from `/home/dux/vendor/jwalk`. Compared all **34** vendored files to the cached crates.io `jwalk-0.8.1` source: only `src/core/read_dir.rs` and `src/lib.rs` differ. The original cached `.crate` SHA-256 is `2735847566356cd2179a2a38264839308f7079fa96e6bd5a42d740460e003c56`; vendor tree SHA-256 is `54485dd8b91508209c9d4789fd8ea5b687f172bf61ef38da1ae938b5e2927be3`. The vendored MIT license is byte-identical to the cached upstream license.
+- Reviewed patch behavior: the new `ClientState::read_dir_state_for_entry` defaults to cloning inherited state (preserving upstream behavior); Dux overrides it to propagate the specific entry's path-instance state into each child directory read. The only other code difference is the equivalent `usize::MAX` spelling. `cargo check --locked --offline` previously passed against this path dependency. Dux has a `jwalk_hands_each_directory_its_own_parallel_read_state` integration regression in `src/scan.rs`, but it has not run in the current full-crate test suite. This review does not replace that test, full traversal/alias tests, or upstream jwalk tests.
+
+### QUAL-168 Recheck live convergence after static review — 2026-11-01 15:39 UTC
+
+- At 15:39:43 UTC Dux remained active at PID **4093354**, zero restarts, dirty/not caught up, **168,269 pending**, **14,099 seconds behind**, no scan, `write_error=null`, zero reported dropped events. Host CPU PSI avg10 was **0.03%** (avg60 **1.60%**); root had **15 GiB free (92% used)**. The backlog grew by **209** updates and lag by **131 seconds** since 15:37:33. No production action occurred; this remains evidence against convergence, not a healthy/ready state.
+
+### QUAL-169 Stop capped full Rust test build at CPU-pressure threshold — 2026-11-01 15:40 UTC
+
+- Retried `cargo test --locked --offline --jobs 1 --bin dux` with `CARGO_INCREMENTAL=0` in a transient scope capped at **5% CPU, 2 GiB memory, no swap, 900s** after CPU PSI had fallen to 0% avg10. A concurrent Go test workload resumed; CPU PSI reached **22.71% avg10** by 15:40:31 UTC, exceeding the 20% stop limit. Stopped the exact Cargo process; it exited **130** at crate compilation (`Compiling dux`), before any Rust test executed. At 15:40:42, Cargo/rustc were gone; Dux remained active PID **4093354**, zero restarts. This is an incomplete run, not a test failure or pass.
+- Production status at 15:40:42 UTC: dirty/not caught up, **168,450 pending**, **14,161 seconds behind**, no scan, `write_error=null`, zero reported dropped events. CPU PSI avg10 remained **24.40%** from competing work; root had **15 GiB free (92% used)**. No production service/index/configuration changes occurred.
+
+### QUAL-170 Refresh severe host pressure and reclaim a duplicate Dux build cache — 2026-11-02 08:34 UTC
+
+- Fresh host check at 08:29 UTC showed root **98% used / 4.4 GiB free**, `/dev/shm` **9.9/13 GiB used**, and the 4 GiB swapfile **fully used**. Top-level disk usage: `/tmp` **57 GiB**, `/var` **50 GiB**, `/home` **34 GiB**, `/root` **23 GiB**, `/usr` **6.6 GiB**; `/var/tmp` alone is **20 GiB**. `docker system df` reports 54 volumes (3 active), 5.068 GiB total / 4.853 GiB nominally reclaimable, and 3 active images totaling 5.089 GiB. These other-project caches/volumes were not deleted.
+- Identified `/tmp/dux-clippy-target` as a Dux Cargo build cache, **1.3 GiB**, last modified Oct. 30, with no process using it. Its 75,748,616-byte `debug/dux` executable had SHA-256 `0586e746f8ddb08e555fb940dfecfe1deda6b613d32f89109b971df60fdee295`, identical to `/tmp/dux-test-target/debug/dux`; the latter test target was retained. After verifying the duplicate, added Cargo's standard cache tag and ran `cargo clean --manifest-path /home/dux/Cargo.toml --target-dir /tmp/dux-clippy-target`; Cargo removed **3,277 files / 1.5 GiB**. Root free space increased to **5.0 GiB**, still **98% used**. This removed only a rebuildable duplicate cache, not project source or readiness evidence.
+- A full Cargo test attempt using `/tmp/dux-test-target` was stopped when CPU PSI avg10 reached **23.99%**, before test execution; no test result. After cleanup, CPU PSI avg10 was **88.39%** and swap remained full, so no further builds were run. `readiness-vps` is not configured to an address and DNS lookup fails; no isolated guest is reachable from this host yet.
+- Production at 08:34:19 UTC remained active at PID **4093354**, zero restarts, dirty/not caught up, **114,740 pending**, **74,976 seconds behind**, **502,309 reported dropped events**, no scan, `write_error=null`. Journal samples from Nov. 2 include fanotify overflow at 03:50, 08:18, and 08:24 UTC plus repeated reconciliation deferrals under memory/high-load pressure. No Dux service, database, quota, or configuration change occurred.
+
+### QUAL-171 Track rapid disk consumption from concurrent host builds — 2026-11-02 08:35 UTC
+
+- Root free space fell from **5.0 GiB at 08:34:19** to **3.7 GiB at 08:35:42** while multiple unrelated Go compiler processes were writing in separate `/tmp/go-build*` directories. CPU PSI avg10 reached **76.79%** (avg60 **73.55%**); swap remained **4/4 GiB used**. No individual recent file exceeded 500 MiB; this is distributed temporary compiler output. I left these live temp directories untouched.
+- Dux at 08:35:42: active PID **4093354**, zero restarts, dirty/not caught up, **114,740 pending**, **75,058 seconds behind**, **502,309 reported dropped events**, no scan, `write_error=null`. Root is **98% used**, `/dev/shm` 9.9/13 GiB used. No production or unrelated test process was stopped.
+- Follow-up at 08:36:37 UTC: pending remained **114,740**, lag increased to **75,112 seconds**, dropped count stayed **502,309**, no scan, no write error. CPU PSI avg10 **87.97%** (avg60 **80.09%**); root **4.5 GiB free (98% used)**; swap remained full. Service PID/restart state unchanged.
+
+### QUAL-172 Recheck production after renewed memory and I/O pressure — 2026-11-02 08:59 UTC
+
+- Host PSI: CPU avg10 **59.41%**, memory avg10 **32.80%**, I/O avg10 **37.70%**. Root **3.8–4.0 GiB free (98% used)**; `/dev/shm` 9.9/13 GiB used; swap **4/4 GiB** used. Concurrent Go compilers and `gosec` processes were active; the `readiness-vps` alias still fails DNS resolution.
+- Dux remained active PID **4093354**, zero restarts, but is **paused for memory pressure**, dirty/not caught up, **119,074 pending**, **76,487 seconds behind**, **502,309 reported dropped events**, no scan, and `write_error=null`. Since 08:36:37, pending increased **4,334** and lag by **1,375 seconds**. No service/index/configuration mutation or scan occurred. Heavy validation remains unsafe on this host.
+
+### QUAL-173 Confirm Dux resumed processing but still lacks convergence — 2026-11-02 09:02 UTC
+
+- Read-only status at 09:02:49 UTC: `/usr/bin/dux` remains active as PID **4093354**, with **0 restarts**. It is no longer paused and reports no active scan, but remains dirty/not caught up with **119,671 pending**, **76,689 seconds (~21.3 hours) behind**, **502,309 dropped events**, **13,448,352 seen / 3,593,044 resolved / 127,104 committed**, `write_error=null`, and a **128 MiB WAL**. Index size is **2,152,972 nodes**. The daemon was consuming about **93% of one CPU**; host CPU PSI avg10 was **61.02%**, while memory and I/O PSI avg10 had eased to **1.74% and 2.41%**. Root remained **98% used with 3.7 GiB free**; `/dev/shm` had **2.9 GiB free**.
+- The latest journal entry says host pressure recovered and index writes resumed at 09:02:34. This is evidence of renewed event processing, not a recovery scan, backlog drain, or exactness pass. No build/test, service/index/configuration mutation, or cleanup was performed in this check.
+- The tracked 14 release blockers remain open. B01 and B02 now reflect the current backlog/lag and Nov. 2 overflow evidence. Current-source full-Cargo/package qualification and a reachable isolated builder remain unavailable under present host pressure; the production service is still not a safe qualification target.
+
+### QUAL-174 Run isolated Python qualification regressions under resource limits — 2026-11-02 09:06 UTC
+
+- Ran `python3 -m unittest discover -s scripts -p 'test_*.py' -v` under a transient systemd scope capped at **5% CPU, 1 GiB memory, no swap**, with test temp files on `/dev/shm`. The suite executed **225 tests in 71.501 seconds**: **224 passed and one errored** because `test_mid_publish_rename_failure_restores_previous_release_files` exceeded that test's internal 15-second subprocess timeout under the artificial 5% CPU cap. The traceback is `subprocess.TimeoutExpired`; it is a timing failure, not an assertion failure. The timed-out fixture left only its own temporary payload tree, which was verified and removed.
+- Reran that exact test alone at **25% CPU / 512 MiB / no swap**; it passed **1/1 in 2.613 seconds**. This targeted pass does not convert the broad run to 225/225; the broad run remains recorded as 224/225 under the stricter cap plus one successful targeted rerun. No production services were stopped or modified.
+- At 09:06:08 UTC production remained active (PID **4093354**, zero restarts), unpaused but dirty/not caught up, with **122,228 pending**, **76,884 seconds behind**, **502,309 dropped events**, **13,457,959 seen / 3,598,424 resolved / 127,232 committed**, no scan, `write_error=null`, and a **128 MiB WAL**. Relative to 09:02:49, seen/resolved/committed rose **9,607 / 5,380 / 128**, while pending grew **2,557** and lag grew **196 seconds**. Processing resumed, but it is not converging. CPU PSI avg10 was **1.14%**; root was **99% used with 3.6 GiB free**. No Rust build was attempted.
+
+### QUAL-175 Record a CPU-bound no-progress interval and another kernel overflow — 2026-11-02 09:07 UTC
+
+- Paired read-only `dux status --json` samples at 09:06:51 and 09:07:14 UTC were unchanged for `events_seen` (**13,523,508**), `events_resolved` (**3,598,586**), `updates_committed` (**127,360**), and `pending_updates` (**122,154**). `behind_seconds` increased from **76,925** to **76,949**; dirty reason remained `non-watched filesystem mounts changed; reconciling visible paths`, with no active scan and no write error. The daemon process remained runnable at about **93% of one CPU** while CPU PSI avg10 was **0.01%** in the later sample. This confirms a short no-progress interval but does not identify its code path or prove a sustained stall.
+- The service journal recorded another `fanotify queue overflow` at **09:06:27 UTC**. Root was **99% full with 3.2 GiB available** at 09:07:14; Dux remained PID **4093354** with zero restarts. No service/index/configuration mutation occurred. B02 now includes this overflow; B03 remains open for source-bound CPU profiling and event-storm qualification.
+
+### QUAL-176 Recheck readiness storage ownership and stop the inventory at the pressure guard — 2026-11-02 09:11 UTC
+
+- The read-only Dux-sidecar scan found **840** old (`>24 h`) top-level regular `-wal`/`-shm` files under `/tmp/dux*`; **758** had no matching main DB and no open descriptor, totaling **21,155,840 allocated bytes (20.18 MiB)**. The remaining sidecars either had a matching DB or were newer. No sidecars were deleted because the reclaimable amount is immaterial and retained test-state provenance was not individually qualified.
+- The largest readiness input remains `target/readiness/p0-churn-oom-failure-20261026/filesystem.img`: a **2 GiB allocated raw ext4 test filesystem**, not a VM disk, accompanied by a failure report and SHA-256 `8b1588f793bd734af76e40402e84ca3fb22cb5616025fd712aff20fc2f6139ec`. Five historical Cargo targets initially totaled about **1.192 GiB**. Verified the `diagnostic-build` binary against the manifest-bound R43 static artifact (SHA-256 `35149a246437c5520f7bc2eaee5c413fb5f75598eae29fa97b1b06d7302d9f21`), `r44-build` against the exact `/usr/bin/dux` payload in retained DEB 0.6.3-42 (SHA-256 `d9d6835a91391716662b51a77ebaf77ff50726db64f5bf055afbc610b52c2eb0`), and `r45-build` against the checksum-verified R45 static artifact and manifest (SHA-256 `9d6d97e2512190c127839dc462e16566e6bfa8181469cd2e7e491da1ae6c4c28`). Removed only those three duplicate rebuildable Cargo caches with `cargo clean`; each reported 1,092 files / 237.7 MiB removed. Preserved `r45-fault-build` and `r46-build` because their binaries are unique. No release package, source archive, failure report, or fault binary was deleted.
+- Ran the repository's read-only `dux_storage.inventory("target/readiness", 0)` at a 10% CPU cap. It had not produced a complete report when CPU PSI avg10 crossed **27.28%**; the exact inventory process was interrupted (exit **130**). This is **no result**, not a completed capacity report. No artifact mutation occurred. Root space recovered from **3.2 GiB free / 99%** at 09:07 to **5.4 GiB free / 97%** at 09:11 during the same interval as unrelated Go test activity ended; causality is not assigned.
+- Production at 09:11:42 UTC: active PID **4093354**, zero restarts, unpaused, dirty/not caught up, **123,896 pending**, **77,218 seconds behind**, **502,309 dropped**, **13,629,489 seen / 3,607,823 resolved / 128,512 committed**, no scan, no write error. Compared with 09:07:14, seen/resolved/committed rose **105,981 / 12,237 / 1,152**, pending grew **1,742**, and lag grew **269 seconds**. This is processing without convergence; no production mutation occurred.
+
+### QUAL-177 Refresh live incident and current-tree static checks — 2026-11-02 09:14 UTC
+
+- Read-only status at 09:14:11 UTC: active PID **4093354**, zero restarts, dirty/not caught up, **124,748 pending**, **77,366 seconds behind**, **502,309 reported drops**, **13,634,256 seen / 3,612,446 resolved / 128,896 committed**, no scan, and `write_error=null`. Compared with 09:11:42, seen/resolved/committed advanced **4,767 / 4,623 / 384**, while pending grew **852** and lag grew **148 seconds**. The index continues to process but fails to converge.
+- Journal since 09:00 UTC adds another `fanotify queue overflow` at **09:10:13**. `ps -L` shows one runnable Dux task consuming **93% of one CPU**; systemd's process-wide quota is **100%**, with `MemoryCurrent=415,277,056` bytes and `MemoryPeak=445,493,248` bytes. The same timestamp window has no active scan. This confirms the target mismatch/loss symptom; installed-binary source and stack symbols are still unavailable, so no source-level root cause is assigned.
+- `cargo fmt --all -- --check` passed under **CPUQuota 5%, MemoryMax 512 MiB, no swap**; `git diff --check` passed across the worktree. `Cargo.lock` remains SHA-256 `fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`, matching the prior zero-advisory `cargo audit` evidence. These are static/dependency checks only; no current-source Rust compile or test was run and no production mutation occurred.
+- Root at this sample was **98% used / 4.6 GiB free**. A separate Go linker/test remained active under `/var/tmp`; I did not touch it. B01/B02 now reflect the 09:14 state and latest observed overflow.
+
+### QUAL-179 Recheck disk pressure, refresh incident register, and scan the exact source handoff — 2026-11-02 09:23 UTC
+
+- Latest live status at **09:22:47 UTC**: Dux active, dirty/not caught up, **127,021 pending**, **77,888 seconds behind**, **502,309 reported drops**, no scan, and `write_error=null`. The journal records another fanotify queue overflow at **09:20:03 UTC**. Compared with 09:20:09, event counters advanced but pending rose by 1,878 and lag rose by 163 seconds; the index remains nonconverged. No service or index mutation was made.
+- Disk was **98% used with 4.0 GiB free**. Read-only `du` inventory measured `/tmp` at **55 GiB**, `/var/tmp` at **20 GiB**, `/home/dux/target` at **16 GiB**, with `/home/dux/target/readiness` **8.6 GiB** and `/home/dux/target/debug` **3.7 GiB**. Large `/tmp` and `/var/tmp` entries belong to other project names/workspaces; they were left untouched. The retained `/tmp/dux-test-target` is a **1.3 GiB** Cargo cache, last updated Oct. 30, with no Rust/Cargo process active; it remains useful as a warm dependency cache for the deferred build and was preserved. No VST or session-archive directory matching the earlier requested paths was present under `/home/dux`.
+- Rebuilt and scanned the exact source handoff after the B01/B02 register refresh. Gitleaks default rules, `--no-git`, full redaction, 5 MiB target cap, and 60-second timeout completed with exit **0** and **zero findings** in 1.0s. Archive SHA-256 `a2962a4110cdedec402f2f6ed48dea50fdd8d3a8001a5813b336ca6ef9c3612f`; redacted empty JSON report SHA-256 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`, preserved under `target/readiness/source-security-review-20261102T0923Z/`. This covers only the 124-file source snapshot, not Git history, ignored files, host secrets, installed artifacts, or production data.
+- The handoff remains unqualified. Full Rust tests/build, verified production backup and restore, schema migration/rollback, live exactness, final-binary fault/scale/endurance testing, and canary remain open. No production package, service, database, or configuration was changed.
+
+### QUAL-180 Record renewed pressure and another fanotify overflow — 2026-11-02 09:27 UTC
+
+- At **09:26:49 UTC**, production Dux remained active with zero restarts, dirty/not caught up, **128,326 pending**, **78,123 seconds behind**, **502,309 reported drops**, no scan, and `write_error=null`; systemd still reports reconciliation deferred. Since 09:22:47, events seen/resolved/committed advanced, but pending rose by **1,305** and lag by **235 seconds**.
+- The journal recorded another fanotify overflow at **09:23:38 UTC**. CPU PSI at 09:26:49 was **30.09% avg10 / 20.77% avg60**; an unrelated Go compiler was using **306% CPU** to build the `/home/xgenstack.com/backend` test target. This demonstrates real concurrent host pressure during recovery, but does not explain prior intervals or assign the installed binary's behavior to current source. No Dux build/test was started.
+- Current pressure and the isolated builder's unknown role leave exact-source full-crate qualification unstarted. No production service/index change was made.
+
+### QUAL-181 Verify the installed R16 package payload and correct provenance classification — 2026-11-02 09:33 UTC
+
+- `dpkg-query` reports installed package `dux 0.6.3-16`. The retained R16 DEB metadata agrees; its `SHA256SUMS` verifies, and streaming `usr/bin/dux` directly from the DEB yields SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`, exactly matching the installed executable. The R16 build manifest also records that binary digest and source-tree SHA-256 `3fa91992e998d8f6777c241be96061c5948b9b323978c0d204ff869b78224cc8`, 57 source inputs, `worktree_dirty=true`, and rustc 1.99.1; manifest SHA-256 is `3cab6005ac3b5084c86e50a02fed6e4d584e5aaa8819e2844dc539a36a3134ce`.
+- Corrected B08: the installed binary has no embedded source digest, but a retained, hash-valid build manifest binds it to a dirty-source digest. The exact source contents/archive and matching symbols are absent from the R16 artifact directory; current 124-input source tree is a different digest. This improves binary/package identity evidence but does not make the build reproducible or qualify current source.
+- No package, service, or index change occurred. Full current-source build/tests, v5→v6 migration/rollback, exactness, and final-artifact release gates remain open.
+
+### QUAL-182 Recheck the active production blocker and isolated-builder admission — 2026-11-02 09:39 UTC
+
+- The installed package remains `dux 0.6.3-16` (R16), binary SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`. At 09:39:33 UTC systemd reports active PID **4093354**, zero restarts, and `Reconciliation deferred; waiting for normal host pressure`. Read-only status reports dirty/not caught up, **135,137 pending**, **78,891 seconds behind**, **502,309 dropped events**, no active scan, and `write_error=null`. The event counters advanced from 09:37, but pending and lag did not improve; this is not recovery or convergence.
+- Root has **2.27 GiB available (99% used)**. `/dev/shm` has **2.89 GiB available**, below the VM runner's **3 GiB** ephemeral workspace requirement for even the standard 2 GiB guest. The runner's persistent-workspace reserve is 8 GiB in addition to its 2 GiB image requirement. `target/readiness/vms/images.json` and the qualification VM image directory are absent, although `/dev/kvm` exists. Host memory availability is about 15.3 GiB; the immediate guest admission blockers are missing verified images and insufficient workspace capacity. No build/test or service/index/package/configuration mutation was started.
+- The current R16 executable remains installed because there is no source-bound, fully tested and packaged replacement candidate, and the production index has not recovered to a stable exact baseline. Current source still requires isolated build, full test and migration/package qualification, fault/scale/endurance gates, then an exactness-gated canary. The `vps-4` peer previously inspected is not a clean builder: it contains Dux database state and a broken auto-restarting unit, and was left untouched.
+
+### QUAL-183 Preserve the retained failure reproduction during tmpfs capacity review — 2026-11-02 09:42 UTC
+
+- At 09:41:40 UTC production remained active at PID **4093354**, zero restarts, dirty/not caught up, with **137,774 pending**, **79,015 seconds behind**, **502,309 reported drops**, no active scan, and `write_error=null`; systemd continued to report reconciliation deferred. Since 09:39, pending rose by **2,637** and lag by **124 seconds**, further evidence that production is not converging.
+- Root had **2.0 GiB free (99% used)** and `/dev/shm` **2.9 GiB free**. The largest identified Dux-owned tmpfs workspace that could otherwise be mistaken for disposable scratch is `/dev/shm/dux-readiness-7_2g8vnk` (about **508 MiB allocated**, containing a 2 GiB sparse `filesystem.img`, `crash.marker`, `daemon.log`, and runtime heartbeat). The audit records this as the retained failed R45 workspace, restored after exact content/metadata comparison. It was preserved because it is reproduction evidence. No other-project data or readiness artifacts were removed.
+- A read-only search found no QCOW2 qualification disk or active QEMU/qualification VM. The local builder remains unavailable, and the source handoff needs refreshing after this qualification-document update. No Dux build/test, service/package/index change, or artifact deletion occurred.
+
+### QUAL-185 Reclaim verified duplicate release-build caches — 2026-11-02 09:45 UTC
+
+- Inspected the five historical Cargo targets under `target/readiness/production-review-20261030/core-limit-r40/` (about **1.192 GiB** combined). `diagnostic-build` exactly matched the retained R43 manifest-bound static binary; `r44-build` exactly matched the `/usr/bin/dux` payload extracted from retained DEB 0.6.3-42; `r45-build` exactly matched the R45 static executable whose package, source archive, manifest, and `SHA256SUMS` verify. The retained R43 and R45 package checksum manifests passed.
+- No `cargo` or `rustc` process was active. Used `cargo clean` only on those three verified production-build cache directories. Cargo removed **1,092 files / 237.7 MiB per directory**, **713.1 MiB reported total**. The resulting filesystem sample was 99% used with **2.4 GiB available**; concurrent host writes make the `df` free-space delta smaller than the cleanup total. Preserved `r45-fault-build` and `r46-build` because their executable hashes are unique, along with all package/source/failure evidence.
+- No Rust build/test, release artifact deletion, production service/index/package/configuration mutation, or unrelated project cleanup occurred. Full release qualification and live exact recovery remain open.
+- Follow-up read-only sample at **09:45:37 UTC**: production remained active (PID **4093354**, zero restarts), dirty/not caught up, **141,089 pending**, **79,251 seconds behind**, **502,309 reported drops**, no active scan, and no write error; systemd still reported reconciliation deferred. Since 09:42:19, pending increased by **3,315** and lag by **196 seconds**. Root had **2.6 GiB free (99% used)**; `/dev/shm` had **2.9 GiB free**. The free-space sample varied between cleanup and recheck, so the measured difference is not attributed wholly to cache deletion.
+
+### QUAL-187 Reclaim the R58 Cargo cache after verifying retained release evidence — 2026-11-02 09:48 UTC
+
+- `target/dux-auditable` contained a **543,928,320-byte** Cargo target. Its static binary SHA-256 `85009675f502c232b80374a524eb9d98eed97f96d1b603c7e26e848aae89104d` matched the R58 build manifest and the retained R58 static artifact. R58 `SHA256SUMS` verified the DEB, RPM, static binary, source archive, and build manifest. No Cargo/Rust process was active.
+- Removed only this Cargo cache with `cargo clean`; Cargo reported **1,867 files / 592.8 MiB** removed. The package artifacts, build manifest, and source archive remain intact. Root availability increased from **2.6 GiB to 3.1 GiB** across the cleanup samples (still **99% used**).
+- At **09:47:49 UTC**, production remained active (PID **4093354**, zero restarts), dirty/not caught up, **141,370 pending**, **79,384 seconds behind**, **502,309 reported drops**, no active scan, and no write error; systemd continued to defer reconciliation. Since 09:46:49, pending rose by **281** and lag by **59 seconds**. No Rust build/test or production service/index/package/configuration change occurred.
+
+### QUAL-189 Recheck live backlog and local static syntax coverage — 2026-11-02 09:50 UTC
+
+- At **09:49:46 UTC**, production remained active (PID **4093354**, zero restarts), dirty/not caught up, **142,262 pending**, **79,501 seconds behind**, **502,309 reported drops**, no active scan, and `write_error=null`; reconciliation remained deferred. Since 09:48:58, pending increased by **892** and lag by **49 seconds**. Root had **2.7 GiB free (99% used)**; `/dev/shm` had **2.9 GiB free**.
+- Tailscale status showed no new qualification peer; the configured `readiness-vps` still fails DNS resolution. A read-only `ast.parse` pass accepted all **49 Python scripts** under `scripts/`. This verifies syntax only, not harness behavior or security. No Rust build, behavioral test, or production mutation occurred.
+
+### QUAL-199 Recheck production convergence and refresh the blocker register — 2026-11-02 10:13 UTC
+
+- Read-only `/usr/bin/dux status --json` updated at **10:13:26 UTC**: production remains active, dirty/not caught up, with **165,113 pending**, **80,922 seconds behind**, **502,309 dropped events**, no active scan, and `write_error=null`. The dirty reason remains `non-watched filesystem mounts changed; reconciling visible paths`; the index reports **2,154,335 nodes**, **167,100,928,000 indexed bytes**, and **755,593,216 bytes on disk**. This does not establish that the visible index is exact. Root is **99% used with 2.6 GiB free**.
+- The journal recorded additional fanotify queue overflows at **09:52:57, 09:55:57, 10:09:48, and 10:12:27 UTC**. Updated B01/B02 accordingly. No service, index, package, or configuration mutation occurred.
+- Current-source build/test and deployment remain prohibited by the host qualification constraints and unresolved live-index recovery. The documented source handoff is refreshed separately for this qualification-register change.
+
+### QUAL-200 Reconcile blocker metadata with the latest live check — 2026-11-02 10:14 UTC
+
+- Refreshed B01 from the 10:14:33 UTC status sample and corrected B07/B08 handoff/resource metadata. The live sample remains dirty/not caught up with **165,023 pending**, **80,989 seconds behind**, and **502,309 dropped events**; reconciliation is deferred. The current 126-input source handoff digest is `fedef068…dff1f95`.
+- Static review of the current `dux scan` request path confirms that the CLI sends SIGHUP to the identified daemon, reports a 60-second start timeout without blindly resending, and waits for a changed scan generation, clean dirty/paused markers, no active scan, and fresh kernel-empty/zero-pending/certain watch status before success. This is source inspection only: the installed R16 behavior and current source runtime remain unqualified, so B04 stays open.
+
+### QUAL-201 Remove environment-variable admission bypass from qualification guard — 2026-11-02 10:16 UTC
+
+- Security review found `require_disposable_qualification_vm` accepted `GITHUB_ACTIONS=true`, `CI=true`, and any existing `GITHUB_WORKSPACE` directory as proof of an ephemeral runner. Those values are caller-controlled environment variables, so a root invocation could bypass virtualization and the controller marker by setting them.
+- Removed the environment-based bypass and its forwarding through `systemd-run`. Admission now requires the explicit root-owned regular mode-0400 marker; an actual KVM/QEMU guest still requires that marker, and an explicitly marked hosted runner is accepted without trusting CI environment values. The readiness workflow creates the marker on its ephemeral GitHub-hosted runner before qualification; the private worker repeats the marker check.
+- Replaced the previous test that blessed the environment bypass with regressions requiring spoofed CI variables to fail and explicit marker admission to succeed. Python AST parsing and `git diff --check` pass. Behavioral tests and workflow execution were not run on the production host; the source remains unqualified until isolated CI verifies them.
+
+### QUAL-202 Recheck production status and isolated-test capacity — 2026-11-02 10:17 UTC
+
+- Read-only Dux status updated at **10:17:20 UTC**: active PID **4093354**, zero restarts, dirty/not caught up, **164,590 pending**, **81,156 seconds behind**, **502,309 dropped events**, no scan, and `write_error=null`. The last journaled fanotify overflow remains **10:12:27 UTC**; reconciliation is still deferred. Counters advanced and pending fell since 10:14, but the index did not reach caught-up/exact status.
+- Disk is **96% used / 7.2 GiB free**; `/dev/shm` remains **2.9 GiB free**. No qualification VM image/manifest files or QEMU guest process were found; `systemd-detect-virt --vm` reports this production host itself runs under KVM. The 2 GiB runner requires at least 3 GiB available tmpfs, and the persistent guest profile needs 10 GiB root workspace, so no isolated guest is admitted by the current resource policy. No test/build was started here.
+
+### QUAL-203 Fix guard import regression and tighten workflow regression coverage — 2026-11-02 10:19 UTC
+
+- The post-change source review found `Path` was still used to construct `SANDBOX_MARKER` after its import had been removed. This caused an import-time `NameError`, preventing all shared-guard callers from starting. Restored `from pathlib import Path` and confirmed that the guard module and its regression-test module both import successfully.
+- Added a workflow regression requiring explicit root-owned mode-0400 marker provisioning and asserting that the shared guard does not inspect `GITHUB_ACTIONS` or `GITHUB_WORKSPACE`. The test is added but not run; full behavioral tests still require the isolated runner. `git diff --check` passes.
+
+### QUAL-204 Refuse optimized Python in assertion-based qualification harnesses — 2026-11-02 10:20 UTC
+
+- Review found that `dux-package-lifecycle.py` uses Python `assert` for sandbox admission and multiple package/security postconditions; `python -O` removes those checks. `dux-qualification-vm.py` also uses assertions for image checksum and CLI validation. Added an explicit `__debug__` refusal to the shared sandbox module and both standalone scripts, so optimized mode exits before tests or VM side effects.
+- Added subprocess regressions invoking the package lifecycle, shared-guard entry point, and VM manager with `python -O`; each must fail with the explicit guard message. Tests are added but not run on the production host. Static syntax/import checks and `git diff --check` are recorded separately.
+
+### QUAL-205 Recheck non-converged production index — 2026-11-02 10:23 UTC
+
+- Read-only status updated at **10:23:04 UTC**: production remains active, dirty/not caught up, with **165,740 pending**, **81,500 seconds behind**, **502,309 dropped events**, no active scan, and `write_error=null`. Pending grew by **1,576** and lag by **257 seconds** since 10:18:48 UTC; this is continuing work without convergence. No newer fanotify-overflow warning appeared in the queried journal interval after 10:12:27 UTC. Root is **97% used / 5.7 GiB free**; `/dev/shm` has **2.9 GiB free**. No service/index/configuration action was taken.
+
+### QUAL-206 Focused qualification-guard regressions — 2026-11-02 10:25 UTC
+
+- Ran the focused sandbox/report tests, optimized-Python refusal tests for the package lifecycle and VM manager, and the workflow marker test in a transient systemd unit capped at **10% CPU, 512 MiB memory, zero swap, IOWeight 10, Nice 10**, with temp files on `/dev/shm`. The first invocation only failed test-module discovery because systemd's default working directory was `/`; after setting `WorkingDirectory=/home/dux/scripts`, the exact focused set passed **11/11 in 9.101 seconds**. Unit result was exit **0**, about **999 ms CPU**, **356 KiB** peak memory, zero swap. No service or index operation is part of these tests.
+- Post-run, Dux remained active as PID **4093354**, zero restarts. At 10:24:50–10:25:00 its event counters (**14,616,863 seen / 3,777,244 resolved / 136,192 committed**) and backlog (**168,530 pending**) were unchanged; lag rose from **81,606** to **81,616 seconds**. The daemon thread measured **93.3% of one CPU**, no scan was active, and no new journal entries appeared since 10:23 UTC. CPU PSI some avg10 was **10.55%** after the run; no causal attribution is made. This confirms the small regression set passed but does not qualify full test/build performance or explain the production stall.
+
+### QUAL-231 Close the package permission-repair race — 2026-11-02 12:22 UTC
+
+- Security review found `secure-index-permissions.sh` changed state-directory ownership before removing group/world write access. Mode 0700 alone is insufficient because an untrusted existing directory owner retains owner write access. The helper now applies mode **000** before ownership repair, changes ownership, then reopens mode **0700** for artifact validation and restores the intended final directory mode **0750**. Debian invokes this helper on `/var/lib/dux`, whose parent is root-controlled.
+- Artifact handling now also rejects hard-linked database/WAL/SHM/journal files before changing their ownership or mode, avoiding changes to files outside the state directory. Added a regression that verifies an external hardlink target keeps its owner, group, and mode.
+- Added a regression using a writable state directory initially owned by uid **65534**. It wraps `chown` and records directory mode at every ownership change; the directory transfer must occur at mode **000**, and artifact ownership changes happen only after the directory is root-owned and mode **0700**. The complete `scripts.test_dux_package_lifecycle` suite passed **44/44 in 0.465s**, including the **8** helper-specific tests, SQLite backup tests, and package policy checks. `sh -n`, ShellCheck, and `git diff --check` pass. This verifies local helper/package-script behavior; it does not qualify an installed package lifecycle or eliminate every possible hostile filesystem race.
+- The previously built **0.6.3-59** DEB/RPM and binary predate this fix. Their embedded helper therefore does not contain the corrected ordering and those artifacts must not be used as the current candidate. The updated source tree must be re-archived, rebuilt, audited, and rerun through package lifecycle tests before any promotion. No live package, service, database, or index was changed.
+
+### QUAL-232 Retest all Python qualification harnesses and fix a stale CPU timing assertion — 2026-11-02 12:32 UTC
+
+- The first full Python discovery run completed **245/246** tests and failed one source-contract assertion: the CPU-burst harness had been corrected to measure event production from `producer_started`, but its test still expected the old `event_window_started` expression. The harness correctly kept event production separate from the daemon event/CPU measurement window. Updated the test to check both timer expressions, their ordering around `SIGCONT`, and that CPU fraction uses only the event window. The focused regression passed **1/1**.
+- Reran full discovery with `python3 -m unittest discover -s scripts -p 'test_*.py'` under transient service limits **CPUQuota=10%, MemoryMax=1 GiB, MemorySwapMax=0, IOWeight=10, TasksMax=128, Nice=19**; `TMPDIR` was on `/dev/shm`. Final result: **246/246 passed in 38.304s**, **3.820 CPU-seconds**, **360 KiB** peak memory, **zero swap**. Host CPU PSI some avg10 was **4.83%** afterward and full avg10 remained **0%**. This qualifies Python harness behavior; it does **not** run Dux's Rust CPU event-burst, current-binary fault/scale, or package install tests.
+- Post-run read-only production sample at 12:32:44 UTC remains active and dirty/not caught up with **233,461 pending**, **89,279 seconds behind**, **502,309 dropped events**, no active scan, and `write_error=null`. Root had **3.9 GiB free / 98% used**. No production service, package, DB, or index change occurred. The source handoff must be refreshed for this test-source correction; B03/B07/B09 remain open.
+
+
+### QUAL-233 Stop current-source build at the host CPU-pressure gate — 2026-11-02 12:44 UTC
+
+- Prepared source handoff `target/readiness/current-source-handoff-20261102T1240Z` with **126 inputs**, tree SHA-256 `4ed9714f273f8d1654af9de50175aceb195f1dcabef6f8b74327e886da8e8536`, archive SHA-256 `588448345f73d729edaf874a6d23c1fefce4f852ab97bf0b503f45b46fe800a4`, and Gitleaks **zero findings** on the exact 2.40 MB extraction. The handoff itself verifies all member hashes and checksum entries.
+- Attempted a current-source static-musl build in transient systemd services with `/dev/shm` target storage, one Cargo job, no network, 2 GiB memory ceiling, no swap, IOWeight 10, Nice 19, and idle I/O. The 25% CPU attempt was stopped when host CPU PSI `some avg10` reached **22.33%**. A 10% CPU retry was stopped when PSI again crossed **20%** (20.18% then 20.51%). Both services ended via SIGTERM, no Cargo/rustc process remains, and no complete executable was produced. Partial tmpfs build cache was removed after confirming the build had stopped.
+- Latest read-only production status at **12:44:08 UTC** remains dirty/not caught up: **236,000 pending**, **89,964 seconds behind**, **502,309 dropped events**, `uncertain=1`, and no active scan. The production daemon remains active with **zero restarts**. No installed executable, service configuration, database, or index state was changed.
+- A third attempt at CPUQuota **5%** from the refreshed source handoff `current-source-handoff-20261102T1245Z` was also stopped: CPU PSI `some avg10` rose to **33.51%** in the first minute, despite only **3.36 CPU-seconds** and a **256.4 MiB** memory peak. That unit ended via SIGTERM; the incomplete 7.5 MiB tmpfs cache was removed after confirming no active compiler remained. By 12:46:45, CPU PSI had fallen to **5.42% avg10**, while the live index remained stale.
+- These were incomplete builds, not build/test failures of Dux. Current-source build and all gates requiring that binary remain open. Stops follow the existing host CPU-pressure safety gate; resume only after a stable low-pressure window or on an isolated build host.
+
+
+### QUAL-234 Build and verify current-source release 0.6.3-60 — 2026-11-02 13:01 UTC
+
+- Reused the pinned R34 musl Cargo cache copied to `/dev/shm`; exact source input was the 126-file handoff `current-source-handoff-20261102T1247Z`, tree SHA-256 `5973bcbeeedea6325a37fd19a7bb054e518fda7c3241c354c02cf777eb0fb0fe`. Build used Rust/Cargo **1.99.1**, `cargo-auditable` **0.7.7**, `CARGO_BUILD_JOBS=1`, offline dependencies, CPU affinity **3–5**, `CPUWeight=10`, `MemoryMax=3 GiB`, no swap, `IOWeight=10`, Nice 19, and idle I/O. Build completed in **2m33s**, with **1.1 GiB** memory peak and no swap; CPU PSI avg10 stayed below 0.3% during observation.
+- Produced static-musl PIE binary SHA-256 `b6f759f135590021364eefcbfb6a217d580a3ac02d1b140ef87797d7250e551c`, DEB SHA-256 `7adcc65547a669798a6871318a763db5965b99bbd3c79900d35c5d286a25f9bc`, RPM SHA-256 `45bfbcb83dc0713dbfed0c80c6cf706b18b7e72a707a9fc7a16f437945cf20ba`, and Build-ID-matched debug symbols SHA-256 `d9b148110773373de431fee069b768387d699a45a1ffa1b2ac229727aff1a08d` (Build ID `490e931ddb6f852107194ca3cd7177e721d522a2`). Build manifest and `SHA256SUMS` verify; embedded `.dep-v0` is present and no `DT_NEEDED` entry exists.
+- Independently checked all 126 source archive members/sizes/hashes and recomputed the manifest tree digest. Gitleaks scanned the exact **2.40 MB** extraction with zero findings. `cargo audit bin` exited **0** and parsed metadata for **202 dependencies**; no advisory finding was emitted. DEB and RPM extracted payloads match the release binary; the shipped permission helper, backup helper, and service units match the exact source files. Version/source digest, top-level help, daemon help, and the static binary smoke checks succeeded.
+- Ran `cargo test --locked --offline --release --all-features -- --test-threads=1` against the same source with systemd affinity to CPUs **3–5**, `CPUWeight=10`, `MemoryMax=2 GiB`, no swap, and low I/O priority. Result: **255/255 passed** in **19.36 seconds** of test time; service runtime **2m16s**, **767.3 MiB** peak memory, zero swap. This covers Rust unit tests, not live event, package-install, migration, scale, endurance, or canary behavior.
+- Candidate package is unqualified. No DEB/RPM install/upgrade/rollback, current-binary P0/fault/scale, v5-to-v6 production-sized migration, 72-hour endurance, 24-hour canary, signing, or owner acceptance is established. Production remains on R16; no production service, executable, database, or index state changed.
+
+### Local checks and live gate revalidated — 2026-11-02 13:54 UTC
+
+The current source worktree passed Python qualification harness discovery (**246/246**), `cargo fmt --all -- --check`, Python `compileall`, and `git diff --check`. A fresh Rust compile/test attempt was stopped during dependency compilation to avoid resource pressure on the production host; this is not a Rust test result. Release candidate 0.6.3-62 remains uninstalled and unqualified.
+
+At the same checkpoint, production R16 remained active with zero restarts, dirty/not caught up, **286,317 pending updates**, **94,182.6 seconds behind**, **502,309 userspace updates dropped**, no active scan, and no write error. Root had **6.4 GiB free / 97% used**. The stale `/run/dux-ext4-inspection` mount remained present. These local checks do not close B01–B15 or justify promotion.
+
+### Candidate Rust source/test binding rechecked — 2026-11-02 13:56 UTC
+
+Manifest comparison confirms release 0.6.3-62 differs from Rust-tested release 0.6.3-60 only in `docs/QUALIFICATION.md`; all Rust source, Cargo, build-script and toolchain inputs are byte-identical. The current worktree differs from release-62 only in `docs/QUALIFICATION.md` and `docs/STORAGE_RETENTION_REVIEW_20261030.md`, with no code/build input changes. Thus the prior **255/255** default/all-feature Rust suite is source-equivalent evidence for the release-62 code. The stopped 13:54 compile attempt did not execute tests and is not a failure. Runtime fault/overflow, production-sized migration/rollback, package lifecycle, scale, endurance and canary gates remain open.
+
+### Legacy overflow telemetry correctness fix — 2026-11-02 14:01 UTC
+
+The current source no longer converts pre-v4 watcher status into a numeric zero for kernel overflow notifications. Legacy status produces an unavailable value (`null` in JSON); metrics expose `dux_fanotify_overflow_count_available` and omit the count metric when unavailable; text and TUI status label the gap. Regression tests were added for v3 parsing, JSON, metrics, and TUI. Formatting and whitespace checks pass. The Rust suite has not yet completed on this patch: a compile surfaced test-fixture errors that were corrected, then the resource-capped attempt was stopped at **29.86% CPU PSI** while the production daemon and an unrelated Go test were active. Release 0.6.3-62 predates this fix and is stale for promotion; a rebuilt candidate and successful test run are required.
+
+### Telemetry-fix test retry — 2026-11-02 14:02 UTC
+
+The Rust suite retry used one Cargo job under a systemd scope capped at 5% CPU, 2 GiB RAM, no swap, and idle I/O. Global CPU PSI rose to **24.45% avg10** while Dux and another workload were active, so the scope was stopped during compilation; no tests ran. Systemd confirms the scope is inactive. Formatting and whitespace checks pass, but the new regression assertions remain unverified until an isolated host or lower-pressure window. Production at 14:02:37 UTC remains dirty with **294,809 pending**, **94,673.9 seconds behind**, and **502,309 userspace updates dropped**; root has **5.5 GiB free / 97% used**. Candidate 0.6.3-62 predates the fix.
+
+Third telemetry-fix Rust test attempt at 14:03 UTC was again stopped during compilation under the 5% CPU quota: host CPU PSI reached **22.78% avg10** after about 35 seconds. The scope is inactive; no tests ran. Final source review confirms all parser consumers preserve and expose unavailable legacy counts consistently. Formatting and whitespace checks pass, but the Rust patch remains uncompiled and untested. Use an isolated VPS or a sustained low-pressure host window for the next build.
+
+Python qualification harness discovery after the telemetry source change passed **246/246** in **6.005 seconds**. This does not verify Rust compilation or the modified status parser/metrics; those tests remain pending due repeated CPU-pressure stops.
+
+### Legacy overflow telemetry full Rust test pass — 2026-11-02 14:14 UTC
+
+After correcting a malformed v3 test record (missing `behind_ms`), the complete all-features Rust suite passed **256/256** in **99.45 seconds**. The locked/offline one-job run used the existing `/tmp/dux-test-target` cache under a 20% CPU quota, 2 GiB memory cap, no swap, low CPU/I/O weights and idle I/O scheduling. The earlier run was **255/256**, with only the bad fixture failing; all 255 other tests passed. This verifies the modified parser, status JSON, Prometheus availability/counter behavior, and TUI labels at Rust unit-test scope. It is not a release build, package lifecycle, actual kernel overflow, production migration, scale, endurance or canary qualification. Production remains on R16; candidate 0.6.3-62 does not contain this fix.
+
+### Production source, schema, and disk recheck — 2026-11-02 14:20 UTC
+
+Read-only inspection confirms the host package is `dux 0.6.3-16`, `/usr/bin/dux` reports `0.6.3 (a42739776bbd+modified) [production]`, and the live database has `meta.schema_version=5`. The current worktree is based on commit `a427397` (`v0.6.1-1-g...-dirty`) with 83 changed/untracked paths; the executable's `+modified` label does not identify those exact source bytes. Current source declares schema v6, so replacing the binary can trigger a full-root rebuild/migration and still requires tested rollback. No production binary or database was changed.
+
+At 14:20:04 UTC the daemon (PID 4093354) was active with zero restarts, **304,900 pending**, **95,719 seconds behind**, **502,309 userspace updates dropped**, no scan in progress, and last scan age **96,899 seconds**. The journal recorded another fanotify overflow at **14:15:30 UTC**. `/` had **8.9 GiB available / 95% used**, below the 18 GiB build-and-test preflight. `/dev/loop0` still maps an **8 GiB** filesystem image whose backing path `/tmp/dux-scale-f2azn2f8/filesystem.img` is deleted; `/run/dux-ext4-inspection` remains mounted in the host and daemon namespaces. Detaching it could release backing-file space and remove a scan contaminant, but requires controlled service/mount maintenance; no such action was taken.
+
+The effective service still runs as root with `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`, `NoNewPrivileges=yes`, and the installed service security score is **5.1 MEDIUM**. Effective CPU quota is **100%**; the packaged unit says **50%** while the current source unit says **100%**. The daemon used about **94% of one CPU** in the sample. Two unrelated Go compiler processes were each using about **120%**, with host CPU PSI some avg10 **3.38%** and I/O PSI full avg10 **0.48%**. No release build was started under this concurrent host load and insufficient disk headroom. An isolated VPS and exact source-bound package/migration evidence remain release prerequisites.
+
+### Capped release-build attempt stopped on host pressure — 2026-11-02 14:25 UTC
+
+After the unrelated Go compilers exited, attempted a source-only locked/offline all-features release build under a systemd scope capped at **5% CPU**, **2 GiB RAM**, no swap, low CPU/I/O weights, `nice 19`, and idle I/O. Host CPU PSI some avg10 crossed the **20% stop threshold** and peaked at **28.10%**; the build scope was stopped before Dux compiled. Disk availability fell from **8.2 GiB** to **7.0 GiB**; it remained above the 6 GiB emergency floor. The scope is inactive, no cargo/rustc remains, and the **47.3 MB** incomplete Cargo target was removed. This is a host-pressure stop, not a compiler failure; no release executable or package was produced. Production PID **4093354** stayed active with zero restarts; at 14:25:44 it remained dirty/not caught up with **307,556 pending**, **96,059 seconds behind**, **502,309 userspace updates dropped**, no scan, and last scan age **97,239 seconds**. Root had **7.0 GiB free / 97% used**. The source-bound release build and all package/migration gates remain open.
+
+### Compact the retained P0 OOM reproduction and recheck recovery admission — 2026-11-02 14:36 UTC
+
+The 2 GiB raw ext4 P0 churn/OOM image was losslessly compressed to
+`target/readiness/p0-churn-oom-failure-20261026/filesystem.img.zst` (**41,845,099
+bytes / 39.9 MiB**). `zstd -t` passed and its decompressed SHA-256 equals the
+original **`8b1588f793bd734af76e40402e84ca3fb22cb5616025fd712aff20fc2f6139ec`**;
+the compressed hash is
+**`ca2720259352fbd7217649b0e93d969a89dda6e2c90ef37a5bc12a5edf9ed4a0`**. The
+failure-analysis manifest records the compressed path and restore procedure.
+The raw image was removed only after content verification and confirming no
+open consumer; about **2 GiB** was reclaimed without discarding the failure
+reproduction. Root availability rose from **8.8 to 11 GiB**, and
+`target/readiness` fell from **8.1 to 6.2 GiB**. The 18 GiB workspace/reserve
+preflight still fails.
+
+Production at 14:35:36 UTC remained active, dirty/not caught up, **307,551
+pending**, **96,652 seconds behind**, **502,309 userspace updates dropped**,
+no active scan, and last scan age **97,831 seconds**. Systemd still reported
+reconciliation deferred. Around 14:35–14:36 UTC, load was about **2 on 12
+CPUs**, MemAvailable **15.3 GiB**, CPU PSI **0.31–0.54%**, I/O PSI **0.15–0.28%**,
+and root free space **11 GiB**. Current source would classify these host-wide
+readings as below its admission thresholds, but the installed binary's source
+is unmatched; the observed deferral cause is not established. No service,
+index, mount, or DB change was made.
+
+### Cover optimized-Python refusal for all assertion-based CLIs — 2026-11-02 14:43 UTC
+
+Static review found eight production `dux-*.py` CLI harnesses using Python
+`assert`. All eight already import the shared `dux_qualification_sandbox`
+module (or have a direct guard), which rejects `python -O` before CLI work; this
+was not a live bypass. The optimized-interpreter regression had only exercised
+the package lifecycle and bind-alias entry points. Expanded it to invoke
+`python -O <script> --help` for the live quota, live test, readiness, scale,
+systemd-status, and TUI harnesses as well. The focused test passed **1/1 in
+17.699 seconds** under a systemd scope capped at **5% CPU**, **512 MiB memory**,
+no swap, and idle I/O. It confirms every script exits with the explicit
+assertions-required message before running. The scope exited successfully.
+
+At 14:43:14 UTC production remained active with zero restarts, dirty/not caught
+up, **315,478 pending**, **97,110 seconds behind**, **502,309 dropped userspace
+updates**, last scan age **98,289 seconds**, no scan, and `write_error=null`.
+Root had **7.0 GiB free / 97% used**; CPU PSI some avg10 was **10.28%** after
+the Go workload eased. No production state changed.
+
+### Stream large artifact hashes in package rollback — 2026-11-02 15:21 UTC
+
+Review found that package lifecycle rollback hashed SQLite backups with
+`Path.read_bytes()`, loading the entire database into memory. The verified live
+v5 snapshot is **755,593,216 bytes**, so this could create a large transient
+memory spike or OOM during rollback. Replaced whole-file hashing with a shared
+1 MiB streaming SHA-256 helper and updated binary/package/artifact hashes to
+use it. The rollback unit test patches `Path.read_bytes` to fail during backup
+and restore, asserts the recorded hash, restores the snapshot, checks SQLite
+`quick_check`, permissions, and removes stale WAL/SHM/journal artifacts.
+
+The complete package lifecycle module passed **46/46 tests** in **23.109
+seconds** (systemd service runtime 25.343 seconds) under CPUQuota 5%,
+MemoryMax 512 MiB, no swap, IOWeight 10, `nice 19`, and idle I/O. This is
+synthetic helper/lifecycle evidence; a bounded-memory restore rehearsal using
+the full 755 MiB live snapshot has not yet run. At 15:20 UTC root had **11 GiB
+free** and the production Dux service remained active with PID **4093354** and
+zero restarts. Host CPU PSI rose to **32.07% avg10** after the test; no
+production service, binary, package, database, or index was changed. The 18
+GiB build reserve and all binary/migration/runtime qualification gates remain
+open.
+
+### Full-size rollback restore rehearsal stopped at host-pressure gate — 2026-11-02 15:22 UTC
+
+Started an isolated restore rehearsal using the **755,593,216-byte** root-only
+v5 snapshot. The harness was configured to restore only inside a fresh
+mode-0700 temporary directory under `/root`, compare the complete source and
+restored SHA-256, verify schema/mode/sidecar handling, and then delete the
+scratch database. While the helper was still performing its initial read-only
+snapshot `quick_check` (before it created its restore temporary file), host CPU
+PSI crossed the established **20% avg10** stop threshold and reached **31.63%**.
+Stopped the rehearsal after about **35 seconds**; systemd confirms the scope
+inactive, **2.049 CPU-seconds**, **42.1 MiB** peak memory, and no swap. The only
+scratch file was the 8 KiB dummy target created before invoking the helper; it
+was removed after confirming no process remained. The source snapshot remains
+unchanged and mode 0600. This is a pressure-gated incomplete attempt, **not** a
+restore pass or failure. Production stayed active, PID **4093354**, zero
+restarts; no production files or service state were changed. Retry the full
+restore only when CPU PSI is stably below the gate or on an isolated host.
+
+### Production backlog and host-pressure sample — 2026-11-02 15:23 UTC
+
+Read-only `dux status --json` reports the production index dirty and not caught
+up, with **332,673 pending updates**, **99,541.567 seconds behind**,
+**502,309 dropped userspace events**, no scan in progress, `write_error=null`,
+and dirty reason `non-watched filesystem mounts changed; reconciling visible
+paths`. The index reports **2,137,384 nodes** and **755,593,216 bytes** on
+disk. Systemd still reports the R16 daemon active with PID **4093354** and zero
+restarts; a process sample measured about **94% of one CPU**. Host load was
+**33.73 / 23.11 / 33.93** and CPU PSI `some avg10` reached **85.68%**. An
+existing remote-session `gosec` debt-ratchet job was concurrently compiling
+many Go packages; it was left untouched. Root had **9.1 GiB free**. These
+conditions invalidate this window for build, migration, scale, or full-size
+restore qualification. The status sample confirms the live convergence gate
+remains failed; it does not identify whether the installed R16 daemon or the
+background host workload is the cause of the growing backlog. No live Dux
+state was changed.
+
+### Live memory-pressure pause and fanotify overflow — 2026-11-02 15:28 UTC
+
+At 15:25 UTC the R16 journal recorded that reconciliation was deferred,
+index writes were paused for memory pressure, and the fanotify queue overflowed
+again. At 15:28:40 UTC, read-only status reported `paused=true`,
+`pause_reason=memory pressure`, **334,455 pending updates**, **99,836.261
+seconds behind**, **502,309 dropped userspace events**, no scan in progress,
+`write_error=null`, and **2,137,406 indexed nodes**. `dirty_reason` remains
+`non-watched filesystem mounts changed; reconciling visible paths`. The
+installed service remains active (PID **4093354**, zero restarts) and consumes
+about **318 MiB** in its cgroup.
+
+Host evidence at the same sample: **25 GiB RAM**, **9.4 GiB available**, only
+**2.3 GiB free**, all **4.0 GiB swap used**; memory PSI `some avg10` **45.99%**
+and `full avg10` **32.78%**; CPU PSI `some avg10` **68.75%**; root has **8.4
+GiB free**. Journal shows further memory-pressure pause and fanotify-overflow
+warnings at 15:25:04. The host is not currently safe for a candidate build,
+scale load, full restore, or migration rehearsal. This is a confirmed
+production-readiness failure in current operation; its cause remains
+unattributed between the stale R16 daemon behavior and other host workloads.
+Do not treat `write_error=null` or the running service as evidence of a healthy
+or converged index. No production state was changed.
+
+At **15:29:14 UTC**, a follow-up read-only status showed `paused=false`, but
+still no active scan: pending rose from **334,455 to 334,569** and lag from
+**99,836.261 to 99,868.498 seconds** over about 34 seconds; the committed-update
+counter remained **172,800**. Memory PSI had eased to **1.53% some / 1.09%
+full avg10**, but CPU PSI remained **67.97%**, host load was **72.50 / 65.35 /
+50.12**, swap remained **4.0 GiB used**, and the existing `gosec` compile was
+still active. This transient unpause is not recovery or convergence: there is
+no scan and the backlog/lag continue to grow. Do not resume load tests in this
+host window.
+
+### Disk cleanup request rechecked — 2026-11-02 15:30 UTC
+
+Current filesystem inventory shows `/vms` absent, `/home/vm` only **28 KiB**,
+and `/home/dux/target/readiness` **6.2 GiB**. No `vst-*` directories remain
+under `/root` or `/home`; no multi-GiB QCOW2/raw VM image remains in the named
+readiness or VM paths. The remaining `target/readiness` data is retained
+qualification evidence, including small **366 KiB** seed images, rather than
+the former 10 GiB VM image. Root had **8.7 GiB free / 96% used** at this check.
+
+The large paths the user asked about resolve under `/root`: `.local` **4.6
+GiB** (contains the currently running Codex executable), `.codex` **3.3 GiB**,
+`go` **2.9 GiB** (Go modules/toolchains used by the active Go security scan),
+`.cache` **1.4 GiB** (Go build and staticcheck caches, with Go scanning still
+active), and `codex-sessions-archive` **1.2 GiB**. The first four are in use
+or may contain active application state; the VST/VM targets are already absent.
+The session archive is not required by Dux or to launch Codex; it preserves
+historical Codex sessions. It was retained because removing it would discard
+user history, not merely clear a build cache. No filesystem data was deleted
+during this recheck.
+
+### Full-size rollback rehearsal retry stopped at pressure and memory limits — 2026-11-02 15:32 UTC
+
+Retried the same isolated **755,593,216-byte** v5 snapshot restore after the
+15:31 sample showed CPU PSI `some avg10` **1.48%**, memory PSI near zero, and
+11 GiB free. The scope remained capped at **5% CPU**, **512 MiB memory**, no
+swap, and idle I/O. Within **34 seconds**, CPU PSI rose to **68.20% avg10**;
+host load then measured **21.55 / 39.53 / 42.67** with multiple concurrent
+compiler processes. The scope reached its 512 MiB memory cap and recorded
+**1,031 `memory.events:max` events**, but `oom=0` and `oom_kill=0`. Stopped the
+scope before the helper's initial snapshot `quick_check` completed, before it
+created the restore temporary file. Systemd confirms the scope is inactive;
+the only scratch artifact was an 8 KiB dummy database, removed after checking
+no process remained. This is neither a restore pass nor a restore failure.
+Production remained active with PID **4093354**, zero restarts; a follow-up
+status still showed no scan and **337,556 pending**, **100,069.696 seconds
+behind**. No production database, service, or index was changed. Retry with a
+larger memory cap only during a stable low-pressure window or on an isolated
+host. The final check after cleanup showed root free space falling to **7.6
+GiB**, CPU PSI `some avg10` **75.00%**, the daemon still active with zero
+restarts, and no rehearsal scratch left. The unrelated compiler activity and
+concurrent disk growth remain uncontained; the 18 GiB qualification reserve
+is further out of reach.
+
+### Production event processing stalled during concurrent static analysis — 2026-11-02 15:33 UTC
+
+A new read-only sample shows the live index still dirty with **337,556 pending**
+and no scan. Compared with 15:32, `events_seen`, `events_resolved`, and
+`updates_committed` were unchanged while reported lag rose from **100,069.696**
+to **100,145.736 seconds**. The daemon and its status heartbeat remain live,
+but this interval shows no event/commit progress. The daemon process was using
+about **94% of one CPU**. Host CPU PSI was **22.97% avg10**, and root had **8.4
+GiB free**. An unrelated `staticcheck` process was consuming about **150% CPU**
+with compiler activity in its parent workload. The installed R16 binary's
+source is unmatched, so this observation cannot attribute the stall solely to
+Dux or the external load. No process was interrupted and no production state
+was changed; candidate work remains outside the safe resource window.
+
+### Current-source secrets scan remains inconclusive — 2026-11-02 15:44 UTC
+
+Created a deterministic archive of **126 exact release inputs** at
+`target/readiness/source-security-review-20261102T1536Z/current-source.tar.gz`
+(SHA-256 `80b9c2db490071396a732ec935dfa6805fc6ce24d51fbab6e424cfb70be02aa4`;
+tree digest `4d35732c6657c9ea3803efd77fafc871422c8478cfbc59e0ff3239d54a1ab9e1`).
+The first Gitleaks attempt exited **1** despite an empty JSON report; stderr was
+not retained, so the cause and scan completeness are unknown. A retry disabled
+the scanner timeout but was stopped after about **4 minutes** at the host
+pressure gate. It consumed **2.507 CPU-seconds**, peaked at **51.9 MiB**, used no
+swap, and created no final report. At stop, CPU PSI `some avg10` was **89.48%**
+and root had **5.1 GiB free** while unrelated Go race tests/compiles were
+active. The redacted status and archive checksums are preserved in that
+directory. This is **not** a clean secrets-scan result; repeat on the isolated
+builder or a stable low-pressure host. No production state was changed.
+
+A third attempt began when CPU PSI avg10 had eased to **8.35%**, using a **3%
+CPU / 256 MiB memory** scope with no swap. Within about **34 seconds**, PSI rose
+above the stop threshold to **84.92% avg10**; the attempt was terminated before
+a report existed. Systemd recorded **1.185 CPU-seconds**, **45.7 MiB** peak
+memory, and zero swap. The extracted archive was removed. After stopping, root
+had **4.8 GiB free** and CPU PSI remained **84.95% avg10**. The second and third
+attempts are incomplete, not clean scans or source findings; the exact release
+input archive and status/checksum manifests remain available for a clean-host
+rerun.
+
+### Fresh current-source secrets scan stopped at host-pressure gate — 2026-11-02 15:46 UTC
+
+Regenerated the exact release-input snapshot after qualification-log changes:
+**126 inputs**, archive
+`target/readiness/source-security-review-20261102T1545Z/current-source.tar.gz`
+(SHA-256 `c3a9eb913370d044c99628a435382e172f9de2b84376312fdb559500d585754b`).
+The Gitleaks scan started at a **3% CPU / 256 MiB memory** cap with no swap,
+after CPU PSI was **2.82% avg10**. Within about **34 seconds**, PSI reached
+**73.64% avg10**. Stopped the service before a report existed; systemd recorded
+**1.183 CPU-seconds**, **49.0 MiB** peak memory, and no swap. The temporary
+extraction was removed. Root had **5.0 GiB free** after cleanup. Checksums and
+the explicit incomplete status are stored beside the archive. This remains
+inconclusive, not a no-findings pass. No production service or data changed.
+
+### Production convergence and host-pressure checkpoint — 2026-11-03 09:37 UTC
+
+- Read-only status for the installed production daemon still reports dirty and
+  not caught up: **189,576 pending updates**, **165,134 seconds behind**,
+  **1,503,990 dropped events**, no scan in progress, and no reported write
+  error. The index reports **1,952,873 nodes**, **142,357,225,472 logical
+  bytes**, **755,593,216 bytes on disk**, and a **128 MiB WAL**. Its dirty reason
+  remains `non-watched filesystem mounts changed; reconciling visible paths`.
+- Dux PID **4093354** remains active with zero systemd restarts and has consumed
+  about **91% of one CPU** in the point sample. The service's effective quota is
+  **100% of one CPU**; CPU PSI `some avg10` is **19.36%**, near the established
+  20% pressure gate. Memory PSI is zero. These conditions are not suitable for
+  a build, full test suite, migration, scale run, or database integrity scan on
+  the production host.
+- Installed package is `dux 0.6.3-16`; `/usr/bin/dux` identifies itself as
+  `0.6.3 (a42739776bbd+modified) [production]`, SHA-256
+  `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`. The
+  current checkout is dirty and contains substantial unbuilt source changes.
+  It is not source-bound to the installed executable; no candidate is promoted
+  or claimed qualified.
+- Root has **80 GiB free**. `/tmp` has grown back to **7.0 GiB** and `/var/tmp`
+  to **1.2 GiB** since the previous cleanup. The inventory sweep did not identify
+  the producers; current temporary consumers were not cleaned in this checkpoint.
+  A separate `du` inventory will be needed to attribute the new growth.
+- The orphan inspection mount remains present at `/run/dux-ext4-inspection` on
+  `/dev/loop0` (`ext4`, `ro,norecovery`). `losetup` reports the backing pathname
+  `/tmp/dux-scale-f2azn2f8/filesystem.img`, which no longer exists in the
+  filesystem; Dux still holds FD 9 to the mountpoint. Journal review counted
+  **54 fanotify queue-overflow warnings** and one pending-backlog-cap drop at
+  03:10 UTC on Nov. 3. The deleted loop backing storage remains kernel-held;
+  detaching it needs planned maintenance to release Dux's mount mark. No unmount
+  or loop-device change was made.
+- No production binary, service, database, quota, mount, or index state was
+  changed. Candidate source tests, exact accounting, overflow recovery, release
+  build/package lifecycle, full-size migration/rollback, supported-platform
+  qualification, scale, soak, canary, and coverage completion remain open.
+
+### Current-source Rust regression attempt stopped at host-pressure gate — 2026-11-03 09:39 UTC
+
+- Started `cargo test --locked --offline --all-features -- --test-threads=1`
+  against this worktree with one build job, a systemd scope capped at **15% CPU**
+  and **2 GiB memory**, swap disabled, low CPU/I/O weights, idle I/O scheduling,
+  and `nice 19`.
+- While compiling dependencies, CPU PSI `some avg10` crossed the **20% stop
+  threshold** and reached **20.72%**. Stopped the exact scope immediately; it
+  exited **143** after **2.110 CPU-seconds**, peaked at **387.5 MiB**, and used
+  no swap. No Rust test binary or test result was produced. This is an
+  incomplete pressure-gated attempt, not a test failure or pass.
+- Verified the scope inactive and no Cargo/Rust compiler remained. The
+  production Dux service and index were not changed. Retry the full suite on an
+  isolated builder or a stable low-pressure interval; do not raise the PSI stop
+  threshold on this production host.
+- A post-stop read-only status sample at **09:39:54 UTC** still showed the
+  installed daemon active with zero restarts, dirty/not caught up, **190,113
+  pending**, **165,304 seconds behind**, **1,503,990 dropped events**, no scan,
+  and `write_error=null`. Relative to the 09:37 sample, pending rose by **537**
+  and lag by about **170 seconds**; the index remains unqualified despite some
+  event and commit counters advancing.
+- After the pressure stop, `cargo fmt --all -- --check` and `git diff --check`
+  completed successfully. These checks do not substitute for compilation or
+  execution of the Rust regressions.
+- Ran `python3 -m unittest -q scripts.test_dux_package_lifecycle` in a separate
+  scope capped at **5% CPU / 512 MiB memory**, with swap disabled and
+  `TMPDIR=/dev/shm` to avoid creating event churn in Dux's watched `/tmp`. All
+  **46/46 tests passed in 19.797 seconds**. The scope completed successfully
+  and is inactive. A PSI sample taken immediately after completion briefly read
+  **20.63% avg10**; a later post-run sample at 09:41 read **5.09%**. No further
+  workload was started.
+- Coverage is limited to package-helper, permission-policy, effective-unit
+  verifier, tunnel-unit policy, rollback-helper, and readiness-harness unit
+  behavior. These are not actual DEB/RPM install/upgrade/rollback transactions,
+  Rust runtime tests, live service policy changes, or production index tests.
+- Current static checks passed: `systemd-analyze verify` for both packaged
+  units, shell syntax checks for the permission helper and release scripts,
+  ShellCheck on those scripts, locked/offline Cargo metadata validation,
+  `cargo fmt --all -- --check`, and `git diff --check`. These validate syntax
+  and selected policy contracts, not binary behavior.
+- At **09:41:27 UTC**, production remained active with zero restarts but dirty
+  and not caught up: **190,351 pending**, **165,403 seconds behind**,
+  **1,503,990 dropped events**, no scan, and `write_error=null`. The pending
+  count was unchanged from 09:40:19 while reported lag increased by about 68
+  seconds; this does not demonstrate convergence.
+
+### Lower-quota Rust regression retry stopped at host-pressure gate — 2026-11-03 09:44 UTC
+
+- Retried the same locked/offline all-features Rust suite with one build job,
+  `TMPDIR=/dev/shm`, `CPUQuota=5%`, `MemoryMax=2 GiB`, swap disabled, and idle
+  I/O. CPU PSI was **1.37% avg10** before launch, but reached **43.46% avg10**
+  within about 20 seconds during dependency compilation. Stopped the exact scope;
+  it exited **143**, never produced a Rust test binary, and no Rust test ran.
+- At the last live scope sample, CPU time was **0.929 seconds**, memory peak
+  **79.7 MiB**, and swap use zero. Verified the scope inactive and no Cargo or
+  Rust compiler remained. This is an incomplete resource-gated attempt, not a
+  source pass or test failure. It confirms that reducing the quota to 5% does
+  not make this production host a safe Rust test builder.
+- Root retained **79 GiB free**. Production remained active and untouched; use
+  an isolated builder for the Rust suite and release build rather than retrying
+  compilation on this host while CPU pressure is unstable.
+- Post-stop status at **09:45:15 UTC** still showed the daemon active with zero
+  restarts, dirty/not caught up, **194,374 pending**, **165,630.752 seconds
+  behind**, **1,503,990 dropped events**, no scan, and `write_error=null`. Since
+  09:44:11, pending rose by **3,586** while **128** more updates were committed;
+  reported lag increased **65.2 seconds**. CPU PSI then read **5.71% avg10 /
+  16.89% avg60**. This confirms backlog growth continues; it does not attribute
+  the increase to the short stopped build attempt.
+
+### Release-builder CLI and provenance tests — 2026-11-03 09:47 UTC
+
+- Ran `python3 -m unittest discover -s scripts -p 'test_build_release*.py' -q`
+  in a transient scope capped at **5% CPU / 512 MiB memory**, with swap disabled
+  and `TMPDIR=/dev/shm`. All **13/13 tests passed in 47.701 seconds**. Scope
+  result was success and it is inactive; the highest observed CPU PSI avg10
+  during the run was **15.48%**. At the last live resource sample, scope CPU
+  time was **2.149 seconds**, memory peak **61.9 MiB**, and swap use zero.
+- Coverage includes rejecting unknown or ambiguous build arguments, mismatched
+  version/revision/source digest, fault-enabled or non-static/non-auditable
+  binaries, package failure without partial publication, rollback after a
+  mid-publish rename failure, and Build-ID-matched debug symbols. The tests use
+  mocked build/package tools; **no real release binary or DEB/RPM was built**.
+- A first direct-module invocation failed during Python imports because it did
+  not add `scripts/` to `sys.path`; it executed zero tests. The successful
+  discovery invocation above is the authoritative result.
+- No production service, database, mount, or index state changed.
+- Latest read-only production status at **09:48:09 UTC** remains dirty/not
+  caught up: **195,960 pending**, **165,804.036 seconds behind**, **1,503,990
+  dropped events**, no scan, and `write_error=null`; Dux is active with zero
+  restarts. Since 09:45:15, pending grew **1,586** and reported lag grew
+  **173.3 seconds**, although events and commits advanced. CPU PSI was then
+  **0.54% avg10**; low instantaneous pressure does not resolve the stale index.
+
+### Rollback backup helper regression tests — 2026-11-03 09:49 UTC
+
+- Ran `python3 -m unittest discover -s scripts -p
+  'test_dux_backup_index.py' -q` in a transient scope capped at **5% CPU /
+  512 MiB memory**, with swap disabled and `TMPDIR=/dev/shm`. All **12/12
+  tests passed in 0.401 seconds**; the scope exited successfully and is
+  inactive.
+- Coverage includes v4/v5/v6 schema validation, transaction-consistent WAL
+  backup, private output modes, hash-bound manifest, no-clobber publication,
+  directory fsync ordering, symlinked database/sidecar rejection, unsupported or
+  forged schema rejection, output-sidecar refusal, free-space admission, and
+  writable-output-directory rejection. These are helper unit tests using
+  disposable SQLite fixtures; they do not rehearse migration or restore of the
+  full production index.
+- No production files or service state were changed.
+
+### Optional tunnel syscall filter hardening — 2026-11-03 09:54 UTC
+
+- Added a syscall denylist to `packaging/dux-tunnel.service` for kernel
+  management, mount/swap/reboot, clock changes, obsolete calls, raw I/O,
+  debugging, CPU emulation, and `open_by_handle_at`. The tunnel does not need
+  FID resolution; `dux.service` retains that syscall for fanotify indexing.
+  Dropbear's required setuid/setgid capabilities remain in the tunnel's
+  capability bounding set, and the tunnel stays disabled by default.
+- `systemd-analyze verify packaging/dux.service packaging/dux-tunnel.service`
+  passed. The focused tunnel policy tests passed **2/2**. The transient syscall
+  smoke test passed for both packaged filter lines: representative restricted
+  syscalls were denied, `clock_gettime` remained available, and
+  `open_by_handle_at` was allowed for the indexer and denied for the tunnel.
+- On this systemd 255 host, the tunnel unit scored **3.2 OK**; an otherwise
+  identical unit without the new syscall filter scored **4.5 OK**. This is a
+  matched before/after comparison and supersedes the older 7.1 score from a
+  different tunnel unit revision.
+- Scope limit: these checks validate unit syntax and representative seccomp
+  behavior only. They do not execute the current Dux binary, run Dropbear or
+  OpenSSH under the exact packaged tunnel unit, or qualify real package
+  install/upgrade/rollback behavior. The production service and index were
+  not modified.
+- The loopback SSH harness was improved to include captured stdout/stderr when
+  checked commands fail. Its baseline integration run then passed **8/8 checks
+  in each of both GatewayPorts modes** under a transient **5% CPU / 512 MiB / no
+  swap** scope, with scratch files in `/dev/shm`. Applying the exact tunnel
+  syscall filter to this test's OpenSSH `sshd` failed at verified-host-key
+  login with a connection reset. The filter's `@mount` group includes
+  `chroot`, which OpenSSH privilege separation may use. The failure does not
+  test the local Dropbear child used by Dux; Dropbear is unavailable on this
+  host, so compatibility with that child under the exact service policy stays
+  unverified. Temporary SSH processes and scratch files were removed after
+  each run. The harness's diagnostic helper tests passed **4/4**, and Python
+  compilation plus `git diff --check` passed.
+- Read-only production status at **09:54:17 UTC**: daemon active with zero
+  restarts, but dirty/not caught up with **198,642 pending updates**, **166,173
+  seconds behind**, **1,503,990 dropped events**, no scan in progress, and
+  `write_error=null`. The latest status reports a dirty reason of changed
+  non-watched filesystem mounts and a **128 MiB WAL**. Backlog growth and the
+  dropped-event history remain release blockers; no readiness gate closes from
+  this source-only tunnel change.
+- The same read-only status reports the last scan **167,352 seconds** earlier;
+  a process sample measured Dux at **91.5% of one CPU**, and the journal records
+  fanotify queue overflows at **09:46:32** and **09:48:29**. Root now has **87
+  GiB available** after stale `/tmp` and `/var/tmp` artifacts were cleared;
+  `target/readiness` still holds **6.2 GiB** of qualification evidence. That
+  retained evidence was not pruned as part of temporary-file cleanup.
+
+### Temporary and cache cleanup — 2026-11-03 10:02 UTC
+
+- Removed **245** stale top-level scratch/log entries from `/tmp` and
+  `/var/tmp`, then removed **8** inactive, rebuildable Go/Node cache directories
+  from `/dev/shm` after confirming no process held files in them. The cleanup
+  recovered about **9 GiB** on the root filesystem and **8.6 GiB** of tmpfs;
+  `df` now reports root **91 GiB used / 86 GiB available** and `/dev/shm`
+  **3.4 GiB used / 9.5 GiB available**. Dux qualification reports and its
+  current-source build/test scratch were retained.
+- Remaining temporary entries are small systemd-private and Codex runtime
+  directories, plus `/tmp/go-build1762785916` (**194 MiB**) and small test
+  fixture directories owned by a live Go test process from another project.
+  That job was confirmed active and its scratch was left intact. The
+  production Dux service remained active with zero restarts; no index,
+  database, configuration, or service state changed.
+
+### Full Python suite attempts stopped at host-pressure gate — 2026-11-03 10:06 UTC
+
+- Two attempts to run all `scripts/test_*.py` tests used a corrected
+  `/home/dux` working directory, `TMPDIR=/dev/shm`, **5% CPU / 1 GiB memory / no
+  swap**, and a 240-second runtime limit. Neither produced a test summary or a
+  count, so neither is a pass or a failure result.
+- During the first attempt CPU PSI `some avg10` reached **23.72%** at about 67
+  seconds. The exact transient unit was stopped; its result and empty output
+  provide no coverage evidence. A second attempt reached **20.48%** at 26
+  seconds, before its redirected output log received any bytes; that exact
+  unit was also stopped. The empty log and one empty temporary test directory
+  were removed. No tests are reported from either attempt.
+- An unrelated full Go test process remained active throughout. This is
+  correlated host activity only; no causal attribution is made. At 10:06 UTC
+  CPU PSI had fallen to **2.46% avg10**, but the full Python suite remains
+  unqualified until a complete, captured run succeeds on a stable host or
+  isolated builder. Dux remained active with zero restarts and its live index
+  was not touched.
+
+### Live production blocker refresh — 2026-11-03 10:07 UTC
+
+- `/usr/bin/dux --version` reports **0.6.3 (a42739776bbd+modified) [production]**.
+  The service is active as PID **4093354** with **zero restarts**, but status is
+  dirty/not caught up: **208,731 pending updates**, **166,953.727 seconds
+  behind**, **1,503,990 dropped events**, no scan in progress, no write error,
+  and a **128 MiB WAL**. The last scan is **168,134 seconds** old and the dirty
+  reason remains a changed non-watched filesystem mount.
+- Since 09:54:17, pending work grew by **10,089**, reported lag by about **781
+  seconds**, and commits advanced by **1,664**. Journal entries record more
+  fanotify overflows at **09:55:45**, **10:03:55**, and **10:05:44**, plus a
+  deferred full reconciliation at 10:05:44. Dux was still using about **91.5%
+  of one CPU** at the sample. This confirms continuing backlog growth and
+  event loss; it is not a source-matched diagnosis or exactness proof.
+- Root had **86 GiB available**, `/dev/shm` **9.5 GiB available**, and CPU PSI
+  `some avg10` was **0.20%**. No production service, index, database, or
+  configuration was modified. The production exactness, overflow recovery,
+  and source-matched performance blockers remain open.
+
+### Full Python suite retry after external Go job ended — 2026-11-03 10:09 UTC
+
+- Retried the complete suite after the previously observed Go test process had
+  exited. The attempt again used `/home/dux`, tmpfs scratch, **5% CPU / 1 GiB / no
+  swap**, and a 300-second limit. CPU PSI `some avg10` rose from **4.26%** to
+  **26.63%** within 54 seconds, before the captured output log received any
+  bytes. Stopped the exact transient scope; the session returned no unittest
+  summary, so this attempt also provides no test result. Removed its empty log;
+  no fixture files remained.
+- This third pressure stop occurred after the identified external Go job had
+  ended. It does not attribute the pressure to this suite or Dux, but confirms
+  the full Python suite cannot currently be completed safely on this host.
+  The Dux service remained active with zero restarts; no production state was
+  changed.
+
+### Temporary storage cleared and backup interruption cleanup fixed — 2026-11-03 10:15 UTC
+
+- A constrained online backup attempt was stopped when host CPU PSI reached
+  **22.95%**, above the established stop threshold. SIGTERM terminated the helper before
+  Python cleanup ran, leaving a **755,593,216-byte incomplete temporary SQLite
+  file** under `/root`; it was confirmed to have no process owner and removed.
+  No final backup or manifest was published, and the production database was
+  not modified. This exposed a real cleanup defect in the backup helper.
+- Updated `scripts/dux-backup-index.py` to allocate its database temp file
+  inside the cleanup-protected block and defer SIGINT/SIGTERM to safe
+  checkpoints. An interrupted operation now closes SQLite handles and removes
+  temporary database and sidecar files. If interruption arrives after the
+  verified database file is published, that recovery copy is retained.
+  Added a regression that raises SIGTERM during hashing and verifies exit status,
+  diagnostic, handler restoration, absence of output artifacts, and complete
+  temp cleanup. `_exclusive_temp` now also closes and removes its new artifact
+  if setting mode 0600 fails; a test verifies the descriptor is closed and the
+  file removed.
+- Focused backup-helper suite passed **14/14 in 0.400 seconds** under a **5%
+  CPU / 512 MiB RAM / no-swap** scope. Tested helper SHA-256
+  `ce6c18a7c2430cfa09aa1c1e286bfbffebec177415d183fdba43ff2059d87a6f` and
+  regression-test SHA-256
+  `197a816a7c8a631ad1258280f4c0c33df190aa193042ff0517da8bcba02fdfe0`.
+  Python compilation and `git diff --check` passed. This verifies the helper's
+  interruption cleanup path; it does not qualify a production-sized backup or
+  restore, migration, or full Python suite.
+- Cleared abandoned scratch/cache directories from `/tmp`, `/var/tmp`, and
+  `/dev/shm`. Tmpfs use fell from **3.4 GiB to about 1 MiB**. Root now reports
+  **91 GiB used / 87 GiB available**. Remaining temporary entries are small
+  systemd-private and Codex runtime directories and PostgreSQL shared memory;
+  they were preserved as live service/runtime state. `target/readiness` and
+  other qualification evidence remain intact. No Dux service, index, database,
+  or configuration change was made.
+- Fresh read-only check at **10:15 UTC** confirms `/usr/bin/dux` is still
+  `0.6.3 (a42739776bbd+modified) [production]`; systemd reports PID **4093354**
+  active with **zero restarts**. Status remains dirty/not caught up with
+  **208,615 pending**, **167,439 seconds behind**, **1,503,990 dropped events**,
+  no scan, and no write error. The 128 MiB WAL and 168,618-second-old scan
+  reinforce that cleanup does not resolve the live reconciliation blocker.
+
+### Full Python suite attempt stopped by production-host CPU pressure — 2026-11-03 10:16 UTC
+
+- Re-attempted full discovery after scratch cleanup, under a transient
+  **5% CPU / 1 GiB RAM / no swap / 300-second** systemd scope with a one-second
+  CPU PSI watchdog. Four release-builder tests passed; the fifth,
+  `test_mid_publish_rename_failure_restores_previous_release_files`, was still
+  running when host CPU PSI some avg10 reached **20.07%**. Stopped the exact
+  suite scope at 10:16:43 UTC. The run exited 143 without a unittest summary,
+  so it provides no full-suite result; the partial log is retained at
+  `target/readiness/dux-python-suite-attempt-20261103T1016Z.log` (SHA-256
+  `e2e216088055c66f5b9c458b7d2e10f808c19668729917e476fe2b33fd0b04f6`).
+- Systemd confirms the suite scope is inactive. The Dux service remained PID
+  **4093354**, active, with **zero restarts**. A post-run read-only status
+  sample shows **208,503 pending**, **167,527 seconds behind**, **1,503,990
+  dropped events**, no scan, and no write error. Counters advanced during the
+  attempt; no index, service, package, or configuration change was made.
+- Another full-suite run on this host would repeat load against a daemon
+  already consuming about one CPU and failing to converge. Complete remaining
+  broad test coverage on an isolated builder; the earlier **249/249** Nov. 2
+  result remains valid for its recorded source/test snapshot but does not
+  qualify today's changed worktree.
+- The focused `scripts.test_dux_package_lifecycle` suite then passed **46/46 in
+  18.898 seconds** in its own **5% CPU / 512 MiB RAM / no-swap** scope. The
+  scope completed successfully and is inactive; CPU PSI some avg10 peaked at
+  **17.72%** after completion. The Dux service remained active with zero
+  restarts. This is source/policy regression coverage and does not demonstrate
+  current DEB/RPM installation, rollback, or production effective-policy
+  qualification.
+- `cargo fmt --all -- --check`, `systemd-analyze verify` on both packaged
+  service units, Python byte-compilation of the backup helper/test, and
+  `git diff --check` all passed after these changes. Formatting and unit syntax
+  checks do not substitute for compilation, runtime sandbox testing, or final
+  package qualification.
+
+### Isolated full Python qualification and VM scratch cleanup — 2026-11-03 10:36 UTC
+
+- The complete Python discovery suite ran in a disposable Ubuntu 24.04.5 guest
+  from a writable ext4 source copy. It reported **253 tests, OK (skipped=3),
+  exit 0** in **26.401 seconds**. Release-builder tests used locked offline
+  cargo metadata from the current `Cargo.lock` and narrow cargo/rustc shims.
+  The three skips are the debug-artifact test and two split-debug-symbol tests,
+  which require guest compiler/binutils tools absent from the base image. The
+  raw full-suite log was not durably recovered after the host pressure guard
+  stopped the disposable guest; the captured test summary is preserved in
+  `target/readiness/dux-python-full-writable-20261103.summary.json` and is
+  explicitly a summary, not a raw log. This does not qualify Rust tests, a
+  current release build, package install/rollback, migration, or production
+  performance/endurance.
+- The guest used the Canonical Ubuntu 24.04 cloud image whose signed checksum
+  was verified before boot (SHA-256
+  `04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`). Its
+  2-vCPU guest was constrained to a 25% host CPU quota and 2.5 GiB memory.
+  The host pressure guard stopped the guest after the test summary was
+  collected. The recovery mount had been backed by a disconnected NBD device;
+  Dux detected the mount topology change and systemd restarted the service.
+  That interim scan logged 128 I/O errors beneath `/mnt/dux-vm-recovery`.
+- Stopped Dux cleanly, unmounted and removed the disposable recovery root,
+  disconnected `/dev/nbd15`, and restarted the service. The mountpoint and NBD
+  partition are now absent. The new daemon (PID **2212602**, zero systemd
+  restarts in its new activation) completed reconciliation on three
+  filesystems at **10:36:42 UTC**: **1,226,356 files**, **110,779 directories**,
+  and **0 scan errors**. At **10:36:52 UTC**, status reported `dirty=false`,
+  no active scan, **400 pending updates**, **81.6 seconds behind**, zero drops
+  since this daemon activation, **128 updates committed**, and no write error.
+  The index is not caught up yet. The fresh process's zero drop count resets
+  the earlier daemon's counters; it does not erase the previously observed
+  drop/backlog history or independently prove exact current contents.
+- Removed the stopped guest overlay from `/dev/shm`; tmpfs is now about **1.1
+  MiB** used, `/tmp` **916 KiB**, and `/var/tmp` **160 KiB**. Small live
+  systemd/Codex and database runtime entries were preserved. After completing
+  the VM run, removed its **593 MiB** Ubuntu base image, signed checksum files,
+  guest state, and pressure-guard log from `target/readiness/vms`; the captured
+  suite summary and qualification notes remain. Root now has about **89 GiB
+  available (50% used)**.
+- Followed up on the three guest skips on the host, where `cc` and binutils are
+  installed. `scripts.test_build_release_debug_artifact` and
+  `scripts.test_dux_split_debug_symbols` passed **3/3 in 17.896 seconds** in a
+  transient scope limited to **5% CPU / 512 MiB RAM / no swap**; the scope
+  exited successfully. CPU PSI some avg10 briefly reached **18.56%**, then
+  fell to **3.27%** 12 seconds later. Dux remained active as PID **2212602**,
+  with zero restarts. At 10:37:08 its status observer recovered and reported
+  `dirty=false`, **469 pending**, **159.5 seconds behind**, zero drops since
+  activation, **256 updates committed**, and no write error. It remains behind
+  and is not caught up; the earlier daemon's historical drop counts remain
+  relevant.
+- A later read at **10:38:31 UTC** still showed the daemon live, `dirty=false`,
+  and no write error, but `watch_status_available=false` and all live queue
+  counters were null. The heartbeat continued updating (10:38:41), while the
+  status record was last written at 10:38:21; current source accepts status
+  records only when at most five seconds old. The daemon was using about **61%
+  of one CPU** in that sample, with CPU PSI avg10 **1.02%** and no systemd
+  restart. This is an observability/catch-up qualification gap; it does not
+  identify the cause in the source-unmatched installed binary.
+- At **10:39:51 UTC**, the observer was available again. Dux remained active
+  with zero automatic restarts, `dirty=false`, no scan, and no write error, but
+  still was not caught up: **439 pending**, **261.8 seconds behind**, **512
+  updates committed**, and zero drops in this activation. CPU PSI some avg10
+  was **17.41%**. Root had **89 GiB available / 50% used** after VM artifact
+  removal. This supports preserving a live convergence blocker; it is not a
+  clean production exactness or performance qualification.
+- Current-source release build attempt at **10:43 UTC**: prerequisites were
+  present, offline Cargo resolution was requested, disk headroom was **88 GiB**,
+  and the build ran in a **5% CPU / 2 GiB RAM / no-swap** systemd scope. Rust
+  compilation began, then host CPU PSI some avg10 reached **37.21%** while an
+  unrelated XGen Go race-test compile was also active. Stopped only the Dux
+  build scope (exit **143**); systemd confirms it is inactive. No executable,
+  package, or candidate manifest was published. Removed the exact partial
+  14 MiB Cargo target and its empty output directory after confirming no
+  compiler remained. The production service was not restarted or modified.
+- Retrospective safety note: that first target directory was under
+  `/home/dux/target`, inside the filesystem Dux watches. Its creation/removal
+  could have added event churn; the later overflow at 10:45:46 also overlapped
+  unrelated XGen tests, so causality is unknown. Do not repeat builds in the
+  watched host tree. The subsequent private-mount attempt avoided that path.
+- At **10:44:34 UTC**, Dux remained active as PID **2212602**, zero systemd
+  restarts. Status showed `dirty=false`, no scan, **8,557 pending paths**,
+  **544.7 seconds behind**, **97,951 events seen**, **79,300 resolved**,
+  **1,024 updates committed**, zero drops in this activation, and no write
+  error. It is not caught up. The live executable reports **0.6.3** and its
+  `/run/dux/watch.status` record is format **v3**, while current source writes
+  format **v4**; this confirms the running binary is not built from this exact
+  checkout. The per-process zero drop count does not clear historical loss.
+  CPU PSI avg10 had recovered to **1.86%** (avg60 **12.63%**), root had **88
+  GiB free**, `target/readiness` was **6.2 GiB**, and `/tmp` had returned to
+  **932 KiB** after the external Go build ended. The earlier 447–565 MiB Go
+  build directories were live and were not removed.
+- After the first build stop, a second attempt used a private mount namespace
+  with a temporary tmpfs at `/tmp`, so Cargo's many intermediate files were
+  not written into Dux's watched filesystem. It was limited to **5% CPU / 3
+  GiB RAM / no swap**. CPU PSI avg10 rose from **18.81%** at 10:48:08 to
+  **31.87%** at 10:48:22 while multiple compiler workers were present; stopped
+  that exact scope (exit **143**). No package or binary was copied to the
+  workspace, and the private tmpfs disappeared with the process. The separate
+  production-tree attempt and this isolated attempt both confirm that the
+  current host cannot yet provide a stable release-build window.
+- The same live overflow remains unresolved. At **10:48:22 UTC**, status still
+  showed `dirty=true`, **9,265 pending**, **784.8 seconds behind**, **112,558
+  events seen**, **83,437 resolved**, **1,792 committed**, zero known userspace
+  drops, and no write error. The v3 status record indicates `kernel_empty=0`
+  and `uncertain=1`; the journal logged a fanotify queue overflow at **10:45:46
+  UTC**. No new reconciliation had started. Kernel overflow count is not
+  available in the installed v3 record, so zero userspace drops must not be
+  interpreted as zero total event loss.
+- At **10:48:42 UTC**, `/` had **88 GiB free**, `/tmp` **173 MiB**, and
+  `target/readiness` **6.2 GiB**. The temporary files were
+  `/tmp/xgenstack-api-readiness` (**105 MiB**) and
+  `/tmp/xgenstack-agent-readiness` (**75 MiB**); they belong to the active
+  XGen host workload and were preserved. The remaining compile/build temp
+  directories were absent. No production restart or index mutation was made.
+- Follow-up at **10:50:39 UTC**: the same daemon remained active with no
+  restarts, but status still showed `dirty=true`, no scan, **10,281 pending**,
+  **910.6 seconds behind**, **117,922 events seen**, **87,764 resolved**,
+  **2,304 committed**, zero userspace drops, and no write error. The backlog
+  grew from 9,265 to 10,281 after the 10:48 sample; the overflow-triggered
+  dirty state has not reconciled. CPU PSI avg10 was **4.06%**. `/tmp` was **259
+  MiB**, including a **12 KiB** live Go build tree and a running XGen WordPress
+  Go test; these were preserved. The two XGen readiness outputs remain about
+  **173 MiB** and are outside Dux ownership.
+- Production/candidate identity check: `dpkg-query` reports the installed
+  package as **0.6.3-16**. `/usr/bin/dux --version` reports commit
+  `a42739776bbd+modified` but no embedded source digest; its SHA-256 is
+  `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`. The
+  retained **0.6.3-62** static candidate from Nov. 2 has a verified package
+  manifest and source digest `d0bfef3c0838fc3f29916d60e61d1dc93a4900650a0bf42b86c53739969c4cce`,
+  but a different binary SHA-256 (`e878cb4c5e82c1055977cc4af1cf60dc16a41e4ca4c3f7418920e8976384a43f`).
+  At the identity-check time, the source tree was
+  `99477a55564fee1d4f9b238de7186b49d74df263de6b426eacdcbc0dfed85694`.
+  Therefore the installed package is behind the retained package revision,
+  and neither the retained candidate nor the installed binary proves identity
+  with today's checkout. A new candidate has not been built. Deployment remains
+  gated by exact source/build identity, live kernel overflow and backlog,
+  v5-to-v6 migration/rollback qualification, and the production canary gates.
+
+
+### Live recovery follow-up and temporary-storage cleanup — 2026-11-03 11:03 UTC
+
+- Following the 10:57:57 UTC graceful restart, daemon PID **2256237** completed a full reconciliation at **10:59:18 UTC**: **1,238,273 files**, **111,033 directories**, **89.63 GiB**, **0 scan errors**. The daemon logged that its backlog persisted at 10:59:28. It remains active with **zero systemd restarts**.
+- The live v3 status record advanced between **11:01:36** and **11:02:32 UTC**: pending paths **251 → 842**, events seen **74,649 → 79,412**, resolved **58,628 → 60,772**, committed updates remained **384**, and lag rose **218.7 → 274.9 seconds**. At 11:02:32 it reported kernel queue not empty, zero known userspace drops, no scan, no write error, and `uncertain=0`. This indicates the daemon is processing some events but backlog/lag are growing; it is not caught up. The v3 record has no kernel-overflow counter, so historical and new kernel loss cannot be excluded from its zero userspace-drop count. CPU PSI some avg10 was **0.04%** at 11:01:31; Dux used about **68% of one CPU** cumulatively at 11:01:48.
+- The temporary-storage cleanup removed the stale `/tmp/xgs-go-cache` (**832 MiB**), XGen readiness outputs (**about 180 MiB**), small stale test scratch directories, and small gate/maturity JSON outputs after confirming no process had them open. `/tmp` fell from **1,005 MiB to 684 KiB**; root went from **90 GiB used / 87 GiB free** to **89 GiB used / 88 GiB free**. Remaining `/tmp` and `/var/tmp` contents are small systemd-private runtime directories/sockets; they were retained to avoid disrupting active services. Retained Dux qualification artifacts under `target/readiness` (**6.2 GiB**) were not deleted.
+- `fs.fanotify.max_queued_events` remains **65,536** only as a runtime setting; it is not persisted. Do not infer that this larger queue resolved the catch-up issue. Do not lower it while the kernel queue reports non-empty.
+- Current release build, package transactions, production v5→v6 migration/rollback, exact tree reconciliation, sustained queue convergence, source-matched kernel-overflow telemetry, and production canary qualification remain open.
+
+
+### Constrained current-source release-build retry stopped on host pressure — 2026-11-03 11:04 UTC
+
+- Retried the source-bound release build into `/dev/shm` (a tmpfs superblock not among the three devices watched by the installed daemon), with `/tmp` private tmpfs, `CARGO_NET_OFFLINE=true`, one Cargo job, package revision **63**, CPUQuota **20%**, MemoryMax **6 GiB**, and swap disabled. This kept target/output away from the watched ext4 tree. The build scope was stopped at **11:04:37 UTC** after host CPU PSI some avg10 reached **65.67%** (avg60 **37.08%**) and `dux status` briefly had no fresh watch-status record. The same sample showed external XGen Go compiler processes at up to **152% CPU**, plus `go build ./...`; Dux status later refreshed.
+- Only the exact release-build scope was stopped; it exited **143** and systemd reports it inactive. No Cargo/Rust compiler remained, no release output or candidate package was produced, and no Dux service/index/package/configuration was changed. The transient 847 MiB copied Cargo home and empty build/output directories in `/dev/shm` were removed after scope termination.
+- At **11:04:42 UTC**, production Dux was still active with **zero systemd restarts**, fresh status, no scan, no reported write error, and zero known userspace drops, but it remained behind: **2,613 pending paths**, **405 seconds lag**, **84,849 events seen / 64,850 resolved / 640 committed**, and the kernel queue was not known to be drained. Host CPU PSI remained high. Do not retry build or test workloads on this host while this pressure and external compilation persist; use the offered VPS once reachable or wait for a verified quiet window.
+
+
+### Current-checkout static and secret-scan checks — 2026-11-03 11:06 UTC
+
+- `gitleaks` with full redaction exited **0 with no findings** across `src`, `scripts`, `packaging`, `docs`, `.github`, `vendor`, and top-level `README.md`, `Cargo.toml`, `Cargo.lock`, `build.rs`, and `rust-toolchain.toml`. This is a secret-pattern scan of those paths; it is not a general security audit or a proof that no secrets exist.
+- Current-checkout `cargo fmt --all -- --check`, `shellcheck` for the release/verify/index-permission scripts, `systemd-analyze verify` for both packaged unit templates, `cargo metadata --locked --offline --no-deps`, and `git diff --check` all exited **0**. These static checks do not compile or exercise the production binary.
+- Full Rust/Python results recorded in the main audit are prior qualification evidence, not a substitute for a current source-bound release build and package lifecycle run. This host remains under active XGen Go compile/vet load (CPU PSI some avg10 **31.93%** at 11:05:35 UTC); no full suite was started during that pressure.
+- SSH configuration inspection found only aliases `192.168.5.106` and `forgejo-git`; `192.168.5.106` resolves to the Git user on port **2222**, not an identified clean builder. A batch-mode read-only probe returned `No route to host`. No VPS credentials/endpoint are configured, so isolated build/migration/scale testing remains unavailable until the offered VPS details are supplied.
+
+
+### Live Go-test scratch and Dux backlog refresh — 2026-11-03 11:07 UTC
+
+- At **11:06:38 UTC**, `/tmp` had grown to **1.4 GiB**, all in `/tmp/x.Kq4Ws`; process **2284912** (`go test -p 2 ... xgenstack/agent/...`) was live under `/home/xgenstack.com/backend` and writing the tree. This is external host test scratch, not a Dux-owned build. It was retained while the writer is active; deleting it could break that test. Other temp storage remained small (`/var/tmp` **160 KiB**, `/dev/shm` **1.1 MiB**). Root had **86 GiB free**.
+- Dux status at 11:06:38: daemon PID **2256237**, active, zero restarts; v3 record had **7,399 pending paths**, **520.6 seconds lag**, **95,402 events seen / 71,125 resolved / 768 committed**, kernel queue **not empty**, userspace drops **0**, `uncertain=0`, no active scan or write error. Relative to 11:04:42, pending rose **2,613 → 7,399** and lag **405 → 520.6 seconds**. It is not converging during the sampled host workload; no statement is made about whether that Go test alone caused the backlog. CPU PSI some avg10/avg60 was **0.92% / 14.42%**.
+- The temporary 65,536 fanotify queue cap remains unpersisted. Historical kernel overflow accounting is unavailable from this v3 daemon record. The growing pending queue and absent source-matched overflow count continue to block exactness/canary sign-off.
+
+
+### Rebuilt and verified current-source handoff for isolated qualification — 2026-11-03 11:08 UTC
+
+- Ran the four `test_dux_source_archive.py` cases with temporary files on `/dev/shm` and bytecode generation disabled; **4/4 passed** in **1.118 seconds**.
+- Generated `/dev/shm/dux-current-source-handoff-20261103T1108Z/` from the current worktree. It contains **126 source entries**, tree digest **`847197bb01bfe2d9103e82b014196e5ae93bf2451bd108c49cbabea43d071820`**, deterministic `source.tar.gz` (**641,035 bytes**, SHA-256 **`fb636d9fc1556ba3e477d73a66f1e8d22fe31dfb9efc425ae47f94a67624e956`**), and `SOURCE_MANIFEST.json` (SHA-256 **`039f23e561a133b43544dc500e28c435ad6f71d313d53c8fcb3a0582ac2b7bfc`**). `SHA256SUMS`, all tar members, file lengths, and per-file hashes were independently verified. This is a source-only handoff; it contains no executable or package. It is in tmpfs and will be lost at reboot.
+- At **11:08:12 UTC**, the XGen Go test remained active and Dux was still not caught up: **11,293 pending paths**, **614.1 seconds lag**, **109,989 seen / 76,962 resolved / 896 committed**, with fresh status and no write error. No Dux service or index change was made.
+
+
+### Full Python harness suite on the current checkout — 2026-11-03 11:09 UTC
+
+- Ran `python3 -m unittest discover -s scripts -p 'test_*.py' -q` with `TMPDIR=/dev/shm`, `PYTHONDONTWRITEBYTECODE=1`, `nice 19`, and idle I/O priority while host CPU PSI some avg10 was **0.16%** and avg60 **1.60%**. Result: **253/253 passed** in **5.579 seconds**. Test scratch stayed on the un-watched `/dev/shm`; no bytecode was written.
+- This is current Python harness/helper coverage only; it does not compile Rust, build a package, or qualify the live index. The Rust source-bound build and production recovery gates remain open.
+
+
+### Revalidate production identity and live telemetry cadence — 2026-11-03 11:11 UTC
+
+- Re-read the installed identity and live DB: package **0.6.3-16**, `/usr/bin/dux` version `0.6.3 (a42739776bbd+modified) [production]`, binary SHA-256 **`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`**; database `meta.schema_version=5`, while the checkout requires schema **6**. The daemon remains active as PID **2256237**, systemd restarts **0**. Do not replace it without a tested full rebuild/rollback path.
+- At **11:10:58 UTC**, the raw v3 record had last updated at 11:10:48: pending **14,966**, lag **770.8 seconds**, **125,875 seen / 82,312 resolved / 1,152 committed**, `kernel_empty=0`, `uncertain=0`, and zero known userspace drops. `dux status --json` returned `watch_status_available=false` at that instant because its freshness limit is five seconds while this v3 record was about ten seconds old. This is a real intermittent telemetry-availability gap in the installed CLI/daemon pairing; do not interpret null counters as healthy or as zero.
+- The external XGen Go test process remained active past five minutes with child package tests and a compiler; its `/tmp/x.Kq4Ws` scratch grew to **1.9 GiB**. It remains outside Dux ownership and must stay until all writers exit. Root had **86 GiB free**; the production queue remains large and not known drained.
+
+
+### Source review of live status freshness mismatch — 2026-11-03 11:12 UTC
+
+- Reviewed the exact current-source path: `src/watch.rs` publishes pipeline status on each main watcher cycle and republishes a conservative snapshot at least every **2 seconds** during governor sleep; `src/util.rs` accepts records no older than **5 seconds**. These intervals are compatible in this checkout.
+- The intermittent stale/NULL status observed on production therefore remains attributable to the installed **v3** daemon/CLI pair, which is source-unmatched and sometimes left its status record older than the five-second reader limit. This is not evidence of a defect in the current writer cadence. No TTL relaxation was made because accepting older queue snapshots could misrepresent live backlog/overflow state. Validate after a source-matched candidate is built and running.
+- At **11:11:59 UTC**, the live raw record still showed **18,534 pending**, **841 seconds lag**, **143,027 seen / 87,400 resolved / 1,152 committed**, and `kernel_empty=0`; the Go test remained active with **2.0 GiB** in its temporary build tree.
+
+
+### Host contention and live queue follow-up — 2026-11-03 11:13 UTC
+
+- At **11:13:27 UTC**, production Dux remained active as PID **2256237** with zero restarts. The raw v3 status was fresh but the index was not caught up: **18,963 pending paths**, **928.99 seconds lag**, **155,092 events seen / 88,328 resolved / 1,280 committed**, `kernel_empty=0`, zero known userspace drops, `uncertain=0`, and no write error. This queue state has not advanced since the 11:12:21 commit while lag continued to increase.
+- Host CPU PSI some avg10/avg60 was **46.82% / 24.60%** while external XGen PID **2333905** ran `go test -race ...` with multiple Go compiler workers. `/tmp/x.Kq4Ws` was **2.3 GiB** and actively written; root had **85 GiB free**. It was preserved as live test scratch. No release build or additional qualification workload was started.
+
+
+### Refresh Rust advisory audit for the current lockfile — 2026-11-03 11:14 UTC
+
+- `cargo audit --no-fetch --json` exited **0** against the current **229-package** `Cargo.lock` (SHA-256 **`fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`**): **0 known RustSec vulnerabilities**, **0 warnings**. The local advisory repository is at commit **`537440b6e46d3970ba9a6719e6e37bfd86ca5134`**, committed **09:37 UTC** today. The JSON report was written to `/dev/shm` and removed after summarizing.
+- Scope is locked Rust dependencies versus the local advisory snapshot. It does not cover OS/native dependencies, binary provenance, or complete dependency metadata for the installed executable; the existing binary scan recovered only 44 dependencies and remains inconclusive.
+
+
+### Current package hardening and live recovery status — 2026-11-03 11:21 UTC
+
+- Restricted the packaged indexer service to `AF_UNIX` sockets by default. The optional `--alert-exec` systemd override explicitly requires `AF_UNIX AF_INET AF_INET6`; the package lifecycle verifier rejects a missing `AF_UNIX`, unknown family, or network family without that hook. The README now documents applying the hook through a systemd drop-in instead of launching a second daemon that would contend for the database lock. This hardening is source-only; it has not been installed or activated on the production host.
+- Validation on the current checkout: the full Python harness suite passed **258/258** in **4.966 seconds**; `cargo fmt --all -- --check`, `git diff --check`, and `systemd-analyze verify packaging/dux.service packaging/dux-tunnel.service` all exited **0**. Earlier same-checkout transient systemd smoke verified that AF_UNIX works, AF_INET/AF_INET6 are denied for the indexer policy, and the optional tunnel policy can use its configured network families. These checks do not build or validate a release executable/package.
+- Read-only live samples at **11:20:16** and **11:21:32 UTC**: installed `/usr/bin/dux` is still **0.6.3 (a42739776bbd+modified) [production]**, service PID **2256237**, zero systemd restarts. At 11:20:16 it was dirty and not caught up with **24,591 pending paths**, **1,354.3 seconds behind**, **344,226 events seen / 105,271 resolved / 2,176 committed**, **95,460,487,168 indexed bytes**, **418,230,272 database bytes**, **128 MiB WAL**, no reported userspace drops or write error, and no scan active. At 11:21:32 it remained dirty/not caught up with **24,165 pending**, **1,411.7 seconds behind**, **374,731 events seen / 107,173 resolved / 2,688 committed**, no write error, and no scan active. PID CPU was **71.9–73.0%** across the samples. A fresh fanotify queue overflow was logged at **11:20:23 UTC**, so zero userspace-drop counts do not establish event completeness. At 11:21:32 CPU PSI some avg10 was **0.00%** and I/O PSI some avg10 **0.45%**; despite low host contention, the daemon has not caught up and continues to use about 73% of a CPU.
+- The effective installed unit is still the legacy unit with no `RestrictAddressFamilies` limit; the hardened AF_UNIX-only rule exists only in the package source. Do not infer production security improvement until an exact candidate is built, package-qualified, and deliberately deployed.
+- Cleanup at **11:20 UTC** left `/tmp` at **684 KiB** and `/dev/shm` at **1.1 MiB**. Active systemd-private and Codex runtime directories/sockets were retained. Root filesystem reports **89 GiB used / 88 GiB free**; no meaningful root-space increase was attributable to this final cleanup because the earlier multi-GiB test tree had already disappeared.
+- Open release gates remain: exact live convergence and recovery after fanotify overflow; schema-v5 installed database to current-schema migration and rollback; source-matched release build/package identity and signing; current-binary fault matrix; 100k/1m/10m performance budgets; supported Debian/Ubuntu and Rocky lifecycle; least-privilege residual review; uninterrupted 72-hour endurance; and a 24-hour exactness-monitored production canary. The current installed executable and index were not changed.
+
+- Follow-up at **11:21:58 UTC**: still dirty/not caught up with **24,719 pending**, **1,439.1 seconds behind**, **376,178 seen / 108,578 resolved / 3,072 committed**, no scan and no write error. Relative to 11:21:32, pending rose **554** and lag grew **27.4 seconds** while seen/resolved/committed advanced **1,447 / 1,405 / 384**. This is active but insufficient processing relative to arrivals, not a no-progress interval. Service remained active with zero restarts; no recovery action was issued.
+
+
+### Live CPU contention, scratch preservation, and current disk snapshot — 2026-11-03 11:23 UTC
+
+- At **11:22:39 UTC**, Dux status counters were unchanged from 11:21:58: **24,719 pending**, **1,481.1 seconds behind**, **376,178 seen / 108,578 resolved / 3,072 committed**, no scan, no write error. At **11:23:17 UTC**, it was still dirty/not caught up with **28,040 pending**, **1,518.2 seconds behind**, **383,563 seen / 113,272 resolved / 3,200 committed**. Thus there was a short no-counter-progress interval followed by active work that did not keep pace with arrivals. No root-cause claim is made from these samples.
+- Host CPU PSI some avg10 was **59.32%** at **11:23:08 UTC**; memory PSI was near zero, I/O PSI some avg10 **0.16%**. PID **2256237** used **88.6%** of one CPU in a two-second process sample, with zero measured block I/O. A concurrent external XGen `go vet ./...` (PID **2408242**) had active Go compiler/vet workers consuming additional CPU. The production Dux service, index and quota were not changed. Concurrent host load confounds attribution; the Dux counters show it is not currently catching up.
+- `/tmp/x.Fb0xR` is **1.6 GiB** of active Go build/cache scratch, held open by that live `go vet` process. It was preserved; remove it only after the Go process and all child writers exit, then recheck open handles. Root had **85–86 GiB free** (about **52% used**); `target/readiness` occupies **6.2 GiB**, `/var/lib/dux` **528 MiB**, the protected root-only database backup **721 MiB**, and `/vms` is absent. No large temp cleanup was attempted while the writer is active.
+
+
+### Follow-up: additional pressure deferral despite stale production status — 2026-11-03 11:25 UTC
+
+- At **11:25:42 UTC**, live Dux remained dirty/not caught up with **37,231 pending paths**, **1,658.3 seconds behind**, **415,414 events seen / 125,913 resolved / 3,328 committed**, no scan and no write error. Service PID **2256237** remained active (zero restarts) at about **76.4% CPU**. Journal recorded another `deferring full reconciliation until host pressure returns to Normal` at **11:24:29 UTC**; no scan had started by the sample. The installed binary is the older source-mismatched v3-status daemon, so current-checkout pressure-admission code cannot be used to attribute this behavior.
+- At 11:25:42, host CPU PSI some avg10/avg60 was **1.20% / 5.10%**, I/O PSI **3.05% / 1.97%**, memory PSI **0%**. These are later samples than the deferral and cannot prove which metric caused it. Concurrent XGen Go test PID **2419438** remained alive, and `/tmp/x.Fb0xR` was about **1.5 GiB**; it was not removed because its test workers still use it. No Dux restart, scan request, or resource-policy change was made.
+
+
+### Disqualify stale retained root package from current release use — 2026-11-03 11:26 UTC
+
+- Read-only inspection of `/root/dux-latest.deb` found Debian package `dux` **0.6.1**, amd64, **1,932,032 bytes**, mtime **2026-09-12 11:55:10 UTC**, package SHA-256 `8ef508d7ee7a755a3998ecad01a7e01649f467889406c496f5ff5ca86458f691`. Its embedded executable SHA-256 is `5390de755b52ee8bd91e6ed32e9b5b673038b59b3ed1746a899b9eb5ab165c78`, different from installed `/usr/bin/dux` SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`; no current source-digest marker was found in the payload. It predates the current schema/security work and is not a deployable current-source candidate. No package was installed or removed.
+
+
+### Backlog growth continues while the live daemon remains source-mismatched — 2026-11-03 11:27 UTC
+
+- Read-only status at **11:27:30 UTC**: PID **2256237** active, zero restarts, dirty/not caught up, **45,381 pending paths**, **1,772.2 seconds behind**, **504,228 events seen / 137,759 resolved / 3,584 committed**, `events_dropped=0`, no write error, no scan. Compared with 11:25:42, pending rose **8,150** and lag **113.9 seconds** while event/resolved/commit counters advanced **88,814 / 11,846 / 256**. Event processing is active but not keeping pace; zero reported userspace drops does not negate the recorded kernel overflow at 11:20:23. Installed unit remains unrestricted by `RestrictAddressFamilies` and source-mismatched.
+- Root remains **52% used / 86 GiB available**. `/tmp` is **1.7 GiB**, still held by the live XGen Go test PID **2419438** and package test workers; leave it until the writers exit, then recheck and remove the stale scratch tree. No production service, index, or quota change was made.
+
+- Follow-up at **11:27:54 UTC** had unchanged event/commit counters from 11:27:30 (**504,228 seen / 137,759 resolved / 3,584 committed; 45,381 pending**); lag reached **1,798.2 seconds**. The watch-status heartbeat was fresh, and `last_event_commit` was **11:27:16 UTC**, so this is a short no-commit interval with active health publication, not a dead process. XGen Go test PID **2419438** and test children were still live; `/tmp/x.Fb0xR` remained **1.7 GiB**. No process was signalled and no scratch file was removed.
+
+
+### Bounded production CPU diagnosis and profiling policy — 2026-11-03 11:29 UTC
+
+- A three-second per-thread sample at **11:28:48–11:28:50 UTC** showed the sole Dux thread at **100% CPU** on one core. The preceding status samples showed no commits since **11:27:16 UTC**; at **11:29:12 UTC**, counters had resumed (**569,786 seen / 139,795 resolved / 3,712 committed**) but the index remained dirty/not caught up with **46,848 pending**, **1,873.4 seconds behind**, and no scan. This confirms an interval of high CPU with little commit progress, followed by resumed activity; it does not identify the code path or establish a persistent hot loop.
+- `perf` 6.8 is installed, but `/proc/sys/kernel/perf_event_paranoid=4` disallows performance-counter profiling. It was not lowered. The installed executable has zero defined function symbols and no matching debug file; even an unprivileged sample would not map to source. Effective CPUQuota is **100% of one CPU**. Cgroup `nr_throttled` was **920 / 15,404 periods** in a cumulative sample; no interval delta was collected. Effective unit I/O byte properties are unavailable (`IOAccounting` not active), so no Dux-specific I/O attribution is claimed. No source, service, sysctl, or index change was made.
+- `/tmp/x.Fb0xR` remained held by live Go test PID **2419438** and children; it was retained.
+
+
+### Repeated live overflow and growing external scratch — 2026-11-03 11:29 UTC
+
+- Journal recorded a further `fanotify queue overflow — index may have missed events` at **11:28:22 UTC**. At **11:29:33**, Dux remained dirty/not caught up with **46,848 pending**, **1,895.4 seconds behind**, **569,786 seen / 139,795 resolved / 3,712 committed**, fresh status, no scan, and no write error. The last event commit timestamp remained 11:28:22. No exactness claim can be made from `events_dropped=0`.
+- The external Go test PID **2419438** was still live at **6:05 elapsed** with linker workers writing `/tmp/x.Fb0xR`; the scratch had grown to **2.0 GiB** (`/tmp` total). It was left untouched. Root had **86 GiB free**. No service/database/configuration change occurred.
+
+
+### Third observed overflow in the current incident window — 2026-11-03 11:29 UTC
+
+- Another fanotify overflow was logged at **11:29:50 UTC**. Status at **11:29:55** remained dirty/not caught up: **47,353 pending**, **1,917.4 seconds behind**, **635,326 seen / 140,988 resolved / 3,840 committed**, no scan or write error. Relative to 11:29:33, counters advanced, but pending and lag increased. The kernel loss signal makes exactness unknown; the old installed binary's zero userspace-drop field is not a counter of kernel loss.
+- External Go test PID **2419438** was still active with compiler/test workers; `/tmp/x.Fb0xR` was **2.0 GiB** and retained. No production or process change occurred.
+
+
+### Preview test remains active after the first Go test exits — 2026-11-03 11:30 UTC
+
+- The broad Go test parent PID **2419438** exited, but its runner started `go test -count=1 -timeout 5m ./agent/preview` as UID `nobody`, PID **2461032**, with `go`/`vet` processes still holding `/tmp/x.Fb0xR`. At **11:30:34 UTC**, scratch had grown to **3.0 GiB** and root had **85 GiB free (53% used)**. Do not delete until this second test process tree and all open references exit.
+- At 11:30:34, Dux status counters remained unchanged from 11:29:55 (**47,353 pending, 1,957.4 seconds behind, 635,326 seen / 140,988 resolved / 3,840 committed**); status heartbeat was fresh, no scan or write error. This is a further no-commit interval after the 11:29:50 kernel overflow. No production mutation occurred.
+
+
+### Test runner transition and renewed shared-host pressure — 2026-11-03 11:30 UTC
+
+- Go test PID **2419438** and the `nobody` preview test exited, but the parent shell **2396871** (`bash scripts/test-fast.sh`) is still active and has started `go test -race -count=1 -timeout 5m ./internal/ws/... ./internal/router/... ./agent/core/...` as PID **2468433**, with many compiler/vet children. `/tmp/x.Fb0xR` has expanded to **2.0 GiB**; `/tmp` total **2.2 GiB**. It remains actively used; do not remove or kill it.
+- At **11:30:55 UTC**, Dux counters were still unchanged from 11:29:55 (**47,353 pending**, **1,977.4 seconds behind**, **635,326 seen / 140,988 resolved / 3,840 committed**), no scan or write error. Host CPU PSI some avg10 had risen to **41.85%** while race-test compilation ran; I/O PSI remained under **1%**. The coincident workloads confound attribution, but production is not catching up and the journal has recent kernel overflow evidence. Root had **86 GiB free**. No test or daemon was stopped.
+
+
+### No local qualification guest available; host test activity continues — 2026-11-03 11:31 UTC
+
+- Read-only `dux-qualification-vm.py status` for Debian 12, Rocky 9, and Ubuntu 24 reports all three guests **missing/inactive**; `target/readiness/vms` has no usable guest state. No local VM was started because host CPU PSI avg60 was **21.83%** and the production watcher remained unhealthy.
+- At **11:31:58 UTC**, Dux remained dirty/not caught up with **47,384 pending**, **2,040.8 seconds behind**, **671,760 seen / 141,588 resolved / 3,968 committed**, no scan/write error. At that sample host CPU PSI avg10/avg60 was **6.43% / 21.83%**, I/O PSI avg10 **0.17%**. The active `scripts/test-fast.sh` runner (PID **2396871**) was running Go race tests (PID **2468433**); `/tmp/x.Fb0xR` reached **3.8 GiB**. Root: **93 GiB used / 84 GiB free**. Scratch is active and was not removed.
+
+- Follow-up at **11:32:20 UTC**: Dux remained dirty/not caught up with **48,007 pending**, **2,061.1 seconds behind**, **703,730 seen / 144,257 resolved / 4,096 committed**, no scan/write error. Since 11:31:58, pending rose **623** and lag **20.3 seconds** while counters advanced; host CPU PSI avg10/avg60 was **0.71% / 15.14%**. `/tmp` reached **4.0 GiB**; root remained **84 GiB free**. The Go race test runner was still live.
+
+
+### Reconciliation deferral and fanotify overflow recur — 2026-11-03 11:32 UTC
+
+- At **11:32:18 UTC**, the live journal recorded both `deferring full reconciliation until host pressure returns to Normal` and `fanotify queue overflow — index may have missed events`. The 11:32:33 sample remained dirty/not caught up with **48,007 pending**, **2,075.1 seconds behind**, **703,730 seen / 144,257 resolved / 4,096 committed**, no scan and no write error; no commits had advanced since 11:31:27. Reconciliation is repeatedly deferred while event coverage remains uncertain.
+- `scripts/test-fast.sh` PID **2396871** and Go race test PID **2468433** were still live. `/tmp` was **3.9 GiB**; root had **84 GiB free**. Scratch was retained while open.
+
+
+### Fresh status during next test-runner phase — 2026-11-03 11:34 UTC
+
+- At **11:34:05 UTC**, Dux remained dirty/not caught up with **48,025 pending**, **2,167.4 seconds behind**, **705,722 seen / 145,003 resolved / 4,224 committed**, no scan and no write error. Compared with 11:32:20, counters advanced, pending rose slightly, and lag increased. Host CPU PSI some avg10 was **36.98%**. Journal still shows the paired **11:32:18** pressure deferral and kernel overflow; no later recovery scan is present.
+- `scripts/test-fast.sh` parent **2396871** remained alive (12m23s elapsed). `/tmp/x.Fb0xR` was about **3.0 GiB** with concurrent Go build cleanup/creation activity; `du` observed transient missing build subdirectories. Root had **85 GiB free**. The conditional cleanup watcher remains waiting for the owner to exit.
+
+- Follow-up at **11:34:44 UTC**: Dux remained dirty/not caught up with **49,452 pending**, **2,206.7 seconds behind**, **719,367 seen / 146,788 resolved / 4,352 committed**, fresh status, no scan/write error. In 39 seconds pending rose **1,427** and lag **39.3 seconds** while processing continued. CPU PSI some avg10/avg60 was **51.13% / 37.18%**; `/tmp` was **3.2 GiB**. The test-fast owner process remains alive between batches; no new overflow was logged after 11:32:18 in this sample.
+
+
+### Tighten package security verifier option matching — 2026-11-03 11:36 UTC
+
+- Fixed a verifier false-acceptance path: network address families are now allowed only when the parsed `ExecStart` argv contains the exact `--alert-exec` option (including equals form), not when that text appears inside another option or argument. Added regressions for `--alert-exec-helper` and a path containing `--alert-exec`; retained positive coverage for both valid forms.
+- Focused effective-unit security tests passed **18/18**. Full current Python harness passed **261/261** in **5.674s**. `cargo fmt --all -- --check`, `git diff --check`, and `systemd-analyze verify` for both unit templates passed. These validate packaging verifier/source behavior, not the Dux Rust executable or current production service.
+- At **11:36:37 UTC**, production Dux remained dirty/not caught up: **54,290 pending**, **2,319.95 seconds behind**, **725,891 seen / 151,963 resolved / 4,480 committed**, no active scan or write error. Last commit was 11:35:11; no counters advanced since that event. Installed unit still lacks the source AF_UNIX restriction. `/tmp/x.Fb0xR` was **3.5 GiB** with an active `scripts/test-fast.sh` stage writing `vitest.log`/npm logs; root had **84 GiB free**. No live service or index change occurred.
+
+
+### External test scratch cleanup complete; production queue remains dirty — 2026-11-03 11:37 UTC
+
+- Confirmed the `scripts/test-fast.sh` parent and Go/npm child processes have exited; both `/tmp/x.Fb0xR` and prior `/tmp/x.Kq4Ws` are absent. The guarded cleanup watcher finished. `/tmp` is **696 KiB** and `/dev/shm` **1.1 MiB**; root is **90 GiB used / 88 GiB free**. The prior external scratch reached about **3.5 GiB**. No active runtime directories were deleted.
+- Read-only Dux status at **11:37:12 UTC** remains dirty/not caught up: **54,317 pending**, **2,372.9 seconds behind**, **760,038 seen / 161,386 resolved / 4,608 committed**, no scan and no write error. A prior pressure deferral at 11:35:11 remains unresolved; the most recent status shows event counters advanced but backlog persists.
+- The package verifier exact-option fix remains source-only; focused tests 18/18 and full Python harness 261/261 passed. No release build, package install, or service/index modification occurred.
+
+
+### R16 source recovery search and post-test Dux drain sample — 2026-11-03 11:39 UTC
+
+- Independently recomputed the canonical source-tree digest for **158** retained `target/readiness/**/*.tar.gz` snapshots against the R16 build-manifest digest `3fa91992e998d8f6777c241be96061c5948b9b323978c0d204ff869b78224cc8`: **0 matches**, **0 corrupt archives**, 9 non-UTF8 member archives skipped (these cannot be inputs accepted by the current UTF-8 source collector). No R16 source archive is available to map the installed executable to exact source.
+- Two status samples 30 seconds apart after external test completion show slow backlog reduction: pending **53,015 → 52,897**, events seen **793,248 → 793,353**, resolved **163,081 → 163,180**, committed **6,016 → 6,144**. Dux remained dirty/not caught up, behind **2,485.8 → 2,514.1 seconds**, no scan/write error; process used about **83.8% CPU**. CPU PSI avg10 was **0.00%** at the second sample. This indicates the daemon is making slow progress under low host contention, not recovered. Root remains **90 GiB used / 88 GiB free**; `/tmp` **696 KiB**.
+
+
+### DISK-213 Refresh filesystem accounting and clear newly regenerated test cache — 2026-11-03 11:43 UTC
+
+- Root filesystem is **185 GiB total / 90 GiB used / 87 GiB free (51%)**. `du -xhd1 /` attributes **32 GiB to `/var`**, **25 GiB to `/home`**, **23 GiB to `/root`**, and **6.6 GiB to `/usr`**.
+- `/var` is primarily live service data: PostgreSQL **14 GiB**, containerd **6.8 GiB**, Docker **4.8 GiB**, XGenStack data **2.7 GiB**, Dux index **528 MiB**, plus **1.5 GiB** of Dux index backups. The two Dux index snapshots are each **755,593,216 bytes**, timestamped Nov 1 before upgrade/rescan; they are recovery evidence and were preserved.
+- `/home` includes Dux **6.3 GiB** (qualification evidence **6.2 GiB**), XGenStack **7.8 GiB**, VPN projects **3.4 GiB**, and other active projects. `/root` includes `.local` **4.6 GiB** (largest file `rtk/history.db`, **2.87 GB**), `.cache` **3.7 GiB**, Go **2.9 GiB**, `.codex` **3.4 GiB**, `.rustup` **1.9 GiB**, and Codex archives **1.2 GiB**. These are not generic temp files and were not deleted.
+- A new XGen Go test run had regenerated **635 MiB** at `/tmp/xgs-go-cache` plus Go compiler scratch. After verifying the test and compiler processes exited and the cache had no open users, the cache and completed temporary maturity report were removed. Go had already removed `/tmp/go-build*`. Final temporary usage: `/tmp` **692 KiB**, `/var/tmp` **160 KiB**, `/dev/shm` **1.1 MiB** (PostgreSQL shared-memory files are active and preserved). Root usage returned from **91 GiB** to **90 GiB**.
+- No PostgreSQL, container, Dux index/backup, project, or system cache data was removed. The largest reclaim candidates now require service-specific retention/ownership decisions; this scan does not establish that they are disposable.
+
+
+### PROD-HEALTH-214 Confirm live reconciliation remains stalled under recurrent pressure admission — 2026-11-03 11:43 UTC
+
+- At **11:43:21 UTC**, installed Dux PID **2256237** was still running `/usr/bin/dux daemon /`, version **0.6.3**, SHA-256 `9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`. It reported **69,822 pending paths**, **2,724 seconds behind**, **819,847 events seen / 184,548 resolved / 6,784 updates committed**, `dirty=true`, `caught_up=false`, no scan, and no write error. The dirty marker was refreshed at 11:42:01; last scan began 10:57:57 and completed at 10:59:18 per journal.
+- The journal then emitted another `deferring full reconciliation until host pressure returns to Normal` at **11:43:23 UTC**. This is the third such deferral in the recent incident window; fanotify overflow was last logged at **11:37:44**. `events_dropped=0` does not prove no kernel loss. Dux is using roughly **85% of its 1-CPU systemd quota**. Around the sample, host memory had **21.7 GiB available**, root had **87 GiB free**, load was about **4.3–5.9 on 12 host CPUs**, and memory/I/O PSI were low. Those point samples do not explain the deferral; pressure hysteresis or different sampling timing may account for it, but the cause is unproven.
+- The live SQLite metadata is schema **v5**. Current worktree source declares schema **v6**. Installed binary SHA and build age do not identify source, and the R16 manifest source digest remains unrecovered. A current-source executable cannot be treated as a safe drop-in until source-matched build provenance, v5-to-v6 migration/rollback qualification, and recovery exactness tests pass. No live action was taken.
+- The daemon's current state remains a release-blocking data-integrity incident: do not advertise the index as caught up or exact until a verified full reconciliation and post-scan accounting complete.
+
+
+### PROD-SECURITY-216 Restrict Dux service address families on the next start — 2026-11-03 11:46 UTC
+
+- Effective installed unit inspection showed `RestrictAddressFamilies=~` (unrestricted); the service runs as root with `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`. Its effective `ExecStart` is `/usr/bin/dux daemon /`, with no `--alert-exec`; `Environment=` is empty and no hook configuration was found. The packaged source unit already restricts Dux to `AF_UNIX` by default.
+- Added `/etc/systemd/system/dux.service.d/70-address-families.conf` with `RestrictAddressFamilies=AF_UNIX`, then ran `systemctl daemon-reload` and `systemd-analyze verify dux.service` successfully. `systemctl show` confirms effective `RestrictAddressFamilies=AF_UNIX`.
+- Dux PID **2256237** and its start timestamp **10:57:57 UTC** remained unchanged; no restart was issued because the live index is dirty and far behind. The address-family restriction is loaded for the next process start and is **not claimed to constrain the already-running process**. If a networked alert hook is introduced later, the unit and verifier must be deliberately updated together.
+
+
+### PROD-PERF-217 Abort source release build after measurable host contention; confirm Dux still processes slowly — 2026-11-03 11:47 UTC
+
+- Attempted `cargo build --release --locked --offline --jobs 1` in a transient systemd scope capped at **50% CPU**, CPU weight **20**, idle I/O priority, and nice **19**. During the first 30 seconds CPU PSI `some avg10` rose from **0.03% to 6.81%** while production Dux was already dirty and backlogged. Interrupted the build with exit **130**; it produced no executable or package. The partial `target/release` build tree (**92 MiB**) was removed after confirming compiler processes exited. This is a stopped build, not a build failure or test result.
+- Read-only cgroup sampling after the build stopped showed Dux used **7.89 CPU seconds in an 8-second interval**, with exactly one process thread and no increase in cgroup `nr_throttled`. The process is CPU-bound in userspace and the current 100% CPU quota is not observed throttling it during that interval; increasing the quota is not supported as a remedy by this evidence.
+- Between status samples around **11:45:22–11:47:20**, pending paths went **70,976 → 70,060**, events seen **857,768 → 870,822**, resolved **191,255 → 196,975**, committed **7,424 → 8,960**. The path backlog reduced slightly, but `behind_seconds` grew **2,844.6 → 2,963.0** and the index remained dirty/not caught up with no scan. This shows live processing continues but incoming work/lag is not converging. Last observed kernel overflow remains **11:37:44 UTC**; last reconciliation deferral is **11:43:23 UTC**.
+- No current-source Rust test or candidate build has passed. Further compile/test load on this production host is deferred until the watcher has recovered or an isolated VPS is provisioned.
+
+
+### PROD-MAINT-218 Remove the orphan loop test mount and reconcile the remaining root — 2026-11-03 12:00 UTC
+
+- Confirmed `/run/dux-ext4-inspection` was an **8 GiB sparse loop mapping** backed by the deleted `/tmp/dux-scale-f2azn2f8/filesystem.img`, mounted `ro,norecovery`; the only process holder was Dux PID **2558658**. At 11:52:56 Dux was dirty/not caught up with **7,429 pending paths**, **269.8 seconds behind**, and no scan active.
+- Executed a controlled sequence: requested `systemctl stop dux`; the daemon logged `received SIGTERM/SIGINT — drained + flushed, exiting` at **11:54:36** (about **98 seconds** after stop was requested); then a **normal** `umount /run/dux-ext4-inspection` succeeded. A normal `losetup -d /dev/loop0` released the mapping. No lazy unmount or forced detach was used. `findmnt -T /run/dux-ext4-inspection` now resolves to `/run` tmpfs and no `/dev/loop0` mapping remains.
+- Restarted the same installed **0.6.3** binary at **11:54:55**. The loaded service now runs with `RestrictAddressFamilies=AF_UNIX`; its startup reports **2 filesystems** (previously 3) and automatically starts a full reconciliation. At **11:56:15** it completed **1,234,823 files, 111,289 directories, 89.64 GiB, zero scan errors**. This rebuilt the index after removal of the stale test mount.
+- At **12:00:14**, the daemon remained active with `dirty=false`, no scan, no write error, and **841 pending paths**, **315.1 seconds behind**, **68,612 events seen / 61,349 resolved / 512 updates committed / 0 userspace drops**. The queue was empty at that sample and event counters had not advanced since 11:59:44; pending work has drained **1,027 → 841** since scan completion. It remains `caught_up=false`; no exactness claim is made. The running v3 status format has no kernel-overflow counter; no overflow warning has appeared since this process started, but that is weaker evidence than a counter plus an independent exact comparison.
+- Root remains **87 GiB free / 52% used**; `/tmp` is **692 KiB**. This cleanup resolves the known orphan test mount but does not close the live recovery/caught-up, source provenance, schema migration, or current-source qualification gates.
+
+
+### PROD-SECURITY-219 Verify address-family restriction is active after restart — 2026-11-03 12:00 UTC
+
+- `systemctl show dux` confirms PID **2558658** is active under the loaded `RestrictAddressFamilies=AF_UNIX` drop-in, with zero systemd restarts since its 11:54:55 start. `systemd-analyze verify dux.service` passes. The focused package-unit policy suite passes **18/18** tests, including positive restricted-unit/alert-hook cases and rejection of unrestricted address families without an exact alert option.
+- This verifies the active unit configuration and verifier logic; it does not prove confinement of code paths outside systemd's address-family control or replace current-binary provenance and package-lifecycle qualification.
+
+
+### PROD-HEALTH-220 Recovery scan succeeded but live mount/event churn made the index dirty again — 2026-11-03 12:01 UTC
+
+- After the second scan completed at **11:56:15** with **0 errors**, Dux was briefly clean but not caught up. At **12:00:14**, it had **841 pending paths** and the fanotify queue was empty. By **12:01:06**, the persisted dirty marker had returned (`non-watched filesystem mounts changed; reconciling visible paths`), there was no scan active, pending had grown to **4,759**, and behind time was **370.2 seconds**. At **12:01:28**, it remained dirty/not caught up, with **4,759 pending**, **392.2 seconds behind**, **75,085 events seen / 66,058 resolved / 512 updates committed / 0 reported userspace drops**; the kernel queue was not empty. No kernel-overflow warning has appeared since the 11:54:55 process start, but the installed v3 status has no kernel-overflow count.
+- Eight Docker `overlay` mounts were visible under `/var/lib/docker/rootfs/overlayfs` at 12:01:21. The current worktree contains `duplicate_overlay_mount_churn_does_not_reconcile_indexed_tree` and overlay topology filtering, but the installed binary's exact source is still unknown. The temporal correlation between mount changes and this dirty transition is suggestive only; the specific changed mount and cause are not captured by the installed log.
+- At 12:01:28 the loop test mount remained absent and the service was active under `AF_UNIX`; root had **87 GiB free**. This confirms the orphan-mount cleanup and second baseline scan succeeded, while showing the live exactness gate remains open under continuing mount/event churn.
+
+
+### ARTIFACT-REVIEW-221 Refresh exact source handoff and disqualify retained release 0.6.3-62 — 2026-11-03 12:03 UTC
+
+- Created `target/readiness/current-source-handoff-20261103T1203Z/` from the authoritative current worktree: **126 source entries**, canonical tree SHA-256 `05ead01b400964e7499c54e93d7a21975671cd2a27a538b04272a73ed719391b`, `source.tar.gz` **654,443 bytes**. Verified all **126** archive members against per-file hashes and `sha256sum -c` passed for archive and manifest. The handoff explicitly has `binary_built=false`, `packages_built=false`, `production_qualified=false`.
+- The retained 0.6.3-62 static candidate's manifest digest is `d0bfef3c0838fc3f29916d60e61d1dc93a4900650a0bf42b86c53739969c4cce`; its binary embeds that same digest. It is not a current-tree candidate: the current tree digest is `05ead…`; changed Rust inputs include `src/main.rs`, `src/query.rs`, `src/tui.rs`, `src/util.rs`, and `src/watch.rs`, plus packaging/verifier and docs. The installed `/usr/bin/dux` still reports 0.6.3 at revision `a427397…+modified` without an embedded source digest. No candidate was installed or run against production.
+- The current source build remains unverified. The previous bounded production-host build was interrupted; current-source Rust tests, full migration lifecycle, fault/overflow qualification, and scale/soak remain open. The new handoff is ready for the isolated host whose SSH details were requested.
+
+
+### PROD-HEALTH-222 Live backlog grows after source-matched source handoff refresh — 2026-11-03 12:04 UTC
+
+- At **12:04:27 UTC**, active Dux PID **2558658** remained dirty with reason `non-watched filesystem mounts changed; reconciling visible paths`, no scan, no write error, **12,258 pending paths**, and **571.6 seconds behind**. Counters were **93,165 events seen / 76,183 resolved / 768 committed / 0 reported userspace drops**. The v3 `watch.status` format omits kernel-overflow accounting; no overflow warning has appeared since PID 2558658 started, but this cannot prove zero kernel loss.
+- Across samples from **12:01:28 to 12:04:27** (179 seconds), pending rose **4,759 → 12,258** (+7,499), while events seen rose **75,085 → 93,165**, resolved **66,058 → 76,183**, and commits **512 → 768**. The service is processing events but arrival exceeds applied updates. The dirty marker dates from **12:00:43** and no recovery scan has started. The eight Docker overlay mounts and current-source overlay-churn test remain a plausible but unproven connection.
+- A separate live XGen Go race-test build is writing **215 MiB** beneath `/tmp` (Go test PID **2573393**, active compiler/vet children). The scratch is retained while the writer is live. Root has **86 GiB free**; this is not the disk-capacity constraint.
+- Dux service confinement remains active (`RestrictAddressFamilies=AF_UNIX`); the orphan test mount and loop device remain absent. Current-source handoff digest `05ead01b…719391b` is checksum-verified, but no matching binary exists. Current-source build and aggressive Rust/scale/fault tests still require a separate test host or a recovered production watcher.
+
+
+### PROD-HEALTH-223 Correlate renewed Dux dirty state with Docker overlay mount churn — 2026-11-03 12:05 UTC
+
+- `findmnt` showed **8** Docker overlay mounts under `/var/lib/docker/rootfs/overlayfs` at **12:01:21**; at **12:05:26**, only **4** remained (the same four earlier mounts persisted, four others had disappeared). The Dux dirty marker refreshed at **12:05:04** with `non-watched filesystem mounts changed; reconciling visible paths`. This timing strongly correlates the current dirty transition with Docker overlay lifecycle, though the installed log does not name the changed mount.
+- Current worktree has an explicit overlay view filter and `duplicate_overlay_mount_churn_does_not_reconcile_indexed_tree` test. The installed binary is an older source-unmatched executable; its observed behavior is consistent with the fix not being present, but this cannot be attributed to exact source without the matching binary/source. No Docker service/container was stopped or altered.
+- At **12:05:26**, Dux remained dirty/not caught up with **12,218 pending**, **629.1 seconds behind**, status format v3 reporting **95,065 seen / 76,771 resolved / 896 committed / 0 userspace drops**, and `kernel_empty=false`; no scan or write error. Around 12:05, CPU/memory/I/O pressure readings were low, so the renewed dirty state is not explained by observed host pressure. Kernel-overflow counts remain unavailable.
+- The external Go race test finished and removed its build scratch. `/tmp` is **768 KiB**; root is **86 GiB free**.
+
+
+### PROD-HEALTH-224 Recheck live dirty state and mount attribution limit — 2026-11-03 12:06 UTC
+
+- At **12:06:23 UTC**, `/usr/bin/dux status --json` reported the service live but `dirty=true`, `caught_up=false`, `scan_in_progress=false`, with **12,034 pending updates**, **688.3 seconds behind**, **102,920 events seen / 77,685 resolved / 1,152 committed / 0 userspace drops**, and no write error. The dirty reason is `non-watched filesystem mounts changed; reconciling visible paths`; the marker dates to **12:05:04**. PID **2558658** remains active with zero systemd restarts.
+- A read-only inspection of the live v5 database found only `dirty_reason`, `dirty_since`, last scan/root, schema version, and throttle metadata; it has no prior mount-topology fingerprint. Current mountinfo has **4** Docker overlay mounts plus ephemeral `nsfs` and systemd credential mounts. This cannot establish which topology entry changed or prove overlay churn caused the dirty marker. Current worktree source excludes duplicate overlay views for visible-tree reconciliation and has a focused unit test; that behavior is not present in the source-unmatched installed executable unless independently demonstrated.
+- Root has **87 GiB free**; after stale temporary-log removal, `/tmp` is **692 KiB** and `/var/tmp` **160 KiB**. Disk capacity and temp scratch are not the cause of the live index backlog. No restart, database write, mount change, or container change was made.
+- Production exactness remains unverified. The immediate qualification requirement is a source-matched candidate on an isolated host, plus runtime instrumentation that records mount identity deltas; do not infer clean/caught-up status from the successful earlier baseline scan.
+
+### Live recovery regression — 2026-11-03 12:42 UTC
+
+The controlled restart and clean full scan recorded in PROD-HEALTH-238 did not
+restore a qualified live index. At 12:40:53 UTC the installed daemon marked the
+index dirty again because non-watched mount topology changed. Three status
+samples between 12:41:50 and 12:42:20 remained dirty and not caught up, with
+6,535 pending paths and no change in the event counters; lag increased from
+321.4 to 351.4 seconds. Dux was using 99.4% of one CPU and CPU PSI some avg10
+was 16.85%. No exact observer or build was run in this condition. The mount
+change cannot be identified from the current mount snapshot because the daemon
+does not retain or log its previous topology fingerprint. The running 0.6.3
+binary is source-unmatched, so the current worktree's overlay-churn fix is not
+evidence that the live daemon contains it. B01, B03, B04, and B07 remain open;
+the baseline scan's zero traversal errors do not establish replay exactness.
+
+At approximately 12:43 UTC, status still showed no scan and `caught_up=false`;
+pending had increased to 11,481 and lag to 416.5 seconds. Event counters had
+resumed advancing, but pending rose by 4,946 over about 56 seconds. Systemd
+reported reconciliation deferred for normal host pressure while sampled CPU
+and I/O PSI avg10 were 0.01% and 0.09%; this status string does not establish
+the daemon's actual admission decision. Root had 86 GiB free and 21 GiB
+available RAM. Storage capacity is not the present blocker; exact recovery,
+source provenance, and isolated qualification remain open.
+
+### Current-source Rust unit run — 2026-11-03 12:52 UTC
+
+`cargo test --locked --all-features --jobs 1` passed **256/256 tests** with
+Rust/Cargo 1.99.1. It ran in a transient systemd scope capped at 20% CPU and
+2 GiB memory, with swap disabled, low CPU/I/O weight, nice 19, and idle I/O
+priority. Compilation took 4m44s; tests took 98.24s. This verifies the current
+worktree's debug unit suite only; it is not a release build or a production
+qualification run.
+
+The installed Dux service remained active and unchanged. At 12:51:58 UTC it
+was still dirty and not caught up, with no scan, 28,171 pending paths, and
+928.99 seconds of lag. The backlog grew during the test window, but this
+coincidence does not prove the test caused it. The run left a 650 MiB
+`target/debug` tree; its 44 small PID-scoped test files were removed after the
+test process exited. No further build or test should run on this host while
+the live backlog is growing. Continue release qualification on an isolated
+guest or VPS.
+
+### Live core-dump hardening — 2026-11-03 12:56 UTC
+
+The running service previously had `LimitCORE=infinity`; its soft limit was
+zero but its hard limit was unlimited, so the root daemon could raise the soft
+limit. I set both live limits to zero with `prlimit` and added
+`/etc/systemd/system/dux.service.d/80-core-dump.conf` with `LimitCORE=0` for
+future starts. `systemctl daemon-reload` and `systemd-analyze verify dux.service`
+passed. Dux remained PID 2731095 with no restart; its capability sets were
+unchanged. This closes only the core-dump mismatch. The installed unit still
+differs from the current package source in other hardening settings, and
+source-matched release and live-index qualification remain open.
+
+The effective unit also had `SecureBits=0` despite the current package policy
+requiring `noroot noroot-locked`. Added
+`/etc/systemd/system/dux.service.d/81-securebits.conf` with that tested policy;
+`systemctl daemon-reload` and `systemd-analyze verify dux.service` passed.
+`systemctl show` reports `SecureBits=3` with the existing capability sets. The
+running PID was not restarted, so securebits apply only at the next start;
+the current process capabilities remain unchanged. The index remains dirty
+and unqualified.
+
+### Mount-churn correlation — 2026-11-03 12:59 UTC
+
+The dirty marker at 12:40:53 UTC was preceded six seconds earlier by four
+Docker/containerd dead-shim cleanup sequences. Because Dux checks mount
+topology every five seconds, this timing strongly correlates the dirty
+transition with container overlay lifecycle. Exact changed mount identities
+were not retained, so this is not proven causation. The current worktree
+filters duplicate overlay-view churn and its focused regression is included in
+the 256 passing Rust tests; the installed source-unmatched daemon has not been
+shown to contain that fix. Current Dux still has a growing backlog, so the
+runtime remains unqualified pending a source-matched candidate and exact
+recovery evidence.
+
+### Transferable source checkpoint — 2026-11-03 13:00 UTC
+
+Refreshed the source-only handoff at
+`target/readiness/current-source-handoff-20261103T1259Z/`: 126 manifest-bound
+entries, source-tree SHA-256
+`cc9fca935d3353bd708ad854985cb5761d00588b95d7478833dbae1aaceaf687`, and
+verified deterministic archive SHA-256
+`5aae5b8fb59065f1b107c53790a6991ca3401e41d2098463ca7177088c2bd9f2`.
+Manifest, member hashes, and `SHA256SUMS` verify. Gitleaks scanned the exact
+2.57 MB extraction with zero findings. The handoff contains no binary or
+package and explicitly remains unqualified; it is ready for the isolated
+builder once access is available.
+
+
+### ARTIFACT-225 Verify source handoff generator after refresh — 2026-11-03 12:08 UTC
+
+- `PYTHONPATH=scripts python3 -m unittest test_dux_source_archive -v` passed **4/4** in **1.117 seconds**. The cases cover deterministic archive metadata, rejecting source mutation between inventory and packaging, path/content-bound digests, and rejecting symlink escapes. A first invocation without `PYTHONPATH=scripts` failed during import; it did not execute tests. The refreshed handoff at `target/readiness/current-source-handoff-20261103T1208Z/` separately verified all **126** archived members against path, size, and SHA-256 metadata, and `sha256sum -c` passed.
+- This is source-archive integrity coverage only; it provides no evidence about Rust correctness or a production candidate. At **12:07:17 UTC**, live Dux remained dirty/not caught up, with **11,871 pending updates**, **742.6 seconds behind**, no scan in progress, and no write error. No service or database change was made.
+
+
+### PROD-QUAL-226 Full Python qualification harness under production-host resource cap — 2026-11-03 12:09 UTC
+
+- Full discovery `python3 -m unittest discover -s scripts -p 'test_*.py' -v` passed **261/261 tests** in **85.400 seconds**, under a transient systemd scope capped at **5% CPU**, **1 GiB memory**, low CPU/I/O weight, `nice 19`, and idle I/O priority. Coverage includes release builder rejection/rollback, backup integrity and cleanup, package/security policy, live-test schemas, qualification safety, storage preflight, source archives, and verifier checks. This Python suite does not run Rust code, build packages, or exercise the installed daemon's event behavior. Static `cargo fmt --all -- --check` and `git diff --check` also pass.
+- After the test process exited, a separate XGen Go race-test process briefly owned `/tmp/go-build2444661393` (**26 MiB**) and a test fixture. Its PID was checked; the process then exited and Go removed its scratch. Final `/tmp` is **692 KiB**, `/var/tmp` **160 KiB**. Existing tiny systemd-private and Codex runtime files remain active runtime state.
+- At **12:09:47 UTC**, Dux PID **2558658** remained active with zero systemd restarts, but `dirty=true`, `caught_up=false`, **12,394 pending updates**, **890.3 seconds behind**, no reconciliation scan, and no write error. It reported **115,789 events seen / 82,860 resolved / 2,432 committed / 0 userspace drops**; status format v3 still omits the kernel-overflow count. Root has **87 GiB free**. No Dux restart or database modification occurred during the test.
+
+
+### SECURITY-227 Refresh RustSec dependency audit and disk-pressure evidence — 2026-11-03 12:15 UTC
+
+- `cargo audit --deny warnings --file Cargo.lock` passed with exit **0** against RustSec advisory DB commit `6c5fedf8ff03c485ed674d8f941e0180f3f72d70` (commit time **2026-11-03 09:44:19 UTC**). It loaded **1,403** advisories and scanned **229** locked dependencies with no vulnerability or warning reported. The current `Cargo.lock` SHA-256 matches the previously verified source handoff, so this audit did not modify its contents. This is dependency advisory coverage; it does not replace source review, binary scanning, or runtime qualification.
+- At **12:14:49 UTC**, root had **86 GiB free**. `/var` used **32 GiB**, chiefly live service data: PostgreSQL **14 GiB**, containerd **6.0 GiB**, Docker **4.8 GiB**, XGenStack **2.7 GiB**, Dux index/backups about **2.0 GiB**; `/var/log` used **1.6 GiB** including **531 MiB** of journals. Dux backups and database data were preserved.
+- `/tmp` was **1.5 GiB**, attributable to active XGen `scripts/test-fast.sh` PID **2586523** and child `go test` PID **2608766**, writing `/tmp/x.JbN6Y`. The same process remained live at 12:14:49; its data was not deleted. Three old Nginx worker handles reference already-deleted logs under a different `/tmp/x.*` tree; their small open sizes do not explain the current large scratch.
+- Dux PID **2558658** remained active with zero systemd restarts, but dirty/not caught up and no scan: **29,606 pending**, **1,192.3 seconds behind**, **170,168 seen / 108,855 resolved / 3,328 committed / 0 userspace drops**, no write error. Its v3 status still has no kernel-overflow counter. CPU PSI avg10/60/300 was **0.42% / 8.03% / 13.41%**. The Go test and backlog were concurrent; causation is not established.
+
+
+### Live recovery replay remains stalled — 2026-11-03 13:13 UTC
+
+The controlled restart at 13:04:57 UTC completed gracefully. The new daemon
+started with core dumps disabled and `SecureBits=3`, then completed a full
+root scan at 13:10:18: 1,634,910 files, 145,480 directories, 99.66 GiB, and
+zero scan errors. The live status did not report caught-up after the scan.
+
+From 13:10:33 to 13:13:00, the status remained at 66,094 pending updates,
+163,360 seen, 162,922 resolved, and zero committed updates; behind time grew
+132 seconds. The daemon consumed approximately one CPU core and its database
+and WAL mtimes remained at 13:10:14. A three-second syscall sample counted
+about 50,000 `pread64` calls. A low-frequency profile could not resolve code
+symbols: the stripped installed binary has Build ID
+`2e2d4557ac578ce614c1b48cfb6b53a389b27330`, with no matching debug artifact
+in retained releases. This proves sustained read activity and no observed
+queue progress, but does not identify the responsible function.
+
+The live database remains unqualified. Next evidence required: identify the
+exact source/build behind the installed binary, obtain a symbolized profile or
+equivalent hotspot diagnosis, observe durable queue progress and drain, then
+run an independent exact comparison on an isolated qualification host. The
+host currently has 78 GiB free; `/tmp` is 668 KiB and `/var/tmp` is 160 KiB
+after removing about 835 MiB of unused build caches and scan reports. Active
+systemd-private and Codex runtime directories were preserved.

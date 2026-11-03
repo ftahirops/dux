@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -69,7 +69,12 @@ pub fn deleted_open() -> Result<Vec<DeletedOpen>> {
             let clean = s.strip_suffix(" (deleted)").unwrap_or(&s).to_string();
             // report ALLOCATED disk (blocks*512), not apparent size — a sparse
             // deleted file doesn't pin its apparent size on disk.
-            let size = (meta.blocks() as i64) * 512;
+            let size = crate::util::allocated_bytes(&meta).with_context(|| {
+                format!(
+                    "reading allocated size for deleted fd {}",
+                    fd.path().display()
+                )
+            })?;
             seen.entry((pid, dev, ino)).or_insert(DeletedOpen {
                 pid,
                 process: process.clone(),

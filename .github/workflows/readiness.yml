@@ -1,0 +1,35 @@
+name: Isolated Linux failure qualification
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: Bounded soak duration (seconds; dedicated runner needed for multi-day soak)
+        default: '120'
+        required: true
+permissions:
+  contents: read
+jobs:
+  qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.99.1
+      - name: Mark the ephemeral hosted runner for isolated qualification
+        run: sudo python3 -c 'from pathlib import Path; p=Path("/etc/dux-qualification-sandbox"); p.write_text("dux-qualification-sandbox-v1\n"); p.chmod(0o400)'
+      - run: cargo build --locked --release
+      - run: mkdir -p target/readiness && cp target/release/dux target/readiness/dux-production
+      - run: cargo build --locked --release --features fault-injection
+      - run: cp target/release/dux target/readiness/dux-faults
+      - name: Run on disposable ext4 filesystem in a private mount namespace
+        env:
+          SOAK_SECONDS: ${{ inputs.duration_seconds }}
+        run: sudo python3 scripts/dux-readiness.py --binary target/readiness/dux-production --fault-binary target/readiness/dux-faults --suites crash overflow cpu churn disk coverage soak capability oom pressure mount wal startup retry root --crash-rounds 30 --duration-seconds "$SOAK_SECONDS"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: readiness-evidence
+          path: target/readiness/*.json
+          if-no-files-found: warn

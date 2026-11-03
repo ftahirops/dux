@@ -1,6 +1,6 @@
 Name:           dux
-Version:        0.6.1
-Release:        1%{?dist}
+Version:        0.6.3
+Release:        17%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
 License:        MIT
@@ -10,9 +10,13 @@ BuildArch:      x86_64
 # runs on any x86_64 Linux regardless of the host glibc. Don't let rpm synthesize
 # a glibc requirement from the binary.
 AutoReqProv:    no
+# The static-musl binary is already stripped and is an identity-bearing
+# release artifact. Do not let rpmbuild's generic brp-strip rewrite its bytes.
+%global __os_install_post %{nil}
 # %pre runs groupadd to create the `dux` group that gates index access.
 # AutoReqProv is off, so this dependency must be declared explicitly.
 Requires(pre):  shadow-utils
+Requires:       python3
 
 %description
 dux is an indexed, persistent du/ncdu with fast trigram file-name search and an
@@ -25,15 +29,21 @@ capacity, and ships an integrity-audit harness. Companion to xtop.
 
 %install
 rm -rf %{buildroot}
-mkdir -p %{buildroot}%{_bindir} %{buildroot}/usr/lib/systemd/system %{buildroot}%{_docdir}/dux
+mkdir -p %{buildroot}%{_bindir} %{buildroot}/usr/lib/dux %{buildroot}/usr/lib/systemd/system %{buildroot}%{_docdir}/dux
 mkdir -p %{buildroot}/var/lib/dux
 install -m0755 %{_sourcedir}/dux        %{buildroot}%{_bindir}/dux
+install -m0755 %{_sourcedir}/secure-index-permissions.sh %{buildroot}/usr/lib/dux/secure-index-permissions.sh
+install -m0755 %{_sourcedir}/dux-backup-index.py %{buildroot}/usr/lib/dux/dux-backup-index.py
 install -m0644 %{_sourcedir}/dux.service %{buildroot}/usr/lib/systemd/system/dux.service
+install -m0644 %{_sourcedir}/dux-tunnel.service %{buildroot}/usr/lib/systemd/system/dux-tunnel.service
 install -m0644 %{_sourcedir}/README.md  %{buildroot}%{_docdir}/dux/README.md
 
 %files
 %{_bindir}/dux
+/usr/lib/dux/secure-index-permissions.sh
+/usr/lib/dux/dux-backup-index.py
 /usr/lib/systemd/system/dux.service
+/usr/lib/systemd/system/dux-tunnel.service
 %doc %{_docdir}/dux/README.md
 # The index lists every filename on /, so the state dir is root:dux 0750, not 0755.
 %dir %attr(0750,root,dux) /var/lib/dux
@@ -42,27 +52,28 @@ install -m0644 %{_sourcedir}/README.md  %{buildroot}%{_docdir}/dux/README.md
 # The `dux` group gates read access to the index. Created in %pre so it exists
 # before %files ownership is applied and before the unit starts.
 if ! getent group dux >/dev/null 2>&1; then
-    groupadd -r dux >/dev/null 2>&1 || true
+    groupadd -r dux >/dev/null
 fi
 exit 0
 
 %post
 mkdir -p /var/lib/dux
-chgrp dux /var/lib/dux 2>/dev/null || true
-chmod 0750 /var/lib/dux 2>/dev/null || true
-# Upgrades from <= 0.5.2 left a world-readable index behind; close it.
-for f in /var/lib/dux/dux.db /var/lib/dux/dux.db-wal /var/lib/dux/dux.db-shm; do
-    [ -e "$f" ] || continue
-    chgrp dux "$f" 2>/dev/null || true
-    chmod 0640 "$f" 2>/dev/null || true
-done
+/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux
+# Optional dux-tunnel.service is never enabled or configured by installation.
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
-    systemctl enable dux.service || true
+    if [ "$1" = "1" ]; then
+        systemctl enable dux.service
+    fi
     # --no-block so the first-start full scan runs in the BACKGROUND and does not
     # block rpm/dnf for the whole scan. Progress is observable via `dux status`.
     echo "dux: starting service — the initial scan of / runs in the BACKGROUND."
-    systemctl restart --no-block dux.service || true
+    if [ "$1" = "1" ]; then
+        systemctl start --no-block dux.service
+    else
+        systemctl try-restart --no-block dux.service
+        systemctl try-restart --no-block dux-tunnel.service
+    fi
     echo "dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)"
 fi
 echo "dux: the index is readable by root and the 'dux' group (it lists every"
@@ -72,8 +83,8 @@ exit 0
 %preun
 # $1 == 0 on final removal (not upgrade)
 if [ "$1" = "0" ] && [ -d /run/systemd/system ]; then
-    systemctl stop dux.service || true
-    systemctl disable dux.service || true
+    systemctl stop dux.service dux-tunnel.service || true
+    systemctl disable dux.service dux-tunnel.service || true
 fi
 exit 0
 
@@ -84,6 +95,32 @@ fi
 exit 0
 
 %changelog
+* Fri Oct 23 2026 dux maintainers <root@localhost> - 0.6.3-8
+- Verify full directory accounting before reporting reconciliation caught up
+
+* Fri Oct 23 2026 dux maintainers <root@localhost> - 0.6.3-6
+- Keep fanotify batches moving across concurrent directory renames
+
+* Fri Oct 23 2026 dux maintainers <root@localhost> - 0.6.3-5
+- Optimize full-retained-history growth aggregation
+
+* Fri Oct 23 2026 dux maintainers <root@localhost> - 0.6.3-4
+- Fix unit documentation and restrict the optional tunnel's address families
+
+* Fri Oct 23 2026 dux maintainers <root@localhost> - 0.6.3-3
+- Keep freshness and systemd status truthful across background reconciliation
+  and pending event replay.
+
+* Thu Oct 22 2026 dux maintainers <root@localhost> - 0.6.3-2
+- Correct combined fanotify CREATE|DELETE masks by reconciling the final path
+  state; preserve exact hardlink paths through rapid replacement churn.
+
+* Thu Oct 22 2026 dux maintainers <root@localhost> - 0.6.3-1
+- Fix inode-incarnation and nested rename accounting drift, and start watches
+  before the baseline scan so changes during first install and upgrades replay.
+- Bound event flush work, publish uncertainty promptly, improve query responsiveness,
+  separate optional remote access, and pin/audit production dependencies.
+
 * Sun Aug 30 2026 dux maintainers <root@localhost> - 0.6.0-1
 - Rebuilt the TUI around four prominent, numbered destinations: Overview,
   Explore, Activity, and Reclaim, with responsive layouts down to 80x24.
@@ -102,25 +139,17 @@ exit 0
   unbounded work during large filesystem event bursts.
 
 * Mon Jul 13 2026 dux maintainers <root@localhost> - 0.5.2-1
-- Daemon CPU/I/O governor — dux is a background reader and must never load a
-  production host. New guarantees:
-  * Hard CPU cap: the daemon self-measures its own CPU (CLOCK_PROCESS_CPUTIME)
-    and injects proportional sleeps to hold a duty-cycle ceiling (`daemon
-    --max-cpu`, default 25% of one core). Under a filesystem event storm it
-    stays at the cap instead of spiking — verified holding 3-5% under a
-    1.8M-file create storm that previously pinned 16-21%.
-  * Idle I/O priority (IOPRIO_CLASS_IDLE) + low nice, so it never contends with
-    production for disk or CPU; cgroup backstops in the unit (CPUQuota=50%,
-    IOWeight/CPUWeight=10).
-  * The kernel fanotify queue is the buffer; the flush is bounded per cycle so a
-    create storm can't produce one giant CPU spike. Excess load drains over
-    subsequent throttled cycles; if the queue ever overflows, the index is marked
-    dirty for a later reconcile — it degrades to eventual consistency, never a
-    CPU spike.
-  * New THROTTLED state in `dux status`/TUI: when the governor is deliberately
-    holding the daemon back, the UI explains the index is intentionally stale to
-    protect the host, how stale it is, and that it catches up automatically.
-- Idle daemon stays ~0% CPU; normal activity is tracked in realtime as before.
+- Daemon CPU/I/O controls reduce its resource share under contention. The
+  watcher thread targets a CPU duty cycle (`daemon --max-cpu`, default 25% of
+  one core); the systemd unit adds a 100% of one core CPU ceiling and low CPU/I/O
+  scheduling weights. Short bursts and work on other threads still consume host
+  resources.
+- Event batches are bounded and queued in fanotify's finite kernel queue. If
+  event rates exceed throughput, the queue can overflow, mark the index
+  uncertain, and require reconciliation. Sustained pressure can delay recovery;
+  status and TUI expose lag and uncertainty.
+- Idle activity is typically near 0% CPU; measured rates depend on the host,
+  event stream, and resource limits.
 
 * Sun Jul 12 2026 dux maintainers <root@localhost> - 0.5.1-1
 - Perf (daemon CPU): born-and-died event coalescing. A file created AND deleted
@@ -136,7 +165,7 @@ exit 0
 - Docs: version-agnostic install commands (resolve the newest release via the
   GitHub API) so the instructions never go stale between versions.
 
-* Tue Jul 08 2026 dux maintainers <root@localhost> - 0.5.0-1
+* Wed Jul 08 2026 dux maintainers <root@localhost> - 0.5.0-1
 - New SRE/DevOps commands (all served from the index — no fs re-walk, no daemon
   cost):
   * `--json` on every read command (top/find/growth/by-owner/by-ext/deleted-open/
@@ -224,7 +253,8 @@ exit 0
 * Sat Jun 27 2026 dux maintainers <root@localhost> - 0.3.0-1
 - Resource guardian: the daemon self-throttles under host pressure (low RAM,
   low disk, high load, kernel PSI) — pauses its own writes when Critical, drops
-  optional work when Elevated, marks itself the preferred OOM victim.
+  optional work when Elevated. The current systemd daemon keeps the default OOM
+  score; only one-off direct scans receive an OOM-victim preference.
 - Perf: poll(2) daemon loop (~0.5 idle wakeups/s), set-based subtree delete,
   unicode-width TUI columns, per-row path cache.
 
@@ -235,14 +265,14 @@ exit 0
   (restore-guard ordering, empty-row indexing) + per-row path cache; growth
   --since honors the window; --ext is literal; prepare_cached children query.
 
-* Thu Jun 26 2026 dux maintainers <root@localhost> - 0.2.1-1
+* Fri Jun 26 2026 dux maintainers <root@localhost> - 0.2.1-1
 - UX: `dux scan` against a live daemon now triggers an in-place atomic rescan
   (SIGHUP) instead of telling the user to stop/start by hand; no downtime.
 - TUI: stop labeling a live index "N old" (it's maintained in realtime); the
   age-as-staleness text only shows for an off-daemon snapshot.
 - Daemon drains the fanotify queue on SIGTERM before the final flush.
 
-* Thu Jun 26 2026 dux maintainers <root@localhost> - 0.2.0-1
+* Fri Jun 26 2026 dux maintainers <root@localhost> - 0.2.0-1
 - Schema v4: separate inode/dirent tables; hardlink-aware search (every path
   findable, inode counted once); raw-byte (non-UTF-8) filename support.
 - Daemon: exclusive per-db lock, graceful SIGTERM flush, root validation,

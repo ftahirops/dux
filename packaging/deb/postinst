@@ -6,33 +6,35 @@ set -e
 # (and root) can run `dux find` / `dux status` directly. Must exist BEFORE the
 # unit starts — systemd resolves Group= at activation.
 if ! getent group dux >/dev/null 2>&1; then
-    addgroup --system dux >/dev/null 2>&1 || groupadd -r dux >/dev/null 2>&1 || true
+    addgroup --system dux >/dev/null
 fi
 
-# state dir for the index (systemd's StateDirectory= enforces this on start too;
-# done here as well for the non-systemd path below)
+# StateDirectory= enforces this on systemd starts too; this also covers the
+# non-systemd path. The helper rejects symlinked paths before chgrp/chmod so a
+# damaged state directory cannot redirect root's permission changes elsewhere.
 mkdir -p /var/lib/dux
-chgrp dux /var/lib/dux 2>/dev/null || true
-chmod 0750 /var/lib/dux 2>/dev/null || true
-# Upgrades from <= 0.5.2 left a world-readable index behind; close it.
-for f in /var/lib/dux/dux.db /var/lib/dux/dux.db-wal /var/lib/dux/dux.db-shm; do
-    [ -e "$f" ] || continue
-    chgrp dux "$f" 2>/dev/null || true
-    chmod 0640 "$f" 2>/dev/null || true
-done
+/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux
 
 case "$1" in
     configure)
+        # Remote access is operator-configured through the separate disabled
+        # dux-tunnel.service. Installation never creates identities or starts it.
+
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload || true
-            systemctl enable dux.service || true
-            # --no-block: the FIRST start runs a full `dux scan /` (ExecStartPre),
-            # which can take a long time on a big filesystem. Without --no-block,
-            # `systemctl restart` (and therefore dpkg/apt) would BLOCK the terminal
-            # for the entire scan. --no-block returns immediately; the scan runs in
-            # the background under systemd. Progress is observable (see message).
+            if [ -z "${2:-}" ]; then
+                systemctl enable dux.service
+            fi
+            # --no-block leaves package operations responsive. The service attaches
+            # watches before its background baseline scan and reports progress via
+            # `dux status` while keeping the initial generation queryable.
             echo "dux: starting service — the initial scan of / runs in the BACKGROUND."
-            systemctl restart --no-block dux.service || true
+            if [ -z "${2:-}" ]; then
+                systemctl start --no-block dux.service
+            else
+                systemctl try-restart --no-block dux.service
+                systemctl try-restart --no-block dux-tunnel.service
+            fi
             echo "dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)"
         else
             echo "dux: systemd not detected; run 'dux scan /' then 'dux daemon /' manually."
