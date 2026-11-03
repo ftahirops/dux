@@ -3533,3 +3533,20 @@ version string alone cannot establish the installed binary's source identity.
 No daemon, package, database, index, or quota was changed. Production remains
 unqualified; the exact-binary overflow recovery, scale, migration/rollback,
 fault, endurance, and canary gates remain open.
+
+### Bounded production no-progress sample — 2026-11-03 19:56 UTC
+
+An 8-second read-only sample at 19:56:31 UTC measured **8.00 CPU seconds in
+8.00 wall seconds** for PID 2777300. Between the immediately-before and
+immediately-after status reads, pending stayed at **39,861**, events stayed at
+**6,562,841 seen / 1,348,558 resolved / 61,440 committed**, and the last commit
+timestamp stayed at **19:56:27 UTC**; this interval showed no counter progress.
+The daemon remained dirty, not caught up, with no scan and no write error. This
+bounded sample confirms CPU saturation without claiming that the pipeline
+never advances.
+
+The Go race-test process exited during the subsequent 20-second host poll, but
+`staticcheck -checks=SA* ./...` was then active. At 19:57:23 UTC host load1 was
+**10.23**, above the VM controller's **10.0** admission limit, and CPU PSI
+some avg10 was **15.94%**. The R63 VM retry therefore remains inadmissible;
+the exact test has not been restarted.
