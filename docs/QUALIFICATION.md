@@ -3557,3 +3557,18 @@ from `/home/xgenstack.com/backend`; the Dux daemon was also present at its
 one-CPU quota. Root remained **58% used with 75 GiB available** and `/dev/shm`
 was **6% used**, so the current qualification blocker is host compute
 pressure, not disk capacity. The guest was not restarted under these conditions.
+
+### Production backlog and local admission recheck — 2026-11-03 20:00 UTC
+
+At 20:00:43 UTC the live index remained `dirty=true`, `caught_up=false`, with
+**44,671 pending**, **6,611,463 seen / 1,358,174 resolved / 61,696 committed**,
+**500,180 drops**, and **24,716.557 seconds behind**. No full scan was active
+and `write_error=null`. Compared with the 19:56:31 sample, pending grew by
+**4,810** and seen events by **48,622**, while commits grew by only **256**;
+this is continued backlog growth, not recovery. The last scan timestamp is
+still **13:08:33 UTC**.
+
+The VM remained inactive. Host load1 was **17.68**, CPU PSI some avg10
+**32.08%**, I/O PSI some avg10 **7.75%**, and I/O PSI full avg10 **5.07%**;
+the local admission limit still rejects load above **10**. A Go test was active
+in the shared host. Root had **74 GiB free (59% used)** and `/dev/shm` **6% used**.
