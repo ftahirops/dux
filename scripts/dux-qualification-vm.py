@@ -287,6 +287,28 @@ def run_pressure_guard(guest, directory, vm_unit):
         time.sleep(5)
 
 
+def stop_vm_unit(unit):
+    """Stop a guest, accepting a unit already collected by systemd --collect."""
+    result = subprocess.run(
+        ['systemctl', 'stop', unit], capture_output=True, text=True, check=False
+    )
+    if result.returncode == 0:
+        return
+    state = subprocess.run(
+        ['systemctl', 'show', unit, '-p', 'LoadState', '-p', 'ActiveState'],
+        capture_output=True, text=True, check=False,
+    )
+    properties = dict(
+        line.split('=', 1) for line in state.stdout.splitlines() if '=' in line
+    )
+    if (state.returncode == 0 and properties.get('LoadState') == 'not-found'
+            and properties.get('ActiveState') == 'inactive'):
+        return
+    raise subprocess.CalledProcessError(
+        result.returncode, result.args, output=result.stdout, stderr=result.stderr
+    )
+
+
 def run(*args, **kwargs):
     return subprocess.run([str(a) for a in args], check=True, text=True, **kwargs)
 
@@ -496,7 +518,7 @@ def main():
     else:
         statefile = persistent_statefile
     if options.action == 'stop':
-        run('systemctl', 'stop', unit)
+        stop_vm_unit(unit)
         if not statefile.exists():
             return
         state = json.loads(statefile.read_text())

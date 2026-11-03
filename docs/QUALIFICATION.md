@@ -3665,3 +3665,30 @@ revision `a42739776bbd+modified` with SHA-256
 does not match the current R63 candidate/source. Production recovery and CPU
 behavior therefore remain unresolved and unqualified; no service, index, or
 package mutation was made.
+
+### R63 guest boot guarded during host saturation — 2026-11-03 22:17 UTC
+
+A 4 GiB Ubuntu 24.04 guest with QEMU capped at 25% started at **22:13:11**.
+The guest reached network setup, but its SSH probe at **22:14:15** was reset
+while cloud-init was still running. The pressure guard stopped QEMU at **22:14:22**
+when host load1 was **15.10** and CPU PSI some avg10 was **63.19%**; QEMU
+accounted **17.091 CPU-seconds**, peaked at **666 MiB**, and used no swap. At
+22:14:35, load1 had risen to **20.88** and CPU PSI some avg10 to **68.82%**.
+The candidate was not copied and no Dux suite ran. This is a guarded boot
+interruption, not a product result. The console, guard event, and descriptor
+are retained under `target/readiness/qualification-vm-boot-20261103T2213Z/`;
+SHA-256 values are respectively `df59717870e80e67879917741ed55351733f9962ace00076205495ab83e8dbe3`,
+`3af7e5dc25af077a5a05d6e9732c17b8bf1c24766c96b01b94536185580fc7a8`, and
+`19fe399715899adfa31f8a92af783b351b1dd08e362d13aed9c50c619a3f8c7b`.
+The stopped VM's writable overlay was removed from tmpfs after preserving the
+console and pressure record.
+
+This attempt exposed a harness cleanup defect: `systemd-run --collect` removed
+the stopped transient unit before the cleanup command called `systemctl stop`,
+which made cleanup abort with “Unit not loaded” and leave the ephemeral overlay
+behind. The VM controller now accepts that case only when `systemctl show`
+confirms both `LoadState=not-found` and `ActiveState=inactive`; other stop
+failures still raise. Regression tests cover both the collected/inactive case
+and an active unit. The full VM-controller module passed **29/29** tests, and
+`py_compile` plus `git diff --check` passed. These are harness results only;
+the R63 overflow suite remains unrun.

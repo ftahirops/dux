@@ -19,6 +19,25 @@ SPEC.loader.exec_module(VM)
 
 
 class PressureGuardTests(unittest.TestCase):
+    def test_stop_accepts_a_systemd_collected_inactive_guest(self):
+        stop_result = subprocess.CompletedProcess(['systemctl', 'stop', 'dux-vm'], 5)
+        show_result = subprocess.CompletedProcess(
+            ['systemctl', 'show', 'dux-vm'], 0,
+            stdout='LoadState=not-found\nActiveState=inactive\n',
+        )
+        with patch.object(VM.subprocess, 'run', side_effect=[stop_result, show_result]):
+            VM.stop_vm_unit('dux-vm')
+
+    def test_stop_still_fails_when_systemd_reports_guest_active(self):
+        stop_result = subprocess.CompletedProcess(['systemctl', 'stop', 'dux-vm'], 5)
+        show_result = subprocess.CompletedProcess(
+            ['systemctl', 'show', 'dux-vm'], 0,
+            stdout='LoadState=loaded\nActiveState=active\n',
+        )
+        with patch.object(VM.subprocess, 'run', side_effect=[stop_result, show_result]):
+            with self.assertRaises(subprocess.CalledProcessError):
+                VM.stop_vm_unit('dux-vm')
+
     def test_vm_manager_refuses_optimized_python(self):
         script = Path(__file__).with_name("dux-qualification-vm.py")
         result = subprocess.run(
