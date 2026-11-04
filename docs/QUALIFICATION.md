@@ -3855,3 +3855,24 @@ The candidate was not copied and no Dux suite ran. The guard event and
 interruption descriptor are under
 `target/readiness/qualification-vm-boot-20261104T0801Z/`; the empty ephemeral
 runtime was cleaned. This is a boot interruption, not a product result.
+
+### Repeat production full-core no-progress sample and host admission hold — 2026-11-04 08:05 UTC
+
+Paired read-only `/usr/bin/dux status --json` snapshots at **08:05:39** and
+**08:05:49 UTC** show the live production index still dirty and not caught up,
+with no active scan and `write_error=null`. Pending stayed at **39,206**;
+events seen/resolved stayed at **19,574,911 / 3,637,902**; committed stayed at
+**161,536**; dropped stayed at **1,501,934**. `behind_seconds` advanced from
+**68,224.815** to **68,234.826**. In the same interval, `/proc/2777300/stat`
+advanced by **952 clock ticks** (about **9.52 CPU-seconds** at 100 Hz), while
+host load1 climbed to **20.06**. This is another short interval of nearly one
+core consumed without observable event-pipeline progress, on the
+source-mismatched installed 0.6.3 binary; it does not identify the cause in
+the R63 candidate.
+
+The host was not suitable for another qualification guest at this checkpoint:
+CPU PSI some avg10 was **51.81%**, load1 was **20.06**, and an unrelated
+`go test -race` build remained active. Root had **81 GiB free** and `/dev/shm`
+about **12.4 GiB free**. The guarded guest remains stopped; no attempt was made
+to override its pressure admission limits. No production process, package,
+configuration, or index state was changed.
