@@ -4092,3 +4092,20 @@ critical limit, the scope was stopped (exit **143**) and its partial target
 removed. At **15:03:42**, load1 was **19.84** and CPU PSI some avg10 **68.95%**.
 Root had **70 GiB free** and `/dev/shm` returned to **594 MiB used**. The Rust
 regression remains unrun; production state was not changed.
+
+### Production backlog accelerated during another Go test wave — 2026-11-04 15:05 UTC
+
+At **15:05:19 UTC**, read-only production status showed **75,666 pending**,
+**26,665,541 events seen / 5,239,352 resolved / 220,160 committed**, and
+**2,003,046 userspace updates dropped**. Compared with the **14:54:08** sample,
+pending increased by **16,469**, events seen by **241,610**, resolved by
+**24,482**, and commits by **1,024**; lag increased by **671.344 seconds** to
+**93,405.902 seconds**. The index remains dirty/not caught up with no scan and
+`write_error=null`. A new reconciliation deferral was logged at **15:05:15**.
+
+Host load1 was **13.62**, CPU PSI some avg10 **10.78%**, and I/O PSI some avg10
+**15.27%**; an unrelated `go test ./...` run and `gatecat-index` were active.
+The journal since 08:30 records the **14:00:04** backlog discard and repeated
+fanotify overflows through **15:00:51**. Root had **70 GiB free** and
+`/dev/shm` about **12.4 GiB free**. Dux is processing events, but pending work
+and lag continue to grow; candidate qualification remains open.
