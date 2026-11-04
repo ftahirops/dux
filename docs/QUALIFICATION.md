@@ -4910,3 +4910,28 @@ The candidate remains undeployed. A clean full reconciliation on a qualified
 binary, exact post-scan filesystem comparison, and evidence that the remaining
 unresolved named-event cases are correctly handled are still prerequisites for
 calling the production index trustworthy.
+
+### Rev 67 capability-loss and recovery qualification — 2026-11-04 21:03 UTC
+
+After host pressure returned below admission limits, the exact rev 67 candidate
+passed the isolated capability suite in a marked Ubuntu 24.04 KVM guest (2 GiB
+RAM; QEMU CPU quota 25%). The suite verified that the daemon refuses to start
+without `CAP_SYS_ADMIN`, exposes uncertainty when `CAP_DAC_READ_SEARCH` is
+missing, keeps that known failure visible across a rebuild, and converges with
+exact filesystem state after capabilities are restored. Suite time was **2.227
+seconds**; worker CPU quota was 25%, with a 4 GiB worker memory ceiling. Binary
+SHA-256 is `188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`;
+harness SHA-256 is `3ebf425f55835f7e0a0609afa90b2953fc8301b41afa43f44d97152227cf0628`.
+The final report is
+`target/readiness/qualification-rev67-capability-20261104/report.json` (SHA-256
+`7400937aeb5b8223dd9885a19d8ec1b1d911ba0faaf8dbc7ba6c83e5b48a0a34`), with
+runner output alongside it. This closes only the bounded capability suite for
+this exact binary; the other 14 readiness suites listed in that report remain
+unrun in that run.
+
+The VM was stopped and its ephemeral runtime cleaned. The production daemon
+remained PID **423219**, active with zero restarts and unchanged on the prior
+binary. A post-run read-only status at **21:03 UTC** still reported
+`dirty=true`, `caught_up=false`, 28 kernel overflow notifications, 15 pending
+updates, and about **5,799 seconds** behind. No production scan or deployment
+was performed; exact live convergence remains a blocker.
