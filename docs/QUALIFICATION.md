@@ -4407,3 +4407,37 @@ scan was active, and `write_error=null`. Host load1 was **12.70** and CPU PSI
 some avg10 **23.21%**. The I/O-accounting change added observability only; it
 did not change the live index or resolve the convergence and kernel-overflow
 blockers.
+
+
+### Static-musl release build stopped on host pressure; live backlog persists — 2026-11-04 16:49 UTC
+
+Retried the official static-musl release/package pipeline for package revision
+**64** from checkout **baee3c0**. The one-job build used a transient systemd
+scope with a **4 GiB memory cap**, `IOWeight=1`, `Nice=19`, tmpfs target/output,
+and initially a **10% CPU quota**; the quota was raised to **20%** after host
+load fell below 5 and the slow bundled SQLite compile became the bottleneck.
+Cargo progressed through the musl dependencies and was compiling
+`tracing-subscriber` when the host guard sample at **16:48:16** reached CPU PSI
+some avg10 **66.56%**. The build was interrupted with exit **130**. No release
+binary or package was produced. The transient scope became inactive, all of its
+compiler processes exited, and its isolated tmpfs tree was removed; `/dev/shm`
+returned to **595 MiB used / about 12.4 GiB free**. The attempt is stopped due
+to host pressure, not a compilation failure.
+
+The scope ran while unrelated Go compile/test jobs were active; concurrent
+workloads prevent attributing the pressure spike to this build alone. At the
+stop sample, load1 was **10.65** and CPU PSI full avg10 **0%**; by **16:49:21**,
+after the build had exited, load1 had risen to **25.53** and CPU PSI some avg10
+to **60.34%**. Root had **70 GiB free**. Production Dux remained active as PID
+**2777300**, with **0 restarts**, the original one-CPU quota, and
+`IOAccounting=yes`.
+
+Read-only production status at **16:49:21 UTC** remained dirty and not caught
+up: **191,848 pending**, **28,070,135 events seen / 5,561,150 resolved / 235,264
+committed**, **2,003,046 userspace updates dropped**, and **99,647.772 seconds
+behind**.
+No scan was active and `write_error=null`. The latest recorded fanotify
+overflow was **16:30:31**; reconciliation deferrals were logged at **16:32:05**,
+**16:38:03**, and **16:46:28**. The live index still needs a qualified recovery
+scan and exactness check. No production binary, service restart, or database
+change occurred during this build attempt.
