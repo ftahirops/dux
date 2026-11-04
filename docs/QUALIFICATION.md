@@ -4233,3 +4233,24 @@ The live executable's `+modified` label does not identify its source bytes, and
 its build ID is not tied to the tested tree by current provenance evidence. The
 unit-suite passes therefore qualify the checked-out source only, not the running
 production daemon. No executable or service state was changed.
+
+
+### Strict Clippy passes for all Dux targets; production backlog continues to grow — 2026-11-04 15:45 UTC
+
+`cargo clippy --locked --offline --all-targets -- -D warnings` completed
+successfully with no warnings for Dux. The check covered all configured Dux
+targets, including test targets, and finished in **4m26s** inside a transient
+systemd scope capped at **20% CPU**, **4 GiB memory**, and `IOWeight=1`, with one
+Cargo job and output isolated to `/dev/shm`. The scope exited, its build tree was
+removed, and `/dev/shm` returned to **594 MiB used / about 12.4 GiB free**. This
+is static lint evidence; it does not qualify runtime or deployed-binary behavior.
+
+At **15:45:19 UTC**, production remained dirty/not caught up with **121,479
+pending**, **27,102,776 events seen / 5,367,612 resolved / 226,432 committed**,
+and **2,003,046 userspace updates dropped**. Compared with 15:42:57, pending
+grew by **7,368**, seen events by **50,582**, resolved events by **11,049**, and
+commits by **256**; lag increased from **95,663.507** to **95,804.782 seconds**.
+No scan was active and `write_error=null`. Host load1 was **7.22**, CPU PSI some
+avg10 **10.88%**, and I/O PSI some avg10 **1.78%**. Root had **71 GiB free**.
+The check changed no production state; convergence, event-loss recovery, and
+live executable provenance remain open blockers.
