@@ -5363,16 +5363,6 @@ as **interrupted / not qualified**, not a candidate failure or a pass. At
 **17.99**; a retry is deferred until the host has recovered. The production
 service and index were not touched. Churn remains an open qualification gate.
 
-A second guarded attempt began at **23:05:25 UTC** after a short improvement
-in host load. It again seeded 100,000 files, completed baseline and watcher
-startup, passed initial exact validation, and performed the first 2,000 churn
-mutations. The guest was stopped while that batch's exactness check was in
-progress. At **23:11:45 UTC**, the pressure guard recorded CPU PSI some
-avg10 **46.95%** and load1 **13.95**; active host compiler workers were
-visible. The guest overlay was discarded before a batch result was published,
-so this attempt is also **interrupted / not qualified**. Repeated guarded
-stops show that the current host is not a reliable place to complete this
-long CPU/I/O workload while other builds run. The guard remains enabled.
 
 ### Production status and host-pressure follow-up — 2026-11-04 23:04 UTC
 
@@ -5395,3 +5385,51 @@ proof that it is the only source of pressure. At the next sample, load1 was
 **21.21** and CPU PSI some avg10 **36.58%**. Another CPU- or I/O-intensive
 qualification run is unsafe until host pressure subsides. No production scan,
 restart, or index mutation was performed.
+
+### Churn qualification retry interrupted by host pressure — 2026-11-04 23:11 UTC
+
+A second guarded attempt began at **23:05:25 UTC** after a short improvement
+in host load. It again seeded 100,000 files, completed baseline and watcher
+startup, passed initial exact validation, and performed the first 2,000 churn
+mutations. The guest was stopped while that batch's exactness check was in
+progress. At **23:11:45 UTC**, the pressure guard recorded CPU PSI some
+avg10 **46.95%** and load1 **13.95**; active host compiler workers were
+visible. The guest overlay was discarded before a batch result was published,
+so this attempt is also **interrupted / not qualified**. Repeated guarded
+stops show that the current host is not a reliable place to complete this
+long CPU/I/O workload while other builds run. The guard remains enabled.
+
+### Current Rust dependency audit and candidate binary inventory — 2026-11-04 23:15 UTC
+
+`cargo audit --deny warnings --format json` passed against the refreshed
+RustSec advisory database (commit `965bf9ad083b58e6340d65829d85217b18be9290`,
+updated **2026-11-03 20:34 UTC**). It scanned **229** locked crate dependencies
+and reported **0** vulnerabilities and **0** warnings. The JSON evidence is
+`target/readiness/dependency-audit-20261104/cargo-audit.json` (SHA-256
+`2f551d1ceee702ba99e3c6676401c46f981ac9a0e75de146ffdba01c5049fd9f`). This
+covers the lockfile against the advisory snapshot; it does not cover native OS
+libraries or prove what is present in a particular executable.
+
+The exact source-matched test candidate
+`target/release/dux` (SHA-256
+`f494ad29cc708048700a7cec18f8c8dd25d1bef14537c8711b55138081d410d4`) was
+also scanned with `cargo audit bin`. The tool explicitly warned that it was
+not built with `cargo auditable` and recovered only **43** dependencies, so
+that binary scan is **incomplete** and is not a release approval. The release
+builder already requires pinned cargo-auditable **0.7.7** and verifies the
+embedded `.dep-v0` section, but the most recent exact-source static package
+evidence is for an earlier source revision. Rebuild and scan a current-source
+static package before promotion. The binary scan log is
+`target/readiness/dependency-audit-20261104/candidate-bin-scan.log` (SHA-256
+`d7623fc14b413599139876d4546e3f06d232761157652da9b32589f6749b85f8`).
+
+A read-only production snapshot captured at **23:15:11 UTC** shows the
+installed binary SHA-256 remains
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060` (PID
+**423219**, zero restarts). The live index is still **DIRTY** from fanotify
+overflow, with **98** kernel overflow notifications, **114** pending updates,
+no active scan, and **13,731 seconds** behind; its last successful scan is
+**13,484 seconds** old. Host CPU PSI some avg10 was **65.06%** and load1
+**20.72**. No production scan, restart, or index mutation occurred. Snapshot:
+`target/readiness/production-status-20261104T2315Z.json` (SHA-256
+`9e7116f9d26a37d6fb67eaaf114924ea121fecf0fd600edd44efbdab6c67961c`).
