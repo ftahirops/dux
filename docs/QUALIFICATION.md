@@ -4864,3 +4864,22 @@ requires an approved maintenance window, backup/rollback, successful full
 reconciliation, and exact clean caught-up verification. Scale qualification,
 capability suite, package/upgrade rollback matrix, prolonged endurance, 72-hour
 soak, and monitored 24-hour canary remain open.
+
+### Capability suite admission stopped by shared-host pressure — 2026-11-04 20:55 UTC
+
+A retry of the candidate's unrun capability-loss/recovery suite booted a fresh
+Ubuntu 24.04 guest with its qcow2 overlay isolated in the private mount-namespace
+tmpfs. SSH became available, but the host-pressure guard stopped the guest at
+**20:54:56 UTC**, before artifact transfer and before any test case ran. The
+recorded sample was CPU PSI some **74.19%**, CPU PSI full **0.00%**, I/O PSI
+some **0.58%**, and load1 **13.86**. The guard operated as configured; the
+attempt is **incomplete**, not a candidate failure or pass. A high-CPU Go
+compile and Go tests under `/home/xgenstack.com/backend` were active in the
+same window, but temporal overlap does not prove they caused the pressure.
+
+The attempt record and guard log, including their hashes, are retained in
+`target/readiness/qualification-rev67-capability-20261104/`. The guest was
+stopped and its private overlay cleaned. No Dux production process, database,
+or index was changed. Do not retry this CPU-intensive guest suite until host
+CPU pressure returns below the qualification admission limits; capability
+coverage remains open.
