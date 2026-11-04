@@ -4962,3 +4962,11 @@ kernel overflow notifications, **8** pending updates, and about **6,150 seconds*
 behind; no reconciliation scan was in progress. Root had **65 GiB available**.
 The candidate remains undeployed, and exact live convergence is still a release
 blocker.
+
+### Rust dependency advisory refresh — 2026-11-04 21:12 UTC
+
+Refreshed the RustSec advisory database and ran `cargo audit` with cargo-audit
+**0.22.2** against the current `Cargo.lock` (**229 dependencies**). The command
+exited **0** with no lockfile vulnerability findings. This is dependency
+advisory evidence only; it does not qualify the current executable, distro
+packages, runtime configuration, or the remaining security and release gates.
