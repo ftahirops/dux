@@ -4480,3 +4480,24 @@ advanced. Host load1 was **6.55**, CPU PSI some avg10 **1.00%**, and root had
 **70 GiB free**; `/dev/shm` was back at **595 MiB used**. Resource pressure has
 receded, but live indexing is still not converging and the production syscall
 policy remains mismatched.
+
+
+### Create a verified rollback backup of the live v5 index — 2026-11-04 17:02 UTC
+
+Created `/var/backups/dux-index-prequalification-20261104.sqlite` with
+`scripts/dux-backup-index.py` under a transient **5% CPU / 512 MiB / IOWeight=1**
+scope while the daemon remained online. The helper used SQLite's online backup
+API, verified the Dux schema and `PRAGMA quick_check`, computed the backup
+SHA-256, and published the database plus JSON manifest without clobbering any
+existing file. The verified copy is **530,878,464 bytes**, schema **v5**, with
+**129,609 pages × 4,096 bytes**, `quick_check=ok`, SHA-256
+`fb9274d6709d93b3b6af41512c251b13bc807f8f0a8dcc620338eef57fde7cbe`; both
+files are root-owned mode **0600**. No temporary files remain. This is a
+rollback snapshot, not proof that the live index is exact or caught up.
+
+At **17:02:34 UTC**, Dux was still active as PID **2777300** with zero restarts.
+Status remained dirty/not caught up with **211,951 pending**, **28,348,940 seen /
+5,596,181 resolved / 236,416 committed**, **2,003,046 userspace updates
+dropped**, and **100,440.261 seconds behind**; no scan was active and
+`write_error=null`. Root had **67 GiB free**. The backup did not install a
+binary, restart the service, or alter the production index.
