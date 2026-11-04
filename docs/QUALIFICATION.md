@@ -4628,3 +4628,20 @@ convergence is therefore **not qualified**; wait for the host's filesystem
 churn to settle before requesting another manual reconciliation, then require
 a complete scan with no lost events and a caught-up clean status before
 claiming readiness.
+
+### Manual quiet-window reconciliation attempt — 2026-11-04 18:41 UTC
+
+After the earlier Go tests exited and a 30-second sample contained no stale
+handle warnings, requested an operator-triggered in-place reconciliation via
+`dux scan /`. It ran for about 149 seconds and again found **zero walker
+coverage issues**, but the host's container workload resumed file churn during
+the scan. The watcher logged repeated `ESTALE` failures while resolving
+fanotify `DFID_NAME` events and recorded **one kernel queue overflow**. The
+result correctly remained dirty (`incomplete coverage or changes lost during
+reconciliation`); it must not be treated as a successful recovery. At 18:42
+UTC, the service was still active with **zero restarts**, zero userspace drops,
+about **28,248 pending updates**, and a **128 MiB WAL**. The separate
+`/home/xgenstack.com/backend` Go test/build workload was active again. It was
+left untouched because interrupting another application's tests or service
+would risk its availability. A clean full reconciliation and post-scan event
+continuity proof remain the production-readiness blockers on this host.
