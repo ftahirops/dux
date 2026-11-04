@@ -3711,8 +3711,10 @@ dropped**, and **65,588 seconds behind**. No scan was active,
 changed; reconciling visible paths**. Compared with 22:19:52 UTC on Nov. 3,
 pending grew from **247,018** to **478,273**, drops from **500,180** to
 **1,001,175**, and lag from **33,077** to **65,588 seconds**. Journal review
-shows recurring fanotify queue overflows and full-reconciliation deferrals
-through the night; the latest overflow was at **07:19:16 UTC**.
+counted **85 fanotify queue-overflow notices** and **59 full-reconciliation
+deferrals** since 22:17 on Nov. 3, plus one logged in-memory backlog discard
+at **02:03:11 UTC**. The latest overflow was at **07:19:16 UTC** and the latest
+deferral at **07:23:42 UTC**.
 
 Host root had **85 GiB free (53% used)** and `/dev/shm` about **12.4 GiB free**;
 Dux used about **441 MiB** of cgroup memory. At the sample, load1 was **2.45**
