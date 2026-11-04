@@ -4109,3 +4109,24 @@ The journal since 08:30 records the **14:00:04** backlog discard and repeated
 fanotify overflows through **15:00:51**. Root had **70 GiB free** and
 `/dev/shm` about **12.4 GiB free**. Dux is processing events, but pending work
 and lag continue to grow; candidate qualification remains open.
+
+### CPU governor regression passes on the current source — 2026-11-04 15:14 UTC
+
+The focused regression `pending_rescan_does_not_bypass_cpu_governor` passed
+(**1 passed, 255 filtered out**) using the command
+`cargo test --locked --offline --bin dux pending_rescan_does_not_bypass_cpu_governor`. The test profile built in **5m08s**
+inside a transient systemd scope capped at **20% CPU**, **4 GiB memory**, and
+`IOWeight=1`; Cargo used one job and wrote its target to `/dev/shm`. The test
+itself completed in **5.01 seconds**. The scope exited and its tmpfs build tree
+was removed; `/dev/shm` returned to **594 MiB used / about 12.4 GiB free**.
+This verifies the targeted governor regression only, not the remaining 255 Rust
+tests or runtime recovery behavior.
+
+At **15:14:30 UTC**, production status still reported a dirty, not-caught-up
+index with **84,714 pending**, **26,779,968 events seen / 5,268,336 resolved /
+221,824 committed**, and **2,003,046 updates dropped**. Compared with 15:07:06,
+pending grew by **8,577**, seen events by **82,201**, resolved events by **20,751**,
+and commits by **1,536**; lag increased from **93,511.457** to **93,956.003
+seconds**. No scan was active and `write_error=null`. The daemon remained live
+with zero service restarts. The focused test passed without changing production
+state; production qualification remains open.
