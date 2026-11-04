@@ -4675,3 +4675,11 @@ directories (12,500–28,831 children) took **9–22 ms each**. That isolated qu
 does not explain the end-to-end flush latency; transaction-level profiling
 under a controlled workload is still needed before changing the accounting
 algorithm.
+
+At **18:55 UTC**, a fresh `go test ./... -count=1` run had started under the
+same external backend tree before a quiet scan window could be established.
+Dux remained active with zero restarts and userspace drops, but now had
+**70,404 pending updates**, **886,719 events seen / 501,599 resolved**, three
+kernel overflow notifications, `dirty_reason=fanotify queue overflow`, and a
+128 MiB WAL. The transient 30-second observation window therefore did not
+qualify as quiet; no additional reconciliation was started.
