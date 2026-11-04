@@ -4254,3 +4254,23 @@ No scan was active and `write_error=null`. Host load1 was **7.22**, CPU PSI some
 avg10 **10.88%**, and I/O PSI some avg10 **1.78%**. Root had **71 GiB free**.
 The check changed no production state; convergence, event-loss recovery, and
 live executable provenance remain open blockers.
+
+
+### Optimized release build stopped on renewed CPU pressure — 2026-11-04 15:47 UTC
+
+A production-profile candidate build was started with
+`cargo build --locked --offline --release --bin dux`, one Cargo job, and its
+target isolated to `/dev/shm`, inside a transient scope capped at **20% CPU**,
+**4 GiB memory**, and `IOWeight=1`. At **15:47:16**, host load1 reached **16.76**
+and CPU PSI some avg10 **62.03%**, exceeding the controller stop threshold.
+The scope was stopped before it produced an executable; its partial target was
+removed, restoring `/dev/shm` to **594 MiB used / about 12.4 GiB free**. The
+optimized current-source binary and its CLI smoke checks remain unverified.
+
+At **15:47:30 UTC**, production remained dirty/not caught up with **124,155
+pending**, **27,147,896 events seen / 5,372,631 resolved / 226,688 committed**,
+and **2,003,046 userspace updates dropped**. Compared with 15:45:19, pending
+grew by **2,676**, seen events by **45,120**, resolved events by **25,019**, and
+commits by **256**; lag increased from **95,804.782** to **95,935.905 seconds**.
+No scan was active and `write_error=null`. The pressure spike was concurrent with the build; causality is not established.
+No production binary or service state was changed.
