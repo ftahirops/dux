@@ -3844,3 +3844,14 @@ and `write_error=null`. A concurrent `ps -L` showed the daemon has only its
 main thread, currently at **97.4% CPU**. This independently reproduces the
 full-core/no-counter-progress interval from 07:47; the production executable
 remains source-mismatched, so source-level root cause is still unproven.
+
+### R63 guest stopped before kernel console startup — 2026-11-04 08:02 UTC
+
+A 4 GiB Ubuntu guest admitted at **08:01:04 UTC** was stopped by the pressure
+guard at **08:01:23** before it emitted any console bytes. The guard measured
+load1 **10.18** and CPU PSI some avg10 **42.34%**; systemd reported
+**4.671 CPU-seconds**. A shared-host Go test suite was active in this interval.
+The candidate was not copied and no Dux suite ran. The guard event and
+interruption descriptor are under
+`target/readiness/qualification-vm-boot-20261104T0801Z/`; the empty ephemeral
+runtime was cleaned. This is a boot interruption, not a product result.
