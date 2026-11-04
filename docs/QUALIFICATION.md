@@ -4453,3 +4453,17 @@ their unit files. The scope exited successfully and is inactive. This validates
 the source unit's seccomp policy on this kernel; it does **not** change or prove
 the loaded production unit, whose effective `SystemCallFilter` still lacks the
 source denylist. No service or index state changed.
+
+### Existing static candidate rejected for current deployment — 2026-11-04 16:51 UTC
+
+Checked the newest preserved static candidate at
+`target/readiness/current-source-release-20261103T1321Z` before considering reuse.
+Its manifest binds the binary to commit **a42739776bbd** with a dirty worktree
+and source digest `d952c8d46a7b57234c46a4af24c07698c3ac07512732ce56fa520634957dd4d6`.
+Its `--version` independently reports `a42739776bbd+modified` and that same
+digest. Comparing the manifest's **126** source-file hashes with this checkout
+found **115** matches, **9** mismatches (including qualification scripts and
+documentation), and **2** missing workflow files. Although the core Rust files
+match, the candidate does not attest to the current complete source tree and is
+not eligible for the exact-source release/package gate. The failed static build
+left no replacement artifact.
