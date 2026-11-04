@@ -4155,3 +4155,24 @@ seconds**. No scan was active and `write_error=null`. Host load1 was **3.37**,
 CPU PSI some avg10 **6.99%**, and I/O PSI some avg10 **0.09%** after the run.
 The service stayed live; the passing unit suite did not change production
 state. The widening backlog and event-drop history remain production blockers.
+
+
+### Vendored jwalk integration suite deferred after host pressure spike — 2026-11-04 15:28 UTC
+
+The vendored `jwalk` crate has its own upstream integration tests, including a
+single-threaded Rayon deadlock regression, outside the root Dux test target. An
+offline attempt stopped before compilation because the local Cargo index lacked
+the locked `criterion` package; no tests ran. Cargo then downloaded the locked
+test dependencies and started a retry with its target isolated to `/dev/shm`,
+one build job, **10% CPU**, **3 GiB memory**, and `IOWeight=1`. At **15:27:56**,
+host load1 reached **22.20**, so the transient scope was stopped before reaching
+test execution. Its partial target was removed. The vendored crate's own tests
+remain unverified; the Dux root test suite's `jwalk_hands_each_directory_its_own_parallel_read_state`
+regression did pass in the 256-test run.
+
+At **15:28:16 UTC**, after stopping the scope, host load1 was **29.67** and CPU
+PSI some avg10 **70.96%**. Production remained dirty/not caught up with **99,250
+pending**, **26,908,286 seen / 5,309,997 resolved / 225,024 committed**, and
+**2,003,046 userspace updates dropped**; lag was **94,781.186 seconds**, no scan
+was active, and `write_error=null`. The run was stopped to avoid adding load;
+no production state was changed.
