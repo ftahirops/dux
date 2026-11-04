@@ -3800,3 +3800,16 @@ no observable ingestion or recovery progress, not merely a steadily draining
 backlog. The installed binary remains R16/source-unmatched, so the cause cannot
 be assigned to the current candidate. No process attach, restart, scan, or
 production mutation was performed.
+
+### Qualification guest stopped on host I/O pressure — 2026-11-04 07:52 UTC
+
+The 07:50:28 Ubuntu guest boot was stopped by the existing pressure guard at
+**07:51:27**. Host load1 was **8.58**, CPU PSI some avg10 **15.26%**, but I/O
+PSI some/full avg10 had reached **45.06% / 36.47%**; the controller's critical
+I/O-some limit is 40%. Systemd reported **14.239 CPU-seconds**, **360.5 MiB
+peak memory**, and zero swap. A host 8-worker I/O test was active in the
+contemporaneous process sample. SSH did not become ready; the candidate was
+not copied and no Dux suite ran. The console, guard event, and descriptor are
+retained under `target/readiness/qualification-vm-boot-20261104T0750Z/`; the
+ephemeral runtime was cleaned. This is a host-pressure boot interruption, not
+a product result.
