@@ -3909,3 +3909,24 @@ the 08:09:45 sample had shown a concurrent `gosec`, compiler, and Go test wave.
 Root had **79 GiB free** and `/dev/shm` about **12.4 GiB free**. These host
 conditions exceed qualification admission limits. No VM was started, and no
 production service or index changes were made.
+
+### Installed production daemon stalled again between refreshed status records — 2026-11-04 08:11 UTC
+
+Paired read-only `/usr/bin/dux status --json` snapshots at **08:10:52** and
+**08:11:03 UTC** were unchanged for pending (**41,587**), events seen/resolved
+(**19,660,983 / 3,644,997**), committed (**162,048**), and dropped
+(**1,501,934**). Lag advanced from **68,538.893** to **68,548.895 seconds**.
+Over the same 10.2 seconds, PID **2777300** advanced by **1,000 clock ticks**
+(**10 CPU-seconds** at 100 Hz). The service remains active with zero restarts,
+100% one-core quota, and one runnable daemon thread. This is another bounded
+full-core interval without counter progress; it still cannot establish the
+cause in the source-mismatched installed binary.
+
+At **08:11:22**, the index remained dirty/not caught up, with **68,566.899
+seconds** of lag, no active scan, and `write_error=null`. The journal since
+08:01 contains fanotify queue overflows at **08:02:48**, **08:04:12**, and
+**08:07:31**, plus full-reconciliation deferrals at **08:01:44** and **08:07:31**.
+Host load1 was **16.37** (above VM admission), while CPU PSI some avg10 was
+**0.67%** and I/O PSI some avg10 **6.62%**. Root had **79 GiB free** and
+`/dev/shm` about **12.4 GiB free**. The qualification guest remains stopped;
+the index and service were not modified.
