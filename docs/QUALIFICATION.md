@@ -4011,3 +4011,14 @@ After cleanup, `/dev/shm` returned to **595 MiB used / about 12.4 GiB free**;
 root had **78 GiB free**. At **08:23:58**, load1 was **24.25** and CPU PSI some
 avg10 **25.75%**. The attempt was deliberately bounded and no production state
 was changed; rerun the focused test and R63 guest suite when admission permits.
+
+The focused build was retried at **08:27 UTC** with the same isolated tmpfs
+target, one Cargo job, `nice`/idle I/O priority, and a transient scope capped at
+**20% of one CPU** and **4 GiB memory**. It compiled further dependencies but
+still did not reach the Dux test binary. At **08:28:22**, host load1 was **25.58**
+and CPU PSI some avg10 **80.09%**, with unrelated compiler/stress processes
+active. The scope had consumed **12.75 CPU-seconds** and **147 MiB** at stop; it
+was terminated with SIGTERM (143). After removing its partial build tree,
+`/dev/shm` returned to **595 MiB used**; at **08:28:51**, load1 had reached
+**33.72** and CPU PSI some avg10 **81.29%**. This second bounded attempt also
+produced no test result, and production state was not changed.
