@@ -4656,3 +4656,22 @@ drops, one recorded kernel overflow, about **59,673 pending updates**, and
 `dirty=true`. Automatic full scans are now paused pending explicit operator
 action. Repeated manual retries during the continuing Go workload would only
 reproduce the same host-load and event-loss conditions.
+
+### Continued event-pressure and flush-latency observation — 2026-11-04 18:51 UTC
+
+While the retry circuit remained paused, the host continued running Go tests
+under `/home/xgenstack.com/backend`. Dux recorded a second kernel fanotify
+overflow, and the persisted dirty reason became `fanotify queue overflow`. At
+18:51 UTC the daemon was active with zero restarts, **65,162 pending updates**,
+**803,677 events seen / 491,894 resolved**, **3,009 updates committed**, zero
+userspace drops, and a **128 MiB WAL**. This independently confirms the live
+index cannot currently be trusted, even outside a reconciliation attempt.
+
+The service also logged `rollup_reconcile` flush phases of about **50 seconds
+for 52 items** and **65 seconds for 122 items** during the same workload. A
+read-only query-plan check confirmed the rollup aggregate uses the expected
+parent and inode indexes; representative samples for four high-fanout
+directories (12,500–28,831 children) took **9–22 ms each**. That isolated query
+does not explain the end-to-end flush latency; transaction-level profiling
+under a controlled workload is still needed before changing the accounting
+algorithm.
