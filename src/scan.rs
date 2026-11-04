@@ -11,6 +11,13 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// A directory or child can disappear after `jwalk` enumerates its parent.
+/// The resulting `NotFound` means there is no current subtree to index; other
+/// traversal failures remain coverage errors and must keep the index dirty.
+fn scan_race_is_vanished(error: Option<&std::io::Error>) -> bool {
+    error.is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+}
+
 #[derive(Default)]
 pub struct ScanOptions {
     pub one_file_system: bool,
@@ -1328,9 +1335,24 @@ fn parallel_stage(
                             children.clear();
                             return;
                         }
-                        let pinfo = std::fs::symlink_metadata(dir_path)
-                            .ok()
-                            .and_then(|metadata| crate::util::indexed_identity(&metadata).ok());
+                        let pinfo = match std::fs::symlink_metadata(dir_path) {
+                            Ok(metadata) => crate::util::indexed_identity(&metadata).ok(),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                                // The walker enumerated this directory, but it
+                                // vanished before its children were attributed.
+                                // Its current subtree is absent, so this is a
+                                // normal concurrent-delete race.
+                                children.clear();
+                                return;
+                            }
+                            Err(error) => {
+                                let prior = ne.fetch_add(1, Ordering::Relaxed);
+                                if prior < 32 {
+                                    tracing::warn!(path = %dir_path.display(), %error, "could not stat directory while scanning its children");
+                                }
+                                None
+                            }
+                        };
                         if pinfo.is_none() {
                             // Never attribute children to the scan root when
                             // their real parent cannot be identified.
@@ -1500,16 +1522,20 @@ fn parallel_stage(
                     match result {
                         Ok(entry) => {
                             if let Some(ref error) = entry.read_children_error {
-                                let prior = walk_errors.fetch_add(1, Ordering::Relaxed);
-                                if prior < 32 {
-                                    tracing::warn!(path = %entry.path().display(), %error, "could not read directory during scan");
+                                if !scan_race_is_vanished(error.io_error()) {
+                                    let prior = walk_errors.fetch_add(1, Ordering::Relaxed);
+                                    if prior < 32 {
+                                        tracing::warn!(path = %entry.path().display(), %error, "could not read directory during scan");
+                                    }
                                 }
                             }
                         }
                         Err(error) => {
-                            let prior = walk_errors.fetch_add(1, Ordering::Relaxed);
-                            if prior < 32 {
-                                tracing::warn!(%error, "filesystem walker could not read an entry");
+                            if !scan_race_is_vanished(error.io_error()) {
+                                let prior = walk_errors.fetch_add(1, Ordering::Relaxed);
+                                if prior < 32 {
+                                    tracing::warn!(%error, "filesystem walker could not read an entry");
+                                }
                             }
                         }
                     }
@@ -1618,6 +1644,17 @@ fn set_low_priority() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vanished_scan_entries_do_not_count_as_coverage_errors() {
+        let vanished = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let other = std::io::Error::from(std::io::ErrorKind::Other);
+        assert!(scan_race_is_vanished(Some(&vanished)));
+        assert!(!scan_race_is_vanished(Some(&denied)));
+        assert!(!scan_race_is_vanished(Some(&other)));
+        assert!(!scan_race_is_vanished(None));
+    }
 
     #[test]
     fn stale_scan_cleanup_removes_only_generated_regular_stage_files() {

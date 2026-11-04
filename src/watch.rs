@@ -152,6 +152,15 @@ fn reconciliation_scan_ready(
     requested && retry_backoff_elapsed && (queues_drained || behind >= RECONCILE_BACKLOG_GRACE)
 }
 
+fn automatic_reconciliation_request_allowed(
+    retry_paused: bool,
+    scan_active: bool,
+    accounting_check_active: bool,
+    request_pending: bool,
+) -> bool {
+    request_pending && !retry_paused && !scan_active && !accounting_check_active
+}
+
 fn watcher_poll_timeout(
     active_flush_interval: Duration,
     elapsed_since_flush: Duration,
@@ -1830,10 +1839,12 @@ pub fn run_daemon(
             last_caught_up.elapsed(),
             retry_backoff_elapsed,
         );
-        if scan_job.is_none()
-            && accounting_check.is_none()
-            && rescan_requested
-            && RESCAN.swap(false, Ordering::SeqCst)
+        if automatic_reconciliation_request_allowed(
+            reconciliation_retry_paused,
+            scan_job.is_some(),
+            accounting_check.is_some(),
+            rescan_requested,
+        ) && RESCAN.swap(false, Ordering::SeqCst)
         {
             if pressure_defers_reconciliation {
                 RESCAN.store(true, Ordering::SeqCst);
@@ -6681,6 +6692,21 @@ mod tests {
 
     #[test]
     fn persistent_backlog_can_start_reconciliation_but_retries_are_bounded() {
+        assert!(automatic_reconciliation_request_allowed(
+            false, false, false, true,
+        ));
+        assert!(!automatic_reconciliation_request_allowed(
+            true, false, false, true,
+        ));
+        assert!(!automatic_reconciliation_request_allowed(
+            false, true, false, true,
+        ));
+        assert!(!automatic_reconciliation_request_allowed(
+            false, false, true, true,
+        ));
+        assert!(!automatic_reconciliation_request_allowed(
+            false, false, false, false,
+        ));
         assert!(!reconciliation_scan_ready(
             false,
             true,

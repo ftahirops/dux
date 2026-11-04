@@ -4550,3 +4550,53 @@ The `ci.yml` and `readiness.yml` definitions are absent from both the current
 branch and fetched `main`; the zero-second failures are prior runs generated
 while the workflow was disabled, not active jobs. No workflow source change was
 needed in this checkout.
+
+### Installed exact-source package; live v6 rebuild completed but index remains unsafe — 2026-11-04 18:12 UTC
+
+Installed the qualified **0.6.3-64** DEB on this production host after saving
+the prior `/usr/bin/dux`, packaged unit, effective unit properties, and
+installed-package state under
+`target/readiness/production-preupgrade-20261104/`. Re-verified those rollback
+file hashes and the v5 database backup hash after installation. The package
+post-install restart requested a graceful stop; the old daemon drained and
+exited successfully after about three minutes. The new exact-source binary is
+now active as PID **4030438**, `NRestarts=0`. Its packaged syscall denylist is
+effective, and `IOAccounting=yes` and the existing one-CPU quota remain active.
+
+The daemon watched both filesystems and performed the v5-to-v6 atomic baseline
+rebuild. The v5 database remained available until the staging index was
+installed; the resulting v6 database passed a read-only `PRAGMA quick_check`
+(`ok`). The first baseline found **3** coverage errors: the walker reached
+short-lived Go test directories in `/tmp` that disappeared before it read
+them (`ENOENT`). The second baseline had **0** scan errors, but unresolved
+stale file handles and a kernel fanotify overflow still made event continuity
+uncertain. A third same-loop scan started immediately after the retry circuit
+reported that scans were paused. Automatic scans then paused with the index
+still dirty, as the retry counter reached **3**. The v5 backup is still intact;
+the live database is v6.
+
+At **18:11:49 UTC**, the current daemon was still active with zero restarts,
+**153,055 pending** updates, **1,127,688 events seen / 579,549 resolved / 4,096
+committed**, **0 userspace updates dropped**, and **3 kernel overflow
+notifications**. It reported `dirty=true`, reason `fanotify queue overflow`,
+`caught_up=false`, and about **2,072 seconds behind**; no scan or write error
+was active. The main database was about **500 MiB** with a **128 MiB WAL**;
+root had **67 GiB free**. Installing the new binary did not resolve production
+convergence, so this host is not qualified as production-ready.
+
+### Regression fixes for observed retry and scan-race behavior — 2026-11-04 18:12 UTC
+
+The live run exposed a same-loop retry-circuit race: after the second failed
+reconciliation set the paused flag, a pending rescan request could still launch
+another scan. Added an explicit admission predicate that refuses automatic
+scan starts while the retry circuit is open, with coverage for paused, active
+scan, active accounting check, and no-request cases.
+
+The scan's walker counted `ENOENT` from a directory that vanished after parent
+enumeration as incomplete coverage. Such a missing current subtree is a normal
+concurrent-delete race; other I/O errors (including permission failures) still
+count as coverage failures. Added handling for that case and a focused unit
+test. Both changed regression tests passed using the release-profile test
+binary: **2 passed, 0 failed**. `cargo fmt --all -- --check` and `git diff
+--check` passed. The running production executable remains package revision 64;
+these source fixes are not yet part of a deployed binary.
