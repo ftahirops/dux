@@ -5363,6 +5363,17 @@ as **interrupted / not qualified**, not a candidate failure or a pass. At
 **17.99**; a retry is deferred until the host has recovered. The production
 service and index were not touched. Churn remains an open qualification gate.
 
+A second guarded attempt began at **23:05:25 UTC** after a short improvement
+in host load. It again seeded 100,000 files, completed baseline and watcher
+startup, passed initial exact validation, and performed the first 2,000 churn
+mutations. The guest was stopped while that batch's exactness check was in
+progress. At **23:11:45 UTC**, the pressure guard recorded CPU PSI some
+avg10 **46.95%** and load1 **13.95**; active host compiler workers were
+visible. The guest overlay was discarded before a batch result was published,
+so this attempt is also **interrupted / not qualified**. Repeated guarded
+stops show that the current host is not a reliable place to complete this
+long CPU/I/O workload while other builds run. The guard remains enabled.
+
 ### Production status and host-pressure follow-up — 2026-11-04 23:04 UTC
 
 A second read-only status sample confirms the installed binary is still SHA-256
