@@ -4935,3 +4935,30 @@ binary. A post-run read-only status at **21:03 UTC** still reported
 `dirty=true`, `caught_up=false`, 28 kernel overflow notifications, 15 pending
 updates, and about **5,799 seconds** behind. No production scan or deployment
 was performed; exact live convergence remains a blocker.
+
+### Rev 67 real kernel overflow and reconciliation qualification — 2026-11-04 21:09 UTC
+
+The exact rev 67 candidate passed a real kernel fanotify-overflow suite in the
+isolated Ubuntu 24.04/ext4 guest under a **25% CPU quota**. With the guest
+queue capacity set to **16,384**, the harness stopped the daemon and created
+**18,432** files, then resumed it and verified that overflow uncertainty stayed
+visible even when the dirty-marker metadata write was deliberately forced to
+fail. After removing the fault, the daemon reconciled the persisted backlog,
+completed a full scan, verified accounting, and returned to caught-up state.
+Recovery took **33.803 seconds**; the suite took **113.179 seconds**. This is
+bounded scenario evidence, not proof of long-term overflow immunity or live-host
+convergence. Binary SHA-256 is
+`188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`; harness
+SHA-256 is `3ebf425f55835f7e0a060b7296718ce6da91d877ec4a124c8e807dbfcb1a2b74`.
+Report SHA-256 `069aefcaa18b236677df9034342e4f64c375330d36fc21006438bb665c61a597`
+is retained at
+`target/readiness/qualification-rev67-overflow-20261104/report.json`, with
+runner output beside it.
+
+The ephemeral VM and private overlay were stopped and cleaned. The production
+service remained PID **423219** with zero restarts and was not modified. At
+**21:08:50 UTC**, production status remained dirty/not caught up, with **28**
+kernel overflow notifications, **8** pending updates, and about **6,150 seconds**
+behind; no reconciliation scan was in progress. Root had **65 GiB available**.
+The candidate remains undeployed, and exact live convergence is still a release
+blocker.
