@@ -4286,9 +4286,9 @@ raised `subprocess.TimeoutExpired`** at the harness's 5- or 15-second deadlines:
 `test_mid_publish_rename_failure_restores_previous_release_files`,
 `test_mismatched_binary_version_is_rejected_before_packaging`, and
 `test_native_release_build_rejects_unpinned_cargo_auditable`. The output shows
-timeouts, not assertion failures; because the CPU quota was too low for these
-short subprocess deadlines, the suite is incomplete and must be rerun with an
-adequate CPU allowance when host pressure permits. Tests use temporary paths and
+timeouts, not assertion failures. That attempt was incomplete. A later rerun
+with a one-core allowance passed all 13 tests; see the current-source release
+entry below. Tests use temporary paths and
 fake build/package tools; no production package or service was changed.
 
 Low-cost syntax checks passed: `bash -n` for both release/permissions shell
@@ -4301,3 +4301,43 @@ pending**, **27,201,161 seen / 5,374,705 resolved / 226,944 committed**, and
 was active, and `write_error=null`. At 15:50:44 host load1 was **22.12** and CPU
 PSI some avg10 **68.71%**; root had **70 GiB free** and `/dev/shm` was **595 MiB
 used**. No further build or package test was started at that pressure level.
+
+### Current-source release build and packaging tests pass; static package build interrupted — 2026-11-04 16:15 UTC
+
+A fresh `cargo build --locked --offline --release --bin dux` completed in
+**11m39s** under a transient **20% CPU / 4 GiB / IOWeight=1** scope, with one
+Cargo job and build output in `/dev/shm`. The optimized GNU-host executable
+reported Git revision **706e51a997e4**, source-tree SHA-256
+`e65d6aba9e1a0da9034bcdf4a97c06ee4a20622e7c0ad55d1d5756ae89b76810`, and build
+ID `d3875f8b4dcc615823b6479e57c7c1038027ba8`. An independent recomputation of
+the build script's source-tree digest matched. The executable SHA-256 was
+`db7965b1c039be20cdc5ce95708bdb20804630316360230f8d59120bfdd44709`. Its
+`--version`, top-level help, `status --help`, and `scan --help` checks succeeded.
+A read-only `status --json` invocation against `/var/lib/dux/dux.db` also
+succeeded on the live v5 database and reported kernel overflow count as null
+for its legacy v3 watcher-status record. This artifact was dynamically linked
+for the GNU host and is **not** the required static-musl release package.
+
+The two release packaging CLI modules were rerun at **100% CPU quota / 1 GiB**
+and passed **13/13** in **2.161s**, including publication rollback, source/hash
+rejection, fault-injection rejection, static metadata checks, and debug-symbol
+build-ID binding. This resolves the three timeouts from the earlier 5% quota
+run; no package was installed on the production host.
+
+The official `scripts/build-release.sh` was then started for package revision
+**64** with `cargo-auditable 0.7.7`, the musl target, and its target in tmpfs, in
+a **20% CPU / 4 GiB / IOWeight=1** scope. Before compilation reached packaging,
+host load1 rose to **23.72** and CPU PSI some avg10 to **44.77%** at 16:15:15;
+the scope was stopped. At 16:15:34 host load1 was **33.87** and CPU PSI some
+avg10 **73.28%**. The partial build target was removed and the empty output
+directory discarded. No static-musl executable, DEB, RPM, or manifest was
+produced.
+
+At **16:15:34 UTC**, production remained dirty/not caught up with **136,152
+pending**, **27,466,678 events seen / 5,430,507 resolved / 230,912 committed**,
+and **2,003,046 userspace updates dropped**. Lag was **97,620.849 seconds**, no
+scan was active, and `write_error=null`; the service was live with zero
+restarts. Root had **71 GiB free** and `/dev/shm` returned to **595 MiB used**.
+The installed binary remains the separately identified `a427397+modified`
+executable; the successful GNU build and tests do not qualify the deployed
+binary or production convergence.
