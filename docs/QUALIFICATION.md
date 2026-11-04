@@ -5100,3 +5100,26 @@ second interrupted attempt is preserved in
 `target/readiness/qualification-rust-suite-20261104/attempt-2.json` (SHA-256
 `8b05495a5942389d4f3bac6a8f6bf8191968b1f2a7a586bb645ae840b60c89e7`). No full
 Rust suite result has been produced by either attempt.
+
+### Full default-feature Rust unit suite passed — 2026-11-04 21:48 UTC
+
+After the unrelated workload pressure fell below admission limits, ran the
+existing debug test executable built from code revision `b38f568` directly, so
+the interrupted all-feature build was not repeated. All **259 tests passed**,
+with **0 failures** and **0 ignored**, in **59.40 seconds**. The binary SHA-256
+is `bc7f3be07cb844d752f3d93459f036aa31046b56bdd1b4aab68dfc1707b08ea0`. The
+run used one test thread, a 25% CPU / 2 GiB / no-swap systemd scope, and a
+task-owned `/dev/shm` TMPDIR; Dux explicitly excludes tmpfs from watched real
+filesystems. The test fixture directory was removed after the run. The source
+tree has no code changes since `b38f568`.
+
+The summary report is
+`target/readiness/rust-unit-20261104/report.json` (SHA-256
+`0a1bdd6090e877b76c99aa5656556cc26195505668cf550931bd8eb4c0b51255`). This
+closes the default-feature unit gate for that source revision only. The
+all-feature test binary was not built, so fault-enabled tests, release builds,
+package/lifecycle gates, full-scale gates, and live production recovery remain
+open. The production overflow counter stayed at **71** in the sampled before,
+during, and after statuses; pending updates rose from **33** to **2,511** while
+other host workloads were active, so the source of that backlog is not
+attributed to this test run.
