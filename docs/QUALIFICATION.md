@@ -3975,3 +3975,21 @@ the unrelated full-module Go coverage run (PID **1050936**) was still active.
 Root had **78 GiB free** and `/dev/shm` about **12.4 GiB free**. These host
 conditions are above qualification admission limits. No guest or production
 service/index mutation was started.
+
+### Targeted governor test build interrupted under renewed CPU pressure — 2026-11-04 08:23 UTC
+
+At **08:22 UTC**, the focused
+`cargo test --locked --offline --bin dux pending_rescan_does_not_bypass_cpu_governor`
+command began in a transient systemd scope capped at **10% of one CPU**, **4 GiB
+memory**, and `IOWeight=1`. Cargo used one build job, with its target directory
+on `/dev/shm` to avoid build output in Dux's watched ext4 tree. The build
+compiled initial dependencies but did not reach the test binary. At **08:23:26**,
+host load1 was **27.00** and CPU PSI some avg10 **67.99%** while an unrelated Go
+compile wave was active; the transient scope was stopped. It exited with
+SIGTERM (143), so the regression test has **no result**. Its partial build tree
+was removed from `/dev/shm` after the scope became inactive.
+
+After cleanup, `/dev/shm` returned to **595 MiB used / about 12.4 GiB free**;
+root had **78 GiB free**. At **08:23:58**, load1 was **24.25** and CPU PSI some
+avg10 **25.75%**. The attempt was deliberately bounded and no production state
+was changed; rerun the focused test and R63 guest suite when admission permits.
