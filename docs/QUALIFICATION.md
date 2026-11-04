@@ -4683,3 +4683,16 @@ Dux remained active with zero restarts and userspace drops, but now had
 kernel overflow notifications, `dirty_reason=fanotify queue overflow`, and a
 128 MiB WAL. The transient 30-second observation window therefore did not
 qualify as quiet; no additional reconciliation was started.
+
+### Stale events continue from live web containers — 2026-11-04 18:57 UTC
+
+The Go test process had exited, but a new stale-handle event was attributed to
+host PID **1282**, verified as an `nginx` worker in `nginx.service`; Docker also
+reported active XGenStack WordPress, cron, Redis, and database containers. Thus
+the event churn is not limited to test builds, and pausing tests alone cannot
+establish a clean interval. At 18:57 UTC the daemon remained active with zero
+restarts, **76,205 pending updates**, **900,338 events seen / 511,084 resolved**,
+three kernel overflow notifications, zero userspace drops, and a 128 MiB WAL.
+The live index remained dirty. Any clean live reconciliation now requires a
+maintenance window for the relevant filesystem-writing web/container
+workloads; no such workloads were stopped.
