@@ -5204,3 +5204,22 @@ qualification, package lifecycle/rollback, endurance, and canary remain open.
 The observed production backlog and paused automatic reconciliation remain
 release blockers; do not promote this candidate until safe recovery and the
 required qualification gates pass.
+
+### Production status refresh and VM admission hold — 2026-11-04 22:10 UTC
+
+A read-only status sample at **22:10:27 UTC** shows the daemon still active
+with zero systemd restarts. The index remains **DIRTY** from fanotify queue
+overflow, is not caught up, and is about **9,847 seconds behind**. There are
+**86** recorded kernel overflow notifications, **19** pending updates, no
+active scan, and a **128 MiB WAL**. `automatic_reconciliation_paused=true`
+after two failed full scans; no dropped user-space updates are reported. The
+smaller pending count does not establish convergence or exact indexed state.
+The candidate status output, PSI sample, and unit identity are preserved in
+`target/readiness/production-status-20261104T2209Z.json` (SHA-256
+`b3b243bf0658f333903d43317585e0130063df8822599b0f226f940729f2e38b`).
+
+No qualification VM was active. A subsequent VM admission probe observed
+load1 **17.25**, above the manager's hard limit of 10, so no guest or workload
+was started. Preserve that host-pressure gate; retry exact-candidate guest
+qualification only after the manager admits the host. Production was not
+restarted, rescanned, or modified.
