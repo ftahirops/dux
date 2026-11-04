@@ -5465,3 +5465,32 @@ progress, and was **14,583 seconds** behind. Snapshot:
 `target/readiness/production-status-20261104T2329Z.json` (SHA-256
 `e0f45e1ad546314eb0db9c664ddce1a7bc08e29c4478b9e11b70d70ba77b43c8`). No
 production scan, restart, or index mutation was performed.
+
+### Release-builder regression suite and current production status — 2026-11-04 23:38 UTC
+
+Reran `test_build_release_cli` and `test_build_release_debug_artifact` under a
+transient scope capped at **25% CPU**, **1 GiB memory**, and `IOWeight=1`, with
+temporary files in `/dev/shm`. All **13/13** tests passed in **12.902 seconds**.
+They cover release argument/provenance rejection, refusing non-auditable
+binaries, preserving previous artifacts after injected package/publication
+failures, and Build-ID-matched debug-symbol packaging. Report:
+`target/readiness/release-builder-tests-20261104/report.json` (SHA-256
+`048e8d75eb6f571e3479fbb137bc84e5b3126dd51e1c624f7937e0f2462be2e0`); verbose
+log:
+`target/readiness/release-builder-tests-20261104/release-builder-tests.log`
+(SHA-256
+`c54669b1fda86926c3c1b9896bce7a06a2912d6d67049937bcac2cfb5e645a3a`). This
+is packaging-harness coverage, not a current-source static package build or
+installation/upgrade test.
+
+A read-only production sample at **23:38:30 UTC** still showed the old
+installed binary SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`, PID
+**423219**, and zero systemd restarts. The index remained dirty from fanotify
+overflow, with **112** kernel overflows, **17** pending updates, no active scan,
+and **15,130 seconds** behind; the last scan is **14,883 seconds** old. Host
+load1 was **12.16**. Snapshot:
+`target/readiness/production-status-20261104T2338Z.json` (SHA-256
+`cfa796d54141e0eca0a6aaaa1b400af562fbcebb8a0bfee0cf3c2b47fd97bb9e`). No
+production scan, restart, or index mutation occurred. Churn and current-source
+package promotion remain open.
