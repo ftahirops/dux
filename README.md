@@ -242,8 +242,10 @@ filesystem re-walk, no added daemon cost):**
 shared-library dependencies, so they run on **any x86-64 Linux** regardless of
 host glibc (0.4.x hard-pinned a recent glibc and failed on Debian 12 / RHEL 9 /
 Ubuntu 22.04). `scripts/build-release.sh` uses pinned `cargo-auditable 0.7.7`
-to embed the Rust dependency list in the executable; the release CI audits the
-embedded list as well as `Cargo.lock`.
+to embed the Rust dependency list in the executable. Before packaging, it audits
+both `Cargo.lock` and the exact binary with `cargo-audit` against the current
+RustSec advisory database, rejects incomplete binary inventories, and includes
+the audit reports and advisory database identity in the release bundle.
 Source-built release bundles also include `dux.debug` with the runtime binary's
 matching Build ID. Keep it with the release evidence; to add its symbols to
 Linux `perf`, run `perf buildid-cache --add <path-to-release>/dux.debug`. The

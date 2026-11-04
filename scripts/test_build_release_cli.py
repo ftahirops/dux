@@ -21,6 +21,52 @@ def add_fake_readelf(fake_tools, contains_audit_data=True):
     readelf.chmod(0o755)
 
 
+def add_fake_cargo_audit(fake_tools):
+    audit = fake_tools / "cargo-audit"
+    audit.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "args = sys.argv[1:]\n"
+        "assert args and args[0] == 'audit', args\n"
+        "args = args[1:]\n"
+        "if args == ['--version']:\n"
+        " print('cargo-audit-audit 0.22.2'); raise SystemExit(0)\n"
+        "if args and args[0] == 'bin':\n"
+        " print(os.environ.get('FAKE_CARGO_AUDIT_BINARY_OUTPUT', 'binary inventory complete'))\n"
+        " raise SystemExit(int(os.environ.get('FAKE_CARGO_AUDIT_BINARY_EXIT', '0')))\n"
+        "if args[:2] == ['--deny', 'warnings']:\n"
+        " vulnerable = os.environ.get('FAKE_CARGO_AUDIT_LOCK_VULNERABLE') == '1'\n"
+        " report = {'database': {'advisory-count': 1403, 'last-commit': 'test-db-commit', 'last-updated': '2026-11-03T20:34:00Z'}, 'lockfile': {'dependency-count': 229}, 'vulnerabilities': {'found': vulnerable, 'count': int(vulnerable), 'list': [{'advisory': {'id': 'RUSTSEC-TEST-0001'}}] if vulnerable else []}, 'warnings': {}}\n"
+        " print(json.dumps(report))\n"
+        " raise SystemExit(0)\n"
+        "raise SystemExit('unexpected cargo-audit invocation: ' + repr(args))\n"
+    )
+    audit.chmod(0o755)
+
+
+def add_fake_release_binary(root):
+    version = re.search(
+        r'(?m)^version\s*=\s*"([^"]+)"', (REPO / "Cargo.toml").read_text()
+    ).group(1)
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "--short=12", "HEAD"], cwd=REPO, text=True
+    ).strip()
+    dirty = bool(
+        subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True).strip()
+    )
+    _, source_digest = dux_source_archive.collect_source_entries(REPO)
+    modified = "+modified" if dirty else ""
+    binary = root / "dux-current-source"
+    binary.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = --version ]; then\n"
+        f"  echo 'dux {version} ({revision}{modified}) [production] source-sha256={source_digest}'\n"
+        "fi\n"
+    )
+    binary.chmod(0o755)
+    return binary
+
+
 class BuildReleaseCliTests(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run(
@@ -352,6 +398,47 @@ class BuildReleaseCliTests(unittest.TestCase):
             self.assertIn("missing embedded Rust dependency metadata", result.stderr)
             self.assertEqual(list(output.iterdir()), [])
 
+    def test_vulnerable_or_incomplete_dependency_audits_reject_release(self):
+        for mode in ("lockfile-vulnerability", "incomplete-binary"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory(
+                prefix="dux-release-dependency-audit-"
+            ) as temp:
+                root = pathlib.Path(temp)
+                binary = add_fake_release_binary(root)
+                fake_tools = root / "fake-tools"
+                fake_tools.mkdir()
+                (fake_tools / "file").write_text(
+                    "#!/bin/sh\necho 'ELF 64-bit LSB executable, static-pie linked'\n"
+                )
+                add_fake_readelf(fake_tools)
+                add_fake_cargo_audit(fake_tools)
+                for tool in fake_tools.iterdir():
+                    tool.chmod(0o755)
+                output = root / "out"
+                env = os.environ.copy()
+                env["DUX_RELEASE_BINARY"] = str(binary)
+                env["PATH"] = f"{fake_tools}:{env['PATH']}"
+                if mode == "lockfile-vulnerability":
+                    env["FAKE_CARGO_AUDIT_LOCK_VULNERABLE"] = "1"
+                    expected = "Cargo.lock audit report contains RustSec vulnerabilities"
+                else:
+                    env["FAKE_CARGO_AUDIT_BINARY_OUTPUT"] = (
+                        "warning: report will be incomplete (43 dependencies recovered)"
+                    )
+                    expected = "binary dependency audit emitted a warning or was incomplete"
+                result = subprocess.run(
+                    ["bash", str(SCRIPT), str(output)],
+                    cwd=REPO,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(expected, result.stderr)
+                self.assertFalse(output.exists() and list(output.iterdir()))
+
     def test_failed_package_build_does_not_publish_partial_artifacts(self):
         with tempfile.TemporaryDirectory(prefix="dux-release-staging-") as temp:
             root = pathlib.Path(temp)
@@ -384,6 +471,7 @@ class BuildReleaseCliTests(unittest.TestCase):
             file_command.write_text("#!/bin/sh\necho 'ELF 64-bit LSB executable, static-pie linked'\n")
             file_command.chmod(0o755)
             add_fake_readelf(fake_tools)
+            add_fake_cargo_audit(fake_tools)
             dpkg_command = fake_tools / "dpkg-deb"
             dpkg_command.write_text(
                 "#!/bin/sh\n"
@@ -445,6 +533,7 @@ class BuildReleaseCliTests(unittest.TestCase):
                 "#!/bin/sh\necho 'ELF 64-bit LSB executable, static-pie linked'\n"
             )
             add_fake_readelf(fake_tools)
+            add_fake_cargo_audit(fake_tools)
             (fake_tools / "dpkg-deb").write_text(
                 "#!/bin/bash\n"
                 "if [[ $1 == --build ]]; then cp \"$3/usr/lib/dux/dux-backup-index.py\" \"$FAKE_DEB_HELPER\"; : > \"${@: -1}\"; exit 0; fi\n"

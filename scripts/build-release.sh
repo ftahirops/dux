@@ -7,7 +7,8 @@
 # distros (Debian 12, Rocky 9, Ubuntu 22.04, …). Do NOT ship the glibc build.
 #
 # Requirements: rustup + `rustup target add x86_64-unknown-linux-musl`,
-#               cargo-auditable 0.7.7, musl-tools (provides musl-gcc),
+#               cargo-auditable 0.7.7, cargo-audit with a current RustSec DB,
+#               musl-tools (provides musl-gcc),
 #               readelf, rpmbuild, rpm2cpio, cpio, dpkg-deb.
 set -euo pipefail
 
@@ -16,7 +17,7 @@ usage() {
 Usage: scripts/build-release.sh [OUTPUT_DIRECTORY]
 
 Build and verify the static musl release binary, DEB, RPM, source archive,
-and SHA256SUMS in OUTPUT_DIRECTORY (default: dist).
+RustSec audit reports, and SHA256SUMS in OUTPUT_DIRECTORY (default: dist).
 Set DUX_RELEASE_BINARY to package an already-built production binary.
 Its embedded version, Git revision, and source-tree digest must match this checkout.
 Set DUX_PACKAGE_RELEASE to choose the numeric DEB/RPM package revision.
@@ -93,6 +94,7 @@ mkdir -p "$STAGING_OUT"
 if [[ -n ${DUX_RELEASE_BINARY:-} ]]; then
     BIN=$DUX_RELEASE_BINARY
     CARGO_AUDITABLE_VERSION='external binary (not built here)'
+    CARGO_AUDIT_VERSION=
     echo ">> packaging supplied, already-qualified binary (v$VER)"
 else
     if ! command -v cargo-auditable >/dev/null 2>&1; then
@@ -169,6 +171,44 @@ if ! readelf -W -S "$BIN" | grep -Eq '[[:space:]]\.dep-v0[[:space:]]'; then
     exit 1
 fi
 
+# Audit both the lockfile and exact executable being packaged. Do not let the
+# binary scanner silently fall back to partial dependency recovery. Preserve
+# the machine-readable lockfile result and binary scan log with the artifacts.
+if ! command -v cargo-audit >/dev/null 2>&1; then
+    echo 'ERROR: cargo-audit is required to audit release dependencies' >&2
+    exit 2
+fi
+CARGO_AUDIT_VERSION=$(cargo audit --version)
+if [[ -z $CARGO_AUDIT_VERSION ]]; then
+    echo 'ERROR: cargo-audit did not report its version' >&2
+    exit 2
+fi
+LOCK_AUDIT_REPORT=$STAGING_OUT/cargo-audit-lockfile.json
+BINARY_AUDIT_LOG=$STAGING_OUT/cargo-audit-binary.log
+echo ">> auditing Cargo.lock with $CARGO_AUDIT_VERSION"
+cargo audit --deny warnings --file Cargo.lock --format json > "$LOCK_AUDIT_REPORT"
+python3 - "$LOCK_AUDIT_REPORT" <<'PY'
+import json
+import pathlib
+import sys
+
+report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+vulnerabilities = report.get('vulnerabilities', {})
+if vulnerabilities.get('found') is not False or vulnerabilities.get('count') != 0:
+    raise SystemExit('ERROR: Cargo.lock audit report contains RustSec vulnerabilities')
+if report.get('warnings') != {}:
+    raise SystemExit('ERROR: Cargo.lock audit report contains warnings')
+if not report.get('database', {}).get('last-commit'):
+    raise SystemExit('ERROR: Cargo.lock audit report has no advisory database commit')
+PY
+echo '>> auditing exact release binary'
+cargo audit bin "$BIN" > "$BINARY_AUDIT_LOG" 2>&1
+if grep -Eiq 'warning:|report will be incomplete|not built with .cargo auditable.' "$BINARY_AUDIT_LOG"; then
+    echo 'ERROR: binary dependency audit emitted a warning or was incomplete' >&2
+    cat "$BINARY_AUDIT_LOG" >&2
+    exit 1
+fi
+
 echo ">> .deb"
 STAGE=$TMPROOT/dux_${DEB_VER}_amd64
 mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/bin" "$STAGE/usr/lib/dux" "$STAGE/usr/lib/systemd/system" "$STAGE/usr/share/doc/dux"
@@ -214,7 +254,7 @@ mkdir -p "$RPM_PAYLOAD"
 (cd "$RPM_PAYLOAD" && rpm2cpio "$RPM_ARTIFACT" | cpio -id --quiet ./usr/bin/dux ./usr/lib/dux/dux-backup-index.py)
 
 install -m0755 "$BIN" "$STAGING_OUT/dux-${VER}-x86_64-linux-static"
-python3 - "$VER" "$PKGREL" "$BIN" "$STAGING_OUT" "$SOURCE_TREE_SHA256" "$DEB_PAYLOAD/usr/bin/dux" "$RPM_PAYLOAD/usr/bin/dux" "$CARGO_AUDITABLE_VERSION" "$DEBUG_ARTIFACT" "$DEB_PAYLOAD/usr/lib/dux/dux-backup-index.py" "$RPM_PAYLOAD/usr/lib/dux/dux-backup-index.py" scripts/dux-backup-index.py <<'PY'
+python3 - "$VER" "$PKGREL" "$BIN" "$STAGING_OUT" "$SOURCE_TREE_SHA256" "$DEB_PAYLOAD/usr/bin/dux" "$RPM_PAYLOAD/usr/bin/dux" "$CARGO_AUDITABLE_VERSION" "$CARGO_AUDIT_VERSION" "$LOCK_AUDIT_REPORT" "$BINARY_AUDIT_LOG" "$DEBUG_ARTIFACT" "$DEB_PAYLOAD/usr/lib/dux/dux-backup-index.py" "$RPM_PAYLOAD/usr/lib/dux/dux-backup-index.py" scripts/dux-backup-index.py <<'PY'
 import hashlib
 import json
 import pathlib
@@ -233,8 +273,10 @@ binary, out = pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4])
 expected_source_digest = sys.argv[5]
 deb_payload_binary, rpm_payload_binary = pathlib.Path(sys.argv[6]), pathlib.Path(sys.argv[7])
 cargo_auditable_version = sys.argv[8]
-debug_artifact = pathlib.Path(sys.argv[9]) if sys.argv[9] else None
-deb_backup_helper, rpm_backup_helper, source_backup_helper = map(pathlib.Path, sys.argv[10:13])
+cargo_audit_version = sys.argv[9]
+lock_audit_report, binary_audit_log = map(pathlib.Path, sys.argv[10:12])
+debug_artifact = pathlib.Path(sys.argv[12]) if sys.argv[12] else None
+deb_backup_helper, rpm_backup_helper, source_backup_helper = map(pathlib.Path, sys.argv[13:16])
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -264,6 +306,7 @@ for package_name, payload_helper in [('DEB', deb_backup_helper), ('RPM', rpm_bac
         f'{package_name} backup helper differs from the source-qualified helper: '
         f'{sha(payload_helper)} != {sha(source_backup_helper)}')
 metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--locked', '--format-version', '1']))
+lock_audit = json.loads(lock_audit_report.read_text())
 licenses = sorted({p.get('license') or 'UNSPECIFIED' for p in metadata['packages']})
 manifest = {
     'version': version,
@@ -280,6 +323,21 @@ manifest = {
     },
     'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
     'cargo_auditable': cargo_auditable_version,
+    'cargo_audit': cargo_audit_version,
+    'dependency_audit': {
+        'advisory_database': lock_audit['database'],
+        'lockfile_sha256': sha(pathlib.Path('Cargo.lock')),
+        'lockfile_vulnerability_count': lock_audit['vulnerabilities']['count'],
+        'lockfile_warnings': lock_audit['warnings'],
+        'lockfile_report': {
+            'path': lock_audit_report.name,
+            'sha256': sha(lock_audit_report),
+        },
+        'binary_scan_log': {
+            'path': binary_audit_log.name,
+            'sha256': sha(binary_audit_log),
+        },
+    },
     'target': 'x86_64-unknown-linux-musl',
     'binary_sha256': sha(binary),
     'debug_symbols': ({
@@ -300,7 +358,8 @@ manifest = {
 }
 (out / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 with (out / 'SHA256SUMS').open('w') as sums:
-    evidence = packages + [source_archive, out / 'build-manifest.json']
+    evidence = packages + [source_archive, out / 'build-manifest.json',
+                           lock_audit_report, binary_audit_log]
     if debug_artifact:
         evidence.append(debug_artifact)
     for path in evidence:

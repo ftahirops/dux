@@ -5494,3 +5494,53 @@ load1 was **12.16**. Snapshot:
 `cfa796d54141e0eca0a6aaaa1b400af562fbcebb8a0bfee0cf3c2b47fd97bb9e`). No
 production scan, restart, or index mutation occurred. Churn and current-source
 package promotion remain open.
+
+### Release builder now enforces RustSec audits — 2026-11-04 23:45 UTC
+
+The local release builder now requires `cargo-audit`, audits the locked
+dependency graph with `--deny warnings`, audits the exact executable after
+checking its embedded `.dep-v0` metadata, and refuses an incomplete or
+warning-producing binary scan. It preserves the lockfile JSON report and
+binary scan log in the release bundle, records the advisory database commit,
+Cargo.lock hash, tool version, and audit outcomes in the build manifest, and
+includes both reports in `SHA256SUMS`. README release requirements now
+describe this local gate; it does not depend on GitHub Actions.
+
+The package-builder CLI and debug-symbol suites passed **14/14** in **13.303
+seconds** under a **25% CPU / 1 GiB / IOWeight=1** scope with temp storage in
+`/dev/shm`. Coverage includes source/revision checks, vulnerable lockfile and
+incomplete binary-scan rejection, failure-safe publication, report/manifest
+binding, package payload parity, and Build-ID-bound debug symbols. The final
+hash-bound report is
+`target/readiness/release-builder-audit-gate-final-20261104/report.json`
+(SHA-256
+`1f5ed937e4be2596530b9692ff70127f097f7ede083d9ef50a744ed89f00fb11`); log:
+`target/readiness/release-builder-audit-gate-final-20261104/tests.log` (SHA-256
+`d85c73cb785812254eea66869bbeac9cf95c08ac3c75cbd7ed73ef7d471cc66f`). An
+earlier run exposed a fake-Cargo fixture that did not forward the new audit
+subcommand; the fixture was corrected and the final rerun passed. The initial
+failure remains preserved with its report and log.
+
+As a scanner-path check, `cargo audit bin` also scanned the historical rev64
+release executable, recovered **202 dependencies**, and exited 0 without
+warnings. This validates the scanner invocation against an auditable ELF; it is
+not evidence for the current source revision or a substitute for rebuilding it.
+The preserved log is
+`target/readiness/dependency-audit-20261104/rev64-binary-audit.log` (SHA-256
+`e34e28d4ce68dea4d26a92248c0bee3a622d76a92ac96ade1d6166c2d17f50f0`).
+
+The native current-source static-musl package build has **not** yet been run
+through the new real audit gate. The current test candidate remains
+non-auditable, and its previous binary scan was incomplete; rebuild and audit
+the current source before promotion. This change alters the source-tree
+digest, so the prior candidate's provenance no longer matches HEAD.
+
+A fresh read-only production sample at **23:45:48 UTC** still showed the old
+installed binary, dirty index, **112** fanotify overflows, **22,002** pending
+updates, no scan in progress, and **15,569 seconds** behind. Host load1 was
+**18.06** and CPU PSI some avg10 **40.79%**, with external compiler workers
+active. Snapshot:
+`target/readiness/production-status-20261104T2345Z.json` (SHA-256
+`3d5e0828b0e438c23f76c6fc9717f6dcd7f6c7a705ba4c107e9add7642cc7966`). No
+production scan, restart, or index mutation was performed; churn and safe
+live-index recovery remain open.

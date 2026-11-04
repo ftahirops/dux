@@ -68,6 +68,8 @@ class ReleaseDebugArtifactTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import json, os, pathlib, subprocess, sys\n"
                 "args = sys.argv[1:]\n"
+                "if args and args[0] == 'audit':\n"
+                " subprocess.run(['cargo-audit', *args], check=True); raise SystemExit(0)\n"
                 "if args[:2] == ['install', '--list']:\n"
                 " print('cargo-auditable v0.7.7:\\n    cargo-auditable'); raise SystemExit(0)\n"
                 "if args and args[0] == 'metadata':\n"
@@ -86,6 +88,22 @@ class ReleaseDebugArtifactTests(unittest.TestCase):
             cargo_auditable = tools / "cargo-auditable"
             cargo_auditable.write_text("#!/bin/sh\nexit 0\n")
             cargo_auditable.chmod(0o755)
+            cargo_audit = tools / "cargo-audit"
+            cargo_audit.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, sys\n"
+                "args = sys.argv[1:]\n"
+                "assert args and args[0] == 'audit', args\n"
+                "args = args[1:]\n"
+                "if args == ['--version']:\n"
+                " print('cargo-audit-audit 0.22.2'); raise SystemExit(0)\n"
+                "if args and args[0] == 'bin':\n"
+                " print('binary inventory complete'); raise SystemExit(0)\n"
+                "if args[:2] == ['--deny', 'warnings']:\n"
+                " print(json.dumps({'database': {'advisory-count': 1403, 'last-commit': 'test-db-commit', 'last-updated': '2026-11-03T20:34:00Z'}, 'lockfile': {'dependency-count': 229}, 'vulnerabilities': {'found': False, 'count': 0, 'list': []}, 'warnings': {}})); raise SystemExit(0)\n"
+                "raise SystemExit('unexpected cargo-audit invocation: ' + repr(args))\n"
+            )
+            cargo_audit.chmod(0o755)
 
             (tools / "dpkg-deb").write_text(
                 "#!/bin/sh\n"
@@ -175,6 +193,22 @@ class ReleaseDebugArtifactTests(unittest.TestCase):
                 ).split("Build ID: ", 1)[1].splitlines()[0],
             )
             self.assertIn("dux.debug", (output / "SHA256SUMS").read_text())
+            self.assertEqual(manifest["cargo_audit"], "cargo-audit-audit 0.22.2")
+            self.assertEqual(
+                manifest["dependency_audit"]["advisory_database"]["last-commit"],
+                "test-db-commit",
+            )
+            self.assertEqual(
+                manifest["dependency_audit"]["lockfile_vulnerability_count"], 0
+            )
+            lock_report = output / "cargo-audit-lockfile.json"
+            self.assertEqual(
+                manifest["dependency_audit"]["lockfile_report"]["sha256"],
+                hashlib.sha256(lock_report.read_bytes()).hexdigest(),
+            )
+            checksums = (output / "SHA256SUMS").read_text()
+            self.assertIn("cargo-audit-lockfile.json", checksums)
+            self.assertIn("cargo-audit-binary.log", checksums)
             subprocess.run(
                 ["sha256sum", "--check", "SHA256SUMS"],
                 cwd=output,
