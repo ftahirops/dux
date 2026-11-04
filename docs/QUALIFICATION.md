@@ -4600,3 +4600,31 @@ test. Both changed regression tests passed using the release-profile test
 binary: **2 passed, 0 failed**. `cargo fmt --all -- --check` and `git diff
 --check` passed. The running production executable remains package revision 64;
 these source fixes are not yet part of a deployed binary.
+
+### Revision 65 production retry and scan-race verification — 2026-11-04 18:36 UTC
+
+Built the static exact-source revision **65** package from commit
+`af8fdccea59a41eea5daaed27cefb166ecda2b8c` (source-tree SHA-256
+`3dec5ab0b1606e88a55786da3dfe08a99656fc261ff6f8eb3907ef91720476cc`). The
+release manifest, artifact checksums, static/production binary metadata,
+Build-ID symbols, DEB/RPM payloads, offline systemd checks, candidate CLI, and
+read-only status checks passed. The package was installed and is running as
+`dux 0.6.3 (af8fdccea59a) [production]`; systemd reports PID **124198** and
+zero restarts. The v5 pre-upgrade and v6 pre-rescan verified backups remain
+available under `/var/backups/`.
+
+The revised walker completed two live baselines with **zero scan coverage
+issues**, confirming the vanished-entry handling. The retry admission fix also
+worked: after two incomplete scans, the circuit paused and did not start a
+third automatic scan. Both scans nevertheless observed unresolved fanotify
+events (`open_by_handle_at` returned `ESTALE` for files removed before event
+resolution), so continuity could not be proven and the daemon correctly keeps
+the index dirty. This host was concurrently running Go builds and tests with
+high short-lived-file churn. At **18:35 UTC**, service health remained active
+with zero restarts, zero user-space drops, zero kernel overflow notifications,
+no write error, about **12,964 pending updates**, and a **128 MiB WAL**. The
+automatic reconciliation circuit is paused after two attempts. Production
+convergence is therefore **not qualified**; wait for the host's filesystem
+churn to settle before requesting another manual reconciliation, then require
+a complete scan with no lost events and a caught-up clean status before
+claiming readiness.
