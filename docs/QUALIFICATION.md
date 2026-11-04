@@ -3891,3 +3891,21 @@ keeping pace with filesystem changes or that the index is exact.
 At this later sample, host load1 was **17.85**, root had **79 GiB free**, and
 unrelated Go race-test workers were active. The qualification VM remains
 stopped under the existing admission policy.
+
+### Intermittent status freshness and production movement under renewed host saturation — 2026-11-04 08:10 UTC
+
+At **08:09:44 UTC**, `/usr/bin/dux status --json` still had the 08:08:41
+counters (**19,654,125 seen / 3,642,289 resolved / 161,920 committed / 39,304
+pending**) and **68,406 seconds** of lag. At **08:09:54**, it returned
+`watch_status_available=false` with event counters null, so that response is
+not evidence of zero events or a healthy queue. At **08:10:04**, status had
+refreshed to **19,660,983 seen / 3,644,997 resolved / 162,048 committed / 41,587
+pending** and **68,488.859 seconds** behind. Thus some pipeline work resumed
+between the stale and refreshed records, but the index remains dirty with no
+scan and `write_error=null`.
+
+At 08:10:04, host load1 was **31.94** and CPU PSI some avg10 was **69.76%**;
+the 08:09:45 sample had shown a concurrent `gosec`, compiler, and Go test wave.
+Root had **79 GiB free** and `/dev/shm` about **12.4 GiB free**. These host
+conditions exceed qualification admission limits. No VM was started, and no
+production service or index changes were made.
