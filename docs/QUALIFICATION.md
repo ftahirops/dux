@@ -5275,3 +5275,65 @@ read-only snapshot is `target/readiness/production-status-20261104T2220Z.json`
 (SHA-256 `b19d128a39caa44abece36bb00f343d5ac552656a6df3f0f7eac1d1e21c0857a`).
 No production restart, scan, or index mutation occurred. Exact convergence and
 safe recovery remain release blockers.
+
+### Exact candidate fault, restart, and overflow qualification — 2026-11-04
+
+The source-matched candidate was also exercised with a dedicated
+fault-injection build. Production binary SHA-256 is
+`f494ad29cc708048700a7cec18f8c8dd25d1bef14537c8711b55138081d410d4`; the
+fault-enabled binary SHA-256 is
+`ce41649c0a97bb891e4011d8a056111b29a42208a4b3e3eb0848c3d5a2e5c9e7`. Both
+embed commit `bd84d998029a` and the same source SHA-256
+`8a430e8cc6c8fd3f3605b9921492f83caa7b9c765504863dfe85ab28910fd120`.
+
+On a disposable Ubuntu 24.04 guest, capability loss, pressure handling,
+retry-circuit behavior, and startup/schema-upgrade suites passed. They
+verified bounded retries, preserved prior readable state on failed scans,
+continued event ingestion while scans were suppressed, replayed queued events,
+and repaired stale directory/file-to-directory transitions. The report is
+`target/readiness/qualification-fault-candidate-bd84d99-20261104/capability-pressure-retry-startup-report.json`
+(SHA-256
+`3a4c196dce32f57a247e25658aa22c7bb62430ddace8fd7b95f3f34c7b52182e`).
+
+The same exact candidate pair passed **30/30** crash-recovery rounds covering
+flush and scan/install commit boundaries plus randomized crash timing. A
+real kernel fanotify queue overflow at capacity **16,384** with **18,432**
+created files was detected; dirty state persisted, reconciliation ran after
+backlog handling, and the index returned to exact caught-up state in **32.718
+seconds**. Report:
+`target/readiness/qualification-fault-candidate-bd84d99-20261104/crash-overflow-report.json`
+(SHA-256
+`17e2e13c7efe93ece19acba40098d7376086d144b4adb00e074a5d17d375a7fc`).
+
+An actual scoped cgroup OOM kill also passed: systemd restarted the candidate
+once, and changes made during downtime were recovered exactly. Report:
+`target/readiness/qualification-fault-candidate-bd84d99-20261104/oom-report.json`
+(SHA-256
+`3c83b5a89acb2fbfeb3971b51c184293b35dbe5593c1366dc6693968d3d4bec6`).
+
+### Exact candidate disk exhaustion qualification — 2026-11-04 22:53 UTC
+
+The release candidate passed the isolated disk suite using a disposable
+Ubuntu 24.04 guest, 25% QEMU CPU quota, a 4 GiB guest, a private 3 GiB tmpfs
+workspace, and a disposable ext4 loop image. The seeded tree contained
+**100,000 files**. Low-disk pressure paused and resumed index writes; an
+actual ENOSPC scan and a read-only filesystem scan both preserved the prior
+readable index. The scan reserved **1,597,714,432 bytes** before work and
+returned to exact caught-up state after recovery. Suite elapsed time was
+**169.68 seconds**. Candidate SHA-256 is
+`f494ad29cc708048700a7cec18f8c8dd25d1bef14537c8711b55138081d410d4`; harness
+SHA-256 is
+`3ebf425f55835f7e0a0609afa90b2953fc8301b41afa43f44d97152227cf0628`.
+Report:
+`target/readiness/qualification-fault-candidate-bd84d99-20261104/disk-report.json`
+(SHA-256
+`2eea51c03a53a0f4e95a5cf32628dd74ba62b48e51574a8b3a4d122e77ed4247`).
+The guest was stopped after report capture and its ephemeral overlay removed.
+
+The disk report's `suites_not_run` list is scoped to that individual invocation;
+it does not represent the separate passing suite reports above. These runs do
+not establish multi-day endurance, 100k/1m/10m performance budgets, power-loss
+or media-corruption safety, other filesystem/kernel combinations, package
+upgrade/rollback, signing/dependency review, a dedicated soak, or a canary.
+The production index remains dirty with automatic reconciliation paused, so
+the release candidate is not approved for production promotion.
