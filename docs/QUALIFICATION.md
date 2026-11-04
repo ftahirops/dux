@@ -5433,3 +5433,35 @@ no active scan, and **13,731 seconds** behind; its last successful scan is
 **20.72**. No production scan, restart, or index mutation occurred. Snapshot:
 `target/readiness/production-status-20261104T2315Z.json` (SHA-256
 `9e7116f9d26a37d6fb67eaaf114924ea121fecf0fd600edd44efbdab6c67961c`).
+
+### Exact candidate churn progress and pressure-guard stop — 2026-11-04 23:28 UTC
+
+A third guarded churn attempt passed exact validation for **2/10** batches,
+covering **4,000/20,000** mutations on the **100,000-file** baseline. Batch 1
+converged exactly in **61.474 seconds** (10,816 seen, 9,108 resolved, 1,828
+committed); batch 2 converged exactly in **69.097 seconds** (18,075 seen,
+14,822 resolved, 3,679 committed). Both checkpoints verified exact paths,
+inodes, allocations, and rollups, with zero drops and no uncertainty. Progress
+evidence is
+`target/readiness/qualification-fault-candidate-bd84d99-20261104/churn-current-progress.json`
+(SHA-256
+`ef1a4de0cf33bee7083d560a031218c63bcc73de5fb5982db88fdddb38f4830c`). The
+run report remained `running`; no final suite report was produced.
+
+The host guard stopped the disposable guest at **23:28:26 UTC** during batch
+3 after CPU PSI some avg10 reached **61.69%** and load1 reached **14.52**. The
+guest overlay was removed on stop. Captured stop and progress evidence is
+`target/readiness/qualification-fault-candidate-bd84d99-20261104/churn-guard-evidence-20261104T2329Z.json`
+(SHA-256
+`4f918e291f494b797c638093683ebee2358be401059d0987af837356ee37f554`). This
+is partial passing progress, not a completed churn qualification.
+
+At **23:29:22 UTC**, a read-only production sample still showed the installed
+binary SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`, PID
+**423219**, zero restarts, and a dirty index from fanotify overflow. The index
+had **98** overflow notifications, **3,450** pending updates, no scan in
+progress, and was **14,583 seconds** behind. Snapshot:
+`target/readiness/production-status-20261104T2329Z.json` (SHA-256
+`e0f45e1ad546314eb0db9c664ddce1a7bc08e29c4478b9e11b70d70ba77b43c8`). No
+production scan, restart, or index mutation was performed.
