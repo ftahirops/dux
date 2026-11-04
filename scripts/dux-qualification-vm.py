@@ -11,6 +11,7 @@ import json
 import math
 import os
 from pathlib import Path
+import shlex
 import shutil
 import socket
 import stat
@@ -47,13 +48,15 @@ VM_PROFILES = {
     'qualification4': {'guest_ram_mib': 4096, 'vcpus': 2, 'cpu_quota_percent': 50,
                        # The guest RAM is 4 GiB. QEMU's cgroup also accounts
                        # for dirty qcow2 pages when its ephemeral overlay lives
-                       # on tmpfs; 6 GiB killed the 10m scan before its 30m
+                       # on a private tmpfs; 6 GiB killed the 10m scan before its 30m
                        # budget elapsed. Keep enough bounded headroom for that
                        # overlay while preserving strict host admission checks.
                        'cgroup_memory_mib': 8192, 'minimum_host_free_mib': 12288},
 }
 WATCH_UNIT_RUNTIME_DIRECTORY = Path('/dev/shm/dux-watch-unit-vm')
 EPHEMERAL_RUNTIME_DIRECTORY = Path('/dev/shm/dux-qualification-vm')
+PRIVATE_OVERLAY_MOUNTPOINT = Path('/run/dux-qualification-overlay')
+EPHEMERAL_CONTROL_BYTES = 256 * 1024 * 1024
 
 
 def filesystem_type_for(path):
@@ -78,7 +81,7 @@ def filesystem_type_for(path):
 
 
 def runtime_directory_for(guest, workspace_directory, run_id=None, ephemeral=False):
-    """Keep the watcher-regression VM's writable image outside Dux's watched tree."""
+    """Keep guest control files in a run-private tmpfs directory."""
     if guest == 'watch-unit':
         return WATCH_UNIT_RUNTIME_DIRECTORY / run_id if run_id else WATCH_UNIT_RUNTIME_DIRECTORY
     if ephemeral:
@@ -91,6 +94,24 @@ def runtime_directory_for(guest, workspace_directory, run_id=None, ephemeral=Fal
 def statefile_for(workspace_directory, ephemeral=False):
     """Keep /dev/shm guest state separate from persistent guest metadata."""
     return workspace_directory / ('ephemeral-state.json' if ephemeral else 'state.json')
+
+
+def private_overlay_runner_script(image, overlay, qemu_args):
+    """Build an ephemeral-VM launcher whose writable disk is a private tmpfs."""
+    create_overlay = shlex.join([
+        'qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', str(image),
+        str(overlay), '20G',
+    ])
+    launch_qemu = shlex.join([str(argument) for argument in qemu_args])
+    return f'#!/bin/sh\nset -eu\n{create_overlay}\nexec {launch_qemu}\n'
+
+
+def private_overlay_unit_properties(memory_mib):
+    """Return systemd mount-namespace properties for the ephemeral qcow2."""
+    return [
+        '--property=PrivateMounts=yes',
+        f'--property=TemporaryFileSystem={PRIVATE_OVERLAY_MOUNTPOINT}:rw,size={memory_mib}M',
+    ]
 
 
 def cleanup_ephemeral_runtime(guest, runtime_directory):
@@ -350,7 +371,7 @@ def main():
     parser.add_argument('--read-only-disk', type=Path,
                         help='attach one existing raw disk image read-only as an additional virtio disk')
     parser.add_argument('--ephemeral-runtime', action='store_true',
-                        help='place this guest’s writable overlay in a unique /dev/shm tmpfs directory')
+                        help='use a unique /dev/shm control directory and a private QEMU tmpfs disk overlay')
     parser.add_argument('action', choices=['start', 'stop', 'status', 'ssh', 'copy', 'fetch', 'guard'])
     parser.add_argument('guest', choices=sorted(GUEST_IMAGES))
     parser.add_argument('args', nargs=argparse.REMAINDER)
@@ -424,7 +445,8 @@ def main():
         # Admission is based on usable bytes/inodes, not qcow2 apparent size.
         # Keep capacity for evidence and recovery while a sparse image grows.
         storage_admission = require_capacity(
-            runtime_directory, required_bytes=2 * GIB,
+            runtime_directory,
+            required_bytes=(EPHEMERAL_CONTROL_BYTES if ephemeral_runtime else 2 * GIB),
             reserve_bytes=(GIB if ephemeral_runtime else 8 * GIB),
         )
         minimum_available_mib = profile['minimum_host_free_mib']
@@ -451,8 +473,11 @@ def main():
         userdata.write_text('#cloud-config\ndisable_root: false\nssh_pwauth: false\nwrite_files:\n  - path: /etc/dux-qualification-sandbox\n    owner: root:root\n    permissions: "0400"\n    content: dux-qualification-sandbox-v1\nusers:\n  - name: root\n    lock_passwd: true\n    ssh_authorized_keys:\n      - ' + public + '\nruncmd:\n  - [ sh, -c, "for unit in dnf-makecache.timer apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service apt-news.timer unattended-upgrades.service fwupd-refresh.timer fwupd-refresh.service update-notifier-download.timer motd-news.timer man-db.timer sysstat-collect.timer sysstat-summary.timer fstrim.timer e2scrub_all.timer; do systemctl disable --now \\"$unit\\" >/dev/null 2>&1 || true; done" ]\n')
         metadata = runtime_directory / 'meta-data'
         metadata.write_text(f'instance-id: dux-qualification-{options.guest}\nlocal-hostname: dux-{options.guest}\n')
-        overlay = runtime_directory / 'disk.qcow2'
-        if not overlay.exists():
+        overlay = (
+            PRIVATE_OVERLAY_MOUNTPOINT / 'disk.qcow2'
+            if ephemeral_runtime else runtime_directory / 'disk.qcow2'
+        )
+        if not ephemeral_runtime and not overlay.exists():
             run('qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', image, overlay, '20G')
         seed = runtime_directory / 'seed.img'
         if not seed.exists():
@@ -465,6 +490,7 @@ def main():
                  'read_only_share': str(share) if share else None,
                  'read_only_disk': str(read_only_disk) if read_only_disk else None,
                  'ephemeral_runtime': ephemeral_runtime,
+                 'overlay_isolated_tmpfs': ephemeral_runtime,
                  'runtime_directory': str(runtime_directory),
                  'host_mem_available_mib_at_start': available_mib,
                  'storage_admission': storage_admission,
@@ -482,11 +508,25 @@ def main():
             qemu_args += ['-drive', f'file={read_only_disk},format=raw,if=virtio,readonly=on']
         if share:
             qemu_args += ['-virtfs', f'local,path={share},mount_tag=duxhost,security_model=none,readonly=on']
-        run('systemd-run', f'--unit={unit}', '--collect', f'--property=CPUQuota={profile["cpu_quota_percent"]}%',
+        if ephemeral_runtime:
+            runner = runtime_directory / 'run-qemu.sh'
+            runner.write_text(private_overlay_runner_script(image, overlay, qemu_args))
+            runner.chmod(0o700)
+            qemu_command = [str(runner)]
+        else:
+            qemu_command = qemu_args
+        systemd_args = ['systemd-run', f'--unit={unit}', '--collect',
+            f'--property=CPUQuota={profile["cpu_quota_percent"]}%',
             f'--property=MemoryMax={profile["cgroup_memory_mib"]}M', '--property=OOMScoreAdjust=1000',
             '--property=IOWeight=10', '--property=Nice=10',
-            '--property=RuntimeMaxSec=356400', '--property=TimeoutStopSec=30s',
-            *qemu_args)
+            '--property=RuntimeMaxSec=356400', '--property=TimeoutStopSec=30s']
+        if ephemeral_runtime:
+            # The overlay receives the guest's high-rate block writes. Put it
+            # on a fresh tmpfs visible only in QEMU's mount namespace; host Dux
+            # cannot fanotify-monitor that private superblock. The seed, keys,
+            # and small serial log remain in the host run directory.
+            systemd_args += private_overlay_unit_properties(profile['cgroup_memory_mib'])
+        run(*systemd_args, *qemu_command)
         statefile.write_text(json.dumps(state, indent=2)+'\n')
         guard_unit = f'dux-qualification-pressure-guard-{options.guest}-{time.time_ns()}'
         try:

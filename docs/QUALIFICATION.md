@@ -4825,3 +4825,42 @@ This change is **not deployed**. The release candidate has not passed the exact-
 Rebuilt the release candidate from clean commit **690507c74bb2083d1acf7e0e9b1fe0c8dc865309**. Candidate SHA-256 is `188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`; `dux --version` reports source SHA-256 `7e6fc87327babc862ebd5a5e15eecf8fcf3b710112af6f9158045c21a8a511f5`. In the marked Ubuntu 24.04 guest, the exact binary's live fanotify harness printed all 15 PASS checkpoints, including exact convergence checks, **1,200 replacements**, **1,500 concurrent nested-directory swaps/descendant writes**, and TUI exit. However, the final JSON report was not persisted and the process did not provide a clean completion status: the pressure guard stopped QEMU at **20:37:06 UTC** when host load1 reached **12.16**. Treat this test run as **incomplete**, not as a recorded suite pass. Partial run artifacts are retained at `target/readiness/qualification-rev67-live-20261104/`; observed-output note SHA-256 `de51afea437c4c75f9daf6f00429da6e1e7f1adabdd7f6c4e7ed2f92e0c132ce`, guest console SHA-256 `bce7b6e88731bc56625f6c76c9b9ecc8371fcd21027d108c5e6f685e8a623fa3`, pressure record SHA-256 `fbdfcfd695f731ae43aa54c92f3b01cfcbf041b316730de49265a0f5c378d04d`.
 
 Production status before this attempt reported zero kernel overflows. At **20:39:18 UTC**, the daemon remained active with zero restarts but reported `dirty_reason=fanotify queue overflow`, **17** kernel overflow notifications, **49** pending updates, and about **4,379 seconds** behind. During this interval, the disposable QEMU overlay was stored under the host's shared `/dev/shm/dux-qualification-vm/...` path, which is in production Dux's watched tree, and concurrent host Go tests were active. The timing does not establish which workload caused the overflows, but it exposes a qualification-isolation gap: a guest's “ephemeral” disk still generates host filesystem activity. No further heavy guest run should use this shared watched path until the runner is changed to isolate its writable disk from the host watcher or the workload is run elsewhere. The temporary overlay and transfer archive have been cleaned; the Ubuntu base image remains. Production stays on the prior rev66 binary.
+
+
+### Rev 67 isolated-overlay live fanotify qualification — 2026-11-04 20:51 UTC
+
+The qualification VM runner now creates its disposable qcow2 overlay inside a
+private systemd mount namespace backed by a tmpfs bounded to the guest's memory
+cgroup limit. The writable guest disk is no longer visible under the host's
+watched `/dev/shm` tree. Only small control files remain in the shared runtime
+directory. The host-side runner tests cover shell-safe argument handling and
+the private tmpfs properties; **31 Python tests** and `py_compile` pass. A live
+transient-systemd probe confirmed that the tmpfs and qcow2 overlay disappear
+from the host namespace after unit teardown.
+
+The exact rev 67 binary (SHA-256
+`188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`) then
+completed the Ubuntu 24.04/ext4 live fanotify regression with a clean exit in
+**76.76 seconds** under a 50% CPU quota. It passed exact path/inode/allocation
+and recursive-rollup checks; 1,200 replacement/move/hardlink/path-reuse
+operations; 1,500 concurrent nested-directory swaps and descendant writes;
+Go-build-shaped churn creating 5,764 inodes; 32 SQLite WAL/SHM cycles; and
+TUI quit in 5.828 ms. The report records zero rollup mismatches, zero stale
+build dirents, no dirty/flush-error/uncertain state, and no error. Report
+SHA-256 `89fe47ed9bb56778ba868f32399bca73bbef8bf1991e30daab71b5f83e6a6429` is
+retained at
+`target/readiness/qualification-rev67-private-live-20261104/report.json`;
+the runner output is retained beside it. This is a pass for this bounded live
+fanotify workload, not a full production qualification.
+
+The production service was not changed or stopped. At **20:50 UTC** PID
+**423219** remained active with zero restarts. Read-only status still reports
+`dirty=true`, `caught_up=false`, `dirty_reason=fanotify queue overflow`, **17**
+kernel overflow notifications, **9** pending updates, and about **5,059
+seconds** behind; no scan was in progress (`paused=false`,
+`pause_reason=null` in that status snapshot). The candidate fix is not deployed, and the
+installed v6 daemon's index remains a live correctness blocker. Deployment
+requires an approved maintenance window, backup/rollback, successful full
+reconciliation, and exact clean caught-up verification. Scale qualification,
+capability suite, package/upgrade rollback matrix, prolonged endurance, 72-hour
+soak, and monitored 24-hour canary remain open.

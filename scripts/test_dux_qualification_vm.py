@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -88,6 +89,38 @@ class PressureGuardTests(unittest.TestCase):
         self.assertEqual(first, Path('/dev/shm/dux-qualification-vm/rocky9/run-a'))
         self.assertNotEqual(first, second)
         self.assertEqual(VM.runtime_directory_for('rocky9', workspace), workspace)
+
+    def test_private_overlay_runner_quotes_paths_and_keeps_disk_writes_private(self):
+        image = Path('/srv/test images/ubuntu;touch-owned.img')
+        overlay = VM.PRIVATE_OVERLAY_MOUNTPOINT / 'disk.qcow2'
+        qemu_args = [
+            'qemu-system-x86_64', '-drive',
+            f'file={overlay},format=qcow2,if=virtio',
+            '-serial', 'file:/dev/shm/dux-vm-run/console.log',
+        ]
+
+        script = VM.private_overlay_runner_script(image, overlay, qemu_args)
+        lines = script.splitlines()
+
+        self.assertEqual(lines[:2], ['#!/bin/sh', 'set -eu'])
+        self.assertEqual(
+            shlex.split(lines[2]),
+            [
+                'qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b',
+                str(image), str(overlay), '20G',
+            ],
+        )
+        self.assertTrue(lines[3].startswith('exec '))
+        self.assertEqual(shlex.split(lines[3][len('exec '):]), qemu_args)
+
+    def test_ephemeral_overlay_uses_private_mount_namespace_and_bounded_tmpfs(self):
+        self.assertEqual(
+            VM.private_overlay_unit_properties(8192),
+            [
+                '--property=PrivateMounts=yes',
+                '--property=TemporaryFileSystem=/run/dux-qualification-overlay:rw,size=8192M',
+            ],
+        )
 
     def test_ephemeral_lifecycle_slots_do_not_reuse_persistent_guest_state(self):
         self.assertEqual(VM.GUEST_IMAGES['ubuntu24-lifecycle-ephemeral'], 'ubuntu24')
