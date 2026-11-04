@@ -3692,3 +3692,32 @@ failures still raise. Regression tests cover both the collected/inactive case
 and an active unit. The full VM-controller module passed **29/29** tests, and
 `py_compile` plus `git diff --check` passed. These are harness results only;
 the R63 overflow suite remains unrun.
+
+### Overnight production backlog and repeated kernel overflows — 2026-11-04 07:22 UTC
+
+A read-only refresh at **07:21:42 UTC** shows installed Dux 0.6.3
+(`a42739776bbd+modified`, SHA-256
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`) still
+active with zero systemd restarts and an effective **100% of one CPU** quota.
+The installed hash differs from the current R63 candidate
+(`109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`), so
+runtime symptoms cannot be attributed to the candidate source.
+
+The live root index is dirty and not caught up. Status reported **478,273
+pending updates** (500,000 cap), **18,791,041 events seen / 3,506,398
+resolved**, **155,008 committed updates**, **1,001,175 userspace updates
+dropped**, and **65,588 seconds behind**. No scan was active,
+`write_error=null`, and the dirty reason was **non-watched filesystem mounts
+changed; reconciling visible paths**. Compared with 22:19:52 UTC on Nov. 3,
+pending grew from **247,018** to **478,273**, drops from **500,180** to
+**1,001,175**, and lag from **33,077** to **65,588 seconds**. Journal review
+shows recurring fanotify queue overflows and full-reconciliation deferrals
+through the night; the latest overflow was at **07:19:16 UTC**.
+
+Host root had **85 GiB free (53% used)** and `/dev/shm` about **12.4 GiB free**;
+Dux used about **441 MiB** of cgroup memory. At the sample, load1 was **2.45**
+and CPU PSI some avg10 **1.81%**, but a shared-host Go test/compile was active.
+No qualification VM was started during that build. This confirms adequate disk
+capacity and severe production convergence failure; it does not identify the
+cause in the source-mismatched installed executable. No production service,
+package, configuration, or database mutation was made.
