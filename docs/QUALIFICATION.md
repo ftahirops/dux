@@ -4747,3 +4747,36 @@ about **37,834 pending updates**, a 128 MiB WAL, and `dirty=true` because event
 continuity still cannot be proven. The performance fix is verified and
 deployed; clean production convergence remains unqualified until a quiet
 maintenance window permits a full scan and clean caught-up verification.
+
+### Readiness continuation: dependency audit, disk, and live daemon — 2026-11-04 19:39 UTC
+
+A fresh `cargo audit` scanned the current `Cargo.lock` (**229 crate dependencies**)
+against the refreshed RustSec advisory database and exited successfully with no
+vulnerability findings. The initial attempted `cargo audit --locked` was rejected
+because this cargo-audit version does not accept `--locked`; the actual audit ran
+without that unsupported option. The Go test process seen in an earlier process
+sample has exited; no Cargo test or VM qualification process was running during
+this check.
+
+At **19:38:38 UTC**, the installed revision 66 daemon remained active as PID
+**423219**, with **zero restarts**, no write error, and a **128 MiB WAL**. It had
+seen **672,114 events**, resolved **468,243**, committed **107,355 updates**, and
+had **26 pending updates**, zero user-space drops, and zero kernel overflow
+notifications since installation. Despite the small pending count, it remained
+about **738 seconds behind**, `caught_up=false`, and `dirty=true`; its dirty reason
+is incomplete reconciliation after two failed full scans, with automatic retries
+paused. The low pending count therefore does not establish an exact index. The
+last full scan was 491 seconds old, and the active Nginx/web-container workload
+continues to produce unresolved stale-handle diagnostics (29 matching log lines
+in the preceding ten minutes). No service or container was stopped and no new
+scan was started.
+
+The root filesystem was **61% used with 71 GiB available**. `target/readiness`
+occupies **6.4 GiB** of retained package, rollback, and qualification evidence;
+it contains release builds and interrupted/failing test reports, so it was not
+deleted as temporary cache. The repository remained clean and synchronized with
+`origin/hardening/audit-remediation` at commit **749688d** before this log update.
+Production convergence and host-load overflow/endurance qualification remain
+open; exact current-release fault/scale coverage, package lifecycle on every
+supported distribution, long soak, and monitored canary are not proven by the
+completed unit, CLI, lifecycle, scan-plan, and audit checks.
