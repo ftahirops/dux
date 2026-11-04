@@ -5337,3 +5337,28 @@ or media-corruption safety, other filesystem/kernel combinations, package
 upgrade/rollback, signing/dependency review, a dedicated soak, or a canary.
 The production index remains dirty with automatic reconciliation paused, so
 the release candidate is not approved for production promotion.
+
+### Exact candidate root scan and host-pressure-limited churn attempt — 2026-11-04
+
+The candidate passed a disposable Ubuntu 24.04 guest root scan in **74.189
+seconds**, accounting for **69,600 files**, **9,225 directories**, and **85,329
+directory entries**. The scan excluded its own database, stayed on one
+filesystem, and reported complete coverage. Candidate SHA-256 is
+`f494ad29cc708048700a7cec18f8c8dd25d1bef14537c8711b55138081d410d4`; harness
+SHA-256 is
+`3ebf425f55835f7e0a0609afa90b2953fc8301b41afa43f44d97152227cf0628`. Report:
+`target/readiness/qualification-fault-candidate-bd84d99-20261104/root-report.json`
+(SHA-256
+`1a41d192d3acd4d2d7ecc63bd1f9e908e7b8c414fabbcb33fa14379eabbade77`).
+
+A follow-up production-shaped churn qualification seeded its 100,000-file
+baseline and passed initial exact validation, but the host pressure guard
+stopped the disposable guest before the first churn batch completed. At
+**23:02:46 UTC**, host CPU PSI some avg10 was **67.32%**, load1 was **13.70**,
+and I/O PSI full avg10 was **0.18%**; the guard stopped the VM because CPU PSI
+and load exceeded its safety thresholds. The workspace and report were inside
+the guest's ephemeral overlay and were discarded on stop, so this is recorded
+as **interrupted / not qualified**, not a candidate failure or a pass. At
+**23:03 UTC**, host CPU PSI some avg10 remained **68.30%** and load1 was
+**17.99**; a retry is deferred until the host has recovered. The production
+service and index were not touched. Churn remains an open qualification gate.
