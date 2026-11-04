@@ -4696,3 +4696,54 @@ three kernel overflow notifications, zero userspace drops, and a 128 MiB WAL.
 The live index remained dirty. Any clean live reconciliation now requires a
 maintenance window for the relevant filesystem-writing web/container
 workloads; no such workloads were stopped.
+
+### Revision 66 rollup performance fix and live verification — 2026-11-04 19:34 UTC
+
+The production flush traces identified a repeated full-index scan in
+`reconcile_affected_rollups`: for every affected directory, the leaf repair
+used a correlated `EXISTS` plan that scanned `idx_inodes_lfiles` across the
+whole file table. The live index contains about **1.22 million file inodes**;
+one observed old-code rollup phase took **70.6 seconds for 79 affected items**.
+Replaced that predicate with a parent-index-driven `(dev_id,inode) IN (...)`
+update. The resulting plan uses `idx_dirents_parent` and inode primary-key
+lookups and no longer scans all file inodes. On the live DB, a read-only
+equivalent for a directory with **28,831 children** took **24.27 ms**, versus
+**612.18 ms** for the previous full-scan plan (about **25x faster**, same
+zero-stale-leaf result).
+
+The source change is pushed as **`e0cc915f8f37da61aa6a737052403a8d6d740419`**.
+All **258 Rust tests** passed, including the query-plan and stale-leaf
+correctness tests; Clippy with `-D warnings`, 54 package-lifecycle tests, 12
+release CLI tests, formatting, and `git diff --check` passed. Exact-source
+static package **0.6.3-66** was built under a 20% CPU / 4 GiB memory cap. Its
+manifest reports source SHA-256
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`; the
+static binary SHA-256 is
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`. The
+Build-ID matched debug file, DEB/RPM contents, artifact checksums, candidate
+CLI against live and backup DBs, `systemd-analyze verify`, and offline unit
+security check passed (exposure **3.3, OK**).
+
+Before installing, saved the revision 65 binary and effective unit properties
+at `target/readiness/production-prerev66-20261104/` and created online v6
+snapshot `/var/backups/dux-index-preupgrade-rev66-20261104.sqlite`: **527,355,904
+bytes**, mode 0600, schema 6, `quick_check=ok`, SHA-256
+`49c14e3b08eaee54a582a06579d1d890f230912c31c40c7afd2d54d4924dfcc2`. Package
+0.6.3-66 is installed and running as PID **423219**, with zero restarts.
+
+The revision 66 manual scan (19:26:47–19:29:27 UTC) and its one bounded
+automatic retry (19:30:27–19:32:56 UTC) each completed with **zero walker
+coverage errors and zero kernel overflow notifications**. Both still observed
+unresolvable `ESTALE` fanotify handles during active Go tests and container
+workloads, so the daemon correctly kept the index dirty and paused retries
+after two attempts. WAL temporarily reached about **299 MiB** on the retry and
+checkpointed back to **128 MiB**. Since the new binary started, event replay
+committed **10,112 updates in 45 seconds** and then **16,384 in the next 22
+seconds**; a 128-update flush completed in about **1.77 seconds** (another in
+**0.33 seconds**). This is a substantial live catch-up improvement over the
+previous 70.6-second rollup phase. At **19:34 UTC** the daemon remained active
+with zero restarts, zero user-space drops, zero kernel overflows since upgrade,
+about **37,834 pending updates**, a 128 MiB WAL, and `dirty=true` because event
+continuity still cannot be proven. The performance fix is verified and
+deployed; clean production convergence remains unqualified until a quiet
+maintenance window permits a full scan and clean caught-up verification.
