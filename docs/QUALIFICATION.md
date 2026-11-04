@@ -3764,3 +3764,25 @@ The console, guard event, and interruption descriptor are under
 `target/readiness/qualification-vm-boot-20261104T0737Z/`; the stopped guest's
 tmpfs runtime and ephemeral keys were cleaned. This is a guarded boot
 interruption, not a product result.
+
+### Production queue reached its bound again — 2026-11-04 07:42 UTC
+
+A paired read-only status check at **07:42:22 UTC** shows the dirty production
+index still has no reconciliation scan and `write_error=null`. Since the
+07:36:31 sample, pending updates fell from **496,592** to **5,458**, while
+`userspace_updates_dropped` rose from **1,001,175** to **1,501,934**. The
+journal contains a new `pending backlog exceeded 500000` warning in that
+interval, so the **500,759** increase in the cumulative drop counter confirms
+a second backlog discard of roughly 500,000 updates in addition to the earlier
+one. Since 07:22, the journal records two more kernel fanotify overflows and
+seven reconciliation deferrals. At 07:42:22 status still reported **66,827
+seconds behind**, **19,149,040 events seen / 3,562,945 resolved / 157,824
+committed**, and dirty reason **non-watched filesystem mounts changed;
+reconciling visible paths**.
+
+Host load1 was **11.61** with a shared-host Go race-test wave active; root had
+**80 GiB free**, so disk capacity remains adequate. The current runtime remains
+the source-mismatched R16 binary. This confirms recurrent live data loss and
+failure to recover on this production workload; it does not establish whether
+the R63 candidate has the same behavior. No service, database, package, or
+configuration mutation was made.
