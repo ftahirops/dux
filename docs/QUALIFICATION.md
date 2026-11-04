@@ -5062,3 +5062,27 @@ are captured in
 `3f27c85c6cfbab366609ddb92c4054318714a8d735674d6c8976ea4eb360936a`). Exact
 production convergence remains unverified and blocked by the dirty event stream,
 open reconciliation retry circuit, and elevated host CPU pressure.
+
+### Full Rust suite attempt stopped at host-pressure guard — 2026-11-04 21:40 UTC
+
+The all-feature Rust unit suite was started for source commit
+`cbdeeb9be61699bdb0869f66e3f5c49e25aaafba`, with one Cargo build job, one test
+thread, `CPUQuota=25%`, `MemoryMax=2G`, swap disabled, and both Cargo output and
+test temporary files directed to `/dev/shm` (tmpfs, excluded from Dux's watched
+real filesystems). Compilation began, but no test executable ran. At
+**21:40:35 UTC**, the host measured load1 **14.84** and CPU PSI some **45.21%
+avg10**; the test scope was stopped immediately as a conservative response to
+that first observed sample. CPU PSI full was **0%**, I/O PSI some **0.80%**, and
+memory PSI was **0%**. A separate Go certification build/test remained active
+and was not interrupted. The stopped scope had reached only **287 MiB** peak
+memory; this is not a Rust suite result.
+
+The task-owned partial tmpfs target was **51 MiB** and was removed after scope
+termination. Production Dux remained active; the post-stop sample still showed
+dirty/not caught up, **8** pending updates, **49** recorded kernel overflows,
+and no scan in progress. The incomplete attempt record is
+`target/readiness/qualification-rust-suite-20261104/attempt.json` (SHA-256
+`130bd8bf638e1f738466162d78e3249a6c75b2177ab3851663fa76f92d34cc7b`). This
+attempt must not be counted as a pass or failure. The previous targeted status
+and malformed-retry tests remain the only tests run against the recent status
+change; the full unit, package, release, and live-system gates remain open.
