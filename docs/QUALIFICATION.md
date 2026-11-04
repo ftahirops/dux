@@ -4274,3 +4274,30 @@ grew by **2,676**, seen events by **45,120**, resolved events by **25,019**, and
 commits by **256**; lag increased from **95,804.782** to **95,935.905 seconds**.
 No scan was active and `write_error=null`. The pressure spike was concurrent with the build; causality is not established.
 No production binary or service state was changed.
+
+
+### Release packaging CLI tests incomplete under an overly tight CPU cap — 2026-11-04 15:51 UTC
+
+Ran the isolated release-script suites with
+`PYTHONPATH=scripts python3 -m unittest test_build_release_cli
+test_build_release_debug_artifact -v` in a transient scope capped at **5% CPU**,
+**512 MiB memory**, and `IOWeight=1`. Of **13 tests**, **10 passed** and **3
+raised `subprocess.TimeoutExpired`** at the harness's 5- or 15-second deadlines:
+`test_mid_publish_rename_failure_restores_previous_release_files`,
+`test_mismatched_binary_version_is_rejected_before_packaging`, and
+`test_native_release_build_rejects_unpinned_cargo_auditable`. The output shows
+timeouts, not assertion failures; because the CPU quota was too low for these
+short subprocess deadlines, the suite is incomplete and must be rerun with an
+adequate CPU allowance when host pressure permits. Tests use temporary paths and
+fake build/package tools; no production package or service was changed.
+
+Low-cost syntax checks passed: `bash -n` for both release/permissions shell
+scripts and Python AST parsing for all **51** scripts. `git diff --check` also
+passed.
+
+At **15:51:22 UTC**, production remained dirty/not caught up with **124,341
+pending**, **27,201,161 seen / 5,374,705 resolved / 226,944 committed**, and
+**2,003,046 userspace updates dropped**; lag was **96,168.004 seconds**, no scan
+was active, and `write_error=null`. At 15:50:44 host load1 was **22.12** and CPU
+PSI some avg10 **68.71%**; root had **70 GiB free** and `/dev/shm` was **595 MiB
+used**. No further build or package test was started at that pressure level.
