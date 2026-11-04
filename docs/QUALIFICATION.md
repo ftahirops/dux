@@ -4441,3 +4441,15 @@ overflow was **16:30:31**; reconciliation deferrals were logged at **16:32:05**,
 **16:38:03**, and **16:46:28**. The live index still needs a qualified recovery
 scan and exactness check. No production binary, service restart, or database
 change occurred during this build attempt.
+
+### Source systemd syscall-filter smoke passes; live unit remains mismatched — 2026-11-04 16:50 UTC
+
+Ran `scripts/dux-systemd-filter-smoke.py` in a transient **5% CPU / 256 MiB /
+IOWeight=1** scope. Both `dux.service` and `dux-tunnel.service` probes passed:
+the configured restricted syscall groups returned `ENOSYS`, `clock_gettime`
+remained available, Dux retained `open_by_handle_at` for fanotify FID
+resolution while the tunnel denied it, and address-family policies matched
+their unit files. The scope exited successfully and is inactive. This validates
+the source unit's seccomp policy on this kernel; it does **not** change or prove
+the loaded production unit, whose effective `SystemCallFilter` still lacks the
+source denylist. No service or index state changed.
