@@ -4883,3 +4883,30 @@ stopped and its private overlay cleaned. No Dux production process, database,
 or index was changed. Do not retry this CPU-intensive guest suite until host
 CPU pressure returns below the qualification admission limits; capability
 coverage remains open.
+
+### Continuing production overflow and unresolved-event shape — 2026-11-04 20:59 UTC
+
+After the capability VM had been stopped, production status continued to change.
+A read-only snapshot recorded **28** kernel overflow notifications (up from 17
+at 20:52 UTC), `dirty=true`, `caught_up=false`, and **5,574 seconds** behind;
+the pending count had drained to **14** at this particular sample. No full scan
+was in progress, and the service remained unchanged. This confirms a persistent
+live convergence problem after the isolated guest was gone; it does not assign
+cause to any one host workload.
+
+The preceding 15-minute journal window contained **390** unresolved fanotify
+events: **333** were target-only `FAN_ATTRIB` (`mask=0x4`, `info_type_mask=0x2`,
+`ESTALE`), the exact narrow shape the candidate handles on a proven
+handle-capable filesystem. The other **57** included named/delete/create and
+other masks and remain unresolved by design; there is not enough evidence to
+safely suppress them. This suggests the candidate fix addresses the dominant
+stale-handle warning class but cannot alone be assumed to clear all uncertainty
+or prevent kernel queue overflow under this production workload. The complete
+status/event-shape snapshot is retained at
+`target/readiness/production-fanotify-status-20261104T2058Z.json` (SHA-256
+`23964d72b9ad4854f30ccffbb385fd0d3e8f175fb01d81c6e49900455aec0d6b`).
+
+The candidate remains undeployed. A clean full reconciliation on a qualified
+binary, exact post-scan filesystem comparison, and evidence that the remaining
+unresolved named-event cases are correctly handled are still prerequisites for
+calling the production index trustworthy.
