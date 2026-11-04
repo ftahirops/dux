@@ -5009,3 +5009,34 @@ in `target/readiness/production-fanotify-burst-20261104T2116Z.json`, SHA-256
 start a production reconciliation while this event burst and elevated I/O
 pressure continue. Production remains on its prior binary; exact convergence
 and controlled recovery are unresolved release blockers.
+
+### Rev 67 CPU, coverage, mount, and WAL qualification — 2026-11-04 21:23 UTC
+
+The exact rev 67 candidate passed four additional readiness suites in a marked
+Ubuntu 24.04 KVM guest using ext4, 2 GiB guest RAM, a 25% QEMU CPU quota, and a
+4 GiB worker memory ceiling:
+
+- CPU burst: **12,123** fanotify events; production in **6.965 s**, catch-up in
+  **22.399 s**, exact validation in **3.705 s**, measured daemon CPU fraction
+  **0.104** against the 0.12 limit.
+- Coverage: an unreadable subtree produced explicit incomplete-coverage state.
+- Mount lifecycle: newly mounted filesystems were detected and watched; removal
+  triggered recovery and exact validation.
+- WAL: a pinned reader retained a consistent snapshot; the WAL peaked at
+  **1,108,312 bytes** and reclaimed to **0 bytes** after reader release.
+
+All four suites passed; their combined readiness worker completed in **132.293
+seconds**. Binary SHA-256 is
+`188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`; harness
+SHA-256 is `3ebf425f55835f7e0a0609afa90b2953fc8301b41afa43f44d97152227cf0628`.
+The report is
+`target/readiness/qualification-rev67-cpu-coverage-mount-wal-20261104/report.json`
+(SHA-256 `6abc57828d73b5dfeef78ad6e4dd6e3dfa2813b4e245ddf2c37ee2937f5b1229`),
+with runner output beside it. Crash, disk, OOM, pressure, retry, root-scan, churn,
+startup, and soak suites were not part of this run.
+
+The guest was stopped and its overlay cleaned. The production service remained
+active with zero restarts and was not modified. Post-run status remained dirty
+and not caught up, with **49** recorded kernel overflow notifications, **2**
+pending updates, and about **6,998 seconds** behind; no full reconciliation was
+in progress. These isolated passes do not establish exact production state.
