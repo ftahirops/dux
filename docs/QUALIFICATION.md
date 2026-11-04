@@ -1983,7 +1983,7 @@ or index changed.
 ### QUAL-167 Review the vendored jwalk patch and its dependency provenance — 2026-11-01 15:38 UTC
 
 - `cargo tree --offline -i jwalk` confirms Dux resolves `jwalk 0.8.1` from `/home/dux/vendor/jwalk`. Compared all **34** vendored files to the cached crates.io `jwalk-0.8.1` source: only `src/core/read_dir.rs` and `src/lib.rs` differ. The original cached `.crate` SHA-256 is `2735847566356cd2179a2a38264839308f7079fa96e6bd5a42d740460e003c56`; vendor tree SHA-256 is `54485dd8b91508209c9d4789fd8ea5b687f172bf61ef38da1ae938b5e2927be3`. The vendored MIT license is byte-identical to the cached upstream license.
-- Reviewed patch behavior: the new `ClientState::read_dir_state_for_entry` defaults to cloning inherited state (preserving upstream behavior); Dux overrides it to propagate the specific entry's path-instance state into each child directory read. The only other code difference is the equivalent `usize::MAX` spelling. `cargo check --locked --offline` previously passed against this path dependency. Dux has a `jwalk_hands_each_directory_its_own_parallel_read_state` regression in `src/scan.rs`; it passed as part of the 256-test root Rust suite on 2026-11-04, recorded in the later current-source test entry. The separate upstream `vendor/jwalk` integration suite remains unverified: its online retry was stopped before test execution when host load crossed the critical limit, recorded in the latest vendored-suite entry. The passing Dux test does not replace upstream jwalk tests or full production traversal/alias qualification.
+- Reviewed patch behavior: the new `ClientState::read_dir_state_for_entry` defaults to cloning inherited state (preserving upstream behavior); Dux overrides it to propagate the specific entry's path-instance state into each child directory read. The only other code difference is the equivalent `usize::MAX` spelling. `cargo check --locked --offline` previously passed against this path dependency. Dux has a `jwalk_hands_each_directory_its_own_parallel_read_state` regression in `src/scan.rs`; it passed as part of the 256-test root Rust suite on 2026-11-04, recorded in the later current-source test entry. The separate upstream `vendor/jwalk` integration suite subsequently passed on 2026-11-04; see the later vendored-suite result. The passing Dux test does not replace upstream jwalk tests or full production traversal/alias qualification.
 
 ### QUAL-168 Recheck live convergence after static review — 2026-11-01 15:39 UTC
 
@@ -4176,3 +4176,27 @@ pending**, **26,908,286 seen / 5,309,997 resolved / 225,024 committed**, and
 **2,003,046 userspace updates dropped**; lag was **94,781.186 seconds**, no scan
 was active, and `write_error=null`. The run was stopped to avoid adding load;
 no production state was changed.
+
+
+### Vendored jwalk unit, integration, and documentation tests pass — 2026-11-04 15:36 UTC
+
+The locked vendored dependency test command
+`cargo test --manifest-path vendor/jwalk/Cargo.toml --locked --offline` passed:
+**1 deadlock regression, 50 integration tests, and 3 doctests**, with zero
+failures. The crate library test harness contained zero unit tests. The test
+profile built in **6m02s** within a transient systemd scope capped at **10% CPU**,
+**3 GiB memory**, and `IOWeight=1`, with one Cargo job and the target isolated to
+`/dev/shm`. The scope exited and its temporary build tree was removed; `/dev/shm`
+returned to **594 MiB used / about 12.4 GiB free**. Cargo emitted a
+future-compatibility warning for the vendored crate's test-only dependency
+`fs_extra 1.2.0`; all tests passed.
+
+At **15:36:46 UTC**, production status remained dirty/not caught up with
+**100,274 pending**, **26,975,349 events seen / 5,329,624 resolved / 225,664
+committed**, and **2,003,046 userspace updates dropped**. Compared with 15:29:08,
+pending grew by **1,024**, seen events by **67,063**, resolved events by **19,627**,
+and commits by **640**; lag increased from **94,833.200** to **95,290.930
+seconds**. No scan was active and `write_error=null`. Host load1 was **3.54**,
+CPU PSI some avg10 **7.06%**, and I/O PSI some avg10 **0.59%** after the run.
+Root had **73 GiB free**. Tests changed no production state; the increasing
+backlog and lag remain release blockers.
