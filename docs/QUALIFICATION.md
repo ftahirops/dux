@@ -4645,3 +4645,14 @@ about **28,248 pending updates**, and a **128 MiB WAL**. The separate
 left untouched because interrupting another application's tests or service
 would risk its availability. A clean full reconciliation and post-scan event
 continuity proof remain the production-readiness blockers on this host.
+
+The daemon's single bounded automatic retry then ran from **18:42:39 to
+18:44:55 UTC**. It again completed the full walk with **zero coverage issues**,
+but could not prove event continuity and correctly opened its retry circuit
+after two failed full scans. During the attempt the WAL briefly exceeded
+**300 MiB** before checkpoint recovery; it was back at **128 MiB** at the next
+status sample. At **18:45 UTC**, the daemon had zero restarts and userspace
+drops, one recorded kernel overflow, about **59,673 pending updates**, and
+`dirty=true`. Automatic full scans are now paused pending explicit operator
+action. Repeated manual retries during the continuing Go workload would only
+reproduce the same host-load and event-loss conditions.
