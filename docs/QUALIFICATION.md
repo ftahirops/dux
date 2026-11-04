@@ -3813,3 +3813,22 @@ not copied and no Dux suite ran. The console, guard event, and descriptor are
 retained under `target/readiness/qualification-vm-boot-20261104T0750Z/`; the
 ephemeral runtime was cleaned. This is a host-pressure boot interruption, not
 a product result.
+
+### R63 attempt stopped during 100k fixture seeding — 2026-11-04 07:57 UTC
+
+A guarded Ubuntu 24.04 guest admitted at **07:52:26 UTC** had the exact R63
+candidate and harness copied and hash-verified. Its corrected tmpfs workspace
+was 3 GiB, with a planned 2,048 MiB ext4 fixture. At **07:56:04**, the host
+pressure guard stopped QEMU at load1 **15.19** and CPU PSI some avg10
+**66.16%**. Systemd reported **43.918 CPU-seconds**, **1.5 GiB peak memory**,
+and zero swap. The SSH session's last visible seed progress was **90,000 of
+100,000 files**; the recovered durable report still had `current_suite=null`
+and `status=running` at 07:54:59. No completed seed, baseline scan, or Dux
+suite is evidenced. This is a fixture-setup interruption, not a product
+result.
+
+The report, console, guard event, and descriptor are retained under
+`target/readiness/qualification-vm-overflow-20261104T0755Z/`; the report was
+recovered read-only from the stopped guest overlay. The guest runtime, copied
+overlay, and temporary SSH keys were discarded after report recovery; the
+verified base image is unchanged.
