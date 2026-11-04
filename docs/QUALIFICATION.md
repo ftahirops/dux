@@ -5117,9 +5117,9 @@ The summary report is
 `target/readiness/rust-unit-20261104/report.json` (SHA-256
 `0a1bdd6090e877b76c99aa5656556cc26195505668cf550931bd8eb4c0b51255`). This
 closes the default-feature unit gate for that source revision only. The
-all-feature test binary was not built, so fault-enabled tests, release builds,
-package/lifecycle gates, full-scale gates, and live production recovery remain
-open. The production overflow counter stayed at **71** in the sampled before,
+all-feature unit suite is recorded below. Release builds, package/lifecycle
+gates, full-scale gates, and live production recovery remain open. The
+production overflow counter stayed at **71** in the sampled before,
 during, and after statuses; pending updates rose from **33** to **2,511** while
 other host workloads were active, so the source of that backlog is not
 attributed to this test run.
@@ -5143,3 +5143,41 @@ to debug test executable SHA-256
 not a release candidate. Rebuild and requalify a source-bound release artifact
 from the current code before any production promotion. No installed binary or
 service was changed.
+
+### Full all-feature Rust unit suite passed — 2026-11-04 21:56 UTC
+
+Ran `cargo test --all-features --locked --bin dux -- --test-threads=1` for
+worktree commit `61217b06c9db54843e3e372d325aa41d956799ba`, with the
+`fault-injection` feature enabled. All **259 tests passed**, with **0 failures**
+and **0 ignored**, in **62.42 seconds**. The test executable SHA-256 is
+`e293a029260591b31c2829769e91243cca7b810c51decb5a234f48cd81039686`. The run
+used one Cargo job/test thread, a 25% CPU / 2 GiB / no-swap cgroup, and
+task-owned tmpfs test fixtures. The sampled memory peak was **626,249,728
+bytes**; final transient cgroup accounting was unavailable after exit.
+
+The complete log is
+`target/readiness/allfeature-unit-20261104/run.log` (SHA-256
+`b7ce11d2695ebf81a83e266784ec83762d33798a31c96afc391d374faa30dd0d`); its
+report is `target/readiness/allfeature-unit-20261104/report.json` (SHA-256
+`2d1bf15dc841ded5a3f1e383ed185cbd1d19ad633726e18e1426e22ff95870f1`). This
+closes the all-feature unit gate for the tested source. It does not qualify a
+release binary, packages, scale, endurance, or production recovery.
+
+### Source-matched release build stopped by host guard — 2026-11-04 21:59 UTC
+
+Preserved the old unqualified `target/release/dux` (commit `690507c74bb2`, SHA
+`188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`) at
+`target/readiness/release-690507c/dux` before attempting a locked release build
+from source commit `61217b06c9db54843e3e372d325aa41d956799ba`. The build was
+stopped during compilation at **21:59:02 UTC** when load1 reached **15.37** and
+CPU PSI some reached **71.69% avg10**. It ran in a 25% CPU / 4 GiB / no-swap
+scope; an external Go `./...` build was also active and was not interrupted.
+No replacement release binary was produced: `target/release/dux` still hashes
+to `188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`.
+
+The incomplete attempt report is
+`target/readiness/release-build-20261104/attempt.json` (SHA-256
+`132d520225ce247e825ea742ed39666951841a5d5d86a81e417621108e4a4f27`), with
+the compiler output beside it. No installed binary, daemon, configuration, or
+database was changed. A release build from the current source and all
+release-specific qualification remain open.
