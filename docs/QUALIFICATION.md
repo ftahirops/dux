@@ -5205,21 +5205,73 @@ The observed production backlog and paused automatic reconciliation remain
 release blockers; do not promote this candidate until safe recovery and the
 required qualification gates pass.
 
-### Production status refresh and VM admission hold — 2026-11-04 22:10 UTC
+### VM-manager and packaged syscall-policy checks — 2026-11-04 22:13 UTC
 
-A read-only status sample at **22:10:27 UTC** shows the daemon still active
-with zero systemd restarts. The index remains **DIRTY** from fanotify queue
-overflow, is not caught up, and is about **9,847 seconds behind**. There are
-**86** recorded kernel overflow notifications, **19** pending updates, no
-active scan, and a **128 MiB WAL**. `automatic_reconciliation_paused=true`
-after two failed full scans; no dropped user-space updates are reported. The
-smaller pending count does not establish convergence or exact indexed state.
-The candidate status output, PSI sample, and unit identity are preserved in
-`target/readiness/production-status-20261104T2209Z.json` (SHA-256
-`b3b243bf0658f333903d43317585e0130063df8822599b0f226f940729f2e38b`).
+The updated qualification VM manager's focused test file passed **31/31** in
+1.505 seconds inside a 10% CPU / 512 MiB / no-swap transient scope. The report
+binds test-file SHA-256
+`583a6d01d05c08b27f5e786fa4df6b6a996a5928d5e7c9b1c451a82940d3b93f` and is
+`target/readiness/vm-manager-unit-20261104T2213Z/report.json` (SHA-256
+`60e02b149f24402146885cce3c1ad052c36f37be873008d7611ddd902b1b0989`).
 
-No qualification VM was active. A subsequent VM admission probe observed
-load1 **17.25**, above the manager's hard limit of 10, so no guest or workload
-was started. Preserve that host-pressure gate; retry exact-candidate guest
-qualification only after the manager admits the host. Production was not
-restarted, rescanned, or modified.
+`systemd-analyze verify packaging/dux.service packaging/dux-tunnel.service`
+and `scripts/dux-systemd-filter-smoke.py` also passed. The transient smoke
+confirmed the denied syscall groups return `ENOSYS`, `clock_gettime` remains
+available, the indexer's FID call remains permitted, and the tunnel's FID call
+is denied; both units enforce their configured address-family policy. Report
+`target/readiness/systemd-security-20261104T2211Z/report.json` has SHA-256
+`d6ddec0548a517c8b1d5f2d221c5bd52d975cd8dba57327b01a138d8c22f8a7b` and records
+the effective live unit properties. These checks do not qualify package
+installation, the release binary's runtime behavior, or the dirty production
+index.
+
+### Exact source-matched candidate CPU, coverage, mount, and WAL suites — 2026-11-04 22:19 UTC
+
+Candidate binary SHA-256
+`f494ad29cc708048700a7cec18f8c8dd25d1bef14537c8711b55138081d410d4`
+passed four isolated Ubuntu 24.04 KVM suites on ext4: CPU burst, incomplete
+coverage reporting, mount lifecycle, and long-reader WAL reclamation. The
+guest used 2 GiB RAM, a 25% QEMU CPU quota, and a private 1.5 GiB tmpfs workspace;
+the worker used a 25% CPU quota and no production index or service. All four
+suite statuses are `passed` in the hash-bound report.
+
+- CPU burst: **12,124** events; **3.857 s** event production, **16.954 s**
+  catch-up, **3.237 s** exact validation, and **0.104** measured CPU fraction.
+- Coverage: an unreadable subtree was explicitly reported as incomplete.
+- Mount lifecycle: new mount detection/watch and disappearing-mount recovery
+  both passed.
+- WAL: the reader retained a consistent snapshot; WAL peaked at **1,108,312
+  bytes** and reclaimed to **0 bytes** after release.
+
+The worker completed in **1m54s** and reported a **147.5 MiB** memory peak with
+no swap. Report: `target/readiness/qualification-candidate-bd84d99-20261104/report.json`
+(SHA-256 `679a5e4177127808bcd0bdafd83ed7162b5677e6e863ab27f2c2a38b1929f138`);
+worker log: `worker.log` beside it (SHA-256
+`420ff37b549c15647e7280de333235fd03ac6b9f3e0ddecee1caffa2d8639c5e`). The
+readiness harness SHA-256 is
+`3ebf425f55835f7e0a0609afa90b2953fc8301b41afa43f44d97152227cf0628`.
+The guest was stopped and its private overlay removed after evidence capture.
+
+This run does not cover crash, overflow, churn, disk-full, OOM, pressure,
+capability loss, retry/circuit behavior, root scan, startup, scale budgets,
+package lifecycle, endurance, or canary. The production index remains dirty
+and automatic reconciliation remains paused; exact recovery and all release
+gates remain open.
+
+### Post-qualification production status — 2026-11-04 22:21 UTC
+
+After the isolated candidate suites and guest shutdown, a read-only status
+sample at **22:21:09 UTC** shows the production daemon still active with zero
+systemd restarts. The index remains **DIRTY** from fanotify queue overflow,
+not caught up, and about **10,489 seconds behind**. It reports **86** kernel
+overflow notifications, **3** pending updates, no active scan, and a **128 MiB
+WAL**. Automatic reconciliation remains paused after two failed full scans;
+user-space drops remain zero. The near-empty pending counter does not prove
+exactness: the index's last successful scan is still nearly three hours old.
+
+The captured host CPU/I/O PSI some averages are **4.46% / 2.36%**. Root has
+**73.6 GB free** (62% used); `/dev/shm` has **11.5 GB free**. The full
+read-only snapshot is `target/readiness/production-status-20261104T2220Z.json`
+(SHA-256 `b19d128a39caa44abece36bb00f343d5ac552656a6df3f0f7eac1d1e21c0857a`).
+No production restart, scan, or index mutation occurred. Exact convergence and
+safe recovery remain release blockers.
