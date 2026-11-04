@@ -5123,3 +5123,23 @@ open. The production overflow counter stayed at **71** in the sampled before,
 during, and after statuses; pending updates rose from **33** to **2,511** while
 other host workloads were active, so the source of that backlog is not
 attributed to this test run.
+
+### Installed and release executable identity recheck — 2026-11-04 21:53 UTC
+
+Read-only `--version`, SHA-256, and mtime checks confirm that the live
+`/usr/bin/dux` is still version **0.6.3**, embedded commit **`e0cc915f8f37`**,
+binary SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`, and
+reported source SHA-256
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`. The
+existing `target/release/dux` is also version **0.6.3** but embeds commit
+**`690507c74bb2`**, binary SHA-256
+`188f09518527a38af7fac4fbd47220774f040b66a501e1154a1e62087252a5d1`, and
+reported source SHA-256
+`7e6fc87327babc862ebd5a5e15eecf8fcf3b710112af6f9158045c21a8a511f5`. Both
+predate the current `b38f568` status change. The 259-test result above applies
+to debug test executable SHA-256
+`bc7f3be07cb844d752f3d93459f036aa31046b56bdd1b4aab68dfc1707b08ea0`; it is
+not a release candidate. Rebuild and requalify a source-bound release artifact
+from the current code before any production promotion. No installed binary or
+service was changed.
