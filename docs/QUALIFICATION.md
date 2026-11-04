@@ -4341,3 +4341,40 @@ restarts. Root had **71 GiB free** and `/dev/shm` returned to **595 MiB used**.
 The installed binary remains the separately identified `a427397+modified`
 executable; the successful GNU build and tests do not qualify the deployed
 binary or production convergence.
+
+
+### Effective service security policy drift and second static-build stop — 2026-11-04 16:23 UTC
+
+A fresh read-only policy check at **16:19:44 UTC** found that the loaded unit
+`/usr/lib/systemd/system/dux.service` (SHA-256
+`dd1aa5dcc481c3467c3fbcebbf4f9fda11ddb7082b802412910575dc0a21d47b`) differs
+from the checked-out `packaging/dux.service` (SHA-256
+`dd34d3086af76117b18b06a23c5c70ace4353ff6a33ae9b3fa3c10f13c04d920`).
+`systemd-analyze verify packaging/dux.service` passed. Effective systemd
+properties show `SystemCallFilter=~delete_module finit_module init_module`,
+while the source unit denies `@module @mount @swap @reboot @clock @obsolete
+@raw-io @debug @cpu-emulation`; effective `IOAccounting=no` while source sets
+`IOAccounting=yes`. Effective `SecureBits=3`, `LimitCORE=0`, capability sets,
+`CPUQuotaPerSecUSec=1s`, `MemoryHigh=2 GiB`, `MemoryMax=4 GiB`, and
+`RestrictAddressFamilies=AF_UNIX` match the intended policy. The active daemon
+was not restarted and no unit override was changed: applying the source filter
+to the source-unmapped old executable needs a qualified package/restart plan.
+
+The official static-musl package build was retried at **16:20 UTC** for package
+revision **64**, under a **20% CPU / 4 GiB / IOWeight=1** scope with one Cargo
+job and tmpfs output. At **16:23:37**, host load1 reached **15.91** and CPU PSI
+some avg10 **53.53%**, after a prior sample at 16:22:56 with load1 **10.84**
+and CPU PSI some avg10 **42.51%**. The scope was stopped before packaging.
+The partial build tree and empty output directory were removed; `/dev/shm`
+returned to **595 MiB used / about 12.4 GiB free**. A process sample after stop
+showed multiple external Go `compile` and `vet` processes active. Pressure and
+the package build were concurrent; causality is not attributed. No release
+artifacts were produced and production configuration was not changed.
+
+Production status at **16:23:52 UTC** remained dirty/not caught up with
+**156,875 pending**, **27,682,161 events seen / 5,463,382 resolved / 231,680
+committed**, and **2,003,046 userspace updates dropped**. Lag was
+**98,118.050 seconds**, no scan was active, and `write_error=null`. The journal
+recorded fanotify queue overflows at **16:20:21** and **16:23:07**. Host load1
+was **19.04**, CPU PSI some avg10 **56.35%**, and root had **69 GiB free**.
+The daemon remained active with zero systemd restarts.
