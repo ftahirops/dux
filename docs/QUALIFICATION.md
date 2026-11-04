@@ -4794,3 +4794,14 @@ The installed production binary SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acff
 The ephemeral guest overlay was removed after recovering the partial report; the VM base image and qualification evidence remain. At 20:07 UTC load1 was 4.35, CPU PSI some avg10 1.86%, and root had 69 GiB available. Production Dux PID 423219 remained active with zero restarts; its journal continued to show `ESTALE` fanotify resolutions and reconciliation activity, so its live index is still dirty/not caught up and this host remains unqualified for exact production results. No production daemon or container was stopped.
 
 These suites do not establish power/media-loss behavior, alternate filesystems or kernels, 100k/1m/10m scale, all package upgrade/rollback combinations, interrupted migration, prolonged WAL/endurance behavior, a 72-hour soak, or a monitored 24-hour canary. Capability tests are still outstanding.
+
+
+### Host-pressure and live-event diagnosis — 2026-11-04 20:13 UTC
+
+A second attempt to boot an isolated Ubuntu 24.04 guest used the 2 GiB profile and 15% host CPU quota. It had not reached SSH readiness and ran no qualification cases. Host CPU PSI some briefly reached **59.73% avg10** while the guest was still booting; I stopped and removed the disposable overlay. At **20:13:34 UTC**, CPU PSI some avg10 had fallen to **8.88%**, load1 was **4.68**, and the guest unit was confirmed inactive. The capability suite remains unrun.
+
+Read-only attribution of recent production fanotify diagnostics found repeated unresolved `FAN_ATTRIB` (`mask=0x4`, target-only FID) events whose reported event PIDs **1892** and **1968** are the `containerd-shim` processes for the live `xgs-wp-34ae97a3` WordPress and `xgs-redis-34ae97a3` containers. This establishes that at least some stale-handle notifications coincide with container runtime activity; it does not prove that these account for all scan coverage failures. No container or production service was stopped.
+
+At **20:13:34 UTC**, production Dux remained PID **423219**, active with zero restarts. Read-only status reported **1,490,117 events seen**, **1,075,675 resolved**, **348,711 committed updates**, **64 pending**, zero reported drops or kernel overflows, a **128 MiB WAL**, and no write error. The index remains dirty and not caught up, **2,835 seconds behind**, with automatic retries paused after two incomplete full scans; the last scan was **2,587 seconds old**. Low pending updates and zero recorded overflows do not establish index correctness. Disk remained **62% used / 68 GiB free**.
+
+The root cause is still open: a bounded live workload suite passed after its own final reconciliation, while this production root scan cannot establish complete coverage under the host's ongoing container activity. A maintenance window or a demonstrated online reconciliation strategy with exact accounting is required before claiming a clean production index.
