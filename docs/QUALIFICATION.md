@@ -4038,3 +4038,19 @@ was terminated with SIGTERM (143). After removing its partial build tree,
 `/dev/shm` returned to **595 MiB used**; at **08:28:51**, load1 had reached
 **33.72** and CPU PSI some avg10 **81.29%**. This second bounded attempt also
 produced no test result, and production state was not changed.
+
+### Production status advanced while backlog and lag worsened — 2026-11-04 08:32 UTC
+
+At **08:32:54 UTC**, status reported **79,125 pending**, **19,970,778 events
+seen / 3,717,824 resolved / 165,504 committed**, and **1,501,934 updates
+dropped**. Compared with 08:30:00, pending increased by **5,604**, events seen
+by **7,463**, resolved by **7,338**, and committed by **128**; lag increased
+from **69,686.936** to **69,860.354 seconds**. The index remains dirty, with no
+scan and `write_error=null`. The journal added another reconciliation
+deferral at **08:31:06**.
+
+Host load1 was **30.05**, CPU PSI some avg10 **72.91%**, and I/O PSI some avg10
+**0.41%**. Concurrent compiler and network-stress processes were active. Root
+had **79 GiB free** and `/dev/shm` about **12.4 GiB free**. Dux continues to
+ingest some events, but its queue and lag are growing; no qualification or
+production mutation was attempted at this pressure level.
