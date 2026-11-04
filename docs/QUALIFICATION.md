@@ -4220,3 +4220,16 @@ some avg10 **44.84%** (full avg10 **0%**); compiler and Go test processes were
 active. Root had **73 GiB free**. The host exceeded the test admission limit, so
 no additional build or test was started. These readings reinforce that successful
 unit/dependency tests do not qualify live convergence or production readiness.
+
+
+### Live executable remains unmapped to the tested source — 2026-11-04 15:39 UTC
+
+Read-only identity checks at **15:39:49 UTC** report `/usr/bin/dux` as
+`dux 0.6.3 (a42739776bbd+modified) [production]`, SHA-256
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64`, build ID
+`2e2d4557ac578ce614c1b48cfb6b53a389b27330`. The tested `src/watch.rs` and
+`src/store.rs` are from source commit `5342ae2f52cb2a762dc2f7927f7098252dec1f29`.
+The live executable's `+modified` label does not identify its source bytes, and
+its build ID is not tied to the tested tree by current provenance evidence. The
+unit-suite passes therefore qualify the checked-out source only, not the running
+production daemon. No executable or service state was changed.
