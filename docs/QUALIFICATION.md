@@ -5181,3 +5181,26 @@ The incomplete attempt report is
 the compiler output beside it. No installed binary, daemon, configuration, or
 database was changed. A release build from the current source and all
 release-specific qualification remain open.
+
+### Source-matched release candidate built — 2026-11-04 22:06 UTC
+
+The locked optimized production binary built successfully from source commit
+`bd84d998029abfa99be3203a628884c4f6777cce` using
+`cargo build --release --locked --bin dux`. Candidate
+`target/release/dux` is 5,173,368 bytes with SHA-256
+`f494ad29cc708048700a7cec18f8c8dd25d1bef14537c8711b55138081d410d4`; its
+embedded version reports source SHA-256
+`8a430e8cc6c8fd3f3605b9921492f83caa7b9c765504863dfe85ab28910fd120`.
+The build took 2m37s under a 25% CPU / 4 GiB / no-swap scope. Its log, binary
+manifest, and read-only status smoke output are preserved in
+`target/readiness/release-candidate-bd84d99/`.
+
+The candidate's read-only status command succeeded and exposes the paused
+reconciliation reason and operator recovery command. It also observed the live
+index DIRTY with 15,642 pending updates and 86 kernel overflow notifications.
+The installed `/usr/bin/dux` and production service were not changed. This is a
+source-matched release build and smoke check only; exact-candidate VM and scale
+qualification, package lifecycle/rollback, endurance, and canary remain open.
+The observed production backlog and paused automatic reconciliation remain
+release blockers; do not promote this candidate until safe recovery and the
+required qualification gates pass.
