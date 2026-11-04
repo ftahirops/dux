@@ -4501,3 +4501,52 @@ Status remained dirty/not caught up with **211,951 pending**, **28,348,940 seen 
 dropped**, and **100,440.261 seconds behind**; no scan was active and
 `write_error=null`. Root had **67 GiB free**. The backup did not install a
 binary, restart the service, or alter the production index.
+
+### Exact-source static release package built and smoke-qualified — 2026-11-04 17:32 UTC
+
+Completed `scripts/build-release.sh` for package revision **64** from clean
+checkout **d7de5189fde2c83a336c4f6fc3d9ec537699c0db**. The guarded, single-job
+static-musl build used isolated tmpfs storage, `Nice=19`, `IOWeight=1`, a 4 GiB
+memory cap, and a 20% CPU quota. Its CPU-pressure controller froze and resumed
+the build as host pressure changed. The release script completed successfully
+and produced the static binary, matching Build-ID debug symbols, source archive,
+DEB, RPM, manifest, and SHA256SUMS. The manifest reports a clean worktree,
+124 source files, source-tree SHA-256
+`33ec8c9685530af62a232c49baa53f4947fce5076f8edf7137b8dc7f4b4a5073`, Rust
+1.99.1, and cargo-auditable 0.7.7. All six artifact checksums verified both in
+tmpfs and after copying the 42 MiB artifact set to
+`target/readiness/release-current-20261104-rev64/`.
+
+The release gate verified the binary is static, production-marked, revision-
+and source-digest-matched, has embedded dependency metadata, and has matching
+Build-ID debug symbols. Both package payloads contain the expected executable,
+permission helper, online-backup helper, and systemd units. `systemd-analyze
+verify packaging/dux.service` passed; offline systemd security analysis rated
+the unit exposure **3.3 (OK)**. The candidate's `--version`, `--help`, and
+read-only `status --json` commands succeeded against both the live database and
+the verified backup. This is build and read-only smoke qualification; it is not
+a full v5-to-v6 rebuild rehearsal or a live upgrade.
+
+At **17:31:58 UTC**, the live service remained PID **2777300** with zero
+restarts. The index was still dirty and not caught up: **229,217 pending**,
+**28,716,505 events seen / 5,682,073 resolved / 240,128 committed**,
+**2,003,046 userspace updates dropped**, and about **102,205 seconds behind**;
+no scan was active and `write_error=null`. The production DB remains schema v5;
+the candidate is schema v6 and correctly opens v5 read-only. Installing it would
+trigger the atomic background baseline/reconciliation path. Because the current
+index is already substantially behind and prior reconciliation has been
+deferred under host pressure, the production service and database were left
+untouched pending a controlled rebuild/recovery qualification and post-install
+convergence evidence.
+
+After the package build, the targeted release/package regression suites also
+passed: **54** package-lifecycle tests and **12** build-release CLI tests, plus
+`git diff --check`. These complement the earlier Rust, Clippy, formatting, and
+filter-smoke results recorded above; no code changed in this qualification
+step.
+
+GitHub Actions currently reports both registered workflows disabled manually.
+The `ci.yml` and `readiness.yml` definitions are absent from both the current
+branch and fetched `main`; the zero-second failures are prior runs generated
+while the workflow was disabled, not active jobs. No workflow source change was
+needed in this checkout.
