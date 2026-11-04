@@ -4378,3 +4378,32 @@ committed**, and **2,003,046 userspace updates dropped**. Lag was
 recorded fanotify queue overflows at **16:20:21** and **16:23:07**. Host load1
 was **19.04**, CPU PSI some avg10 **56.35%**, and root had **69 GiB free**.
 The daemon remained active with zero systemd restarts.
+
+
+### Enable source-required I/O accounting; syscall-filter drift remains — 2026-11-04 16:26 UTC
+
+The source package unit declares `IOAccounting=yes`, but the loaded production
+unit had it disabled. Applied the reversible-in-source, persistent systemd
+control property with `systemctl set-property dux.service IOAccounting=yes`,
+then ran `systemctl daemon-reload`. The setting became effective online: Dux
+remained active as PID **2777300** with **0 restarts**, `IOAccounting=yes`, and
+its CPU quota unchanged at one CPU. No application process was restarted.
+
+Reran the repository's read-only
+`dux-package-lifecycle.assert_service_security_policy()` check. It now passes
+the I/O-accounting assertion and fails at `SystemCallFilter`: effective
+`~delete_module finit_module init_module` is missing the source-required
+`@clock`, `@obsolete`, mount, reboot, swap, raw-I/O, debug, and related syscall
+denials. Applying that filter to the source-unmapped old executable would take
+a service restart and could affect its syscall compatibility, so the filter is
+left unchanged pending a qualified current-source package and recovery plan.
+`systemd-analyze verify packaging/dux.service` still passes; source syntax
+validation does not replace effective-unit conformance.
+
+At **16:26:20 UTC**, production remained dirty/not caught up with **157,280
+pending**, **27,737,362 events seen / 5,465,593 resolved / 231,936 committed**,
+and **2,003,046 userspace updates dropped**. Lag was **98,264.883 seconds**, no
+scan was active, and `write_error=null`. Host load1 was **12.70** and CPU PSI
+some avg10 **23.21%**. The I/O-accounting change added observability only; it
+did not change the live index or resolve the convergence and kernel-overflow
+blockers.
