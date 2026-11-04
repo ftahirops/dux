@@ -3957,3 +3957,21 @@ load1 to **20.24** and CPU PSI some avg10 to **72.89%**; the 12-core host had
 **81 GiB free** on root and about **12.4 GiB free** in `/dev/shm`. The load/CPU
 limits rejected another guest attempt. No qualification test or production
 mutation was started during that pressure spike.
+
+### Production backlog grew while a refreshed 10-second sample made no progress — 2026-11-04 08:19 UTC
+
+At **08:19:45 UTC**, read-only production status reported **58,294 pending**,
+**19,798,453 events seen / 3,685,009 resolved / 163,968 committed**, and
+**1,501,934 userspace updates dropped**. The index remained dirty/not caught
+up, **69,070.777 seconds behind**, with no active scan and `write_error=null`.
+At **08:19:55**, pending and all four counters were unchanged while lag
+increased to **69,080.783 seconds**. PID **2777300** advanced **880 clock ticks**
+(**8.8 CPU-seconds**) over the 10.3-second interval. Across the wider interval
+since 08:11, ingestion and commits did advance, but pending grew from **41,587**
+to **58,294**; the index is not keeping up with the live filesystem.
+
+The contemporaneous host load1 was **32.48** and CPU PSI some avg10 **37.47%**;
+the unrelated full-module Go coverage run (PID **1050936**) was still active.
+Root had **78 GiB free** and `/dev/shm` about **12.4 GiB free**. These host
+conditions are above qualification admission limits. No guest or production
+service/index mutation was started.
