@@ -3786,3 +3786,17 @@ the source-mismatched R16 binary. This confirms recurrent live data loss and
 failure to recover on this production workload; it does not establish whether
 the R63 candidate has the same behavior. No service, database, package, or
 configuration mutation was made.
+
+### Installed production daemon saturated with no pipeline progress — 2026-11-04 07:48 UTC
+
+A read-only **20.004-second** sample from PID **2777300** at 07:47:32 measured
+**20.000 CPU-seconds**, exactly **1.000 of one CPU core**. Between the paired
+status snapshots, `pending_updates` stayed at **11,450**; events seen,
+resolved, committed, and dropped all stayed unchanged (**19,199,529 / 3,573,455
+/ 158,336 / 1,501,934**). No scan was active. `behind_seconds` advanced from
+**67,163.767** to **67,183.773**, and the index remained dirty with
+`write_error=null`. Thus this interval showed full-core CPU consumption with
+no observable ingestion or recovery progress, not merely a steadily draining
+backlog. The installed binary remains R16/source-unmatched, so the cause cannot
+be assigned to the current candidate. No process attach, restart, scan, or
+production mutation was performed.
