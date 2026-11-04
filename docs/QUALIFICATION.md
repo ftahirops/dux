@@ -3994,6 +3994,22 @@ free** and `/dev/shm` about **12.4 GiB free**. This supports continued partial
 event ingestion but also shows production falling further behind. No
 qualification or production mutation was attempted under this pressure.
 
+### Fresh production status after another overflow — 2026-11-04 08:30 UTC
+
+At **08:30:00 UTC**, read-only status reported **73,521 pending**,
+**19,963,315 events seen / 3,710,486 resolved / 165,376 committed**, and
+**1,501,934 updates dropped**. Since 08:25:51, pending grew by **7,236**, seen
+events by **84,079**, and commits by **640**; lag increased from **69,436.492**
+to **69,686.936 seconds**. The index remains dirty/not caught up, with no scan
+and `write_error=null`. The journal added a reconciliation deferral at
+**08:26:53** and fanotify overflow at **08:27:03**.
+
+Host load1 was **31.12**, CPU PSI some avg10 **49.52%**, and I/O PSI some avg10
+**4.30%**; the whole-module Go coverage job (PID **1158130**) and another I/O
+stress worker were active. Root had **77 GiB free** and `/dev/shm` about
+**12.4 GiB free**. The service remains active with zero systemd restarts and
+100% CPUQuota. No test or production mutation was attempted under this load.
+
 ### Targeted governor test build interrupted under renewed CPU pressure — 2026-11-04 08:23 UTC
 
 At **08:22 UTC**, the focused
