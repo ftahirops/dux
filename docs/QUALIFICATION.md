@@ -5086,3 +5086,17 @@ and no scan in progress. The incomplete attempt record is
 attempt must not be counted as a pass or failure. The previous targeted status
 and malformed-retry tests remain the only tests run against the recent status
 change; the full unit, package, release, and live-system gates remain open.
+
+The retry at **21:43 UTC** again stopped before any test ran. At **21:45:05**,
+load1 reached **12.49**, crossing the hard host stop threshold; CPU PSI some was
+**39.03% avg10**, I/O PSI some **4.49%**, and the scope memory peak was **353
+MiB**. The 2 GiB/25%-CPU scope was stopped and its task-owned tmpfs target
+removed. A separate Go certification test remained active and was not
+interrupted. Production status at **21:45:29** showed dirty/not caught up,
+**19,416** pending updates, **49** recorded kernel overflow notifications, no
+active scan, and no write error. The increased pending count is concurrent
+host evidence; it does not establish which workload caused each event. The
+second interrupted attempt is preserved in
+`target/readiness/qualification-rust-suite-20261104/attempt-2.json` (SHA-256
+`8b05495a5942389d4f3bac6a8f6bf8191968b1f2a7a586bb645ae840b60c89e7`). No full
+Rust suite result has been produced by either attempt.
