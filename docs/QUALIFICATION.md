@@ -4467,3 +4467,16 @@ documentation), and **2** missing workflow files. Although the core Rust files
 match, the candidate does not attest to the current complete source tree and is
 not eligible for the exact-source release/package gate. The failed static build
 left no replacement artifact.
+
+At **16:52:24 UTC**, the service remained active as PID **2777300** with zero
+restarts and a one-CPU quota. `IOAccounting=yes` remains effective, while the
+effective syscall filter is still only `~delete_module finit_module
+init_module`. The read-only status remains dirty/not caught up with **206,495
+pending**, **28,136,484 events seen / 5,582,802 resolved / 235,520 committed**,
+**2,003,046 userspace updates dropped**, and **99,829.166 seconds behind**; no
+scan is active and `write_error=null`. Compared with 16:49:21, pending rose by
+**14,647** and lag by **181.394 seconds** while seen/resolved/committed counts
+advanced. Host load1 was **6.55**, CPU PSI some avg10 **1.00%**, and root had
+**70 GiB free**; `/dev/shm` was back at **595 MiB used**. Resource pressure has
+receded, but live indexing is still not converging and the production syscall
+policy remains mismatched.
