@@ -3832,3 +3832,15 @@ The report, console, guard event, and descriptor are retained under
 recovered read-only from the stopped guest overlay. The guest runtime, copied
 overlay, and temporary SSH keys were discarded after report recovery; the
 verified base image is unchanged.
+
+### Repeat installed-daemon no-progress sample — 2026-11-04 07:59 UTC
+
+A second read-only sample of PID **2777300** again measured **20.000 CPU-seconds
+in 20.005 seconds** (1.000 of one core). Paired status records were unchanged:
+pending **26,087**, events seen/resolved **19,320,574 / 3,618,864**, committed
+**160,896**, and dropped **1,501,934**. No scan was active. Lag advanced from
+**67,808.443** to **67,828.449 seconds** while `dirty=true`, `caught_up=false`,
+and `write_error=null`. A concurrent `ps -L` showed the daemon has only its
+main thread, currently at **97.4% CPU**. This independently reproduces the
+full-core/no-counter-progress interval from 07:47; the production executable
+remains source-mismatched, so source-level root cause is still unproven.
