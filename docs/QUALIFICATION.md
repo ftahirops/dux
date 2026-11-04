@@ -4780,3 +4780,17 @@ Production convergence and host-load overflow/endurance qualification remain
 open; exact current-release fault/scale coverage, package lifecycle on every
 supported distribution, long soak, and monitored canary are not proven by the
 completed unit, CLI, lifecycle, scan-plan, and audit checks.
+
+
+### Exact revision 66 workload qualification continuation — 2026-11-04 20:07 UTC
+
+The installed production binary SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060` also passed three isolated Ubuntu 24.04 guest suites on the exact binary. The guest used kernel 6.8.0-147-generic and ext4, with strict CPU and memory limits.
+
+- Live fanotify churn suite: **passed**, 1,200 file replacements plus 1,500 concurrent nested directory swaps and descendant writes, including inode reuse, hardlinks, subtree deletion, Go-build-shaped bursts, WAL/SHM cycles, exact path/inode accounting and clean daemon exit. Elapsed 216.129 seconds. Report SHA-256 `729de65c60b6be13d902df876560f5fbd62187eb895104a68b43d9badf6cd51f` (full report retained at `target/readiness/qualification-rev66-live-20261104/report.json`). The test log includes transient ESTALE attributes and an inode-incarnation conflict; final reconciliation converged and exactness checks passed.
+- Real kernel fanotify queue overflow suite: **passed**, confirmed kernel queue overflow, preserved uncertainty when the intentional dirty-marker write failed, then resumed backlog processing and completed reconciliation/accounting verification. 18,432-file workload; recovery 41.084 seconds; suite 340.229 seconds. Report SHA-256 `459e705e7156bf85420187db41e999255a02d784196086eac2d7c74b17ec300b` and runner log SHA-256 `cb624c0a7fc51c3fa2324e6fad9389e238fc2ed654824d03c9f7d6e48836924a` (full artifacts retained under `target/readiness/qualification-rev66-overflow-20261104/`). This qualifies that bounded scenario only.
+- CPU burst suite: **passed**, 12,123 events produced in 6.018 seconds, catch-up in 57.456 seconds, exact validation in 6.641 seconds; daemon event CPU fraction 0.102 under the 0.12 limit. Report SHA-256 `e3e4a79271130be8d4d10b7296718ce6da91d877ec4a124c8e807dbfcb1a2b74`, harness SHA-256 `3ebf425f55835f7e0a0609afa90b2953fc8301b41afa43f44d97152227cf0628`.
+- Capability suite: **incomplete**. The host-pressure guard stopped the disposable guest at 20:03:19 UTC while CPU PSI some was 59.83% and load1 15.07. Its report remained `running`; this is neither a pass nor a product failure. Partial report SHA-256 `7e707c5cfc71d9c410e5fc3004a915bd93b78639bfb66c1dbe2bc69ad1e9e4c1`.
+
+The ephemeral guest overlay was removed after recovering the partial report; the VM base image and qualification evidence remain. At 20:07 UTC load1 was 4.35, CPU PSI some avg10 1.86%, and root had 69 GiB available. Production Dux PID 423219 remained active with zero restarts; its journal continued to show `ESTALE` fanotify resolutions and reconciliation activity, so its live index is still dirty/not caught up and this host remains unqualified for exact production results. No production daemon or container was stopped.
+
+These suites do not establish power/media-loss behavior, alternate filesystems or kernels, 100k/1m/10m scale, all package upgrade/rollback combinations, interrupted migration, prolonged WAL/endurance behavior, a 72-hour soak, or a monitored 24-hour canary. Capability tests are still outstanding.
