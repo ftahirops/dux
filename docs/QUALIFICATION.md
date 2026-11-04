@@ -3876,3 +3876,18 @@ CPU PSI some avg10 was **51.81%**, load1 was **20.06**, and an unrelated
 about **12.4 GiB free**. The guarded guest remains stopped; no attempt was made
 to override its pressure admission limits. No production process, package,
 configuration, or index state was changed.
+
+### Production counters resumed after the 08:05 no-progress interval — 2026-11-04 08:06 UTC
+
+A later read-only status snapshot at **08:06:54 UTC** showed partial movement:
+events seen increased from **19,574,911** to **19,611,049** since 08:05:49,
+resolved from **3,637,902** to **3,638,012**, and committed from **161,536** to
+**161,664**. Pending decreased by **105** to **39,101** and userspace drops
+remained at **1,501,934**. The dirty index was still **68,300 seconds behind**,
+with no scan active and no write error. This bounds the previous no-progress
+observation to its paired 10-second sample; it does not prove that recovery is
+keeping pace with filesystem changes or that the index is exact.
+
+At this later sample, host load1 was **17.85**, root had **79 GiB free**, and
+unrelated Go race-test workers were active. The qualification VM remains
+stopped under the existing admission policy.
