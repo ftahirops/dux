@@ -3930,3 +3930,30 @@ Host load1 was **16.37** (above VM admission), while CPU PSI some avg10 was
 **0.67%** and I/O PSI some avg10 **6.62%**. Root had **79 GiB free** and
 `/dev/shm` about **12.4 GiB free**. The qualification guest remains stopped;
 the index and service were not modified.
+
+### Source review: latched reconciliation could bypass the old CPU governor — 2026-11-04 08:17 UTC
+
+The repository's exact `a427397` baseline has a `CpuGovernor::throttle()` loop
+whose sleep condition includes `!RESCAN`. In the watcher, event loss latches
+`RESCAN` while queued work drains. When that flag is set, the old governor
+abandons its duty-cycle sleep on every iteration, a direct path to sustained
+event-thread CPU use during recovery. The hardening candidate removes
+`RESCAN` from the sleep interrupt condition and keeps shutdown as the interrupt;
+it also adds `pending_rescan_does_not_bypass_cpu_governor`, which injects a
+latched rescan and checks that the event thread still meets its CPU target.
+
+This is a strong source-level explanation for the observed one-core samples,
+not proof of the installed executable's exact code. `/usr/bin/dux` reports
+`a42739776bbd+modified`, and its SHA-256
+`9433d56d2ebd67162dc381437d030d428254373cbde9f86f63610bb0a4e87f64` differs
+from the retained R63 candidate SHA-256
+`109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`. The
+candidate's targeted regression test and full overflow suite have not been
+completed on this host yet.
+
+At the **08:17:55 UTC** admission check, the unrelated host compile wave drove
+load1 to **20.24** and CPU PSI some avg10 to **72.89%**; the 12-core host had
+**19 GiB available memory**. The latest disk sample at **08:15:47** showed
+**81 GiB free** on root and about **12.4 GiB free** in `/dev/shm`. The load/CPU
+limits rejected another guest attempt. No qualification test or production
+mutation was started during that pressure spike.
