@@ -95,7 +95,7 @@ const RECONCILE_RETRY_BACKOFF: Duration = Duration::from_secs(60);
 /// evidence of a continuing defect or outage, not a reason to scan forever.
 /// Permit one automatic retry, then leave the index dirty and require an
 /// explicit `dux scan` after the cause is addressed.
-const MAX_AUTOMATIC_RECONCILIATION_RETRIES: u32 = 1;
+pub(crate) const MAX_AUTOMATIC_RECONCILIATION_RETRIES: u32 = 1;
 
 fn reconciliation_retry_delay(failed_attempts: u32) -> Duration {
     let exponent = failed_attempts.saturating_sub(1).min(9);
@@ -120,6 +120,26 @@ fn parse_reconciliation_attempts(value: Option<&str>) -> (u32, bool) {
             // until an operator explicitly requests reconciliation.
             Err(_) => (MAX_AUTOMATIC_RECONCILIATION_RETRIES.saturating_add(1), true),
         },
+    }
+}
+
+/// Expose the persisted automatic-reconciliation circuit state to status
+/// callers. Missing metadata means this index predates the circuit; malformed
+/// metadata must report paused because daemon startup treats it fail-closed.
+pub(crate) fn reconciliation_retry_status(value: Option<&str>) -> (Option<u32>, Option<bool>) {
+    match value {
+        None => (None, None),
+        Some(value) => {
+            let (attempts, corrupt) = parse_reconciliation_attempts(Some(value));
+            if corrupt {
+                (None, Some(true))
+            } else {
+                (
+                    Some(attempts),
+                    Some(automatic_reconciliation_circuit_open(attempts)),
+                )
+            }
+        }
     }
 }
 

@@ -25,6 +25,13 @@ Healthy steady state requires all of the following:
   `kernel_overflow_notifications` are zero; `write_error` is null. A nonzero
   kernel overflow count records loss episodes; fanotify does not reveal the
   exact number of notifications lost in each episode.
+- In releases that expose the reconciliation circuit, inspect
+  `automatic_reconciliation_paused` and `failed_reconciliation_attempts` too.
+  This is separate from `paused`, which reports a transient pressure pause on
+  writes. A true circuit field means automatic full scans will not restart
+  until an operator requests one after resolving the failure cause; null means
+  the client or index predates this status field. A corrupt retry counter must
+  remain visible as a fail-closed paused circuit.
 - `last_scan_age_seconds` is reasonable for the host's workload and there are
   no recurring accounting, queue-overflow, permission, or storage errors in
   the journal.
@@ -59,9 +66,11 @@ dirty/paused, dropped events, and sustained backlog.
    Save command output with the incident record. Do not delete the database,
    WAL, or shared-memory files while the daemon is running.
 
-2. Check the cause indicated by `pause_reason`, `dirty_reason`, `write_error`,
-   and the journal. Resolve disk/inode exhaustion, filesystem availability,
-   permissions, or memory pressure before asking the daemon to rebuild.
+2. Check the cause indicated by `pause_reason`,
+   `automatic_reconciliation_paused`, `dirty_reason`, `write_error`, and the
+   journal. Resolve disk/inode exhaustion, filesystem availability,
+   permissions, event loss, or memory pressure before asking the daemon to
+   rebuild.
 
 3. For a one-off recoverable outage, request a reconciliatory scan only after
    its cause is resolved and host memory/storage pressure has returned to

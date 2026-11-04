@@ -984,6 +984,21 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
             crate::util::ago(since)
         ));
     }
+    let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
+        crate::watch::reconciliation_retry_status(
+            store.get_meta("failed_reconciliation_attempts")?.as_deref(),
+        );
+    if automatic_reconciliation_paused == Some(true) {
+        if let Some(attempts) = failed_reconciliation_attempts {
+            out.push_str(&format!(
+                "\nreconciliation: automatic scans PAUSED after {attempts} failed full scans; after resolving the cause, request one scan with `dux scan <root>`"
+            ));
+        } else {
+            out.push_str(
+                "\nreconciliation: automatic scans PAUSED because retry metadata is corrupt; inspect the index before requesting a scan",
+            );
+        }
+    }
     // Known event loss (fanotify overflow / dropped backlog / partial watch) makes
     // the index untrustworthy even while "live"; surface it and recommend a rescan.
     if let Some(since) = dirty_since(store)? {
@@ -1013,6 +1028,10 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
     let write_error = store.get_meta("flush_error")?;
     let pause_reason = store.get_meta("pause_reason")?;
     let dirty_reason = store.get_meta("dirty_reason")?;
+    let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
+        crate::watch::reconciliation_retry_status(
+            store.get_meta("failed_reconciliation_attempts")?.as_deref(),
+        );
     let daemon_live = crate::util::daemon_live_for(db);
     let watch = crate::util::read_watch_status(db);
     let scan_progress = crate::util::read_scan_progress_for(db);
@@ -1069,6 +1088,11 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
         "paused": paused,
         "paused_since_timestamp_seconds": paused_since,
         "pause_reason": pause_reason,
+        "automatic_reconciliation_paused": automatic_reconciliation_paused,
+        "failed_reconciliation_attempts": failed_reconciliation_attempts,
+        "max_automatic_reconciliation_retries": crate::watch::MAX_AUTOMATIC_RECONCILIATION_RETRIES,
+        "reconciliation_retry_state_corrupt": automatic_reconciliation_paused == Some(true)
+            && failed_reconciliation_attempts.is_none(),
         "throttled_since_timestamp_seconds": throttled_since,
         "write_error": write_error,
         "scan_in_progress": scan_in_progress,
@@ -1440,12 +1464,60 @@ mod tests {
         assert_eq!(healthy["caught_up"], true);
         assert_eq!(healthy["kernel_overflow_notifications"], 2);
         assert_eq!(healthy["userspace_updates_dropped"], 0);
+        assert_eq!(
+            healthy["automatic_reconciliation_paused"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            healthy["failed_reconciliation_attempts"],
+            serde_json::Value::Null
+        );
+        assert_eq!(healthy["max_automatic_reconciliation_retries"], 1);
         assert!(
             healthy["last_event_commit_timestamp_seconds"]
                 .as_i64()
                 .unwrap()
                 > 0
         );
+
+        store
+            .set_meta("failed_reconciliation_attempts", "1")
+            .unwrap();
+        let retry_available = status_json(&store, &db).unwrap();
+        assert_eq!(retry_available["failed_reconciliation_attempts"], 1);
+        assert_eq!(retry_available["automatic_reconciliation_paused"], false);
+
+        store
+            .set_meta("failed_reconciliation_attempts", "2")
+            .unwrap();
+        let circuit_open = status_json(&store, &db).unwrap();
+        assert_eq!(circuit_open["failed_reconciliation_attempts"], 2);
+        assert_eq!(circuit_open["automatic_reconciliation_paused"], true);
+        assert_eq!(circuit_open["reconciliation_retry_state_corrupt"], false);
+        let human_circuit_status = status(&store, &db).unwrap();
+        assert!(human_circuit_status.contains("automatic scans PAUSED after 2 failed full scans"));
+        assert!(human_circuit_status.contains("dux scan <root>"));
+
+        store
+            .set_meta("failed_reconciliation_attempts", "invalid")
+            .unwrap();
+        let corrupt_retry_state = status_json(&store, &db).unwrap();
+        assert_eq!(
+            corrupt_retry_state["failed_reconciliation_attempts"],
+            serde_json::Value::Null
+        );
+        assert_eq!(corrupt_retry_state["automatic_reconciliation_paused"], true);
+        assert_eq!(
+            corrupt_retry_state["reconciliation_retry_state_corrupt"],
+            true
+        );
+        store
+            .conn
+            .execute(
+                "DELETE FROM meta WHERE key='failed_reconciliation_attempts'",
+                [],
+            )
+            .unwrap();
 
         let status_path = crate::util::runtime_path(&db, "watch.status");
         let canonical_db = db.canonicalize().unwrap_or_else(|_| db.clone());
