@@ -3490,6 +3490,14 @@ fn accrue(
 /// At commit, however, the dirent graph is final. Recompute each affected
 /// directory from its prime children, deepest first, so a rename/replay sequence
 /// cannot leave equal-and-opposite attribution errors in sibling rollups.
+const REPAIR_AFFECTED_LEAVES_SQL: &str =
+    "UPDATE inodes SET recursive_bytes=blocks,recursive_inodes=1
+    WHERE kind!='d' AND (recursive_bytes!=blocks OR recursive_inodes!=1)
+      AND (dev_id,inode) IN (
+        SELECT de.dev_id,de.inode FROM dirents de
+        WHERE de.parent_dev=?1 AND de.parent_inode=?2 AND de.prime=1
+      )";
+
 fn reconcile_affected_rollups(tx: &rusqlite::Transaction, anc: &AncestorChanges) -> Result<()> {
     // Ordinary creates, deletes, and metadata changes already carry exact,
     // coalesced deltas through the prime-parent chain. Applying those deltas is
@@ -3565,16 +3573,7 @@ fn reconcile_affected_rollups(tx: &rusqlite::Transaction, anc: &AncestorChanges)
     // directories already touched by this transaction; the deepest-first
     // directory recomputation below then propagates the corrected allocation.
     for &(dev, ino) in &affected {
-        let repaired = tx.execute(
-            "UPDATE inodes SET recursive_bytes=blocks,recursive_inodes=1
-             WHERE kind!='d' AND (recursive_bytes!=blocks OR recursive_inodes!=1)
-               AND EXISTS (
-                 SELECT 1 FROM dirents de
-                 WHERE de.parent_dev=?1 AND de.parent_inode=?2 AND de.prime=1
-                   AND de.dev_id=inodes.dev_id AND de.inode=inodes.inode
-               )",
-            params![dev, ino],
-        )?;
+        let repaired = tx.execute(REPAIR_AFFECTED_LEAVES_SQL, params![dev, ino])?;
         if repaired > 0 {
             tracing::warn!(
                 parent_dev = dev,
@@ -7841,6 +7840,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(leaf.0, leaf.1);
+        drop(store);
+        cleanup(&dir, &db);
+    }
+
+    #[test]
+    fn affected_leaf_repair_query_is_driven_by_indexed_directory_children() {
+        let (dir, db, store) = fixture("leaf-repair-query-plan");
+        let root = id_of(&dir);
+        let sql = format!("EXPLAIN QUERY PLAN {REPAIR_AFFECTED_LEAVES_SQL}");
+        let mut statement = store.conn.prepare(&sql).unwrap();
+        let details: Vec<String> = statement
+            .query_map(params![root.0, root.1], |row| row.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+
+        assert!(
+            details
+                .iter()
+                .any(|detail| detail.contains("idx_dirents_parent")),
+            "repair must enumerate children through the parent index: {details:?}"
+        );
+        assert!(
+            details.iter().any(|detail| detail.contains("PRIMARY KEY")),
+            "repair must address only child inodes through their primary key: {details:?}"
+        );
+        assert!(
+            details.iter().all(|detail| !detail.contains("SCAN inodes")),
+            "repair must not rescan every inode for each affected directory: {details:?}"
+        );
+        drop(statement);
         drop(store);
         cleanup(&dir, &db);
     }
