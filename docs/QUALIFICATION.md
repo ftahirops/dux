@@ -4054,3 +4054,21 @@ Host load1 was **30.05**, CPU PSI some avg10 **72.91%**, and I/O PSI some avg10
 had **79 GiB free** and `/dev/shm` about **12.4 GiB free**. Dux continues to
 ingest some events, but its queue and lag are growing; no qualification or
 production mutation was attempted at this pressure level.
+
+### Governor regression build interrupted after compiling the Dux crate — 2026-11-04 15:00 UTC
+
+After the host cleared admission at **14:54 UTC**, the focused
+`pending_rescan_does_not_bypass_cpu_governor` test was rebuilt with one Cargo
+job in a transient scope limited to **20% of one CPU**, **4 GiB memory**, and
+`IOWeight=1`; the target was confined to `/dev/shm`. Cargo compiled dependencies
+and reached `dux v0.6.3`, but the test binary and body did not complete. At
+**15:00:03**, a new Go compile wave drove host load1 to **14.65** and CPU PSI
+some avg10 to **57.58%**, crossing the host controller's critical conditions.
+The scope had used **67.46 CPU-seconds** and peaked at **765 MiB**; it was
+stopped with SIGTERM (143). Its partial target tree was removed after the unit
+was confirmed inactive.
+
+At **15:00:28**, host load1 was **24.08** and CPU PSI some avg10 **75.11%**.
+Root had **70 GiB free** and `/dev/shm` returned to **594 MiB used / about
+12.4 GiB free**. This attempt produced no regression result and changed no
+production state.
