@@ -5040,3 +5040,25 @@ active with zero restarts and was not modified. Post-run status remained dirty
 and not caught up, with **49** recorded kernel overflow notifications, **2**
 pending updates, and about **6,998 seconds** behind; no full reconciliation was
 in progress. These isolated passes do not establish exact production state.
+
+### Production backlog and unresolved fanotify identities continue — 2026-11-04 21:33 UTC
+
+A fresh read-only sample at **21:33:15 UTC** showed production Dux PID **423219**
+active with zero restarts. The index remained dirty from fanotify queue overflow
+and not caught up, about **7,616 seconds** behind, with **3,132** pending updates,
+**49** kernel overflow notifications, a **128 MiB WAL**, and no full scan in
+progress. The legacy v1 status output still omits the retry-circuit fields added
+to the candidate; production remains on the prior executable. During the
+preceding ~82 seconds, the journal contained **43** unresolved fanotify identity
+warnings (mostly `ESTALE` for target handles) and **zero** new explicit queue
+overflow warnings. Host CPU PSI some was **37.82% avg10** and I/O PSI some was
+**1.21% avg10**. A separate Go/Postgres test workload was active on the host;
+the evidence does not establish that workload as the cause of the lost events
+or prior queue overflows. No production scan or restart was initiated.
+
+The exact status, systemd counters, pressure values, and bounded journal counts
+are captured in
+`target/readiness/production-status-20261104T2132Z.json` (SHA-256
+`3f27c85c6cfbab366609ddb92c4054318714a8d735674d6c8976ea4eb360936a`). Exact
+production convergence remains unverified and blocked by the dirty event stream,
+open reconciliation retry circuit, and elevated host CPU pressure.
