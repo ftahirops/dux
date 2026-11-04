@@ -4988,3 +4988,24 @@ manifest SHA-256 is
 `439a9c0337d3edc26b02328820194953f35c420848366f808ab1ec3952d601f6`.
 Those four exact-candidate suites remain open until a run completes under
 stable host pressure.
+
+### Production overflow burst persists without a qualification VM — 2026-11-04 21:17 UTC
+
+The latest guest had been stopped by its guard at **21:14:43 UTC** before running
+any test. The production journal then recorded **21 explicit fanotify queue
+overflow warnings** between **21:15:46.643** and **21:16:23.070 UTC** (36.4
+seconds). A read-only status at **21:17:24 UTC** still showed `dirty=true`,
+`caught_up=false`, **49** kernel overflow notifications, **25** pending updates,
+and about **6,665 seconds** behind; no scan was in progress. Host I/O PSI some
+was **16.81% avg10** and full was **15.65% avg10**. Independent Go build/test
+workers were active in nearby process snapshots. They may contribute to host
+pressure, but the event source and causal attribution remain unproven. The
+burst occurred while no qualification VM was active, so the isolated guest is
+not needed to explain this production incident.
+
+The exact status, pressure text, and journal warning boundaries are preserved
+in `target/readiness/production-fanotify-burst-20261104T2116Z.json`, SHA-256
+`678663017a4dbf4958aa12ab479e1c7129c61eea9ea073c4c5ce8df541734d04`. Do not
+start a production reconciliation while this event burst and elevated I/O
+pressure continue. Production remains on its prior binary; exact convergence
+and controlled recovery are unresolved release blockers.
