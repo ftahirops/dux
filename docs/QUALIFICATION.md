@@ -3976,6 +3976,24 @@ Root had **78 GiB free** and `/dev/shm` about **12.4 GiB free**. These host
 conditions are above qualification admission limits. No guest or production
 service/index mutation was started.
 
+### Production backlog and lag continued to grow during host stress — 2026-11-04 08:25 UTC
+
+At **08:25:51 UTC**, read-only production status reported **66,285 pending**,
+**19,879,236 events seen / 3,698,739 resolved / 164,736 committed**, and
+**1,501,934 userspace updates dropped**. Since 08:19:45, pending grew by
+**7,991**, seen events by **80,783**, and commits by **768**; `behind_seconds`
+rose from **69,070.777** to **69,436.492**. The index remains dirty/not caught
+up with no active scan and `write_error=null`. The journal since 08:07 adds a
+fanotify queue overflow at **08:23:05** and reconciliation deferrals at
+**08:11:42**, **08:15:20**, and **08:20:49**.
+
+At the snapshot, host load1 was **21.95**, CPU PSI some avg10 **43.59%**, and
+I/O PSI some avg10 **4.32%**. The unrelated whole-module Go coverage job
+(PID **1103586**) and an `xtop-stress` worker were active. Root had **77 GiB
+free** and `/dev/shm` about **12.4 GiB free**. This supports continued partial
+event ingestion but also shows production falling further behind. No
+qualification or production mutation was attempted under this pressure.
+
 ### Targeted governor test build interrupted under renewed CPU pressure — 2026-11-04 08:23 UTC
 
 At **08:22 UTC**, the focused
