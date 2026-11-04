@@ -5362,3 +5362,25 @@ as **interrupted / not qualified**, not a candidate failure or a pass. At
 **23:03 UTC**, host CPU PSI some avg10 remained **68.30%** and load1 was
 **17.99**; a retry is deferred until the host has recovered. The production
 service and index were not touched. Churn remains an open qualification gate.
+
+### Production status and host-pressure follow-up — 2026-11-04 23:04 UTC
+
+A second read-only status sample confirms the installed binary is still SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`, running
+as PID **423219** with zero systemd restarts. The production index remains
+**DIRTY** from fanotify queue overflow, with **86** kernel overflow
+notifications, **1,794** pending updates, no active scan, and about **13,065
+seconds** behind. The automatic pause flag is clear in this sample, but the
+index is still not caught up and its last scan is about **12,817 seconds** old.
+The WAL is **128 MiB**. The exact status snapshot is
+`target/readiness/production-status-20261104T2304Z.json` (SHA-256
+`a3e235bc3c012f0f8f1d9f0bffc3621ce1e5e11d0e4563ac4924ef847e521a2d`).
+
+At **23:03 UTC**, the process list showed active Go `vet` and compiler workers
+under `/home/xgenstack.com/backend/agent` consuming multiple cores while host
+CPU PSI some avg10 was **14.99%** and load1 **16.72**; Dux was using about
+**10.8% CPU** in that sample. This is concurrent host workload evidence, not
+proof that it is the only source of pressure. At the next sample, load1 was
+**21.21** and CPU PSI some avg10 **36.58%**. Another CPU- or I/O-intensive
+qualification run is unsafe until host pressure subsides. No production scan,
+restart, or index mutation was performed.
