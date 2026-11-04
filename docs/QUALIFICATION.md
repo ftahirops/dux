@@ -3723,3 +3723,31 @@ No qualification VM was started during that build. This confirms adequate disk
 capacity and severe production convergence failure; it does not identify the
 cause in the source-mismatched installed executable. No production service,
 package, configuration, or database mutation was made.
+
+### R63 overflow suite interrupted after fixture and suite startup — 2026-11-04 07:35 UTC
+
+The 07:25 guarded Ubuntu 24.04 attempt used the exact release-63 candidate
+(SHA-256 `109b7f4aaa0de22bf428efffcadf27185b691cc71c05cac0dceb2beaa6090c7e`)
+and readiness harness
+(SHA-256 `3ebf425f55835f7e0a0609afa90b2953fc8301b41afa43f44d97152227cf0628`).
+An initial invocation with `/var/tmp` failed the harness preflight because that
+path is on the guest root filesystem; no suite ran in that invocation. The
+corrected invocation remounted guest `/dev/shm` to **3 GiB** and used it as the
+required tmpfs workspace for a **2,048 MiB ext4 fixture**.
+
+The corrected run created the **100,000-file** seed and completed its baseline
+scan. The durable report says the overflow suite started at **07:31:55 UTC**
+with `status=running`. At **07:32:29**, the pressure guard stopped QEMU after
+host load1 reached **13.91** and CPU PSI some avg10 reached **69.54%**. Systemd
+reported **60.385 CPU-seconds**, **1.9 GiB peak memory**, and zero swap. The
+suite report had not reached a terminal checkpoint; this attempt is
+**interrupted**, with no overflow-recovery pass or product failure established.
+
+The report was recovered read-only from the stopped guest overlay before
+cleanup. Report SHA-256 is
+`0ffc390a7207f5411402da9a25a949574ab0a504b38024d2c72d04c9b867e61c`; the
+console, pressure event, and interruption descriptor are under
+`target/readiness/qualification-vm-overflow-20261104T0725Z/`. The guest
+runtime and its temporary SSH keys were removed, the copied overlay was
+discarded after extracting the report, and the verified Ubuntu base image was
+not changed. Full R63 overflow recovery remains unqualified.
