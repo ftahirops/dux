@@ -4072,3 +4072,23 @@ At **15:00:28**, host load1 was **24.08** and CPU PSI some avg10 **75.11%**.
 Root had **70 GiB free** and `/dev/shm` returned to **594 MiB used / about
 12.4 GiB free**. This attempt produced no regression result and changed no
 production state.
+
+### Qualification-controller tests pass; Rust regression retry stopped on host load — 2026-11-04 15:03 UTC
+
+The Python VM-controller regression suite passed **29/29** in **2.598 seconds**
+under a transient scope capped at **5% CPU**, **512 MiB memory**, and
+`IOWeight=1`, with `TMPDIR=/dev/shm`. Coverage includes VM admission and
+pressure-stop thresholds, unavailable-telemetry fail-closed behavior, safe
+ephemeral cleanup, collected systemd guest handling, and CLI command safety.
+This verifies the qualification controller tests only; it is not Dux Rust or
+runtime qualification.
+
+A fresh attempt of the Rust `pending_rescan_does_not_bypass_cpu_governor` test
+started at **15:02 UTC** under a **20% CPU / 4 GiB / IOWeight=1** transient
+scope. Cargo compiled early dependencies but did not reach the test binary.
+At **15:03:22**, host load1 reached **15.93** with CPU PSI some avg10 **33.24%**
+and active staticcheck/gosec work. Because load exceeded the guest controller's
+critical limit, the scope was stopped (exit **143**) and its partial target
+removed. At **15:03:42**, load1 was **19.84** and CPU PSI some avg10 **68.95%**.
+Root had **70 GiB free** and `/dev/shm` returned to **594 MiB used**. The Rust
+regression remains unrun; production state was not changed.
