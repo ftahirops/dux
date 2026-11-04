@@ -4130,3 +4130,28 @@ and commits by **1,536**; lag increased from **93,511.457** to **93,956.003
 seconds**. No scan was active and `write_error=null`. The daemon remained live
 with zero service restarts. The focused test passed without changing production
 state; production qualification remains open.
+
+
+### Full current-source Rust unit suite passes; production lag keeps growing — 2026-11-04 15:22 UTC
+
+`cargo test --locked --offline --bin dux` passed the full Rust binary unit suite:
+**256 passed, 0 failed, 0 ignored**, in **74.58 seconds**. This includes the CPU
+governor regression, watcher churn and rollup tests, schema migration and scan
+projection tests, pressure admission/cancellation tests, query error handling,
+and tunnel/security checks. The test profile built in **5m31s** with one Cargo
+job inside a transient systemd scope limited to **20% CPU**, **4 GiB memory**,
+and `IOWeight=1`; its target was isolated to `/dev/shm`. The scope exited and the
+temporary target was removed, returning `/dev/shm` to **594 MiB used / about
+12.4 GiB free**. This is full coverage of the 256 unit tests in the `dux`
+binary test target; integration, installed-package, end-to-end runtime,
+release, and endurance gates remain separate and unqualified.
+
+At **15:22:12 UTC**, production status remained dirty/not caught up with
+**95,619 pending**, **26,848,909 events seen / 5,302,919 resolved / 224,512
+committed**, and **2,003,046 updates dropped**. Compared with 15:14:30, pending
+grew by **10,905**, seen events by **68,941**, resolved events by **34,583**, and
+commits by **2,688**; lag increased from **93,956.003** to **94,417.180
+seconds**. No scan was active and `write_error=null`. Host load1 was **3.37**,
+CPU PSI some avg10 **6.99%**, and I/O PSI some avg10 **0.09%** after the run.
+The service stayed live; the passing unit suite did not change production
+state. The widening backlog and event-drop history remain production blockers.
