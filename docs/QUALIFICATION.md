@@ -4970,3 +4970,21 @@ Refreshed the RustSec advisory database and ran `cargo audit` with cargo-audit
 exited **0** with no lockfile vulnerability findings. This is dependency
 advisory evidence only; it does not qualify the current executable, distro
 packages, runtime configuration, or the remaining security and release gates.
+
+### CPU, coverage, mount, and WAL suite attempt stopped during guest boot — 2026-11-04 21:15 UTC
+
+A fresh 2 GiB Ubuntu 24.04 guest was admitted at 21:13:44 UTC for the exact
+rev 67 CPU, coverage, mount-recovery, and reader-held-WAL suites. The host
+pressure guard stopped it at **21:14:43 UTC**, before SSH became available and
+before any test ran. The guard sample was CPU PSI some **57.97%**, load1
+**11.77**, CPU PSI full **0.00%**, and I/O PSI some **0.70%**. The attempt is
+**incomplete**, not a product result. Go test processes were active in nearby
+samples, but their contribution is unproven. The guest and its private overlay
+were cleaned; production Dux was not changed.
+
+The attempt manifest and guard log are retained under
+`target/readiness/qualification-rev67-cpu-coverage-mount-wal-20261104/`; the
+manifest SHA-256 is
+`439a9c0337d3edc26b02328820194953f35c420848366f808ab1ec3952d601f6`.
+Those four exact-candidate suites remain open until a run completes under
+stable host pressure.
