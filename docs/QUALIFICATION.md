@@ -4200,3 +4200,23 @@ seconds**. No scan was active and `write_error=null`. Host load1 was **3.54**,
 CPU PSI some avg10 **7.06%**, and I/O PSI some avg10 **0.59%** after the run.
 Root had **73 GiB free**. Tests changed no production state; the increasing
 backlog and lag remain release blockers.
+
+
+### Production backlog and host pressure worsened after passing suites — 2026-11-04 15:38 UTC
+
+At **15:38:45 UTC**, Dux remained active (PID **2777300**, **0 restarts**) but
+its index was dirty/not caught up with **104,816 pending**, **27,025,045 events
+seen / 5,343,360 resolved / 225,920 committed**, and **2,003,046 userspace
+updates dropped**. Compared with 15:36:46, pending grew by **4,542**, seen
+events by **49,696**, resolved events by **13,736**, and commits by **256**; lag
+increased from **95,290.930** to **95,409.699 seconds**. No scan was active and
+`write_error=null`. The journal recorded a kernel fanotify queue overflow at
+**15:32:53** and reconciliation deferrals at **15:30:05** and **15:36:49**.
+The userspace dropped-update counter did not change in this interval; kernel
+queue overflow is a separate event.
+
+At **15:38:26**, host load averages were **22.72 / 11.63 / 9.79** and CPU PSI
+some avg10 **44.84%** (full avg10 **0%**); compiler and Go test processes were
+active. Root had **73 GiB free**. The host exceeded the test admission limit, so
+no additional build or test was started. These readings reinforce that successful
+unit/dependency tests do not qualify live convergence or production readiness.
