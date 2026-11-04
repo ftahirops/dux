@@ -3751,3 +3751,16 @@ console, pressure event, and interruption descriptor are under
 runtime and its temporary SSH keys were removed, the copied overlay was
 discarded after extracting the report, and the verified Ubuntu base image was
 not changed. Full R63 overflow recovery remains unqualified.
+
+### R63 guest stopped before candidate transfer during another Go test wave — 2026-11-04 07:42 UTC
+
+A fresh 4 GiB Ubuntu guest was admitted at **07:37:30 UTC** with QEMU capped at
+25%. SSH became reachable after cloud-init, but candidate transfer did not
+succeed before new shared-host Go test/race-test work raised pressure. The
+controller stopped QEMU at **07:40:54** with load1 **13.69** and CPU PSI some
+avg10 **49.22%**; systemd reported **32.191 CPU-seconds**, **921.4 MiB peak
+memory**, and zero swap. The candidate was not copied and no Dux suite ran.
+The console, guard event, and interruption descriptor are under
+`target/readiness/qualification-vm-boot-20261104T0737Z/`; the stopped guest's
+tmpfs runtime and ephemeral keys were cleaned. This is a guarded boot
+interruption, not a product result.
