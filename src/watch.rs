@@ -2,7 +2,7 @@ use crate::store::Store;
 use crate::util::now_secs;
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -653,6 +653,7 @@ struct FileHandle {
 struct ResolvedEventRecord {
     entry: Option<(PathBuf, std::ffi::OsString)>,
     target_inode: Option<(i64, i64)>,
+    stale_target_fsid: Option<(i32, i32)>,
 }
 
 fn event_identity_unresolved(record: &ResolvedEventRecord) -> bool {
@@ -661,6 +662,18 @@ fn event_identity_unresolved(record: &ResolvedEventRecord) -> bool {
 
 fn self_generated_attrib_event(mask: u64, event_pid: i32) -> bool {
     event_pid == std::process::id() as i32 && mask & !FAN_ONDIR == FAN_ATTRIB
+}
+
+fn stale_target_attrib_is_benign(
+    mask: u64,
+    record: &ResolvedEventRecord,
+    handle_capable_fsids: &HashSet<(i32, i32)>,
+) -> bool {
+    mask & !FAN_ONDIR == FAN_ATTRIB
+        && record.entry.is_none()
+        && record
+            .stale_target_fsid
+            .is_some_and(|fsid| handle_capable_fsids.contains(&fsid))
 }
 
 fn unresolved_event_log_allowed() -> bool {
@@ -970,6 +983,10 @@ pub fn run_daemon(
     // /home, /var, /boot, etc. We mark each, keyed by fsid, and keep a dir fd
     // per filesystem for open_by_handle_at (the event carries its fsid).
     let mut fsfds: HashMap<(i32, i32), RawFd> = HashMap::new();
+    // A stale target-only FAN_ATTRIB can be a normal delete race, but ESTALE
+    // also occurs when a filesystem cannot reopen fanotify FIDs. Only treat it
+    // as benign after another handle on that same filesystem has opened.
+    let mut handle_capable_fsids: HashSet<(i32, i32)> = HashSet::new();
     let mut fsfd_guards = Vec::new();
     let mut mark_failures = 0u32;
     for mp in real_mounts(&root_canon, one_file_system)? {
@@ -1332,6 +1349,7 @@ pub fn run_daemon(
                 let (_, _, overflows, consumed) = parse_events_bounded(
                     &buf[..buf_len],
                     &fsfds,
+                    &mut handle_capable_fsids,
                     &root_canon,
                     db,
                     &mut pending,
@@ -1405,6 +1423,7 @@ pub fn run_daemon(
                 let (_, _, overflows, consumed) = parse_events_bounded(
                     &buf[..buf_len],
                     &fsfds,
+                    &mut handle_capable_fsids,
                     &root_canon,
                     db,
                     &mut pending,
@@ -1993,6 +2012,7 @@ pub fn run_daemon(
                 let (seen, resolved, overflows, consumed) = parse_events_bounded(
                     &buf[..buf_len],
                     &fsfds,
+                    &mut handle_capable_fsids,
                     &root_canon,
                     db,
                     &mut pending,
@@ -2923,6 +2943,7 @@ fn ingest_event_with_indexed_path(
 fn parse_events(
     buf: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
     root: &Path,
     db: &Path,
     pending: &mut HashMap<PathBuf, Op>,
@@ -2936,6 +2957,7 @@ fn parse_events(
     let (seen, resolved, overflows, _) = parse_events_with_budget(
         buf,
         fsfds,
+        handle_capable_fsids,
         root,
         db,
         pending,
@@ -2955,6 +2977,7 @@ fn parse_events(
 fn parse_events_bounded(
     buf: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
     root: &Path,
     db: &Path,
     pending: &mut HashMap<PathBuf, Op>,
@@ -2970,6 +2993,7 @@ fn parse_events_bounded(
     parse_events_with_budget(
         buf,
         fsfds,
+        handle_capable_fsids,
         root,
         db,
         pending,
@@ -2988,6 +3012,7 @@ fn parse_events_bounded(
 fn parse_events_with_budget(
     mut buf: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
     root: &Path,
     db: &Path,
     pending: &mut HashMap<PathBuf, Op>,
@@ -3042,8 +3067,13 @@ fn parse_events_with_budget(
             seen += 1;
             let event_started = Instant::now();
             let resolve_started = Instant::now();
-            let resolved_record =
-                resolve_record(event, meta.metadata_len as usize, meta.mask, fsfds);
+            let resolved_record = resolve_record(
+                event,
+                meta.metadata_len as usize,
+                meta.mask,
+                fsfds,
+                handle_capable_fsids,
+            );
             let resolve_elapsed = resolve_started.elapsed();
             let has_parent_name = resolved_record.entry.is_some();
             if event_identity_unresolved(&resolved_record)
@@ -3058,6 +3088,15 @@ fn parse_events_with_budget(
                     mask = format_args!("{:#x}", meta.mask),
                     event_pid = meta.pid,
                     "ignored unresolved self-generated FAN_ATTRIB event"
+                );
+            } else if stale_target_attrib_is_benign(
+                meta.mask,
+                &resolved_record,
+                handle_capable_fsids,
+            ) {
+                tracing::debug!(
+                    mask = format_args!("{:#x}", meta.mask),
+                    "ignored stale target-only FAN_ATTRIB for deleted object"
                 );
             } else if event_identity_unresolved(&resolved_record) {
                 // Aggregate all-unresolved detection cannot catch one lost
@@ -3171,6 +3210,7 @@ fn resolve_record(
     meta_len: usize,
     mask: u64,
     fsfds: &HashMap<(i32, i32), RawFd>,
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
 ) -> ResolvedEventRecord {
     // Info records begin AFTER the fixed metadata header. Floor the start offset
     // at the header size so a bogus small `metadata_len` can't make the scan begin
@@ -3199,15 +3239,23 @@ fn resolve_record(
     // open_by_handle_at plus fstat on every such event. Keep target identity
     // resolution only for target-only metadata events and deletes, where the
     // named path may already be gone and surviving hardlinks still need refresh.
-    let entry = entry_payload.and_then(|payload| resolve_handle(payload, fsfds));
-    let target_inode = if needs_target_identity(mask, entry.is_some()) {
-        target_payload.and_then(|payload| resolve_handle_identity(payload, fsfds))
+    let entry =
+        entry_payload.and_then(|payload| resolve_handle(payload, fsfds, handle_capable_fsids));
+    let (target_inode, stale_target_fsid) = if needs_target_identity(mask, entry.is_some()) {
+        match target_payload
+            .map(|payload| resolve_handle_identity(payload, fsfds, handle_capable_fsids))
+        {
+            Some(TargetHandleResolution::Resolved(identity)) => (Some(identity), None),
+            Some(TargetHandleResolution::Stale(fsid)) => (None, Some(fsid)),
+            Some(TargetHandleResolution::Unresolved) | None => (None, None),
+        }
     } else {
-        None
+        (None, None)
     };
     ResolvedEventRecord {
         entry,
         target_inode,
+        stale_target_fsid,
     }
 }
 
@@ -3317,6 +3365,7 @@ fn enqueue_inode_refreshes(
 fn resolve_handle(
     payload: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
 ) -> Option<(PathBuf, std::ffi::OsString)> {
     if payload.len() < 16 {
         return None;
@@ -3339,7 +3388,7 @@ fn resolve_handle(
     use std::os::unix::ffi::OsStrExt;
     let name = std::ffi::OsStr::from_bytes(&name_bytes[..name_end]).to_owned();
 
-    let dfd = open_handle(payload, fsfds)?;
+    let dfd = open_handle(payload, fsfds, handle_capable_fsids).ok()?;
     let dir = std::fs::read_link(format!("/proc/self/fd/{dfd}")).ok();
     unsafe {
         libc::close(dfd);
@@ -3347,30 +3396,71 @@ fn resolve_handle(
     dir.map(|d| (d, name))
 }
 
+enum TargetHandleResolution {
+    Resolved((i64, i64)),
+    Stale((i32, i32)),
+    Unresolved,
+}
+
 fn resolve_handle_identity(
     payload: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
-) -> Option<(i64, i64)> {
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
+) -> TargetHandleResolution {
     use std::os::fd::FromRawFd;
-    let fd = open_handle(payload, fsfds)?;
+    let Some(fsid) = payload_fsid(payload) else {
+        return TargetHandleResolution::Unresolved;
+    };
+    let fd = match open_handle(payload, fsfds, handle_capable_fsids) {
+        Ok(fd) => fd,
+        Err(HandleOpenError::Stale) => return TargetHandleResolution::Stale(fsid),
+        Err(HandleOpenError::Other) => return TargetHandleResolution::Unresolved,
+    };
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
-    let metadata = file.metadata().ok()?;
-    crate::util::indexed_identity(&metadata).ok()
+    let Some(metadata) = file.metadata().ok() else {
+        return TargetHandleResolution::Unresolved;
+    };
+    match crate::util::indexed_identity(&metadata) {
+        Ok(identity) => TargetHandleResolution::Resolved(identity),
+        Err(_) => TargetHandleResolution::Unresolved,
+    }
 }
 
-fn open_handle(payload: &[u8], fsfds: &HashMap<(i32, i32), RawFd>) -> Option<RawFd> {
+#[derive(Debug, PartialEq, Eq)]
+enum HandleOpenError {
+    Stale,
+    Other,
+}
+
+fn payload_fsid(payload: &[u8]) -> Option<(i32, i32)> {
     if payload.len() < 16 {
         return None;
     }
-    let fsid = (
+    Some((
         i32::from_ne_bytes(payload[0..4].try_into().ok()?),
         i32::from_ne_bytes(payload[4..8].try_into().ok()?),
+    ))
+}
+
+fn open_handle(
+    payload: &[u8],
+    fsfds: &HashMap<(i32, i32), RawFd>,
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
+) -> Result<RawFd, HandleOpenError> {
+    let fsid = payload_fsid(payload).ok_or(HandleOpenError::Other)?;
+    let mount_fd = *fsfds.get(&fsid).ok_or(HandleOpenError::Other)?;
+    let hb = u32::from_ne_bytes(
+        payload[8..12]
+            .try_into()
+            .map_err(|_| HandleOpenError::Other)?,
+    ) as usize;
+    let ht = i32::from_ne_bytes(
+        payload[12..16]
+            .try_into()
+            .map_err(|_| HandleOpenError::Other)?,
     );
-    let mount_fd = *fsfds.get(&fsid)?;
-    let hb = u32::from_ne_bytes(payload[8..12].try_into().ok()?) as usize;
-    let ht = i32::from_ne_bytes(payload[12..16].try_into().ok()?);
     if hb == 0 || hb > MAX_HANDLE_SZ || payload.len() < 16 + hb {
-        return None;
+        return Err(HandleOpenError::Other);
     }
     let mut fh = FileHandle {
         handle_bytes: hb as u32,
@@ -3386,7 +3476,21 @@ fn open_handle(payload: &[u8], fsfds: &HashMap<(i32, i32), RawFd>) -> Option<Raw
             libc::O_PATH | libc::O_CLOEXEC,
         )
     } as RawFd;
-    (fd >= 0).then_some(fd)
+    if fd < 0 {
+        return Err(classify_handle_open_error(
+            std::io::Error::last_os_error().raw_os_error(),
+        ));
+    }
+    handle_capable_fsids.insert(fsid);
+    Ok(fd)
+}
+
+fn classify_handle_open_error(errno: Option<i32>) -> HandleOpenError {
+    if errno == Some(libc::ESTALE) {
+        HandleOpenError::Stale
+    } else {
+        HandleOpenError::Other
+    }
 }
 
 /// Prime parent of an inode = the parent dir of its block-bearing (prime) dirent.
@@ -6001,6 +6105,7 @@ mod tests {
         let (seen, resolved, overflows) = parse_events(
             event,
             &HashMap::new(),
+            &mut HashSet::new(),
             &root,
             &db,
             &mut pending,
@@ -6030,6 +6135,7 @@ mod tests {
         let (_, _, overflows) = parse_events(
             event,
             &HashMap::new(),
+            &mut HashSet::new(),
             &root,
             &db,
             &mut pending,
@@ -6096,6 +6202,7 @@ mod tests {
         let (seen, resolved, overflows) = parse_events(
             &event,
             &HashMap::new(),
+            &mut HashSet::new(),
             &root,
             &db,
             &mut pending,
@@ -6155,6 +6262,7 @@ mod tests {
             let result = parse_events(
                 &event,
                 &HashMap::new(),
+                &mut HashSet::new(),
                 &root,
                 &db,
                 &mut pending,
@@ -6230,6 +6338,7 @@ mod tests {
         let result = parse_events(
             &event,
             &HashMap::new(),
+            &mut HashSet::new(),
             &root,
             &db,
             &mut pending,
@@ -6247,6 +6356,54 @@ mod tests {
         );
         drop(store);
         cleanup(&root, &db);
+    }
+
+    #[test]
+    fn stale_target_attrib_is_ignored_only_for_a_known_handle_capable_filesystem() {
+        let fsid = (17, 23);
+        let record = ResolvedEventRecord {
+            entry: None,
+            target_inode: None,
+            stale_target_fsid: Some(fsid),
+        };
+        let known = HashSet::from([fsid]);
+        assert!(stale_target_attrib_is_benign(FAN_ATTRIB, &record, &known));
+        assert!(stale_target_attrib_is_benign(
+            FAN_ATTRIB | FAN_ONDIR,
+            &record,
+            &known
+        ));
+        assert!(!stale_target_attrib_is_benign(FAN_MODIFY, &record, &known));
+        assert!(!stale_target_attrib_is_benign(
+            FAN_ATTRIB | FAN_CLOSE_WRITE,
+            &record,
+            &known
+        ));
+        assert!(!stale_target_attrib_is_benign(
+            FAN_ATTRIB,
+            &record,
+            &HashSet::new()
+        ));
+
+        let named_record = ResolvedEventRecord {
+            entry: Some((PathBuf::from("/watched"), "file".into())),
+            target_inode: None,
+            stale_target_fsid: Some(fsid),
+        };
+        assert!(!stale_target_attrib_is_benign(
+            FAN_ATTRIB,
+            &named_record,
+            &known
+        ));
+        assert_eq!(
+            classify_handle_open_error(Some(libc::ESTALE)),
+            HandleOpenError::Stale
+        );
+        assert_eq!(
+            classify_handle_open_error(Some(libc::EACCES)),
+            HandleOpenError::Other
+        );
+        assert_eq!(classify_handle_open_error(None), HandleOpenError::Other);
     }
 
     #[test]
@@ -6288,6 +6445,7 @@ mod tests {
         let parsed = parse_events_bounded(
             &input,
             &HashMap::new(),
+            &mut HashSet::new(),
             &root,
             &db,
             &mut pending,
@@ -6308,6 +6466,7 @@ mod tests {
         let yielded = parse_events_bounded(
             deferred,
             &HashMap::new(),
+            &mut HashSet::new(),
             &root,
             &db,
             &mut pending,
@@ -6327,6 +6486,7 @@ mod tests {
         let resumed = parse_events_bounded(
             deferred,
             &HashMap::new(),
+            &mut HashSet::new(),
             &root,
             &db,
             &mut pending,
