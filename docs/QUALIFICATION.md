@@ -5667,3 +5667,21 @@ purged wholesale because some of it is referenced by this audit. A current
 clean-HEAD release package, package upgrade/rollback lifecycle, exact live
 reconciliation, stable caught-up window, current-source live churn/fault
 recovery, production-scale budgets, endurance, and canary gates remain open.
+
+The refreshed RustSec lockfile audit passed at 00:39 UTC: **229 dependencies,
+0 vulnerabilities, 0 warnings**, advisory DB commit
+`965bf9ad083b58e6340d65829d85217b18be9290` (last updated 2026-11-03). The
+exact running `/usr/bin/dux` binary also passed `cargo audit bin`, with
+dependency metadata recovered for **202 dependencies** and no findings. Its
+SHA-256 still matches the retained rev66 manifest:
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`. The
+binary audit does not qualify current HEAD; it only addresses the installed
+rev66 artifact. Reports are
+`target/readiness/current-source-qual-20261105-4a1f4a4/rustsec-lockfile.json`
+(SHA-256 `2f551d1ceee702ba99e3c6676401c46f981ac9a0e75de146ffdba01c5049fd9f`)
+and `installed-binary-audit.log` (SHA-256
+`cb7d818f16a5c20b7a6311394cc9db8d13bf87565c8875452b9d9de07e5e8692`). At
+00:40 UTC, production remained dirty at **144** overflow notifications and
+**3,923 pending updates**; its after-audit status snapshot is
+`production-status-after-audit.json` (SHA-256
+`1ccf8496d27b7d7f0b2a6f6cf61e22b17a9a39b715b32b7591d6ea9865938c87`).
