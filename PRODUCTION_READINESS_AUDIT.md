@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:51 UTC
+## Current readiness checkpoint — 2026-11-05 07:04 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **381** recorded kernel overflows, **40,623 pending updates**, and
-is about **11.4 hours** behind. The status reports recovery unpaused, but no
-scan is running and the last scan is about **3.8 hours** old. Revision 74 passed
+overflow, has **396** recorded kernel overflows, **812 pending updates**, and is
+about **11.6 hours** behind. The status reports recovery unpaused, but no scan
+is running and the last scan is about **4.0 hours** old. Revision 74 passed
 package lifecycle tests and revision 67 passed the core exact-binary churn
 suite. Exact revision-74 live churn remains unverified, and the current-tree
 revision-75 release build has not completed. The status reports no pause reason
@@ -19642,3 +19642,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Compared the **06:49:08** and **06:51:07 UTC** live status samples: pending updates rose from **978** to **40,623** (**+39,645 in 119 seconds**) while the recorded kernel-overflow count stayed at **381**. The later counters were **80,127,552 seen / 47,191,990 resolved / 8,216,642 committed**, with `events_dropped=0`; these counters are not unique-path or durable capture measurements.
 - The index remains dirty from the prior fanotify-loss epoch, about **41,087 seconds** behind, with no active scan and `write_error=null`. Root had **64 GiB free**. Host I/O PSI at the sample was `some avg10=0.99%`, `full avg10=0.66%` (60-second `full` average **8.90%**). Four unrelated Vitest workers were using roughly **135–151% CPU each**; timing does not establish that workload as the cause.
 - The system remains not caught up even when the overflow count is unchanged. No build, scan, install, or service/index mutation was started; a current-candidate sustained-throughput comparison and exact live reconciliation remain necessary.
+
+### PROD-PRESSURE-330 Current-source auditable release build stopped during a fresh overflow burst — 2026-11-05 07:04 UTC
+
+- Started a revision-75 current-source `scripts/build-release.sh` into unique `/dev/shm` paths with Cargo audit tooling pinned at **0.7.7**, `CARGO_BUILD_JOBS=1`, `CPUQuota=10%`, `MemoryMax=4G`, `CPUWeight=10`, `IOWeight=1`, nice 19, and idle I/O scheduling. The build compiled Rust dependencies and began the patched bundled-SQLite C build. Peak memory observed was about **1.1 GiB**; no binary, package, RustSec report, or source archive was published.
+- During the build, an unrelated `safefs.test` workload and later Go link/test activity were present. The service journal recorded repeated `fanotify queue overflow — index may have missed events` warnings; the recorded count rose from **381** to **396** and `dirty_since` advanced to **07:04:38 UTC**. The build was stopped by stopping only its named systemd scope; timing does not establish that the build or any one external workload caused the overflow burst.
+- The incomplete Cargo target (`/dev/shm/dux-r75-target`, **322 MiB**) and build log (`/dev/shm/dux-r75-build.log`, SHA-256 `b7078b6b0b57d46c3249b20e73bbfb9f0591a43ff5947d5656d9e5e5a301aeb7`) are preserved for a later resume. Scratch and output directories are empty. At **07:04:51**, the installed 0.6.3-66 daemon was live with zero restarts, **812 pending updates**, no scan, `write_error=null`, and about **41,912 seconds** behind; root had **65 GiB free**. No production package, service, or database mutation occurred. Current-source release qualification remains open.
