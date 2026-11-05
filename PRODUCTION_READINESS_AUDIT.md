@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:42 UTC
+## Current readiness checkpoint — 2026-11-05 06:45 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **381** recorded kernel overflows, **95 pending updates**, and is
-about **11.3 hours** behind. The status reports recovery unpaused, but no scan
-is running and the last scan is about **3.6 hours** old. Revision 74 passed
+overflow, has **381** recorded kernel overflows, **14,919 pending updates**, and
+is about **11.3 hours** behind. The status reports recovery unpaused, but no
+scan is running and the last scan is about **3.7 hours** old. Revision 74 passed
 package lifecycle tests and revision 67 passed the core exact-binary churn
 suite. Exact revision-74 live churn remains unverified, and the current-tree
 revision-75 release build has not completed. The status reports no pause reason
@@ -19619,3 +19619,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Read-only live status at **06:41:42 UTC** reported **370** kernel overflow notifications, **5,383 pending updates**, 78,685,567 events seen, and 46,375,221 resolved. A second sample at **06:42:16 UTC** reported **381** overflow notifications (**+11 in 34 seconds**), **95 pending updates**, 79,573,287 seen, 46,872,441 resolved, and 8,107,894 committed updates. The counters are cumulative daemon observations, not unique paths or durable capture rates; the sharp changes do not by themselves identify a cause or prove convergence.
 - The journal independently contains repeated `fanotify queue overflow — index may have missed events` warnings from **06:41:32 through 06:42:10 UTC**. The index remains dirty from overflow, about **40,556 seconds** behind, with no scan active and `write_error=null`. Recovery reports unpaused; that state has not repaired the index.
 - An unrelated Go `verify.test` process was active, with host I/O PSI `full avg10=7.15%` and **66 GiB** free on root. No service restart, scan, install, or index write was initiated. The production exactness/recovery gate remains open.
+
+### PROD-HEALTH-326 Pending backlog regrows without a new overflow count during another Go compile — 2026-11-05 06:45 UTC
+
+- Compared live status at **06:43:13** and **06:45:05 UTC**. The kernel overflow count remained **381**, but pending updates grew from **101** to **14,919** (**+14,818 in 112 seconds**). Event counters moved from **79,721,410 seen / 46,961,317 resolved / 8,121,069 committed** to **79,855,410 / 47,024,231 / 8,151,267**, respectively. These aggregate counters are not unique paths or a durable-capture measure; their change does not identify a cause.
+- At the later sample, the index remained dirty and **40,725 seconds** behind, no scan was active, and `write_error=null`. Root had **65 GiB** free. Host CPU PSI `some avg10` had risen to **52.09%**, with a large external Go compile visible. No additional build, scan, package install, or service mutation was run.
+- This is another confirmed period where pending work grows without a new overflow notification, while the prior dirty marker remains. It further blocks treating an empty/low queue as proof of a recovered exact index; controlled recovery and sustained candidate convergence remain open.
