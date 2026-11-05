@@ -528,6 +528,7 @@ fn is_stale_scan_artifact_name(name: &str, prefix: &str) -> bool {
 
 /// Full scan of `root` into the index. Computes recursive directory totals
 /// bottom-up in a single transaction (batched inserts — never row-at-a-time IO).
+#[cfg(test)]
 pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
     scan_with_progress_policy(store, root, opts, false)
 }
