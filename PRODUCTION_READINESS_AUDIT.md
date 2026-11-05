@@ -1,45 +1,56 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 15:44 UTC
+## Current readiness decision — 2026-11-05 18:38 UTC
 
-**Not production ready; do not promote a new binary yet.** The installed service
-is the legacy Dux **0.6.3** binary (`e0cc915f8f37`, source digest
-`b7c9a8d…`), active with zero systemd restarts. Its `/` index is dirty from
-fanotify queue overflow and is not caught up: **241** recorded kernel
-overflows, **7** pending updates, about **19,490 seconds** behind, and no
-reported write error. This is a point-in-time status, not proof of exactness.
+**Not production ready; do not promote a new binary yet.** The installed
+production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
+source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
+dirty from fanotify queue overflow and is not caught up. At **18:38:56 UTC** it
+reported **381** kernel overflow notifications, **236** pending updates, about
+**29,946 seconds** behind, no active scan, and no write error. Pending updates
+have recently fluctuated between zero and thousands; a drained queue does not
+repair historical event loss or prove index exactness.
 
-The latest source code revision tested is commit `c216b14`. Its Rust unit suite passes
-**267/267** on Ubuntu 24.04, including regressions for safe, distinct display
-of invalid Unix filename bytes. The suite does not replace a release artifact,
-package lifecycle, live-index convergence, or production canary.
+A clean static-musl **0.6.3-88** candidate does exist. It was built from clean
+source commit `9c59d0edaf77b0f20a74f8de63107f136dcedc8b`; the build manifest binds
+the DEB/RPM payloads to the standalone binary, and its source digest, hashes,
+systemd units, and offline dependency audit were revalidated. The artifact
+exists at `target/readiness/r88-clean-release-20261105/`, but successful
+artifact construction does not qualify installation, rollback, or production
+operation. The full **267/267** Rust suite was run on source commit `c216b14`
+before later release-provenance tooling changes; focused stale-FID regressions
+were run on the r88 source. Lifecycle harness tests pass **66/66** and VM guard
+tests **32/32**, but these do not substitute for a valid guest package lifecycle
+or a production-scale recovery test.
 
 Open release gates, in priority order:
 
-1. **Live index exactness and recovery:** the installed index remains dirty;
-   no successful quiet-window reconciliation or independent exactness check
-   has been demonstrated. Do not interpret low pending counts as caught up.
-2. **Current-source release artifact:** no clean integrated auditable static
-   musl binary/package has been produced from the pushed source. The r80
-   package is older; later r82/r83/r84 attempts stopped under host pressure.
-3. **Supported package lifecycles:** candidate DEB/RPM install, upgrade,
-   rollback, service confinement, permissions, and clean-index checks remain
-   incomplete, especially Rocky Linux 9. No interrupted lifecycle attempt is
-   a pass.
-4. **Data-model correctness:** the known v6 inode/path representation cannot
+1. **Live index exactness and recovery:** production remains dirty after 381
+   recorded overflows. No successful quiet-window reconciliation plus
+   independent exactness/accounting check has been demonstrated. Do not read a
+   low pending count as caught up.
+2. **Candidate package lifecycle:** no valid completed r88 install, upgrade,
+   rollback, re-upgrade, remove, and purge lifecycle is available. Attempt 4
+   used a 9p fixture on which fanotify marking is unsupported; attempt 5 used a
+   verified fanotify-compatible ext4 fixture but the host pressure guard
+   stopped it. Neither attempt is a pass. Rocky Linux 9 and RPM lifecycle
+   qualification also remain open.
+3. **Data-model correctness:** the known v6 inode/path representation cannot
    prove full path-instance semantics for aliases and hardlinks. The v7 path
-   instance/schema, event, query, and atomic publication gates remain open.
-5. **Reliability and performance envelope:** production-scale churn, overflow
-   recovery, low-memory/disk/I/O fault injection, long endurance, and canary
-   convergence remain unqualified. Current unit tests are not evidence for
+   instance/schema, event, query, and atomic-publication gates remain open.
+4. **Reliability and performance envelope:** production-scale churn and
+   overflow recovery, low-memory/disk/I/O fault injection, long endurance, and
+   canary convergence remain unqualified. Unit and harness tests do not prove
    these system-level properties.
+5. **Operational promotion:** only after the above gates pass, qualify the
+   candidate's live recovery and service behavior under a controlled canary;
+   the installed package/index have not been changed as part of this review.
 
-Root storage is **185 GiB total / 100 GiB used / 77 GiB available**;
-`/dev/shm` is **13 GiB total / 2.8 GiB used / 11 GiB available**. The retained
-`target/readiness` evidence occupies **6.8 GiB** and was kept. A RustSec audit
-of the current lockfile found no advisories, but that is dependency evidence,
-not a complete source or binary security certification.
-
+At the latest disk sample, root storage was **185 GiB total / 103 GiB used /
+74 GiB available** and `/dev/shm` was **13 GiB total / 3.0 GiB used / 9.9 GiB
+available**. A RustSec audit of the candidate lockfile found no advisories in
+its 2026-11-05 database snapshot; this is dependency evidence, not complete
+source or binary security certification.
 
 ## Watcher diagnostic hardening — 2026-11-05 11:05 UTC
 
