@@ -326,9 +326,27 @@ class PressureGuardTests(unittest.TestCase):
     def test_runtime_guard_stops_only_its_vm_after_two_critical_samples(self):
         with tempfile.TemporaryDirectory(prefix="dux-vm-pressure-guard-") as temp:
             directory = Path(temp)
+            runtime_root = directory / "tmpfs"
+            runtime = runtime_root / "ubuntu24" / "12345"
+            runtime.mkdir(parents=True, mode=0o700)
+            overlay = runtime / "disk.qcow2"
+            overlay.write_bytes(b"private disposable overlay")
+            statefile = VM.statefile_for(directory, ephemeral=True)
+            statefile.write_text(json.dumps({
+                "unit": "dux-vm-guest.service",
+                "guest": "ubuntu24",
+                "ephemeral_runtime": True,
+                "runtime_directory": str(runtime),
+            }))
             critical = {"cpu": {"some": 41.0}, "io": {"some": 0.0}, "memory": {"some": 0.0}}
             with (
-                patch.object(VM.subprocess, "run", return_value=SimpleNamespace(returncode=0)),
+                patch.object(VM, "EPHEMERAL_RUNTIME_DIRECTORY", runtime_root),
+                patch.object(VM, "filesystem_type_for", return_value="tmpfs"),
+                patch.object(VM.subprocess, "run", side_effect=[
+                    SimpleNamespace(returncode=0),
+                    SimpleNamespace(returncode=0),
+                    SimpleNamespace(returncode=3),
+                ]),
                 patch.object(VM, "host_pressure", side_effect=[critical, critical]),
                 patch.object(VM, "run") as run,
                 patch.object(VM.time, "sleep") as sleep,
@@ -342,6 +360,31 @@ class PressureGuardTests(unittest.TestCase):
             self.assertEqual(event["action"], "stopped_disposable_vm")
             self.assertEqual(event["vm_unit"], "dux-vm-guest.service")
             output.assert_called_once()
+            self.assertFalse(runtime.exists())
+            self.assertTrue(json.loads(statefile.read_text())["ephemeral_runtime_cleaned"])
+
+    def test_stopped_guest_cleanup_refuses_an_active_unit(self):
+        with tempfile.TemporaryDirectory(prefix="dux-vm-active-cleanup-") as temp:
+            directory = Path(temp)
+            runtime_root = directory / "tmpfs"
+            runtime = runtime_root / "ubuntu24" / "98765"
+            runtime.mkdir(parents=True, mode=0o700)
+            statefile = VM.statefile_for(directory, ephemeral=True)
+            statefile.write_text(json.dumps({
+                "unit": "dux-vm-guest.service",
+                "guest": "ubuntu24",
+                "ephemeral_runtime": True,
+                "runtime_directory": str(runtime),
+            }))
+            with (
+                patch.object(VM, "EPHEMERAL_RUNTIME_DIRECTORY", runtime_root),
+                patch.object(VM.subprocess, "run", return_value=SimpleNamespace(returncode=0)),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "while guest unit is active"):
+                    VM.cleanup_stopped_guest_runtime(
+                        "ubuntu24", statefile, "dux-vm-guest.service"
+                    )
+            self.assertTrue(runtime.is_dir())
 
 
 class CommandSafetyTests(unittest.TestCase):

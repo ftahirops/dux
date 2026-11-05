@@ -169,6 +169,29 @@ def cleanup_stale_ephemeral_runtimes(guest):
     return removed
 
 
+def cleanup_stopped_guest_runtime(guest, statefile, vm_unit):
+    """Remove a guarded/stopped guest's private overlay after systemd confirms it stopped."""
+    statefile = Path(statefile)
+    try:
+        state = json.loads(statefile.read_text())
+    except FileNotFoundError:
+        return False
+    if state.get('unit') != vm_unit or not state.get('ephemeral_runtime'):
+        return False
+    if state.get('ephemeral_runtime_cleaned'):
+        return False
+    active = subprocess.run(
+        ['systemctl', 'is-active', '--quiet', vm_unit],
+        capture_output=True, text=True, check=False,
+    )
+    if active.returncode == 0:
+        raise RuntimeError(f'refusing to clean runtime while guest unit is active: {vm_unit}')
+    cleanup_ephemeral_runtime(guest, state['runtime_directory'])
+    state['ephemeral_runtime_cleaned'] = True
+    statefile.write_text(json.dumps(state, indent=2) + '\n')
+    return True
+
+
 def parse_psi_avg10(contents, line_name='some'):
     """Read one PSI avg10 value, returning None when the kernel omits PSI."""
     for line in contents.splitlines():
@@ -303,6 +326,8 @@ def run_pressure_guard(guest, directory, vm_unit):
                 stream.write(json.dumps(event, sort_keys=True) + '\n')
                 stream.flush()
             run('systemctl', 'stop', vm_unit)
+            statefile = statefile_for(directory, ephemeral=guest != 'watch-unit')
+            cleanup_stopped_guest_runtime(guest, statefile, vm_unit)
             print(json.dumps(event, sort_keys=True), flush=True)
             return
         time.sleep(5)
@@ -535,6 +560,7 @@ def main():
                 sys.executable, str(Path(__file__).resolve()), 'guard', options.guest)
         except Exception:
             subprocess.run(['systemctl', 'stop', unit], check=False)
+            cleanup_stopped_guest_runtime(options.guest, statefile, unit)
             raise
         print('Started', unit, 'SSH loopback port', port, flush=True)
         return
