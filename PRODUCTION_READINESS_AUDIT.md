@@ -1,6 +1,35 @@
 # dux Production Readiness Audit
 
 
+## Current readiness checkpoint — 2026-11-05 06:08 UTC
+
+**Overall state: not production-ready.** The current installed daemon is package
+0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
+overflow, has **350** recorded kernel overflows, **2,976 pending updates**, and
+is about **10.7 hours** behind. Revision 74 passed package lifecycle tests;
+revision 67 passed the core exact-binary churn suite. Exact revision-74 live
+churn remains unverified, and the current-tree revision-75 release build has
+not completed. The index recovery circuit is
+paused after two failed reconciliations. Root storage is **185 GiB total, 114
+GiB used, 63 GiB free (65% used)**; `/dev/shm` has **8.1 GiB free**.
+
+| Stage | Current disposition | Evidence and remaining gate |
+| --- | --- | --- |
+| S0 — patched SQLite, telemetry, lazy lookups, explicit errors | **Partial** | Candidate bundles SQLite 3.54.1 and core regressions pass. A current-source release build is pending, and the required independent before/after throughput comparison is not established. |
+| S1 — incarnation identity and path-instance schema | **Open** | Active schema remains v6 (`SCHEMA_VERSION=6`); the spec's schema-v7 path-instance/object-incarnation model, exact migration, and rollback are not delivered. |
+| S2 — durable journal and separate capture/apply | **Open** | The watcher still resolves events and applies in-memory work on its live pipeline; there is no versioned durable event journal, replay/cursor protocol, or torn-segment recovery proof. |
+| S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; the current retry circuit is paused and a controlled recovery has not passed. |
+| S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
+| S5 — modules, package/security, operations | **Partial** | Revision 74 passed guarded package upgrade/rollback/removal/clean-install and dependency audit. Current full-tree provenance awaits revision 75; root plus `CAP_SYS_ADMIN`/`CAP_DAC_READ_SEARCH` remains, and capability/platform/runbook gates are open. |
+| S6 — integrated release qualification | **Open** | No current-tree revision-75 artifact; exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. |
+
+This matrix is an evidence summary, not a maturity percentage. Small tests or an
+older passing candidate do not close a stage that requires current-source,
+full-scale, or production-state evidence. See the dated entries below for exact
+commands, hashes, conditions, and interrupted attempts.
+
+
+
 ## Governing development specification — 2026-10-29
 
 The existing production-readiness goal now includes
