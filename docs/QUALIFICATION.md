@@ -6087,3 +6087,20 @@ preserve the host filesystem view required by fanotify. This security check
 does not change the separate live-correctness gate: at the preceding
 02:57:34 sample Dux was dirty with **34,471 pending updates** and about
 **27,074 seconds** behind. No service, package, or database change was made.
+
+### Stale-handle events persist after short-lived tests exit — 2026-11-05 03:00 UTC
+
+The Go race-test and Vitest processes observed earlier were absent at **02:59:44
+UTC**, and pending updates had fallen from **17,609** at 02:59:13 to **7,849**.
+However, the preceding 45-second journal window still contained repeated
+unresolved `FAN_ATTRIB` events with `ESTALE` while opening DFID_NAME handles.
+The event PIDs included long-lived host processes such as Codex app-server
+**2746478**, Codex session **3477315**, and container-runtime shims **1892**,
+**1938**, and **1968**. These processes remained present in the host process
+table; therefore ending the short-lived Go/Vitest batches did not stop the
+unresolved event stream. At the sample, status remained dirty, about **27,205
+seconds** behind, with the kernel-overflow count unchanged at **236** and no
+active scan or write error. This shows the rescan gate is constrained by
+ongoing filesystem churn from long-lived host services as well as test batches;
+it does not establish that any one process is the sole cause. No scan or
+service/database operation was attempted.
