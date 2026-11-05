@@ -20453,3 +20453,8 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 
 - Rechecked the same production daemon while Go `-race` tests were active. It remains active with **0** restarts and no write error, but remains dirty after **484** fanotify overflows. Pending updates increased from **3** at 21:14 to **23,089** at 21:15; reported lag increased from about **39,262** to **39,363 seconds**. No reconciliation scan is running. The pending counter's fast variation confirms it is only a queue gauge and cannot establish index completeness.
 - Host load1 was **7.87** and I/O PSI some/full avg10 was **4.35% / 3.30%**. The concurrent Go test PID was **924710** (`go test -race`, up to five-minute timeout). No Dux test, VM, service restart, or index mutation was started. Wait for host admission conditions to clear before resuming candidate qualification.
+
+### Persist fanotify queue cap across reboot — 2026-11-05 21:16 UTC
+
+- The effective host setting was `fs.fanotify.max_queued_events=65536`, but no sysctl configuration persisted it. Added `/etc/sysctl.d/90-dux.conf` with the same value and applied that single key via `sysctl -p`; it read back as **65,536**. The file is **0644 root:root**. The active Dux service remained active; no restart occurred, so the running fanotify group already retains the same effective queue limit.
+- This prevents a reboot from silently reverting the next Dux fanotify group to the lower kernel default. It does **not** recover prior lost events, establish that 65,536 avoids overflow under workload, or resolve the dirty index. Validation remains required under representative event storms; the live overflow/reconciliation gate is still open.
