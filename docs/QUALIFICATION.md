@@ -6416,3 +6416,12 @@ incomplete tmpfs target/tmp/output directories. Preserved log SHA-256:
 `c8236cf73fa00a6c98ee4398e89a22ea9edfda37b08e91813180c92cac049a67`. No
 production package, service, or index operation occurred. Current-source
 artifact and package qualification remain open.
+
+### Legacy write/backlog sample — 2026-11-05 08:50:47–08:50:57 UTC
+
+Paired read-only samples of installed PID 423219 showed `write_bytes` increasing
+116,785,152 bytes over 10 seconds (~11.7 MB/s), while committed updates advanced
+1,408 and pending updates rose from 17,266 to 44,844. The overflow counter stayed
+460 and WAL size stayed 128 MiB. The index was already dirty on legacy 0.6.3-66.
+Nearby I/O PSI some/full avg10 fell from 48.45%/46.51% to 9.38%/8.97%. The
+sample does not establish cause and cannot qualify candidate performance.
