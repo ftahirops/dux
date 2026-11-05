@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 18:58 UTC
+## Current readiness decision — 2026-11-05 19:01 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **18:58:37 UTC** it
-reported **417** kernel overflow notifications, **3,201** pending updates, about
-**31,127 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **19:01:07 UTC** it
+reported **417** kernel overflow notifications, **23,126** pending updates, about
+**31,276 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness.
 
@@ -46,8 +46,8 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At **18:58 UTC**, root storage was **185 GiB total / 105 GiB used /
-73 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
+At **19:01 UTC**, root storage was **185 GiB total / 105 GiB used /
+72 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
 available**. A RustSec audit of the candidate lockfile found no advisories in
 its 2026-11-05 database snapshot; this is dependency evidence, not complete
 source or binary security certification.
@@ -20328,3 +20328,8 @@ A fourth fresh Ubuntu 24.04 ephemeral guest was admitted at 17:12:50 UTC with th
 - Added regressions for Go/Cargo build and test detection, compiler-worker detection, false-positive avoidance for a Python command containing the words `go build`, admission and guard blocking, and unreadable process/telemetry behavior. `scripts/test_dux_qualification_vm.py` passed **36/36** under a scope capped at 10% CPU, 512 MiB memory, and low I/O priority; Python byte-compilation and `git diff --check` passed. A live smoke sample detected the active host `go test` process and returned an admission blocker.
 - At **18:58:37 UTC**, that external `go test -p 2` batch was still active. Production Dux remained dirty/not caught up at **417** kernel overflows, **3,201** pending updates, about **31,127 seconds** behind, no active scan, and no write error. Root had **73 GiB free**. The current-source control-plane fix improves VM admission but does not resolve production event loss or qualify the r88 package lifecycle.
 - At **18:59:48 UTC**, exercised the actual VM `start` command while host pressure was mostly within numeric admission limits. The new preflight correctly refused before guest creation and identified a Go compiler worker (PID **227556**) plus Go test processes (PIDs **185891** and **219585**). The qualification VM unit remained inactive. This verifies the workload gate on the real `/proc` view, beyond its mocked unit tests. At **19:00:03 UTC**, production remained dirty with **417** overflows, **26** pending updates, about **31,213 seconds** behind, no active scan, and no write error; load1 was **12.74**. No production package/service/database operation occurred.
+
+### Admission detector catches renewed build load as production backlog grows — 2026-11-05 19:01 UTC
+
+- At **19:00:52 UTC**, a fresh host-pressure probe identified both an active Go compiler worker and `go test` PID **230734**; load1 was **12.46**, CPU PSI some avg10 **46.40%**. The pressure guard would stop an already-running guest, and admission would reject a new one.
+- By **19:01:07 UTC**, production status remained dirty/not caught up after **417** historical overflows, but pending updates had surged **26 → 23,126** in about a minute as `events_seen` rose by about **127,819**. Lag was **31,276 seconds**, with no active scan or write error. Root had **72 GiB free**; load1 was **11.94** and CPU PSI some avg10 **22.54%**. This confirms a clean-looking/low-pending instant was not a stable quiet window. Keep live reconciliation and guest lifecycle qualification deferred while the current build/test workload continues.
