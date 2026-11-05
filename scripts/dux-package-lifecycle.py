@@ -53,6 +53,29 @@ def _exec_start_has_option(exec_start, option):
     return any(argument == option or argument.startswith(f"{option}=") for argument in argv)
 
 
+def systemd_syscall_filter_group_members(groups):
+    """Resolve systemd syscall groups so effective expanded filters are verifiable."""
+    result = command("systemd-analyze", "syscall-filter", *sorted(groups), check=False)
+    assert result.returncode == 0, {
+        "property": "systemd syscall-filter group expansion",
+        "groups": sorted(groups), "returncode": result.returncode,
+        "stderr": result.stderr,
+    }
+    members = {group: set() for group in groups}
+    active_group = None
+    for line in result.stdout.splitlines():
+        value = line.strip()
+        if value.startswith("@"):
+            active_group = value.split()[0]
+        elif active_group in members and value and not value.startswith("#"):
+            members[active_group].add(value.split()[0])
+    assert all(members.values()), {
+        "property": "systemd syscall-filter group expansion",
+        "expected_groups": sorted(groups), "observed": result.stdout,
+    }
+    return members
+
+
 def require_disposable_qualification_vm():
     """Refuse package removal/purge unless the VM controller provisioned this guest."""
     assert os.geteuid() == 0, "package lifecycle qualification requires root inside its disposable VM"
@@ -143,8 +166,6 @@ def assert_service_security_policy(proc_root=Path("/proc")):
     }
     denied_syscalls = {syscall_filter[0][1:], *syscall_filter[1:]}
     required_denials = {
-        "@clock",
-        "@obsolete",
         "init_module", "finit_module", "delete_module",
         "mount", "umount", "umount2", "pivot_root", "chroot",
         "swapon", "swapoff", "reboot", "kexec_load", "kexec_file_load",
@@ -152,8 +173,16 @@ def assert_service_security_policy(proc_root=Path("/proc")):
         "lookup_dcookie", "perf_event_open", "pidfd_getfd", "ptrace",
         "modify_ldt", "vm86", "vm86old",
     }
-    assert required_denials <= denied_syscalls, {
-        "property": "SystemCallFilter", "required_denials": sorted(required_denials),
+    group_members = systemd_syscall_filter_group_members({"@clock", "@obsolete"})
+    missing_group_members = {
+        group: sorted(members - denied_syscalls)
+        for group, members in group_members.items()
+        if group not in denied_syscalls and not members <= denied_syscalls
+    }
+    assert required_denials <= denied_syscalls and not missing_group_members, {
+        "property": "SystemCallFilter",
+        "required_denials": sorted(required_denials),
+        "missing_group_denials": missing_group_members,
         "observed": observed.get("SystemCallFilter"),
     }
     address_families = set(observed.get("RestrictAddressFamilies", "").split())
@@ -336,6 +365,12 @@ def installed_backup_helper_hash(path=Path("/usr/lib/dux/dux-backup-index.py")):
     return _sha256_file(path)
 
 
+def rollback_backup_path_for_report(report_path):
+    """Keep each lifecycle attempt's rollback snapshot isolated from prior runs."""
+    report_path = Path(report_path)
+    return report_path.with_name(f"{report_path.stem}-rollback.sqlite")
+
+
 def create_rollback_index_backup(database, backup):
     """Use SQLite's online backup API to preserve a schema-matched rollback index."""
     database, backup = Path(database), Path(backup)
@@ -492,7 +527,8 @@ def main():
                                     "service": service_state()})
 
         rollback_backup = create_rollback_index_backup(
-            "/var/lib/dux/dux.db", "/root/dux-package-lifecycle-rollback.sqlite"
+            "/var/lib/dux/dux.db",
+            rollback_backup_path_for_report(report_path),
         )
         install(args.kind, new_package)
         upgraded = installed_version(args.kind)

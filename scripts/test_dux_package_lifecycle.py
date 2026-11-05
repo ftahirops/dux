@@ -358,14 +358,93 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
             ),
             "MainPID": "4242",
         }
+        self.syscall_group_output = """@clock
+    # Change the system time
+    adjtimex
+    clock_adjtime
+    clock_adjtime64
+    clock_settime
+    clock_settime64
+    settimeofday
+
+@obsolete
+    # Unusual, obsolete or unimplemented system calls
+    _sysctl
+    afs_syscall
+    bdflush
+    break
+    create_module
+    ftime
+    get_kernel_syms
+    getpmsg
+    gtty
+    idle
+    lock
+    mpx
+    prof
+    profil
+    putpmsg
+    query_module
+    security
+    sgetmask
+    ssetmask
+    stime
+    stty
+    sysfs
+    tuxcall
+    ulimit
+    uselib
+    ustat
+    vserver
+"""
 
     def check_properties(self):
         output = "\n".join(f"{key}={value}" for key, value in self.properties.items())
-        with patch.object(LIFECYCLE, "command", return_value=SimpleNamespace(stdout=output)):
+        def fake_command(*args, **kwargs):
+            if args[:2] == ("systemd-analyze", "syscall-filter"):
+                return SimpleNamespace(
+                    returncode=0, stdout=self.syscall_group_output, stderr=""
+                )
+            return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+        with patch.object(LIFECYCLE, "command", side_effect=fake_command):
             return LIFECYCLE.assert_service_security_policy(proc_root=self.proc.name)
+
+    def use_expanded_syscall_filter(self):
+        explicit = set(self.properties["SystemCallFilter"].split())
+        explicit.discard("~@clock")
+        explicit.discard("@obsolete")
+        expanded = {
+            line.strip()
+            for line in self.syscall_group_output.splitlines()
+            if line.strip() and not line.strip().startswith(("@", "#"))
+        }
+        self.properties["SystemCallFilter"] = "~" + " ".join(
+            sorted(explicit | expanded)
+        )
 
     def test_accepts_restricted_effective_service_unit(self):
         self.assertEqual(self.check_properties()["Group"], "dux")
+
+    def test_accepts_systemd_expanded_clock_and_obsolete_deny_groups(self):
+        self.use_expanded_syscall_filter()
+        self.assertEqual(self.check_properties()["Group"], "dux")
+
+    def test_rejects_missing_syscall_from_expanded_clock_group(self):
+        self.use_expanded_syscall_filter()
+        self.properties["SystemCallFilter"] = self.properties["SystemCallFilter"].replace(
+            "clock_settime ", ""
+        )
+        with self.assertRaises(AssertionError):
+            self.check_properties()
+
+    def test_rejects_missing_syscall_from_expanded_obsolete_group(self):
+        self.use_expanded_syscall_filter()
+        self.properties["SystemCallFilter"] = self.properties["SystemCallFilter"].replace(
+            "_sysctl ", ""
+        )
+        with self.assertRaises(AssertionError):
+            self.check_properties()
 
     def test_rejects_added_ambient_capability(self):
         self.properties["AmbientCapabilities"] += " cap_sys_ptrace"
@@ -603,6 +682,16 @@ class PackagePayloadHashTests(unittest.TestCase):
 
 
 class RollbackIndexBackupTests(unittest.TestCase):
+    def test_rollback_backup_path_is_unique_per_report_attempt(self):
+        first = LIFECYCLE.rollback_backup_path_for_report(
+            "/root/dux-package-lifecycle-attempt1.json"
+        )
+        second = LIFECYCLE.rollback_backup_path_for_report(
+            "/root/dux-package-lifecycle-attempt2.json"
+        )
+        self.assertEqual(first, Path("/root/dux-package-lifecycle-attempt1-rollback.sqlite"))
+        self.assertNotEqual(first, second)
+
     def test_online_backup_restores_verified_snapshot_and_permissions(self):
         with tempfile.TemporaryDirectory(prefix="dux-rollback-backup-") as temporary:
             directory = Path(temporary)

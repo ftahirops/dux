@@ -432,7 +432,10 @@ class BuildReleaseCliTests(unittest.TestCase):
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=5,
+                    # This negative-path CLI check runs under low-CPU scopes in
+                    # production qualification; five wall-clock seconds made
+                    # a correct early rejection time out during host contention.
+                    timeout=30,
                     check=False,
                 )
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
