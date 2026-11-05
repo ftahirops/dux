@@ -27,6 +27,21 @@ about 2,751 seconds behind, no scan or pause, and no write error. No candidate
 binary/package was installed. Root storage was 185 GiB total, 111 GiB used,
 66 GiB available; `/dev/shm` was 13 GiB total, 1.7 GiB used, 12 GiB available.
 
+### Disk and host recheck — 2026-11-05 11:08 UTC
+
+The host remained busy with an external Go `staticcheck` process and its build
+tree. Disk usage was 185 GiB total, 112 GiB used, 65 GiB available; `/tmp` was
+17 GiB, `/home/dux/target` 8.4 GiB (including 6.8 GiB of retained readiness
+evidence), and `/dev/shm` 1.7 GiB with 12 GiB available. The 3.9 GiB
+`/tmp/x.gGSQe` Go build tree was active, so it was left alone. I removed the
+26 MiB `/tmp/dux-wt-live-sized-stale-build-tree-1876319` fixture left by the
+interrupted Rust test; its test process and unit were confirmed stopped.
+
+At 11:08 the production daemon remained active but dirty from overflow, with
+39 kernel overflow notifications, 4,354 pending updates, about 2,931 seconds
+behind, no scan or pause, and no write error. A `staticcheck` process was still
+using substantial CPU, so no new VM or filesystem-stressing test was started.
+
 
 ## Same-host continuation — 2026-11-05 10:56 UTC
 
