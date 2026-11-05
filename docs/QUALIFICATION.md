@@ -6275,3 +6275,22 @@ cgroup CPU PSI some avg10 was **2.82%**. Storage had **64 GiB free** on `/` and
 **7.8 GiB free** on `/dev/shm`. No release build was started during this
 workload; the revision-75 cache remains available, but live exactness and
 recovery remain unqualified.
+
+### Revision-74 artifact compatibility check against current HEAD — 2026-11-05 07:28 UTC
+
+Reverified the retained `target/readiness/release-current-head-1ed23b9-r74`
+artifact set: all eight entries in `SHA256SUMS` passed, and the static binary
+reports revision `1ed23b94f173` with embedded source digest
+`a55570a9a93a466ac26f79a20b2d029d5466c306afc67bd219b61df0058a7002`. Its file
+SHA-256 is
+`9d46c3d4b9b4d5b48949136a9369042b8b397e939b53a5af5fa724ab805ffccc`.
+
+Compared with that build commit, the current tree has no changes in Rust
+sources, Cargo manifests/lockfile, `build.rs`, or packaging files. Five Python
+tooling/test files have changed, along with the excluded production audit and
+the included qualification record. The current canonical source-tree digest
+is `12db3a8d02064db3b79f60726ab58410d4e1e47a45a700d02fbd512e76881a30`, so it
+does **not** match the revision-74 binary's embedded digest. The artifact is
+checksum-valid and remains suitable for runtime-code qualification, but it
+cannot satisfy current-HEAD release provenance or replace the pending revision
+75 package build. No artifact was installed or modified.
