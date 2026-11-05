@@ -113,6 +113,8 @@ class PressureGuardTests(unittest.TestCase):
                 "124": ["/usr/bin/node", "--version"],
                 "125": ["/usr/bin/node", "--test", "test/*.test.js"],
                 "126": ["/tmp/go-build123/b140/recovery.test", "-test.paniconexit0"],
+                "127": ["/bin/bash", "scripts/test-fast.sh"],
+                "128": ["/bin/bash", "-c", "echo test"],
             }
             for pid, argv in processes.items():
                 process = proc_root / pid
@@ -145,6 +147,7 @@ class PressureGuardTests(unittest.TestCase):
                     "npm run build pid=116",
                     "pnpm install pid=117",
                     "rustc pid=104",
+                    "shell test script pid=127",
                 ],
             )
 

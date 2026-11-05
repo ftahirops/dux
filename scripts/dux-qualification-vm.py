@@ -290,6 +290,17 @@ def active_host_workloads(proc_root=Path('/proc')):
                     )
             elif executable.endswith('.test'):
                 workloads.append(f'Go test binary pid={process.name}')
+            elif (
+                executable in {'bash', 'dash', 'sh', 'zsh'}
+                and args
+                and not args[0].startswith('-')
+                and (
+                    (Path(args[0]).name.startswith('test-')
+                     and Path(args[0]).name.endswith('.sh'))
+                    or Path(args[0]).name in {'run-tests.sh', 'test.sh'}
+                )
+            ):
+                workloads.append(f'shell test script pid={process.name}')
             elif executable == 'compile' and '/pkg/tool/' in argv[0]:
                 workloads.append(f'Go compiler pid={process.name}')
             elif executable in {'rustc', 'rustdoc', 'cc', 'gcc', 'g++',
