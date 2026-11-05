@@ -1,5 +1,45 @@
 # dux Production Readiness Audit
 
+## Current readiness decision — 2026-11-05 15:21 UTC
+
+**Not production ready; do not promote a new binary yet.** The installed service
+is the legacy Dux **0.6.3** binary (`e0cc915f8f37`, source digest
+`b7c9a8d…`), active with zero systemd restarts. Its `/` index is dirty from
+fanotify queue overflow and is not caught up: **226** recorded kernel
+overflows, **2,196** pending updates, about **18,084 seconds** behind, and no
+reported write error. This is a point-in-time status, not proof of exactness.
+
+The current pushed source is commit `7d64622`. Its Rust unit suite passes
+**267/267** on Ubuntu 24.04, including regressions for safe, distinct display
+of invalid Unix filename bytes. The suite does not replace a release artifact,
+package lifecycle, live-index convergence, or production canary.
+
+Open release gates, in priority order:
+
+1. **Live index exactness and recovery:** the installed index remains dirty;
+   no successful quiet-window reconciliation or independent exactness check
+   has been demonstrated. Do not interpret low pending counts as caught up.
+2. **Current-source release artifact:** no clean integrated auditable static
+   musl binary/package has been produced from the pushed source. The r80
+   package is older; later r82/r83 attempts stopped under host pressure.
+3. **Supported package lifecycles:** candidate DEB/RPM install, upgrade,
+   rollback, service confinement, permissions, and clean-index checks remain
+   incomplete, especially Rocky Linux 9. No interrupted lifecycle attempt is
+   a pass.
+4. **Data-model correctness:** the known v6 inode/path representation cannot
+   prove full path-instance semantics for aliases and hardlinks. The v7 path
+   instance/schema, event, query, and atomic publication gates remain open.
+5. **Reliability and performance envelope:** production-scale churn, overflow
+   recovery, low-memory/disk/I/O fault injection, long endurance, and canary
+   convergence remain unqualified. Current unit tests are not evidence for
+   these system-level properties.
+
+Root storage is **185 GiB total / 102 GiB used / 76 GiB available**;
+`/dev/shm` is **13 GiB total / 2.2 GiB used / 11 GiB available**. The retained
+`target/readiness` evidence occupies **6.8 GiB** and was kept. A RustSec audit
+of the current lockfile found no advisories, but that is dependency evidence,
+not a complete source or binary security certification.
+
 
 ## Watcher diagnostic hardening — 2026-11-05 11:05 UTC
 
