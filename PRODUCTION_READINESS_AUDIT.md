@@ -1,12 +1,12 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 15:21 UTC
+## Current readiness decision — 2026-11-05 15:36 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed service
 is the legacy Dux **0.6.3** binary (`e0cc915f8f37`, source digest
 `b7c9a8d…`), active with zero systemd restarts. Its `/` index is dirty from
-fanotify queue overflow and is not caught up: **226** recorded kernel
-overflows, **2,196** pending updates, about **18,084 seconds** behind, and no
+fanotify queue overflow and is not caught up: **241** recorded kernel
+overflows, **3,279** pending updates, about **18,979 seconds** behind, and no
 reported write error. This is a point-in-time status, not proof of exactness.
 
 The latest source code revision tested is commit `2744c79`; subsequent commits
@@ -22,7 +22,7 @@ Open release gates, in priority order:
    has been demonstrated. Do not interpret low pending counts as caught up.
 2. **Current-source release artifact:** no clean integrated auditable static
    musl binary/package has been produced from the pushed source. The r80
-   package is older; later r82/r83 attempts stopped under host pressure.
+   package is older; later r82/r83/r84 attempts stopped under host pressure.
 3. **Supported package lifecycles:** candidate DEB/RPM install, upgrade,
    rollback, service confinement, permissions, and clean-index checks remain
    incomplete, especially Rocky Linux 9. No interrupted lifecycle attempt is
@@ -35,8 +35,8 @@ Open release gates, in priority order:
    convergence remain unqualified. Current unit tests are not evidence for
    these system-level properties.
 
-Root storage is **185 GiB total / 102 GiB used / 76 GiB available**;
-`/dev/shm` is **13 GiB total / 2.2 GiB used / 11 GiB available**. The retained
+Root storage is **185 GiB total / 104 GiB used / 74 GiB available**;
+`/dev/shm` is **13 GiB total / 2.7 GiB used / 11 GiB available**. The retained
 `target/readiness` evidence occupies **6.8 GiB** and was kept. A RustSec audit
 of the current lockfile found no advisories, but that is dependency evidence,
 not a complete source or binary security certification.
@@ -20147,6 +20147,12 @@ Synchronized read-only samples for installed Dux PID **423219** showed `write_by
 - Cargo built dependencies through `libsqlite3-sys`; it did not reach the Dux executable or produce a DEB, RPM, or release manifest. At **15:26:46 UTC**, host load1 reached **24.48** and CPU PSI some avg10 **79.72%**. Stopped only `dux-release-current-48739df-r84.service` at **15:26:56 UTC**. Systemd reports the unit inactive; the command session confirms termination by SIGTERM, **72.85 CPU seconds**, **821.5 MiB peak memory**, and zero swap. No Cargo/Rust compiler remained afterward. A concurrent external Go build/test batch was observed; timing does not establish causation.
 - The incomplete target is **322 MiB** at `/dev/shm/dux-r84-target`; it remains available as a cache for a retry. Its containing `/dev/shm/dux-r84-tmp` and output directories were empty and removed. The first recursive cleanup command for the nonempty Cargo target was rejected by automatic command review (`rm -f style commands are not permitted`); it was preserved for reuse rather than attempting another deletion method. No persistent disk artifact was added by the build.
 - At **15:28 UTC**, production Dux remained active as legacy **0.6.3**, PID **1627143**, `NRestarts=0`. The root index was dirty from overflow, `caught_up=false`, **226** overflow notifications, **231** pending updates, about **18,496 seconds** behind, and `write_error=null`. Root had **76 GiB free** and `/dev/shm` **11 GiB free**. No production package, service, or index operation was performed. The source-matched r84 release build and all package lifecycle/recovery gates remain open.
+
+### Cached r84 release retry stopped at renewed host load — 2026-11-05 15:31–15:35 UTC
+
+- Retried package revision 84 from pushed branch head `13ae194`, reusing `/dev/shm/dux-r84-target`. The build advanced through bundled SQLite and Rust dependencies to `Compiling dux`, reaching **492 MiB** of cached target artifacts. It still produced no Dux executable, package, or manifest.
+- At **15:35:37 UTC**, host load1 was **13.02**, over the critical limit 12, while CPU PSI some avg10 was **53.68%** and CPU-full/I/O pressure remained low. Stopped only `dux-release-current-13ae194-r84-retry.service` at **15:35:50 UTC**. Systemd confirms it inactive; the session reports SIGTERM, **85.20 CPU seconds**, **761.7 MiB peak memory**, and no swap. No Cargo/Rust compiler remained afterward. The process table showed concurrent Go package test/compile activity; timing does not establish causation.
+- The **492 MiB** `/dev/shm/dux-r84-target` is retained for the next retry; `/dev/shm` still has **11 GiB free**. No package or persistent build output was produced, and no production service, DB, or index command was issued. At **15:36 UTC**, production Dux was active with zero restarts but remained dirty/not caught up (**241** overflows, **3,279** pending, about **18,979 seconds** behind, no write error); root had **74 GiB free**. The release build and production exactness gates remain open.
 
 ### Raw filename byte collisions fixed; current-source Rust suite passes on Ubuntu 24.04 — 2026-11-05 15:08 UTC
 
