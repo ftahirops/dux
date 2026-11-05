@@ -194,7 +194,20 @@ pub struct ScanStats {
 /// retain complete snapshots; failed installation leaves the previous database
 /// intact (callers hold the exclusive writer lock).
 pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+    rebuild_atomic_with_install_observer(db, root, opts, |_| {})
+}
+
+/// Test seam at the point where the fully built staging database is ready to
+/// replace the live index. The progress marker must still describe the active
+/// publication until this function returns.
+fn rebuild_atomic_with_install_observer(
+    db: &Path,
+    root: &Path,
+    opts: &ScanOptions,
+    on_install: impl FnOnce(&Path),
+) -> Result<ScanStats> {
     ensure_not_cancelled(&opts.cancel)?;
+    let _progress_cleanup = ScanProgressCleanup::start(db.to_path_buf());
     // Inspect directory entries without following them before SQLite opens the
     // source. A dangling main-database symlink is an existing install target;
     // sidecar symlinks are rejected by Store's artifact check.
@@ -241,7 +254,8 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
             "could not disable journaling for private rebuild database"
         );
         store.conn.execute_batch("PRAGMA synchronous=OFF;")?;
-        let s = scan(&mut store, root, opts)?;
+        let s = scan_with_progress_policy(&mut store, root, opts, true)?;
+        _progress_cleanup.refresh_until_drop();
         if let Some(cancel) = opts.cancel.as_ref() {
             let cancel = Arc::clone(cancel);
             store
@@ -325,6 +339,7 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
     // Once installation starts, finish its atomic transaction even if pressure
     // changes; cancellation before this point leaves the old index untouched.
     ensure_not_cancelled(&opts.cancel)?;
+    on_install(db);
     if Store::has_index_artifacts(db)? {
         // Never unlink WAL/SHM underneath readers. SQLite's online backup API
         // installs the rebuilt pages in ONE destination transaction; existing
@@ -374,6 +389,65 @@ pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<Scan
             .context("sync index directory")?;
     }
     Ok(stats)
+}
+
+struct ScanProgressCleanup {
+    db: PathBuf,
+    stop: Arc<AtomicBool>,
+    refresh: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ScanProgressCleanup {
+    fn start(db: PathBuf) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let refresh = Arc::new(AtomicBool::new(false));
+        let thread_refresh = Arc::clone(&refresh);
+        let thread_db = db.clone();
+        let handle = std::thread::spawn(move || {
+            while !thread_stop.load(Ordering::Relaxed) {
+                if thread_refresh.load(Ordering::Relaxed) {
+                    if let Some(progress) = crate::util::read_scan_progress_for(&thread_db) {
+                        crate::util::write_scan_progress(
+                            &thread_db,
+                            progress.started,
+                            progress.files,
+                            progress.dirs,
+                            progress.bytes,
+                            progress.indexing,
+                        );
+                    }
+                }
+                for _ in 0..10 {
+                    if thread_stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        });
+        Self {
+            db,
+            stop,
+            refresh,
+            handle: Some(handle),
+        }
+    }
+
+    fn refresh_until_drop(&self) {
+        self.refresh.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Drop for ScanProgressCleanup {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        crate::util::clear_scan_progress(&self.db);
+    }
 }
 
 /// A SIGKILL/power loss cannot run StageGuard. The exclusive DB lock guarantees
@@ -455,13 +529,24 @@ fn is_stale_scan_artifact_name(name: &str, prefix: &str) -> bool {
 /// Full scan of `root` into the index. Computes recursive directory totals
 /// bottom-up in a single transaction (batched inserts — never row-at-a-time IO).
 pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+    scan_with_progress_policy(store, root, opts, false)
+}
+
+/// Keep the final progress snapshot visible while an atomic caller fsyncs and
+/// publishes the staging database. `rebuild_atomic` owns marker cleanup.
+fn scan_with_progress_policy(
+    store: &mut Store,
+    root: &Path,
+    opts: &ScanOptions,
+    retain_progress_for_publication: bool,
+) -> Result<ScanStats> {
     if let Some(cancel) = opts.cancel.as_ref() {
         let cancel = Arc::clone(cancel);
         store
             .conn
             .progress_handler(10_000, Some(move || cancel.load(Ordering::Relaxed)))?;
     }
-    let result = scan_inner(store, root, opts);
+    let result = scan_inner(store, root, opts, retain_progress_for_publication);
     let cleanup = store.conn.progress_handler(0, None::<fn() -> bool>);
     if cancellation_requested(&opts.cancel) {
         Err(ScanCancelled.into())
@@ -472,7 +557,12 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     }
 }
 
-fn scan_inner(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+fn scan_inner(
+    store: &mut Store,
+    root: &Path,
+    opts: &ScanOptions,
+    retain_progress_for_publication: bool,
+) -> Result<ScanStats> {
     ensure_not_cancelled(&opts.cancel)?;
     if opts.low_priority {
         set_low_priority();
@@ -545,6 +635,7 @@ fn scan_inner(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<Scan
         );
         let show_stderr = opts.progress;
         let started_epoch = now_secs();
+        let retain_progress = retain_progress_for_publication;
         Some(std::thread::spawn(move || {
             let spin = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
             let mut i = 0usize;
@@ -588,7 +679,18 @@ fn scan_inner(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<Scan
                 i += 1;
                 std::thread::sleep(Duration::from_millis(120));
             }
-            crate::util::clear_scan_progress(&progress_db); // scan finished — remove the file
+            if retain_progress {
+                crate::util::write_scan_progress(
+                    &progress_db,
+                    started_epoch,
+                    f.load(Ordering::Relaxed),
+                    d.load(Ordering::Relaxed),
+                    b.load(Ordering::Relaxed),
+                    true,
+                );
+            } else {
+                crate::util::clear_scan_progress(&progress_db);
+            }
         }))
     };
     let progress_guard = ProgressGuard {
@@ -2107,6 +2209,48 @@ mod tests {
         rm_db(&db);
         let _ = fs::remove_file(&target);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn atomic_rebuild_progress_remains_visible_until_publication_finishes() {
+        let db = tmp("progress-publication-db");
+        let root = tmp("progress-publication-root");
+        rm_db(&db);
+        crate::util::clear_scan_progress(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("payload"), b"baseline").unwrap();
+
+        let stats =
+            rebuild_atomic_with_install_observer(&db, &root, &ScanOptions::default(), |live_db| {
+                let progress = crate::util::read_scan_progress_for(live_db)
+                    .expect("scan progress must remain visible through publication");
+                assert!(
+                    progress.indexing,
+                    "publication is part of index finalization"
+                );
+                assert_eq!(progress.files, 1);
+                assert_eq!(progress.dirs, 1);
+                assert!(PathBuf::from(format!("{}.new", live_db.display())).exists());
+                // Status rejects progress files older than ten seconds. A
+                // publication can legitimately exceed that while SQLite waits
+                // for a reader, so verify the owner keeps the marker fresh.
+                std::thread::sleep(Duration::from_secs(11));
+                assert!(
+                    crate::util::read_scan_progress_for(live_db).is_some(),
+                    "long atomic publication must keep progress fresh"
+                );
+            })
+            .unwrap();
+
+        assert_eq!(stats.files, 1);
+        assert!(
+            crate::util::read_scan_progress_for(&db).is_none(),
+            "successful publication must clear the progress marker"
+        );
+        assert!(!PathBuf::from(format!("{}.new", db.display())).exists());
+        rm_db(&db);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

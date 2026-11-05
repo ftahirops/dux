@@ -6104,3 +6104,51 @@ active scan or write error. This shows the rescan gate is constrained by
 ongoing filesystem churn from long-lived host services as well as test batches;
 it does not establish that any one process is the sole cause. No scan or
 service/database operation was attempted.
+
+### Production rescan, bounded retry, and scan-progress gap — 2026-11-05 03:14 UTC
+
+With no Go/npm/Rust test command visible, low pending work, and stable overflow
+count **236**, `/usr/bin/dux scan /` was issued at **03:01:46 UTC** through the
+live daemon. The first pass completed at **03:04:00** with **1,241,901 files**,
+**116,909 directories**, **1,358,810 staged path instances**, **107.86 GiB**
+visible bytes, and **zero traversal coverage issues**. It still reported
+`lost_events=true` after unresolved fanotify identities and scheduled the
+bounded retry. The WAL reached **331,186,232 bytes**; event writes paused and
+resumed after checkpoint recovery at **134,217,728 bytes**.
+
+The retry started at **03:05:00** and completed at **03:08:13** with
+**1,244,369 files**, **116,915 directories**, **1,361,284 staged path
+instances**, **108.20 GiB** visible bytes, and again **zero traversal coverage
+issues**. It also had `lost_events=true`; **33,454 pending paths** were replayed
+and the automatic circuit opened after two failed scans. Its WAL reached
+**269,575,752 bytes** and recovered to **134,217,728 bytes**. The client was
+then interrupted while waiting; the daemon stayed live. At **03:13:31**, a new
+external Go test batch was active, pending was **596**, the dirty index was
+about **28,031 seconds** behind, and the recorded overflow count had risen to
+**253**. The scan installed a fresh baseline but did not establish exactness.
+
+The run also reproduced a status-reporting defect. At **03:03:45**, status
+reported no active scan and `/run/dux/scan.progress` was absent while
+`/var/lib/dux/dux.db.new` was **586 MiB** and still growing; the scan client
+remained active until install/replay. Source inspection found `scan_inner`
+cleared progress before `rebuild_atomic` completed its staging fsync and
+SQLite backup publication. The worktree now retains and refreshes progress
+through atomic publication and has a regression test that holds the publication
+boundary for more than the 10-second stale-marker limit. `cargo fmt --all --
+--check` and `git diff --check` pass. The targeted publication regression passed
+**1/1**, and the complete `scan::tests` module passed **33/33** serially. Both
+ran in a transient scope limited to **10% CPU**, **2 GiB memory**, no swap,
+`IOWeight=10`, and `Nice=19`; temporary fixtures used `/dev/shm`. The targeted
+regression held the install boundary for **11.25 seconds**, exceeding the
+10-second stale-marker cutoff, and confirmed progress was cleared after
+publication. The broader all-features Rust binary unit suite subsequently
+completed under the same transient resource limits: **260 passed, 0 failed, 0
+ignored** in **173.37 seconds**. It covered the binary's all-feature unit
+tests; it does not replace current-source release/package qualification or
+host-level fault, scale, endurance, and canary qualification. The production
+binary is unchanged. At the latest follow-up sample, the daemon remained live
+with no restarts, **7 pending updates** out of **500,000** capacity, no
+userspace drops, **253** recorded kernel overflow notifications, and the index
+still marked dirty and about **8 hours** behind its last caught-up point. Root
+storage had **64.88 GiB free**. No full-root scan was repeated because the
+exactness gate remains open after two scans reported lost events.
