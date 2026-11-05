@@ -673,10 +673,14 @@ struct FileHandle {
     f_handle: [u8; MAX_HANDLE_SZ],
 }
 
+#[derive(Clone)]
 struct ResolvedEventRecord {
     entry: Option<(PathBuf, std::ffi::OsString)>,
     target_inode: Option<(i64, i64)>,
     stale_target_fsid: Option<(i32, i32)>,
+    info_type_mask: u64,
+    info_record_count: usize,
+    info_records_complete: bool,
 }
 
 fn event_identity_unresolved(record: &ResolvedEventRecord) -> bool {
@@ -694,6 +698,9 @@ fn stale_target_attrib_is_benign(
 ) -> bool {
     mask & !FAN_ONDIR == FAN_ATTRIB
         && record.entry.is_none()
+        && record.info_type_mask == (1u64 << FAN_EVENT_INFO_TYPE_FID)
+        && record.info_record_count == 1
+        && record.info_records_complete
         && record
             .stale_target_fsid
             .is_some_and(|fsid| handle_capable_fsids.contains(&fsid))
@@ -3280,12 +3287,24 @@ fn resolve_record(
     let mut off = meta_len.max(FAN_EVENT_METADATA_LEN);
     let mut entry_payload = None;
     let mut target_payload = None;
-    while off + 4 <= event.len() {
+    let mut info_type_mask = 0u64;
+    let mut info_record_count = 0usize;
+    let mut info_records_complete = true;
+    while off < event.len() {
+        if off + 4 > event.len() {
+            info_records_complete = false;
+            break;
+        }
         let hdr: InfoHeader =
             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
         let rec_len = hdr.len as usize;
         if rec_len < 4 || off + rec_len > event.len() {
+            info_records_complete = false;
             break;
+        }
+        info_record_count = info_record_count.saturating_add(1);
+        if hdr.info_type < u64::BITS as u8 {
+            info_type_mask |= 1u64 << hdr.info_type;
         }
         if hdr.info_type == FAN_EVENT_INFO_TYPE_DFID_NAME {
             entry_payload = Some(&event[off + 4..off + rec_len]); // fsid(8) + file_handle + name
@@ -3294,6 +3313,7 @@ fn resolve_record(
         }
         off += rec_len;
     }
+    info_records_complete &= off == event.len();
     // Most notifications carry both a parent/name record and a target FID.
     // The path event is sufficient to stat/upsert ordinary creates, renames and
     // metadata updates. Opening the target FID as well costs another
@@ -3317,6 +3337,9 @@ fn resolve_record(
         entry,
         target_inode,
         stale_target_fsid,
+        info_type_mask,
+        info_record_count,
+        info_records_complete,
     }
 }
 
@@ -6473,10 +6496,86 @@ mod tests {
     #[test]
     fn stale_target_attrib_is_ignored_only_for_a_known_handle_capable_filesystem() {
         let fsid = (17, 23);
+        let make_info_event = |info_types: &[u8], trailing: &[u8]| {
+            let mut event = vec![0u8; FAN_EVENT_METADATA_LEN];
+            for info_type in info_types {
+                let header = InfoHeader {
+                    info_type: *info_type,
+                    pad: 0,
+                    len: 12,
+                };
+                let offset = event.len();
+                event.resize(offset + 12, 0);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        (&header as *const InfoHeader).cast::<u8>(),
+                        event.as_mut_ptr().add(offset),
+                        std::mem::size_of::<InfoHeader>(),
+                    );
+                }
+            }
+            event.extend_from_slice(trailing);
+            let metadata = FanotifyEventMetadata {
+                event_len: event.len() as u32,
+                vers: FANOTIFY_METADATA_VERSION,
+                reserved: 0,
+                metadata_len: FAN_EVENT_METADATA_LEN as u16,
+                mask: FAN_ATTRIB,
+                fd: -1,
+                pid: 123,
+            };
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
+                    event.as_mut_ptr(),
+                    FAN_EVENT_METADATA_LEN,
+                );
+            }
+            event
+        };
+        let mut capable_fsids = HashSet::new();
+        let target_only = resolve_record(
+            &make_info_event(&[FAN_EVENT_INFO_TYPE_FID], &[]),
+            FAN_EVENT_METADATA_LEN,
+            FAN_ATTRIB,
+            &HashMap::new(),
+            &mut capable_fsids,
+        );
+        assert_eq!(target_only.info_type_mask, 1u64 << FAN_EVENT_INFO_TYPE_FID);
+        assert_eq!(target_only.info_record_count, 1);
+        assert!(target_only.info_records_complete);
+        let compound = resolve_record(
+            &make_info_event(
+                &[FAN_EVENT_INFO_TYPE_FID, FAN_EVENT_INFO_TYPE_DFID_NAME],
+                &[],
+            ),
+            FAN_EVENT_METADATA_LEN,
+            FAN_ATTRIB,
+            &HashMap::new(),
+            &mut capable_fsids,
+        );
+        assert_eq!(
+            compound.info_type_mask,
+            (1u64 << FAN_EVENT_INFO_TYPE_FID) | (1u64 << FAN_EVENT_INFO_TYPE_DFID_NAME)
+        );
+        assert_eq!(compound.info_record_count, 2);
+        assert!(compound.info_records_complete);
+        let malformed = resolve_record(
+            &make_info_event(&[FAN_EVENT_INFO_TYPE_FID], &[0, 1]),
+            FAN_EVENT_METADATA_LEN,
+            FAN_ATTRIB,
+            &HashMap::new(),
+            &mut capable_fsids,
+        );
+        assert!(!malformed.info_records_complete);
+
         let record = ResolvedEventRecord {
             entry: None,
             target_inode: None,
             stale_target_fsid: Some(fsid),
+            info_type_mask: 1u64 << FAN_EVENT_INFO_TYPE_FID,
+            info_record_count: 1,
+            info_records_complete: true,
         };
         let known = HashSet::from([fsid]);
         assert!(stale_target_attrib_is_benign(FAN_ATTRIB, &record, &known));
@@ -6496,11 +6595,34 @@ mod tests {
             &record,
             &HashSet::new()
         ));
+        let compound_record = ResolvedEventRecord {
+            info_type_mask: (1u64 << FAN_EVENT_INFO_TYPE_FID)
+                | (1u64 << FAN_EVENT_INFO_TYPE_DFID_NAME),
+            info_record_count: 2,
+            ..record.clone()
+        };
+        assert!(!stale_target_attrib_is_benign(
+            FAN_ATTRIB,
+            &compound_record,
+            &known
+        ));
+        let malformed_record = ResolvedEventRecord {
+            info_records_complete: false,
+            ..record
+        };
+        assert!(!stale_target_attrib_is_benign(
+            FAN_ATTRIB,
+            &malformed_record,
+            &known
+        ));
 
         let named_record = ResolvedEventRecord {
             entry: Some((PathBuf::from("/watched"), "file".into())),
             target_inode: None,
             stale_target_fsid: Some(fsid),
+            info_type_mask: 1u64 << FAN_EVENT_INFO_TYPE_FID,
+            info_record_count: 1,
+            info_records_complete: true,
         };
         assert!(!stale_target_attrib_is_benign(
             FAN_ATTRIB,

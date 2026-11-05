@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 19:20 UTC
+## Current readiness decision — 2026-11-05 19:35 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **19:20 UTC** it
-reported **417** kernel overflow notifications, **301** pending updates, about
-**32,446 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **19:35 UTC** it
+reported **429** kernel overflow notifications, **20,174** pending updates,
+about **33,325 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness. The service remains
 active with zero restarts.
@@ -49,10 +49,11 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At **19:20 UTC**, root storage was **185 GiB total / 105 GiB used /
-72 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
-available**. The host workload gate found an active Go test process and
-load1 **10.64**, so another VM was not admitted. A RustSec audit of the
+At **19:35 UTC**, root storage was **185 GiB total / 104 GiB used /
+73 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
+available**. The host workload gate found active Go tests and compiler workers;
+load1 was **10.64** and CPU PSI some avg10 **44.11%**, so no build/test or VM
+qualification was started. A RustSec audit of the
 candidate lockfile found no advisories in its 2026-11-05 database snapshot;
 this is dependency evidence, not complete source or binary security
 certification.
@@ -20357,3 +20358,8 @@ A fourth fresh Ubuntu 24.04 ephemeral guest was admitted at 17:12:50 UTC with th
 - Production Dux remained active with **0** restarts and no write error. Its index remained dirty/not caught up after **417** overflows, with no scan in progress and about **32,409 seconds** reported lag. Pending updates moved **1,650 → 181** since the previous sample, while `events_seen` advanced by about **63,248**; the queue drained substantially during continued event churn, but historic overflow and the stale scan remain unresolved. Root had **73 GiB free**. A lower pending count alone is not proof of index completeness.
 
 At **19:23 UTC**, the same Go test PID remained active after nearly four minutes. Load1 had fallen to **3.67** and I/O PSI some avg10 to **3.24%**, but the admission probe still reported the live build/test process as a blocker. Production pending updates fell further to **8**, with no scan in progress; the overflow count remained **417** and lag increased to about **32,603 seconds**. This is direct evidence that a drained event backlog does not clear the dirty state or establish a reconciled baseline.
+
+### Stale FID event-shape review — 2026-11-05 19:22–19:36 UTC
+
+- A structured sample of the legacy daemon journal recorded **553** stale-handle warnings and **12** overflow messages from 19:22 to 19:36. Of the stale warnings, **464** were exactly target-only `mask=0x4` / `info_type_mask=0x2` ATTRIB events; **89** had compound FID records and varied event masks. These records were not all attributed to one process. The daemon's overflow counter rose **417 → 429**. At 19:35 production was still dirty/not caught up, with **20,174** pending updates, no scan, and no write error.
+- Source review found that the candidate's benign-stale ATTRIB predicate checked the known handle-capable filesystem and unresolved entry, but did not retain the complete event-info shape. A compound event with an unresolved parent/name and a stale target could therefore satisfy the target-only exception. The working-tree fix now requires exactly one complete FID record; compound and malformed records remain unresolved coverage loss. A parser/classifier regression covers target-only, compound, and truncated records. `cargo fmt --all -- --check` and `git diff --check` pass. The Rust regression has **not** been run: repeated Go test/compiler batches and elevated host load have prevented a clean test window. Keep this fix unpromoted until the focused test passes.
