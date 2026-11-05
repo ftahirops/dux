@@ -5753,3 +5753,26 @@ and about **20,069 seconds** behind. Status JSON SHA-256 is
 External Xgenstack Go race tests remained active. Package upgrade/rollback
 testing is still open; retry the disposable guest only after the VM manager's
 host-pressure admission guard passes.
+
+### Python harness rerun and workflow state — 2026-11-05 01:12 UTC
+
+The complete Python discovery suite passed **264/264** in **6.118 seconds**
+when run directly with scratch files on `/dev/shm`. This includes release
+builder error handling and publish rollback. Three stderr assertions had
+failed in a preceding run under the constrained transient systemd test
+environment; both affected test cases passed when run directly, and the full
+direct rerun passed. Treat the earlier failures as runner-specific evidence,
+not as proof of a product defect or as a fully diagnosed runner cause. The
+passing log is
+`target/readiness/current-source-qual-20261105-972f03b/python-suite-direct.log`
+(SHA-256
+`8ea4ac5f25a83ab031621da7a023dd9ce91f1e00a33307e4ea8300f4570c6bcb`).
+
+GitHub reports both registered workflows (`Rust checks`, id **405823139**,
+and the readiness workflow, id **405893096**) as `disabled_manually`. Their
+workflow files are absent from the current default branch (`main`); GitHub's
+contents API returns 404 for `ci.yml`. The visible failed runs are historical
+records from November 3, not active workflow executions. No workflow run
+history was deleted. The root filesystem has **66 GiB free (63% used)**; the
+Python run used `/dev/shm` and did not write to the production index or
+restart the service.
