@@ -17,6 +17,8 @@ static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 /// cannot turn the diagnostic itself into an I/O storm.
 static LAST_SLOW_EVENT_LOG_AT: AtomicU64 = AtomicU64::new(0);
 static LAST_UNRESOLVED_EVENT_LOG_AT: AtomicU64 = AtomicU64::new(0);
+static UNRESOLVED_EVENTS_SUPPRESSED: AtomicU64 = AtomicU64::new(0);
+const UNRESOLVED_EVENT_LOG_INTERVAL_SECS: u64 = 60;
 static LAST_SLOW_FLUSH_LOG_AT: AtomicU64 = AtomicU64::new(0);
 static LAST_WAL_WARNING_AT: AtomicU64 = AtomicU64::new(0);
 static LAST_DIRTY_MARKER_FAILURE_LOG_AT: AtomicU64 = AtomicU64::new(0);
@@ -696,13 +698,31 @@ fn stale_target_attrib_is_benign(
             .is_some_and(|fsid| handle_capable_fsids.contains(&fsid))
 }
 
-fn unresolved_event_log_allowed() -> bool {
+fn unresolved_event_log_permit_at(
+    now: u64,
+    last_logged_at: &AtomicU64,
+    suppressed: &AtomicU64,
+) -> Option<u64> {
+    let mut previous = last_logged_at.load(Ordering::Relaxed);
+    loop {
+        if now.saturating_sub(previous) < UNRESOLVED_EVENT_LOG_INTERVAL_SECS {
+            suppressed.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+        match last_logged_at.compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return Some(suppressed.swap(0, Ordering::Relaxed)),
+            Err(observed) => previous = observed,
+        }
+    }
+}
+
+fn unresolved_event_log_permit() -> Option<u64> {
     let now = now_secs().max(0) as u64;
-    let previous = LAST_UNRESOLVED_EVENT_LOG_AT.load(Ordering::Relaxed);
-    now > previous
-        && LAST_UNRESOLVED_EVENT_LOG_AT
-            .compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
+    unresolved_event_log_permit_at(
+        now,
+        &LAST_UNRESOLVED_EVENT_LOG_AT,
+        &UNRESOLVED_EVENTS_SUPPRESSED,
+    )
 }
 
 fn event_info_type_mask(event: &[u8], meta_len: usize) -> u64 {
@@ -3123,7 +3143,7 @@ fn parse_events_with_budget(
                 // notification in an otherwise healthy stream. A single event
                 // without usable identity makes coverage uncertain.
                 *lost_events = true;
-                if unresolved_event_log_allowed() {
+                if let Some(suppressed_events) = unresolved_event_log_permit() {
                     tracing::warn!(
                         mask = format_args!("{:#x}", meta.mask),
                         info_type_mask = format_args!(
@@ -3139,6 +3159,7 @@ fn parse_events_with_budget(
                         self_generated = meta.pid == std::process::id() as i32,
                         metadata_len = meta.metadata_len,
                         event_len = meta.event_len,
+                        suppressed_events,
                         "fanotify event has no resolvable parent/name or target identity"
                     );
                 }
@@ -6424,6 +6445,39 @@ mod tests {
             HandleOpenError::Other
         );
         assert_eq!(classify_handle_open_error(None), HandleOpenError::Other);
+    }
+
+    #[test]
+    fn unresolved_event_diagnostics_are_rate_limited_with_suppressed_count() {
+        let last_logged_at = AtomicU64::new(0);
+        let suppressed = AtomicU64::new(0);
+
+        assert_eq!(
+            unresolved_event_log_permit_at(1_000, &last_logged_at, &suppressed),
+            Some(0)
+        );
+        assert_eq!(
+            unresolved_event_log_permit_at(1_001, &last_logged_at, &suppressed),
+            None
+        );
+        assert_eq!(
+            unresolved_event_log_permit_at(
+                1_000 + UNRESOLVED_EVENT_LOG_INTERVAL_SECS - 1,
+                &last_logged_at,
+                &suppressed,
+            ),
+            None
+        );
+        assert_eq!(suppressed.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            unresolved_event_log_permit_at(
+                1_000 + UNRESOLVED_EVENT_LOG_INTERVAL_SECS,
+                &last_logged_at,
+                &suppressed,
+            ),
+            Some(2)
+        );
+        assert_eq!(suppressed.load(Ordering::Relaxed), 0);
     }
 
     #[test]

@@ -1,6 +1,33 @@
 # dux Production Readiness Audit
 
 
+## Watcher diagnostic hardening — 2026-11-05 11:05 UTC
+
+Production journal sampling showed repeated unresolved fanotify FID warnings at
+about one per second. A sampled event PID resolved to an external
+`compose.test` Go test process under `/tmp`; the external workload was not
+modified, and this single sample does not explain every overflow. The watcher
+already marked unresolved identity as lost coverage, but its one-second warning
+throttle could still generate sustained journal I/O. `src/watch.rs` now emits
+at most one such warning per minute and includes the number of suppressed
+unresolved events. The loss flag and reconciliation request are unchanged.
+Formatting checks pass and the focused Rust regression passes 1/1.
+
+The full Rust unit suite was attempted under a 20% CPU quota but was stopped
+during watcher tests after host-side filesystem churn coincided with the
+production overflow count rising from 28 to 39. It has no complete summary and
+is **not** a pass. A concurrent external Go test workload was also active, so
+the additional overflow cannot be attributed solely to the Rust tests. Further
+filesystem-stressing tests need an isolated guest; do not run them against the
+live host filesystem.
+
+At 11:05 the production daemon was active on package 0.6.3-66, dirty from
+fanotify overflow, with 39 overflow notifications, 24,581 pending updates,
+about 2,751 seconds behind, no scan or pause, and no write error. No candidate
+binary/package was installed. Root storage was 185 GiB total, 111 GiB used,
+66 GiB available; `/dev/shm` was 13 GiB total, 1.7 GiB used, 12 GiB available.
+
+
 ## Same-host continuation — 2026-11-05 10:56 UTC
 
 The RPM lifecycle retry did not reach SSH. After host load briefly met the
