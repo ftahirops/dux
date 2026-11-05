@@ -524,20 +524,11 @@ pub fn supervise(shutdown: Arc<AtomicBool>) {
     // actually started. Otherwise OpenSSH could successfully bind a dead
     // remote listener and operators would see a port that can never connect.
     let dropbear = if let Some(port) = dropbear {
-        let s = shutdown.clone();
-        match std::thread::Builder::new()
-            .name("dux-dropbear".into())
-            .spawn(move || supervise_dropbear(s))
-        {
-            Ok(handle) => {
-                workers.push(handle);
-                Some(port)
-            }
-            Err(error) => {
-                tracing::error!("break-glass: could not start supervisor: {error}");
-                None
-            }
-        }
+        start_dropbear_supervisor(port, shutdown.clone(), &mut workers, |s| {
+            std::thread::Builder::new()
+                .name("dux-dropbear".into())
+                .spawn(move || supervise_dropbear(s))
+        })
     } else {
         None
     };
@@ -560,6 +551,30 @@ pub fn supervise(shutdown: Arc<AtomicBool>) {
         let _ = h.join();
     }
     tracing::info!("tunnel: all endpoints shut down");
+}
+
+/// Start the local break-glass listener worker and return its remote forward
+/// only when the worker exists. Keeping thread creation injectable lets the
+/// failure policy be regression-tested without exhausting host thread limits.
+fn start_dropbear_supervisor<F>(
+    port: u16,
+    shutdown: Arc<AtomicBool>,
+    workers: &mut Vec<std::thread::JoinHandle<()>>,
+    spawn: F,
+) -> Option<u16>
+where
+    F: FnOnce(Arc<AtomicBool>) -> std::io::Result<std::thread::JoinHandle<()>>,
+{
+    match spawn(shutdown) {
+        Ok(handle) => {
+            workers.push(handle);
+            Some(port)
+        }
+        Err(error) => {
+            tracing::error!("break-glass: could not start supervisor: {error}");
+            None
+        }
+    }
 }
 
 /// Supervise the dropbear break-glass shell: run it in the foreground on
@@ -854,6 +869,42 @@ pub fn keygen(force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropbear_forward_is_omitted_when_supervisor_spawn_fails() {
+        let mut workers = Vec::new();
+        let forward = start_dropbear_supervisor(
+            31_337,
+            Arc::new(AtomicBool::new(false)),
+            &mut workers,
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "injected thread creation failure",
+                ))
+            },
+        );
+
+        assert_eq!(forward, None);
+        assert!(workers.is_empty());
+    }
+
+    #[test]
+    fn dropbear_forward_is_returned_when_supervisor_starts() {
+        let mut workers = Vec::new();
+        let forward = start_dropbear_supervisor(
+            31_337,
+            Arc::new(AtomicBool::new(false)),
+            &mut workers,
+            |_| std::thread::Builder::new().spawn(|| {}),
+        );
+
+        assert_eq!(forward, Some(31_337));
+        assert_eq!(workers.len(), 1);
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    }
 
     #[test]
     fn kill_and_reap_collects_terminated_child() {

@@ -6371,3 +6371,19 @@ its index remained dirty from 446 fanotify overflows, 28 updates pending, and
 avg10 was 18.32%/17.66%. Root had 68 GiB free and `/dev/shm` 7.5 GiB free. No
 production package, service, or index mutation was made. Retry scale qualification
 only after host admission conditions remain safe through VM boot.
+
+### Tunnel supervisor spawn-failure regression — 2026-11-05 08:46 UTC
+
+Made Dropbear thread creation injectable and tested that a simulated spawn error
+returns no advertised remote forward and retains no worker. The success case
+returns the port and retains its worker. All 16 tunnel module tests passed with
+`--locked --all-features` (246 filtered), under CPUQuota=10%, MemoryMax=1 GiB,
+IOWeight=10. Log SHA-256:
+`361142c805b1b46c69b9b024c5691832e29279611118081a77924d6a2a692710`; test
+executable SHA-256:
+`06fe1a4a2d02c30d13b2746ef826e98ba24a56989ea972af0212a8676fb4d774`. Formatting
+and whitespace checks passed. The legacy production daemon stayed active with
+zero restarts. The 08:46 live snapshot was dirty with 460 overflow notifications,
+7,061 pending updates, and 47,999 seconds behind; current-source full suite and
+exact release artifact qualification remain open. Do not infer the cause of the
+overflow-counter increase from timing.
