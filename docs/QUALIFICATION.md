@@ -1735,6 +1735,42 @@ No service, package, or database change was made. Recovery scan and exact-HEAD
 release build remain deferred until host test activity ends and both event
 rate and backlog settle.
 
+### Production rescan attempt and bounded-retry outcome — 2026-11-05 02:48 UTC
+
+After the Go/Vitest test process appeared idle and the overflow count had held
+at **215** for several minutes, the installed CLI issued the documented
+single-writer command `/usr/bin/dux scan /` at **02:38:49 UTC**. The daemon
+stayed active as PID **423219**; no restart or second writer was used. The
+first baseline finished at 02:42 with **1,253,196 files**, **116,925
+directories**, **1,370,121 path instances**, **110.71 GiB** visible bytes, and
+zero traversal coverage issues. It nevertheless recorded `lost_events=true`
+and scheduled the one bounded retry because unresolved fanotify identities
+arrived during the walk. During that attempt the live WAL reached
+**358,596,592 bytes**, over its 256 MiB budget; event writes paused, then
+resumed after checkpoint recovery at **134,217,728 bytes**.
+
+The retry started at 02:43 and finished at **02:45:43 UTC** with **1,269,578
+files**, **117,986 directories**, **1,387,564 path instances**, **112.49 GiB**
+visible bytes, and zero traversal coverage issues. It also recorded
+`lost_events=true`; the automatic circuit opened after **2** failed scans.
+Its WAL reached **271,520,392 bytes**, and writes resumed after checkpoint
+recovery to **134,217,728 bytes**. At 02:47:45, read-only status still showed
+`dirty=true`, `automatic_reconciliation_paused=true`, **878 pending updates**,
+about **26,485 seconds** behind, **236** kernel overflow notifications, no
+active scan, and no write error. An external Go test was still active. The
+scan client was interrupted after the daemon had definitively opened its
+circuit; that affected only the waiting CLI, not the daemon. Evidence bundle
+SHA-256:
+`accd923aa3aaac69143054a8ffd888ca4acf8f51a88fd9d4a433af0fa1d9d720` at
+`target/readiness/current-source-qual-20261105-004c267/production-rescan-two-failures-0246Z.json`.
+
+This recovers and installs a fresh baseline but does **not** certify current
+index exactness: event loss recurred during both scans and later overflows
+raised the count from 215 to 236. Production recovery remains incomplete.
+Wait for the external churn to end, then require stable queue and overflow
+samples before the next operator scan. Package lifecycle, current-source
+release rebuild, and post-recovery exact filesystem comparison remain open.
+
 ### Fifth current-source all-features test attempt stopped at PSI guard — 2026-11-01 14:35 UTC
 
 A fifth attempt used `cargo test --offline --locked --all-features` with the
