@@ -5776,3 +5776,50 @@ records from November 3, not active workflow executions. No workflow run
 history was deleted. The root filesystem has **66 GiB free (63% used)**; the
 Python run used `/dev/shm` and did not write to the production index or
 restart the service.
+
+### Current-source release build and guarded Ubuntu lifecycle attempts — 2026-11-05 01:35 UTC
+
+Static package revision **71** built successfully from clean HEAD
+`7056e9d4360baf3a42a23c890a298760c1edf5d5`. The production ELF reports that
+commit and source-tree SHA-256
+`4b83ec3b876e099c6bb6654112440a8a93746c2324aa9e4d01bf20c6181e2a37`; the
+manifest says `worktree_dirty=false`. It is a static musl x86_64 binary with
+`.dep-v0`. The DEB and RPM payload binary hashes both equal the standalone
+binary hash `723788df6111dbb6502b93a855c38d6754d55b652492dbb5fdc6977ed09b216b`.
+All eight entries in `SHA256SUMS` pass. The lockfile audit found **0
+vulnerabilities and 0 warnings across 229 dependencies**; the exact binary
+scan recovered **202 dependencies** without warnings. The Build-ID-matched
+debug symbols also passed the manifest check.
+
+The build ran under a systemd cap of **30% CPU**, **4 GiB memory**, and no
+swap. It completed in **9m59s** wall time, used **2m59s** CPU, and peaked at
+**1.1 GiB**. The build log SHA-256 is
+`c308310798dc9386288208cf72a86d393041c84dcea985acc58fa2d15f4225bb`; the
+bundle is retained at
+`target/readiness/release-current-head-7056e9d-71/`. Exact-binary smoke
+coverage scanned a 4 KiB fixture with zero coverage issues; Dux `du -s` and
+GNU `du -B1 -s` both reported **4096 bytes**. Smoke log SHA-256:
+`c6238855a38bf9e0869c03ea767f78eb6b538784c4577d66174411ac519d3b5c`.
+
+Two disposable Ubuntu 24 lifecycle starts passed storage admission but were
+stopped by the host-pressure guard before SSH/package installation. At 10%
+CPU quota, the guest mounted its root filesystem and started systemd, but the
+SSH banner never became available; the guard stopped QEMU at load1 **12.08**
+and CPU PSI some avg10 **41.53%**. At 20% quota, the guard stopped the second
+attempt earlier in boot at load1 **11.10** and CPU PSI **43.77%**. These are
+environment admission stops, not package failures or lifecycle passes. No
+package was copied or installed; both private tmpfs runtimes were cleaned and
+the verified Ubuntu image was unchanged. Guard-event log SHA-256
+`2a0d80fcd14ae7f98cdfb1bca4813705c9c46ffa7d4fdddbaacbb0eb34ccb1bd`.
+
+After the second stop, the production daemon remained active without a write
+error, but its index was still dirty from fanotify overflow: **171** kernel
+overflow notifications, **12,797** pending updates, no scan in progress, and
+about **22,092 seconds** behind. Snapshot SHA-256
+`2379f9f825887df73ce8a16d3a50ed78a2fd0d1e0579396232f9e561478b09c8`. The
+current source has no code changes relative to the 259/259 all-features Rust
+run at `4a1f4a4`; the only intervening tracked changes are qualification
+documentation. This entry changes the source-tree digest, so revision 71 is
+bound to the prior clean commit. Rebuild from the commit containing this entry
+before promotion. Package installation/upgrade/rollback and all live-index
+recovery gates remain open.
