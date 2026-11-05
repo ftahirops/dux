@@ -214,9 +214,9 @@ def active_host_workloads(proc_root=Path('/proc')):
     Pressure is a lagging signal: a whole-module compiler or security scan can
     start between the initial PSI sample and guest boot, then trip the
     independent guard after it has already consumed host CPU or I/O. Detect
-    common build/test/package-install drivers, compiler workers, and repository
-    analyzers directly; omit full command lines so paths and arguments do not
-    get copied into guard evidence.
+    common build/test/package-install drivers, test binaries, compiler workers,
+    and repository analyzers directly; omit full command lines so paths and
+    arguments do not get copied into guard evidence.
     """
     workloads = []
     with os.scandir(proc_root) as processes:
@@ -288,6 +288,8 @@ def active_host_workloads(proc_root=Path('/proc')):
                     workloads.append(
                         f'{executable} run {args[index + 1]} pid={process.name}'
                     )
+            elif executable.endswith('.test'):
+                workloads.append(f'Go test binary pid={process.name}')
             elif executable == 'compile' and '/pkg/tool/' in argv[0]:
                 workloads.append(f'Go compiler pid={process.name}')
             elif executable in {'rustc', 'rustdoc', 'cc', 'gcc', 'g++',

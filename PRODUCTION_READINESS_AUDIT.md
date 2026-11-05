@@ -20475,3 +20475,9 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 
 - Invoked the guard's read-only host-pressure/workload probe directly; it detected **Go compiler PID 1043431** and **Go test PID 1025007**, and returned blockers for both plus I/O PSI some avg10 **10.38%** above the 10% limit. No VM was started. This verifies the guard's current decision path against actual `/proc` state after adding direct Node test-runner coverage.
 - Live Dux status: daemon remains active with **0** restarts; index dirty due to fanotify queue overflow, **484** overflow notifications, **110** pending updates, about **40,106 seconds** behind, no active scan, no write error. Root disk had **105 GiB used / 73 GiB free**. Keep exact reconciliation and deployment qualification open.
+
+### Standalone Go test binaries also block qualification — 2026-11-05 21:30 UTC
+
+- A live Go test child (`safefs.test`) was visible at **130% CPU**, so the VM guard was extended to recognize process executables ending in `.test`; output labels the process as a Go test binary without recording paths or arguments. Added a fixture for an orphanable `recovery.test` worker.
+- Re-ran the full qualification-controller unit suite: **36/36 passed** in **0.275 seconds**, including both direct Node runners and Go test binary fixtures. The read-only guard probe against live `/proc` then detected three Go compilers, the `safefs.test` worker, Go build, and two Go test coordinators; it rejected admission for those workloads, load1 **10.73**, and elevated CPU PSI. No VM was started.
+- Live Dux at 21:30 remains active with **0** restarts and no write error, but is dirty from fanotify overflow; overflow notifications increased **484 → 485**, with **233** pending updates and about **40,245 seconds** behind. No scan is active. The persistent queue cap does not prevent all overflows; exact recovery remains outstanding.

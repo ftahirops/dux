@@ -112,6 +112,7 @@ class PressureGuardTests(unittest.TestCase):
                 "123": ["/usr/bin/node", "/srv/app/server.js"],
                 "124": ["/usr/bin/node", "--version"],
                 "125": ["/usr/bin/node", "--test", "test/*.test.js"],
+                "126": ["/tmp/go-build123/b140/recovery.test", "-test.paniconexit0"],
             }
             for pid, argv in processes.items():
                 process = proc_root / pid
@@ -124,6 +125,7 @@ class PressureGuardTests(unittest.TestCase):
                 VM.active_host_workloads(proc_root),
                 [
                     "Go compiler pid=105",
+                    "Go test binary pid=126",
                     "cargo clippy pid=112",
                     "cargo test pid=103",
                     "cargo test pid=109",
