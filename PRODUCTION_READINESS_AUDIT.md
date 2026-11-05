@@ -1,6 +1,42 @@
 # dux Production Readiness Audit
 
 
+## Current readiness checkpoint — 2026-11-05 10:36 UTC
+
+**Overall state: not production-ready.** The exact-current revision-79 DEB
+passed all six lifecycle phases in an ephemeral Ubuntu 24.04 KVM guest under a
+25% CPU quota and pressure guard: legacy baseline, upgrade while preserving
+disabled services, rollback, re-upgrade, remove/purge, and clean install. The
+report is `target/readiness/package-lifecycle-deb-r79-20261105.json` (SHA-256
+`8990dbbc814db98daae79f9e9342dcbffb0d1e4e7c220bb893dab2ab6638041d`). The old
+package hash was `04c61eb9e96ca4ed4d01fd85ad6b7a43b1a4502aaa21d7e702c24d08b92793ca`;
+the r79 package hash matches the release manifest. Installed-guest checks
+verified service state preservation, rollback backup integrity and permissions,
+clean-install catch-up, index file ownership/modes, tunnel remaining disabled,
+and effective systemd restrictions. The RPM lifecycle has **not** run. A fresh
+Rocky 9 image was verified against the distribution's published checksum, but
+the VM manager refused to start it at 10:35 because host load1 was 10.60 against
+its admission limit of 10. No Rocky guest started.
+
+The installed production package remains 0.6.3-66. During offline diagnosis of
+a failed disposable Ubuntu VM, its ext4 root was mounted read-only on the host;
+the live watcher detected the temporary mount topology change and exited, then
+systemd automatically restarted it once. The mount was cleanly removed after a
+brief controlled service stop/start, without lazy or forced unmount. At 10:35
+the service was active with no current restart counter, but status reports the
+production index dirty (`daemon startup requires reconciliation`), 7 pending
+updates, about 966 seconds behind, no scan, no pause, and no write error. The
+temporary mount incident and recovery are recorded here; the index remains
+untrusted until an approved recovery establishes exactness. No r79 package was
+installed on production. Further guest starts remain subject to the manager's
+host pressure admission gate.
+
+Root storage at 10:35 was 185 GiB total, 112 GiB used, 66 GiB free; `/dev/shm`
+was 13 GiB total, 1.7 GiB used, 12 GiB free. Host load1 was 10.60 and CPU PSI
+some avg10 was 3.28% at that sample. These are point-in-time values, not a
+stability qualification.
+
+
 ## Current readiness checkpoint — 2026-11-05 10:11 UTC
 
 **Overall state: not production-ready.** The installed daemon remains package
@@ -73,8 +109,8 @@ total, 109 GiB used, 68 GiB free**; `/dev/shm` is **13 GiB total, 1.1 GiB used,
 | S2 — durable journal and separate capture/apply | **Open** | The watcher still resolves events and applies in-memory work on its live pipeline; there is no versioned durable event journal, replay/cursor protocol, or torn-segment recovery proof. |
 | S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
-| S5 — modules, package/security, operations | **Partial** | Revision 75 passed guarded Ubuntu DEB upgrade/rollback/removal/clean-install and its effective unit denies unused `bpf`. Revision 79 has current-source DEB/RPM/static artifacts and a clean exact-binary dependency scan; current-source Ubuntu and Rocky package lifecycle is pending. Default capability minimization, platform coverage, and operations gates remain open. |
-| S6 — integrated release qualification | **Open** | Revision-79 DEB/RPM/static artifacts are built from clean commit `ff5f443`; the exact source passed 262/262 in an isolated Ubuntu guest and the matching artifact audit passed. Exact-current package lifecycle is pending after the pressure guard stopped its disposable guest. Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
+| S5 — modules, package/security, operations | **Partial** | Revision 79 passed exact-current Ubuntu DEB upgrade/rollback/removal/clean-install, and the effective unit restrictions were inspected. Rocky RPM lifecycle remains pending admission; default capability minimization, broader platform coverage, and operations gates remain open. |
+| S6 — integrated release qualification | **Open** | Revision-79 DEB/RPM/static artifacts are built from clean commit `ff5f443`; the exact source passed 262/262 in an isolated Ubuntu guest and the matching artifact audit passed. Exact-current DEB lifecycle passed, but RPM lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
 
 This matrix is an evidence summary, not a maturity percentage. Small tests or an
 older passing candidate do not close a stage that requires current-source,
