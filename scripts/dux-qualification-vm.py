@@ -208,14 +208,15 @@ def parse_psi_avg10(contents, line_name='some'):
     return None
 
 
-def active_build_workloads(proc_root=Path('/proc')):
-    """Return short labels for active host builds/tests that invalidate VM admission.
+def active_host_workloads(proc_root=Path('/proc')):
+    """Return short labels for host builds, installs, tests, and scans.
 
-    Pressure is a lagging signal: a whole-module compiler can start between the
-    initial PSI sample and guest boot, then trip the independent guard after it
-    has already consumed host CPU. Detect common build drivers and compiler
-    workers directly; omit full command lines so paths and arguments do not get
-    copied into guard evidence.
+    Pressure is a lagging signal: a whole-module compiler or security scan can
+    start between the initial PSI sample and guest boot, then trip the
+    independent guard after it has already consumed host CPU or I/O. Detect
+    common build/test/package-install drivers, compiler workers, and repository
+    analyzers directly; omit full command lines so paths and arguments do not
+    get copied into guard evidence.
     """
     workloads = []
     with os.scandir(proc_root) as processes:
@@ -232,15 +233,58 @@ def active_build_workloads(proc_root=Path('/proc')):
                     for part in raw.split(b'\0') if part]
             if not argv:
                 continue
-            executable = Path(argv[0]).name
-            if executable in {'go', 'cargo'} and len(argv) > 1:
-                if argv[1] in {'build', 'test'}:
-                    workloads.append(f'{executable} {argv[1]} pid={process.name}')
+            process_title = Path(argv[0]).name.split()
+            executable = process_title[0]
+            args = process_title[1:] + argv[1:]
+            if executable in {'node', 'nodejs'} and args:
+                node_tools = {
+                    'npm-cli.js': 'npm',
+                    'pnpm.cjs': 'pnpm', 'pnpm.js': 'pnpm',
+                    'yarn.cjs': 'yarn', 'yarn.js': 'yarn',
+                }
+                node_tool = node_tools.get(Path(args[0]).name)
+                if node_tool is not None:
+                    executable = node_tool
+                    args = args[1:]
+            if executable in {'go', 'cargo', 'npm', 'pnpm', 'yarn', 'bun'}:
+                value_options = {
+                    'go': {'-C'},
+                    'cargo': {'--manifest-path', '--color', '--config'},
+                    'npm': set(), 'pnpm': set(), 'yarn': set(), 'bun': set(),
+                }.get(executable, set())
+                subcommands = {
+                    'go': {'build', 'test', 'vet', 'list'},
+                    'cargo': {'build', 'test', 'check', 'clippy', 'audit', 'deny'},
+                    'npm': {'ci', 'install', 'rebuild', 'update'},
+                    'pnpm': {'install', 'add', 'rebuild', 'update'},
+                    'yarn': {'install', 'add', 'rebuild', 'upgrade'},
+                    'bun': {'install', 'add', 'update'},
+                }[executable]
+                index = 0
+                while index < len(args) and args[index].startswith('-'):
+                    option = args[index].split('=', 1)[0]
+                    index += 2 if option in value_options and '=' not in args[index] else 1
+                if index < len(args) and args[index] in subcommands:
+                    workloads.append(
+                        f'{executable} {args[index]} pid={process.name}'
+                    )
+                elif (
+                    executable in {'npm', 'pnpm', 'yarn', 'bun'}
+                    and index + 1 < len(args)
+                    and args[index] == 'run'
+                    and args[index + 1] in {'build', 'test'}
+                ):
+                    workloads.append(
+                        f'{executable} run {args[index + 1]} pid={process.name}'
+                    )
             elif executable == 'compile' and '/pkg/tool/' in argv[0]:
                 workloads.append(f'Go compiler pid={process.name}')
             elif executable in {'rustc', 'rustdoc', 'cc', 'gcc', 'g++',
                                 'clang', 'clang++', 'cc1', 'cc1plus',
-                                'ld', 'ld.lld', 'collect2', 'make', 'ninja'}:
+                                'ld', 'ld.lld', 'collect2', 'make', 'ninja',
+                                'gosec', 'golangci-lint', 'staticcheck',
+                                'govulncheck', 'cargo-audit', 'cargo-deny',
+                                'semgrep', 'osv-scanner'}:
                 workloads.append(f'{executable} pid={process.name}')
     return sorted(workloads)
 
@@ -277,9 +321,9 @@ def host_pressure():
                 '/proc/pressure/cpu full avg10 is missing or invalid'
             )
     try:
-        result['active_build_workloads'] = active_build_workloads()
+        result['active_host_workloads'] = active_host_workloads()
     except OSError as error:
-        result['active_build_workloads'] = []
+        result['active_host_workloads'] = []
         telemetry_errors.append(f'/proc workload scan is unavailable: {error}')
     result['telemetry_errors'] = telemetry_errors
     return result
@@ -297,8 +341,8 @@ def host_pressure_blockers(pressure):
         for error in pressure.get('telemetry_errors', [])
     ]
     blockers.extend(
-        f'active host build/test workload: {workload}'
-        for workload in pressure.get('active_build_workloads', [])
+        f'active host build/test/install/analysis workload: {workload}'
+        for workload in pressure.get('active_host_workloads', [])
     )
     load1 = pressure.get('load1')
     if load1 is not None and load1 > 10.0:
@@ -331,8 +375,8 @@ def host_pressure_critical_blockers(pressure):
         for error in pressure.get('telemetry_errors', [])
     ]
     blockers.extend(
-        f'active host build/test workload: {workload}'
-        for workload in pressure.get('active_build_workloads', [])
+        f'active host build/test/install/analysis workload: {workload}'
+        for workload in pressure.get('active_host_workloads', [])
     )
     load1 = pressure.get('load1')
     cpu = pressure.get('cpu', {}).get('some')
