@@ -1,14 +1,16 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 08:16 UTC
+## Current readiness checkpoint — 2026-11-05 08:19 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 08:16 UTC its `/` index was dirty from
-fanotify overflow with **446** recorded kernel-overflow notifications, **86
-pending updates**, and about **12.8 hours** behind; no scan was running and
-`write_error` was null. A separate 08:15 sample had 1,751 pending updates. The
-queue fluctuates and does not make this index trustworthy. The 0.6.3-75 release
+0.6.3-66, active with zero restarts. At 08:19 UTC its `/` index was dirty from
+fanotify overflow with **446** recorded kernel-overflow notifications,
+**18,862 pending updates**, and about **12.9 hours** behind; no scan was running
+and `write_error` was null. Pending had been 86 three minutes earlier while
+the overflow counter was unchanged. The queue fluctuates and does not make
+this index trustworthy. Host I/O PSI `some/full avg10` was **27.17% / 26.46%**,
+so no recovery or exactness walk was attempted. The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
 24.04. The effective installed unit in that guest denied `bpf`. RustSec audit
@@ -18,7 +20,7 @@ incomplete: it discovered 260 tests but host pressure/overflow guards stopped
 it after 34 passed; a dedicated watch VM was stopped before SSH readiness.
 Revision 75 predates later documentation-only commits, so its source manifest
 matches the clean release commit, not current HEAD. Root storage is **185 GiB
-total, 114 GiB used, 63 GiB free (65% used)**; `/dev/shm` has **7.5 GiB free**.
+total, 113 GiB used, 64 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -19694,3 +19696,8 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - A further current-source all-features/all-targets run used the compiled test binary under `CPUQuota=5%`, `MemoryMax=1G`, CPU/I/O weight 5/1. It discovered **260 tests**; **34** completed successfully before the scope was stopped. No failure, ignored-test result, or final summary was produced. The partial log and machine-readable record are preserved at `target/readiness/rust-r75-20261105/` (test binary SHA-256 `73b00c995e41fd84cf4c1c68adc6c8fccfe3b7f5717870fe71ea900f9f4cf4ae`; log SHA-256 `766894e853008808ac7f9c396d1e9c897a6785088ff6ea83d58448d6a8fc6918`).
 - During this attempt, the installed daemon's cumulative fanotify overflow count rose from **428 to 446**. Workload timing does not establish causation. Because tests ran on the watched production host and its index was already dirty, stopped the suite rather than risk adding event churn. The partial run is not a pass. At **08:15:05**, read-only status was dirty, **46,125 seconds** behind, **1,751 pending**, 446 recorded overflow notifications, no scan, and no write error. The service remained active with zero restarts on 0.6.3-66.
 - A fresh dedicated `watch-unit` VM was then started at the documented 2 GiB / 25% CPU profile, but the VM manager's host-pressure guard stopped it during early boot when CPU PSI `some avg10` exceeded 40% and load crossed 10. SSH never became available and no guest test ran. Verified the unit inactive and used the VM manager's stop path to clear its ephemeral runtime. At 08:14–08:15 host load again exceeded 15 with concurrent external Go test/compile activity. Retry full Rust and guest test gates only after sustained low host pressure; use the isolated guest for test-generated filesystem churn.
+
+### PROD-HEALTH-338 Legacy dirty-index backlog regrows while overflow count holds — 2026-11-05 08:19 UTC
+
+- Compared the read-only 08:16 and 08:19 status samples: pending updates increased from **86** to **18,862** while the kernel-overflow count remained **446**. At 08:19, status remained dirty from fanotify overflow, about **46,398 seconds** behind, with no scan and `write_error=null`. A low/empty queue would not clear this uncertainty; this large rise independently confirms that a healthy caught-up state has not been established.
+- The installed service remained active on 0.6.3-66 with zero restarts. Host load1 was **6.34**; CPU PSI some avg10 was **2.96%**, while I/O PSI some/full avg10 was **27.17% / 26.46%**. Timing does not establish which workload caused the backlog or I/O pressure. No scan, package install, service restart, or index write was attempted. Root had **64 GiB free** and `/dev/shm` **7.5 GiB free**.

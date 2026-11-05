@@ -6346,3 +6346,7 @@ The installed 0.6.3-66 daemon emitted 143 `open_by_handle_at` `ESTALE` fanotify-
 ### Partial current-source suite and guarded VM start — 2026-11-05 08:15 UTC
 
 The current-source all-features/all-targets Rust suite discovered 260 tests; 34 completed successfully before the host run was stopped after the live legacy daemon's overflow count rose from 428 to 446. Causation is unknown; the partial run is not a pass. Its preserved log and JSON record are under `target/readiness/rust-r75-20261105/`; test binary SHA-256 `73b00c995e41fd84cf4c1c68adc6c8fccfe3b7f5717870fe71ea900f9f4cf4ae`. A dedicated 2 GiB watch-unit VM was also stopped by its host-pressure guard during boot; SSH never became available and no guest tests ran. The live production index remains dirty and behind. Run filesystem-heavy candidate tests in an isolated guest only when host admission stays clear through VM boot.
+
+### Live-index status refresh — 2026-11-05 08:19 UTC
+
+Read-only status on installed 0.6.3-66 showed the dirty index at 446 recorded fanotify overflows and 18,862 pending updates, up from 86 at 08:16 with the overflow count unchanged. It remained about 46,398 seconds behind, with no scan or write error. Host I/O PSI some/full avg10 was 27.17%/26.46%; no recovery or exactness walk was attempted. This is not a clean-index or candidate-release result.
