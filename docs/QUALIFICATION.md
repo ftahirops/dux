@@ -6179,3 +6179,40 @@ unit suite do not resolve these live event-coverage failures; another full-root
 scan remains inappropriate until host churn and overflow behavior stabilize.
 Current-source packaging/install, live index exactness, fault/scale/endurance
 qualification, and production canary remain open.
+
+### Current lockfile security audit and constrained release retry — 2026-11-05 07:15 UTC
+
+Ran `cargo audit --json` on commit `fa9473d290f5`; this refreshed the local
+RustSec database to commit `965bf9ad083b58e6340d65829d85217b18be9290`, last
+updated **2026-11-03 20:34 UTC**. The audit examined **229 locked dependencies**
+against **1,403 advisories** and reported **zero known vulnerabilities**, no
+warnings, and no errors. `Cargo.lock` SHA-256 is
+`fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`; the JSON
+report SHA-256 is
+`2f551d1ceee702ba99e3c6676401c46f981ac9a0e75de146ffdba01c5049fd9f`. This
+result is bounded to Rust dependencies and the advisory database timestamp; it
+does not audit OS packages, runtime configuration, application behavior, or
+advisories published after the database update.
+
+Resumed the current-tree revision-75 auditable static-musl package build using
+the **322 MiB** preserved Cargo target at `/dev/shm/dux-r75-target`, with one
+Cargo job, `CPUQuota=10%`, `MemoryMax=4G`, `CPUWeight=10`, `IOWeight=1`, nice 19,
+idle I/O, and tmpfs build/output directories. The build reached
+`libsqlite3-sys` compilation but produced no Dux binary or package. At
+**07:12:53**, host CPU PSI some avg10 reached **23.70%** and I/O PSI some avg10
+was **17.30%**; an external Go test was also active. The build scope alone was
+stopped under the existing host-pressure guard, and is now inactive. Its log
+SHA-256 is
+`38385ab109811ab8f5d623a8bd1d68a686ff3fca14d94dfce8bf8291478faef2`. The cache
+remains available for a later retry; no release artifacts were produced and
+the installed daemon was not changed.
+
+At **07:14:40**, the installed package remained **0.6.3-66**, active with zero
+restarts. Read-only status reported **33,523 pending updates** of 500,000,
+**42,500 seconds** behind, dirty from fanotify queue overflow, **396** kernel
+overflow notifications, no active scan, and no write error. The last scan was
+**14,980 seconds** old. A host-wide Go `./...` test had started; this is
+correlated workload evidence only, not proof that it caused the Dux backlog.
+Storage was **67 GiB free** on `/` and **7.8 GiB free** on `/dev/shm`. The
+production index remains dirty, so exactness and controlled live recovery are
+still unqualified.
