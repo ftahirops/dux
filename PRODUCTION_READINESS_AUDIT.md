@@ -1,37 +1,47 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 09:18 UTC
+## Current readiness checkpoint — 2026-11-05 10:02 UTC
 
-**Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 09:18 UTC its `/` index was dirty from
-fanotify overflow with **472** recorded kernel-overflow notifications,
-**39,321 pending updates**, and **49,957 seconds** behind; no scan was running
-and `write_error` was null. At 09:17:52 it had been paused by I/O pressure;
-the pause had cleared by the paired 09:18:47–09:18:57 sample, while dirty
-uncertainty remained. Pending moved from 86 at 08:16 to 18,862 at 08:19,
-10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, 19 at 08:57,
-3,557 at 09:04, 85 at 09:13, 126 at 09:16, then 39,321 at 09:18. The queue
-fluctuates and does not make this index trustworthy. At 09:18:57, CPU PSI
-some/full avg10 was **1.21% / 0.00%** and I/O PSI some/full was **1.97% / 1.73%**.
-Earlier load spikes included a `staticcheck ./...` burst. Three current-source
-release-build attempts were stopped between 09:03 and 09:16 at the host pressure limits; none
-compiled Dux or published an artifact. A `staticcheck ./...` burst was observed
-during the third attempt, without causal attribution. The earlier 4 GiB scale
-VM was stopped before SSH at 08:36; a 2 GiB current-source Rust test VM passed
-and was cleaned up through the manager.
-The 0.6.3-75 release
-candidate was built from clean commit `e3863f0`; checksums and embedded audit
-metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
-24.04. The effective installed unit in that guest denied `bpf`. RustSec audit
-covered 229 locked dependencies with zero vulnerabilities against the upstream
-database current through Nov. 3. The all-features/all-targets Rust unit suite
-passed **260/260** in the isolated Ubuntu watch VM using a test harness built
-from the same Rust sources as revision 75. Current HEAD adds the tunnel
-worker-start refactor and now passes the full **262/262** current-source Rust
-suite in an isolated guest. The current source still has no matching release
-artifact; revision 75 does not inherit this new suite result. Root storage is
-**185 GiB total, 112 GiB used, 65 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
+**Overall state: not production-ready.** The installed daemon remains package
+0.6.3-66, active with zero restarts. A read-only `dux status --json` sample at
+10:00 UTC reports `/` dirty from fanotify queue overflow, **506** kernel
+overflow notifications, **83 pending updates**, and **52,562 seconds** behind;
+no scan is running, the service is unpaused, and `write_error` is null. The
+pending queue fluctuates and does not make this index trustworthy. At 10:02,
+host load was 34.23 with CPU PSI some avg10 78.90%; separate Go/security jobs
+were active. No production service, executable, unit, database, or index was
+changed.
+
+The current source from clean commit `ff5f44394eb6981e0e5585fdccf09dd86d053a9f`
+now has matching release revision 79 artifacts. The optimized static-musl
+binary, DEB, and RPM were built successfully by `scripts/build-release.sh` in
+the quota-limited `dux-release-build-current-ff5f443.scope`. Its manifest binds
+the clean 124-file source tree digest
+`bd64c025b825e7f501e59ff1b82aba8ada3d0b0c650651f3a861a741be42a0cd`; the binary
+reports that digest, expected commit and production profile, includes embedded
+dependency metadata, and is statically linked. All artifact checksums verify.
+DEB SHA-256 is `4cdc6d3773191484fcd487b3516635a9d04e18733d114a4c6034e42f7808197c`,
+RPM SHA-256 is `4a3eed7ed1b5c2dbbc83b04f94116b21d7ebdb3b19fd38b14089d3538cf737e5`,
+and static binary SHA-256 is
+`40d186d2a435f7b8df1b1db83faa0d1c275d2c4c5238dec0436ab9a20afdf7b1`. The
+exact lockfile audit covered 229 dependencies with zero vulnerabilities or
+warnings against a 1,409-advisory database; `cargo audit bin` found embedded
+metadata for 202 dependencies and exited successfully without warnings. Full
+artifact set and manifest are preserved at
+`target/readiness/release-r79-ff5f443/`.
+
+The exact-current DEB/RPM lifecycle has **not** passed yet. The manager admitted
+a disposable Ubuntu 24.04 lifecycle guest after stale Cargo build caches were
+removed from `/dev/shm`; its pressure guard stopped the guest 13 seconds later
+when host load reached 15.44, before SSH transfer or package changes. No
+package lifecycle phase ran. The guest overlay is retained for a safe retry.
+The current-source all-features/all-targets Rust unit suite already passed
+**262/262** in an isolated Ubuntu guest; the revision-79 release build closes
+the source/artifact mismatch but does not close lifecycle, scale, fault,
+platform, endurance, canary, or live-index gates. Root storage is **185 GiB
+total, 110 GiB used, 67 GiB free**; `/dev/shm` is **13 GiB total, 1.1 GiB used,
+12 GiB free** after removing only unreferenced temporary Cargo build caches.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -40,8 +50,8 @@ artifact; revision 75 does not inherit this new suite result. Root storage is
 | S2 — durable journal and separate capture/apply | **Open** | The watcher still resolves events and applies in-memory work on its live pipeline; there is no versioned durable event journal, replay/cursor protocol, or torn-segment recovery proof. |
 | S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
-| S5 — modules, package/security, operations | **Partial** | Revision 75 passed guarded Ubuntu DEB upgrade/rollback/removal/clean-install and its effective unit denies unused `bpf`; fresh RustSec audit found no known advisories through 2026-11-03. RPM/Rocky lifecycle, default capability minimization, platform coverage, and operations gates remain open. |
-| S6 — integrated release qualification | **Open** | Revision-75 DEB/RPM/static artifacts exist from clean commit `e3863f0`; that source passed 260/260 in an isolated Ubuntu guest. Current HEAD includes the tunnel worker-start refactor and its all-features/all-targets suite passed 262/262 in an isolated Ubuntu guest, but a current-source release artifact is not built. RPM/Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
+| S5 — modules, package/security, operations | **Partial** | Revision 75 passed guarded Ubuntu DEB upgrade/rollback/removal/clean-install and its effective unit denies unused `bpf`. Revision 79 has current-source DEB/RPM/static artifacts and a clean exact-binary dependency scan; current-source Ubuntu and Rocky package lifecycle is pending. Default capability minimization, platform coverage, and operations gates remain open. |
+| S6 — integrated release qualification | **Open** | Revision-79 DEB/RPM/static artifacts are built from clean commit `ff5f443`; the exact source passed 262/262 in an isolated Ubuntu guest and the matching artifact audit passed. Exact-current package lifecycle is pending after the pressure guard stopped its disposable guest. Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
 
 This matrix is an evidence summary, not a maturity percentage. Small tests or an
 older passing candidate do not close a stage that requires current-source,
