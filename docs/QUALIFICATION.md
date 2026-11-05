@@ -6032,3 +6032,18 @@ continuing unresolved events, and stale index age do not satisfy the live
 recovery gate. No scan, restart, package change, or direct database operation
 was performed. Recheck after the external batch exits and require stable
 pending/overflow samples before the next daemon-mediated scan.
+
+### Go build churn resumed after apparent test exit — 2026-11-05 02:54 UTC
+
+The previously observed Go test processes exited, but new Go processes in
+`/home/xgenstack.com/backend` started immediately afterward. At **02:53:51
+UTC**, Dux remained dirty with **65** pending updates, **236** recorded kernel
+overflows, no active scan, and no write error; the last scan was **651 seconds**
+old and status remained about **26,851 seconds** behind. The preceding 15
+seconds contained **14** unresolved fanotify/stale-handle or slow-flush log
+entries. Host load1 was **18.15**, CPU PSI `some avg10` **50.31%**, I/O PSI
+`some avg10` **0.72%**, and `/` had **62 GiB** free. This confirms the quiet
+window did not hold: the low pending count is transient while new short-lived
+build processes continue generating events. No scan or package/service
+operation was performed. The rescan gate remains closed until host churn and
+unresolved event warnings stop over repeated samples.
