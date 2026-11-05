@@ -5544,3 +5544,66 @@ active. Snapshot:
 `3d5e0828b0e438c23f76c6fc9717f6dcd7f6c7a705ba4c107e9add7642cc7966`). No
 production scan, restart, or index mutation was performed; churn and safe
 live-index recovery remain open.
+
+### Current-source qualification refresh and production-event impact — 2026-11-05 00:17 UTC
+
+The installed production executable is now attributable to the clean rev66
+release: `/usr/bin/dux` SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060` exactly
+matches `target/readiness/release-current-20261104-rev66/build-manifest.json`.
+That manifest binds it to commit `e0cc915f8f37da61aa6a737052403a8d6d740419`
+and source-tree SHA-256
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`; all
+rev66 bundle checksums pass. This resolves source identity for the running
+binary, but the current source has since changed `src/query.rs` and
+`src/watch.rs` by 292 lines, so rev66 fault and performance passes do not
+qualify the current source.
+
+On commit `fed53d741d72f0aaf6ae4f7afd8e310c71526f52`, the Rust all-target test
+suite passed **259/259**, all Python script tests passed **264/264**, Clippy
+passed with warnings denied, and `cargo fmt --all -- --check` passed. The first
+Python discovery run exposed two stale assertions: one required the removed
+GitHub Actions workflow, and one expected obsolete VM tmpfs wording. Both tests
+were aligned with the current requested workflow state and VM implementation;
+the complete rerun passed. Logs are retained under
+`target/readiness/current-source-qual-20261105-277899d/`.
+
+Static package revision **68** was built and audited before the test fixes were
+committed. Its canonical source-tree digest
+`9789658b23dd20e9654ca8f61158d7c5845aba668715c814a1ceeb3189dc2b48` matches
+the source contents committed as `fed53d7` at build time. This qualification
+entry changes the source tree again, so the artifact no longer matches current
+HEAD. The manifest also records the earlier commit and `worktree_dirty=true`;
+it is not a clean promotion artifact. The DEB/RPM,
+static ELF, debug symbols, SHA256SUMS, and audit reports are retained at
+`target/readiness/release-current-source-20261105-277899d/`. The lockfile scan
+reported **0 vulnerabilities and 0 warnings across 229 dependencies**; the
+exact executable scan recovered **202 dependencies** with no warning. The
+ELF is static and contains `.dep-v0`; its debug sidecar Build ID matches. Its
+12 KiB fixture scan completed without coverage issues; the separate 100,000-file
+scan and `dux du` output matched GNU `du` exactly.
+
+A **100,000-file / 100-directory** scan using that exact binary passed in
+**3.249 seconds**, indexed **100,101 nodes**, and reported **409,600,000 bytes**,
+matching GNU `du` byte-for-byte with zero coverage issues. The test wrote its
+fixture on tmpfs, but the installed production watcher still observed its
+create/delete event stream. The kernel overflow counter rose from **112** just
+before the run to **121** at the first post-run sample and **132** during
+cleanup; concurrent host Go test workloads were also active, so attribution is
+temporal rather than isolated. Cleanup removed the full fixture and its
+temporary database. At **00:17:23 UTC**, production remained active as PID
+**423219** with zero restarts, but was dirty/not caught up from fanotify
+overflow, with **132** overflow notifications, **5,425** pending updates,
+**17,464 seconds** behind, no active scan, and no write error. No direct
+production database write, scan, or service restart was issued. Do not run
+high-churn qualification workloads on this production host again.
+
+A clean package rebuild was started for the pushed commit but explicitly
+stopped when host load reached **30.47** and CPU PSI some avg10 reached
+**63.18%** while external Go race-test/compiler workers were active. No clean
+revision-69 package was published. Package upgrade/rollback testing, current
+source live churn and fault recovery, large-scale performance budgets,
+endurance, and canary qualification remain open. Current status and hashes are
+recorded in
+`target/readiness/current-source-qual-20261105-fed53d7/qualification-report.json`
+and `scale100k-result.json`.
