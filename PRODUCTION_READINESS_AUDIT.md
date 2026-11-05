@@ -1,18 +1,18 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:30 UTC
+## Current readiness checkpoint — 2026-11-05 06:41 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **366** recorded kernel overflows, **106 pending updates**, and is
-about **11.1 hours** behind. The status reports recovery unpaused, but no scan
-is running and the last scan is about **3.4 hours** old. Revision 74 passed
+overflow, has **366** recorded kernel overflows, **62 pending updates**, and is
+about **11.2 hours** behind. The status reports recovery unpaused, but no scan
+is running and the last scan is about **3.6 hours** old. Revision 74 passed
 package lifecycle tests and revision 67 passed the core exact-binary churn
 suite. Exact revision-74 live churn remains unverified, and the current-tree
 revision-75 release build has not completed. The status reports no pause reason
 at the latest sample. Root
-storage is **185 GiB total, 112 GiB used, 65 GiB free (64% used)**; `/dev/shm`
+storage is **185 GiB total, 112 GiB used, 66 GiB free (64% used)**; `/dev/shm`
 has **8.1 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
@@ -19607,3 +19607,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 
 - Static review found the fail-closed canary monitor correctly accepted only schema version **6**, but emitted the contradictory diagnostic `database schema is not candidate schema 5` for a mismatch. That could misdirect an operator during a failed canary. The monitor now has one explicit expected-schema constant and reports both the actual and expected versions; the regression test verifies the v6 expectation and checks the mismatch diagnostic.
 - Ran the complete `scripts/test_dux_canary_monitor.py` suite in transient scope `dux-canary-monitor-tests-20261105.scope` with `CPUQuota=5%`, `MemoryMax=256M`, `IOWeight=10`, and `Nice=19`; **16/16 tests passed**. The test imports and exercises the monitor logic but does not run a real 24-hour canary or invoke live systemd/database capture. No production service, package, or index was changed.
+
+### PROD-TEST-324 Full Python qualification harness passes under a constrained host quota — 2026-11-05 06:41 UTC
+
+- The first full discovery run under `CPUQuota=5%`, `MemoryMax=1G`, `IOWeight=1`, `nice 19`, and idle I/O priority executed **269 tests** with one test-harness error: `test_mid_publish_rename_failure_restores_previous_release_files` exceeded its fixed **15-second** subprocess timeout. Its assertion did not fail. The targeted regression then passed under the same 5% CPU quota in **16.800 seconds**, confirming the old wall-clock limit was too short for the deliberately throttled environment.
+- Raised only that mocked release-publisher test's hard timeout to **60 seconds**, retaining a bounded hang guard. Re-ran the entire discovery suite in the same restricted scope: **269/269 passed in 121.900 seconds**. This covers Python release-builder, backup, package-policy, canary, storage, and qualification harness behavior; it is not a Rust build, package installation, live filesystem test, or daemon recovery proof.
+- At **06:41 UTC**, the installed 0.6.3-66 service remained active with zero restarts, dirty from **366** kernel overflows, **62 pending updates**, and about **40,483 seconds** behind. No scan was active, and no write error was reported. Root had **66 GiB free**. An unrelated Go compile/test workload remained active. The harness ran with minimum I/O weight; no live daemon, package, or index state was changed.

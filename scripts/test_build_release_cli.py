@@ -590,7 +590,10 @@ class BuildReleaseCliTests(unittest.TestCase):
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=15,
+                # This exercises several mocked package tools and publication
+                # rollback subprocesses. Keep a hard hang bound, but allow
+                # heavily CPU-throttled qualification scopes to complete.
+                timeout=60,
                 check=False,
             )
 
