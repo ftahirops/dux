@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 18:38 UTC
+## Current readiness decision — 2026-11-05 18:44 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **18:38:56 UTC** it
-reported **381** kernel overflow notifications, **236** pending updates, about
-**29,946 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **18:44:19 UTC** it
+reported **401** kernel overflow notifications, **1,686** pending updates, about
+**30,268 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness.
 
@@ -46,8 +46,8 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At the latest disk sample, root storage was **185 GiB total / 103 GiB used /
-74 GiB available** and `/dev/shm` was **13 GiB total / 3.0 GiB used / 9.9 GiB
+At the latest disk sample, root storage was **185 GiB total / 104 GiB used /
+73 GiB available** and `/dev/shm` was **13 GiB total / 3.0 GiB used / 9.9 GiB
 available**. A RustSec audit of the candidate lockfile found no advisories in
 its 2026-11-05 database snapshot; this is dependency evidence, not complete
 source or binary security certification.
@@ -20304,3 +20304,8 @@ A fourth fresh Ubuntu 24.04 ephemeral guest was admitted at 17:12:50 UTC with th
 
 - At **18:42:49 UTC**, the external whole-module Go coverage run was still active and had progressed to `xgenstack/agent/safefs` (PID **127164**). Host load1 was **6.90**, CPU PSI some/full avg10 **2.34% / 0%**, but I/O PSI some/full avg10 was **11.78% / 10.83%**, above qualification VM admission limits.
 - Production Dux remained active on the same legacy binary with no reported write error or scan in progress, but the kernel overflow counter rose **381 → 388** and `events_seen` rose about **1.06 million** since the 18:37 sample. Status remained dirty/not caught up, with **49** pending updates and about **30,179 seconds** behind. This confirms active event-loss risk despite modest load1 and a small pending queue. Keep reconciliation and lifecycle VM testing deferred until the external run ends and I/O/event pressure stays below admission thresholds for a sustained window.
+
+### Further overflow growth during whole-module coverage — 2026-11-05 18:44 UTC
+
+- At **18:44:19 UTC**, the external Go coverage sweep was still active on packages `xgenstack/agent/wordpress` and `xgenstack/agent/webserver` (PIDs **133624** and **133623**). Load1 was **6.29**, CPU PSI some/full avg10 **3.96% / 0%**, and I/O PSI some/full avg10 **6.08% / 5.83%**.
+- Production Dux's overflow total rose **388 → 401** and `events_seen` rose about **1.10 million** since the 18:42:49 sample. It remained dirty/not caught up, with **1,686** pending updates, about **30,268 seconds** behind, no active scan, and no write error. The queue is now growing as well as retaining historical loss; do not run reconciliation or package lifecycle work until these coverage jobs end and event/I/O pressure is stably low.
