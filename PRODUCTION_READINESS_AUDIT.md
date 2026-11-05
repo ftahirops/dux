@@ -20345,3 +20345,8 @@ A fourth fresh Ubuntu 24.04 ephemeral guest was admitted at 17:12:50 UTC with th
 
 - A 30-second quiet-window check did not remain quiet. At **19:17 UTC**, the host workload probe found `go build` plus ten Go compiler workers; load1 was **15.34** and CPU PSI some avg10 **71.10%**. The normal admission gate returned blockers for the workload, load, and CPU pressure. No new VM was started and no host workload was touched.
 - Production Dux remained live with no write error, but stayed dirty/not caught up after **417** historical overflow notifications. Pending updates rose **6 → 1,164**, `events_seen` rose by about **16,669**, and reported lag was about **32,281 seconds**. This reinforces that a momentary low-pressure sample is insufficient for a safe lifecycle attempt; defer VM qualification and live reconciliation while this batch is active.
+
+### Renewed Go test activity continues to block qualification — 2026-11-05 19:20 UTC
+
+- A later host probe found Go test PID **334471**; load1 was **17.67**, and I/O PSI some/full avg10 was **6.71% / 6.40%**. The VM admission gate refused the workload and load conditions. No VM, production service, or host build/test process was changed.
+- Production Dux remained active with **0** restarts and no write error. Its index remained dirty/not caught up after **417** overflows, with no scan in progress and about **32,409 seconds** reported lag. Pending updates moved **1,650 → 181** since the previous sample, while `events_seen` advanced by about **63,248**; the queue drained substantially during continued event churn, but historic overflow and the stale scan remain unresolved. Root had **73 GiB free**. A lower pending count alone is not proof of index completeness.
