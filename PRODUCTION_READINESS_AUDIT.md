@@ -1,12 +1,12 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:41 UTC
+## Current readiness checkpoint — 2026-11-05 06:42 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **366** recorded kernel overflows, **62 pending updates**, and is
-about **11.2 hours** behind. The status reports recovery unpaused, but no scan
+overflow, has **381** recorded kernel overflows, **95 pending updates**, and is
+about **11.3 hours** behind. The status reports recovery unpaused, but no scan
 is running and the last scan is about **3.6 hours** old. Revision 74 passed
 package lifecycle tests and revision 67 passed the core exact-binary churn
 suite. Exact revision-74 live churn remains unverified, and the current-tree
@@ -19613,3 +19613,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - The first full discovery run under `CPUQuota=5%`, `MemoryMax=1G`, `IOWeight=1`, `nice 19`, and idle I/O priority executed **269 tests** with one test-harness error: `test_mid_publish_rename_failure_restores_previous_release_files` exceeded its fixed **15-second** subprocess timeout. Its assertion did not fail. The targeted regression then passed under the same 5% CPU quota in **16.800 seconds**, confirming the old wall-clock limit was too short for the deliberately throttled environment.
 - Raised only that mocked release-publisher test's hard timeout to **60 seconds**, retaining a bounded hang guard. Re-ran the entire discovery suite in the same restricted scope: **269/269 passed in 121.900 seconds**. This covers Python release-builder, backup, package-policy, canary, storage, and qualification harness behavior; it is not a Rust build, package installation, live filesystem test, or daemon recovery proof.
 - At **06:41 UTC**, the installed 0.6.3-66 service remained active with zero restarts, dirty from **366** kernel overflows, **62 pending updates**, and about **40,483 seconds** behind. No scan was active, and no write error was reported. Root had **66 GiB free**. An unrelated Go compile/test workload remained active. The harness ran with minimum I/O weight; no live daemon, package, or index state was changed.
+
+### PROD-INCIDENT-325 Fresh fanotify overflow burst during external Go verification tests — 2026-11-05 06:42 UTC
+
+- Read-only live status at **06:41:42 UTC** reported **370** kernel overflow notifications, **5,383 pending updates**, 78,685,567 events seen, and 46,375,221 resolved. A second sample at **06:42:16 UTC** reported **381** overflow notifications (**+11 in 34 seconds**), **95 pending updates**, 79,573,287 seen, 46,872,441 resolved, and 8,107,894 committed updates. The counters are cumulative daemon observations, not unique paths or durable capture rates; the sharp changes do not by themselves identify a cause or prove convergence.
+- The journal independently contains repeated `fanotify queue overflow — index may have missed events` warnings from **06:41:32 through 06:42:10 UTC**. The index remains dirty from overflow, about **40,556 seconds** behind, with no scan active and `write_error=null`. Recovery reports unpaused; that state has not repaired the index.
+- An unrelated Go `verify.test` process was active, with host I/O PSI `full avg10=7.15%` and **66 GiB** free on root. No service restart, scan, install, or index write was initiated. The production exactness/recovery gate remains open.
