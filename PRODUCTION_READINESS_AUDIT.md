@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 19:35 UTC
+## Current readiness decision — 2026-11-05 19:40 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **19:35 UTC** it
-reported **429** kernel overflow notifications, **20,174** pending updates,
-about **33,325 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **19:40 UTC** it
+reported **429** kernel overflow notifications, **40** pending updates, about
+**33,653 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness. The service remains
 active with zero restarts.
@@ -49,11 +49,11 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At **19:35 UTC**, root storage was **185 GiB total / 104 GiB used /
-73 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
-available**. The host workload gate found active Go tests and compiler workers;
-load1 was **10.64** and CPU PSI some avg10 **44.11%**, so no build/test or VM
-qualification was started. A RustSec audit of the
+At **19:40 UTC**, root storage was **185 GiB total / 105 GiB used /
+72 GiB available** and `/dev/shm` was **13 GiB total / 3.0 GiB used / 9.9 GiB
+available**. A Go test process remained active; load1 was **2.95** and I/O PSI
+some/full avg10 **5.72% / 5.31%**. The source regression has not been run while
+these host tests continue. A RustSec audit of the
 candidate lockfile found no advisories in its 2026-11-05 database snapshot;
 this is dependency evidence, not complete source or binary security
 certification.
@@ -20363,3 +20363,5 @@ At **19:23 UTC**, the same Go test PID remained active after nearly four minutes
 
 - A structured sample of the legacy daemon journal recorded **553** stale-handle warnings and **12** overflow messages from 19:22 to 19:36. Of the stale warnings, **464** were exactly target-only `mask=0x4` / `info_type_mask=0x2` ATTRIB events; **89** had compound FID records and varied event masks. These records were not all attributed to one process. The daemon's overflow counter rose **417 → 429**. At 19:35 production was still dirty/not caught up, with **20,174** pending updates, no scan, and no write error.
 - Source review found that the candidate's benign-stale ATTRIB predicate checked the known handle-capable filesystem and unresolved entry, but did not retain the complete event-info shape. A compound event with an unresolved parent/name and a stale target could therefore satisfy the target-only exception. The working-tree fix now requires exactly one complete FID record; compound and malformed records remain unresolved coverage loss. A parser/classifier regression covers target-only, compound, and truncated records. `cargo fmt --all -- --check` and `git diff --check` pass. The Rust regression has **not** been run: repeated Go test/compiler batches and elevated host load have prevented a clean test window. Keep this fix unpromoted until the focused test passes.
+
+At **19:40 UTC**, production still had no reconciliation scan. Pending updates fell **20,174 → 40** while `events_seen` rose by about **245,549** and committed updates rose by about **111,015** since 19:35. The overflow counter remained **429**, but the last scan was about **24,681 seconds** old and the index remained dirty; this transient queue drain is not an exactness check. The workload probe still found Go test PID **490406**, so no Rust build/test was started.
