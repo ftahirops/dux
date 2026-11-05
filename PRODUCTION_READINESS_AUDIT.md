@@ -1,6 +1,31 @@
 # dux Production Readiness Audit
 
 
+## Same-host continuation — 2026-11-05 10:56 UTC
+
+The RPM lifecycle retry did not reach SSH. After host load briefly met the
+manager's admission gate, a Rocky 9 guest started at the minimum 10% CPU quota.
+The pressure guard stopped it at 10:55:29 when CPU PSI some avg10 reached
+66.63% and host load1 reached 14.04 (critical limit 12). It had not completed
+cloud-init, transferred packages, or run any lifecycle phase. The guest's
+ephemeral runtime was cleaned. This is a host-capacity interruption, not an
+RPM test result.
+
+At 10:56 the production `dux.service` was active, with `/` dirty from fanotify
+queue overflow, 18 overflow notifications, 22 pending updates, and about 2,185
+seconds behind; no scan was running and `write_error` was null. No package or
+index operation was performed on production. Root storage was 185 GiB total,
+108 GiB used, 69 GiB available; `/dev/shm` was 13 GiB total, 1.7 GiB used,
+12 GiB available. These measurements are point-in-time only.
+
+The qualification harness improvement in commit `45ed857` passed 62/62 local
+unit tests and Python compilation, and was pushed. It separates the known dirty
+legacy baseline from the candidate clean-install gate; the candidate must
+still be caught up and clean. The Rocky RPM lifecycle remains pending, and the
+production v6 alias limitation remains a product blocker until path-instance
+schema, publication, event updates, and queries are implemented and qualified.
+
+
 ## Qualification continuation — 2026-11-05 10:42 UTC
 
 The revision-79 RPM lifecycle on Rocky Linux 9.8 is **inconclusive and
