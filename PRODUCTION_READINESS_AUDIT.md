@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 07:04 UTC
+## Current readiness checkpoint — 2026-11-05 07:06 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **396** recorded kernel overflows, **812 pending updates**, and is
-about **11.6 hours** behind. The status reports recovery unpaused, but no scan
-is running and the last scan is about **4.0 hours** old. Revision 74 passed
+overflow, has **396** recorded kernel overflows, **13,461 pending updates**, and
+is about **11.7 hours** behind. The status reports recovery unpaused, but no
+scan is running and the last scan is about **4.0 hours** old. Revision 74 passed
 package lifecycle tests and revision 67 passed the core exact-binary churn
 suite. Exact revision-74 live churn remains unverified, and the current-tree
 revision-75 release build has not completed. The status reports no pause reason
@@ -19648,3 +19648,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Started a revision-75 current-source `scripts/build-release.sh` into unique `/dev/shm` paths with Cargo audit tooling pinned at **0.7.7**, `CARGO_BUILD_JOBS=1`, `CPUQuota=10%`, `MemoryMax=4G`, `CPUWeight=10`, `IOWeight=1`, nice 19, and idle I/O scheduling. The build compiled Rust dependencies and began the patched bundled-SQLite C build. Peak memory observed was about **1.1 GiB**; no binary, package, RustSec report, or source archive was published.
 - During the build, an unrelated `safefs.test` workload and later Go link/test activity were present. The service journal recorded repeated `fanotify queue overflow — index may have missed events` warnings; the recorded count rose from **381** to **396** and `dirty_since` advanced to **07:04:38 UTC**. The build was stopped by stopping only its named systemd scope; timing does not establish that the build or any one external workload caused the overflow burst.
 - The incomplete Cargo target (`/dev/shm/dux-r75-target`, **322 MiB**) and build log (`/dev/shm/dux-r75-build.log`, SHA-256 `b7078b6b0b57d46c3249b20e73bbfb9f0591a43ff5947d5656d9e5e5a301aeb7`) are preserved for a later resume. Scratch and output directories are empty. At **07:04:51**, the installed 0.6.3-66 daemon was live with zero restarts, **812 pending updates**, no scan, `write_error=null`, and about **41,912 seconds** behind; root had **65 GiB free**. No production package, service, or database mutation occurred. Current-source release qualification remains open.
+
+### PROD-HEALTH-331 I/O-pressure pause clears while pending work grows — 2026-11-05 07:06 UTC
+
+- At **07:05:52**, live status showed the legacy daemon paused for `io pressure`, dirty from fanotify overflow, **4,045 pending updates**, and **396** kernel-overflow notifications. At **07:06:53**, it reported `paused=false` and no pause reason, but remained dirty with **13,461 pending updates** (**+9,416 in 61 seconds**), still **396** overflows, **42,034 seconds** behind, and no active scan or write error. The short pause-state change does not establish recovery.
+- The identified 50-second I/O stress process had exited; I/O PSI `full avg10` fell from **47.94%** at 07:05:52 to **2.65%** at 07:06:53, while the 60-second `full` average was **17.03%**. A separate Go test process was active at the later sample. Their timing does not establish workload causation.
+- The cached r75 build remains stopped and resumable. No scan, build, service restart, install, or index mutation was made during the pause transition; wait for a quieter host and a stable low backlog before retrying it.
