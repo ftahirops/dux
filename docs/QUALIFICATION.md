@@ -6334,3 +6334,7 @@ A fresh locked/offline all-features/all-targets Rust test rerun was interrupted 
 ### Current revision-75 Rust suite retry stopped by host pressure — 2026-11-05 08:05 UTC
 
 The locked/offline all-features/all-targets Rust suite compiled and discovered **260 tests**, then was stopped before completion when host load exceeded 20 and CPU PSI some avg10 exceeded 60% in consecutive samples. This is incomplete evidence, not a test failure or pass. A concurrent Go build was observed but is not established as the cause. The most recent completed all-features/all-targets suite remains 259/259 on commit `4a1f4a4`; current-candidate full Rust qualification remains open.
+
+### Legacy watcher stale-handle observation — 2026-11-05 08:07 UTC
+
+The installed 0.6.3-66 daemon emitted 143 `open_by_handle_at` `ESTALE` fanotify-resolution warnings in a five-minute read-only journal sample; no new overflow warning appeared in that interval. The daemon remained dirty from its earlier 428-overflow epoch and about 45,663 seconds behind, so the live index is not trustworthy. The warning stream's varying event PIDs do not identify cause and must not be attributed to one workload. This is legacy-host evidence; it does not override isolated candidate stale-target test results or qualify current-candidate high-churn behavior.
