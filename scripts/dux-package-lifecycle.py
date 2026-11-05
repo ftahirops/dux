@@ -429,6 +429,43 @@ def rollback_backup_path_for_report(report_path):
     return report_path.with_name(f"{report_path.stem}-rollback.sqlite")
 
 
+def assert_private_directory(directory, stage):
+    """Require a real, writable, owner-only directory for sensitive lifecycle evidence."""
+    directory = Path(directory)
+    try:
+        metadata = directory.lstat()
+    except OSError as error:
+        raise AssertionError({"stage": stage, "path": str(directory), "error": str(error)}) from error
+    evidence = {
+        "stage": stage,
+        "path": str(directory),
+        "uid": metadata.st_uid,
+        "mode": oct(stat.S_IMODE(metadata.st_mode)),
+    }
+    assert stat.S_ISDIR(metadata.st_mode), {**evidence, "expected": "real directory"}
+    assert metadata.st_uid == os.geteuid(), evidence
+    assert stat.S_IMODE(metadata.st_mode) & 0o077 == 0, evidence
+    assert stat.S_IMODE(metadata.st_mode) & stat.S_IWUSR, {
+        **evidence, "expected": "owner-writable directory",
+    }
+    assert os.access(directory, os.W_OK), {**evidence, "expected": "writable directory"}
+    return evidence
+
+
+def validate_report_destination(report_path):
+    """Fail before package changes if report or rollback output is unsafe or reused."""
+    report_path = Path(report_path)
+    assert_private_directory(report_path.parent, "report_directory_security")
+    for path, stage in (
+        (report_path, "report_destination_collision"),
+        (report_path.with_suffix(report_path.suffix + ".tmp"), "report_temporary_collision"),
+        (rollback_backup_path_for_report(report_path), "rollback_backup_collision"),
+    ):
+        if path.exists() or path.is_symlink():
+            raise FileExistsError({"stage": stage, "path": str(path)})
+    return report_path
+
+
 def create_rollback_index_backup(database, backup):
     """Use SQLite's online backup API to preserve a schema-matched rollback index."""
     database, backup = Path(database), Path(backup)
@@ -436,11 +473,7 @@ def create_rollback_index_backup(database, backup):
         return None
     if backup.exists():
         raise FileExistsError(f"refusing to replace an existing rollback backup: {backup}")
-    parent_metadata = backup.parent.stat()
-    assert parent_metadata.st_uid == os.geteuid() and stat.S_IMODE(parent_metadata.st_mode) & 0o077 == 0, {
-        "stage": "rollback_backup_directory_security", "path": str(backup.parent),
-        "uid": parent_metadata.st_uid, "mode": oct(stat.S_IMODE(parent_metadata.st_mode)),
-    }
+    assert_private_directory(backup.parent, "rollback_backup_directory_security")
     metadata = database.stat()
     source = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     destination = sqlite3.connect(backup)
@@ -522,9 +555,9 @@ def main():
     parser.add_argument("new_package")
     parser.add_argument("--report", required=True)
     args = parser.parse_args()
+    report_path = validate_report_destination(args.report)
     sandbox = require_disposable_qualification_vm()
     old_package, new_package = Path(args.old_package), Path(args.new_package)
-    report_path = Path(args.report)
     report = {
         "status": "running", "kind": args.kind,
         "platform": platform.platform(), "kernel": platform.release(),

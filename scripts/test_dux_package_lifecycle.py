@@ -689,6 +689,71 @@ class PackagePayloadHashTests(unittest.TestCase):
 
 
 class RollbackIndexBackupTests(unittest.TestCase):
+    def test_report_directory_must_be_private_and_real(self):
+        with tempfile.TemporaryDirectory(prefix="dux-report-private-") as temporary:
+            directory = Path(temporary)
+            report = LIFECYCLE.validate_report_destination(directory / "attempt.json")
+            self.assertEqual(report, directory / "attempt.json")
+
+            public = directory / "public"
+            public.mkdir(mode=0o755)
+            os.chmod(public, 0o755)
+            with self.assertRaises(AssertionError) as raised:
+                LIFECYCLE.validate_report_destination(public / "attempt.json")
+            self.assertEqual(raised.exception.args[0]["stage"], "report_directory_security")
+
+            readonly = directory / "readonly"
+            readonly.mkdir(mode=0o700)
+            os.chmod(readonly, 0o500)
+            with self.assertRaises(AssertionError) as raised:
+                LIFECYCLE.validate_report_destination(readonly / "attempt.json")
+            self.assertEqual(raised.exception.args[0]["stage"], "report_directory_security")
+
+    def test_report_directory_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="dux-report-link-") as temporary:
+            root = Path(temporary)
+            private = root / "private"
+            private.mkdir(mode=0o700)
+            link = root / "link"
+            link.symlink_to(private, target_is_directory=True)
+
+            with self.assertRaises(AssertionError) as raised:
+                LIFECYCLE.validate_report_destination(link / "attempt.json")
+            self.assertEqual(raised.exception.args[0]["stage"], "report_directory_security")
+
+    def test_report_and_rollback_destinations_must_be_unique(self):
+        with tempfile.TemporaryDirectory(prefix="dux-report-collision-") as temporary:
+            directory = Path(temporary)
+            report = directory / "attempt.json"
+            report.write_text("old report")
+            with self.assertRaises(FileExistsError) as raised:
+                LIFECYCLE.validate_report_destination(report)
+            self.assertEqual(raised.exception.args[0]["stage"], "report_destination_collision")
+            report.unlink()
+
+            temporary_path = report.with_suffix(report.suffix + ".tmp")
+            temporary_path.symlink_to(directory / "outside")
+            with self.assertRaises(FileExistsError) as raised:
+                LIFECYCLE.validate_report_destination(report)
+            self.assertEqual(raised.exception.args[0]["stage"], "report_temporary_collision")
+            temporary_path.unlink()
+
+            backup = LIFECYCLE.rollback_backup_path_for_report(report)
+            backup.write_bytes(b"previous rollback snapshot")
+            with self.assertRaises(FileExistsError) as raised:
+                LIFECYCLE.validate_report_destination(report)
+            self.assertEqual(raised.exception.args[0]["stage"], "rollback_backup_collision")
+
+    def test_unsafe_report_preflight_runs_before_guest_or_package_work(self):
+        with patch.object(sys, "argv", [
+            "dux-package-lifecycle.py", "deb", "old.deb", "new.deb",
+            "--report", "/tmp/dux-unsafe-report.json",
+        ]), patch.object(LIFECYCLE, "require_disposable_qualification_vm") as require_guest:
+            with self.assertRaises(AssertionError) as raised:
+                LIFECYCLE.main()
+        self.assertEqual(raised.exception.args[0]["stage"], "report_directory_security")
+        require_guest.assert_not_called()
+
     def test_rollback_backup_path_is_unique_per_report_attempt(self):
         first = LIFECYCLE.rollback_backup_path_for_report(
             "/root/dux-package-lifecycle-attempt1.json"
