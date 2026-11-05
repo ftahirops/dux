@@ -5726,3 +5726,30 @@ external Go compile/vet workload was active and host CPU PSI some avg10 was
 promotion are deferred until host pressure permits and the dirty index is
 reconciled and exactly verified. Existing current-source live churn/fault,
 scale, endurance, and canary gates remain open.
+
+### Current DEB lifecycle attempt stopped by host-pressure guard — 2026-11-05 01:00 UTC
+
+Started the prepared, checksum-verified Ubuntu 24 guest in an ephemeral
+private-tmpfs overlay (2 GiB guest RAM, 20% host CPU quota). The guard stopped
+the VM at **00:58:49 UTC**, before SSH became ready and before any package was
+copied or installed. Its measured host pressure was load1 **13.04** and CPU
+PSI some avg10 **60.97%**; the guard reported both its critical CPU/load
+conditions and terminated only the disposable QEMU unit. This is an
+environment admission stop, not a package lifecycle pass or product failure.
+The guest reached initramfs driver loading but did not reach the root
+filesystem or userspace. The temporary QEMU overlay was cleaned and the
+verified Ubuntu base image was left unchanged.
+
+Evidence is retained under
+`target/readiness/vms/ubuntu24-lifecycle-current/`: pressure record SHA-256
+`6cce60232431d9bbdebb0daf1524dfb9168b1a0035cc9e78749dacd4b83ca3bf`, boot
+console SHA-256
+`36077ec1793762a2a50658cc4ff70348faacc53c26bdf4e5f306fba723106eba`, and
+the stopped guest state. At **01:00:48 UTC**, production was still active
+without restarts, but its index remained dirty from fanotify overflow, with
+**161** overflow notifications, **107 pending updates**, no scan in progress,
+and about **20,069 seconds** behind. Status JSON SHA-256 is
+`8a5f5d35aef3df14344ccd47b33b6de3490a163101c1f31e6086b21c750eca52`.
+External Xgenstack Go race tests remained active. Package upgrade/rollback
+testing is still open; retry the disposable guest only after the VM manager's
+host-pressure admission guard passes.
