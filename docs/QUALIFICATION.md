@@ -6342,3 +6342,7 @@ The installed 0.6.3-66 daemon emitted 143 `open_by_handle_at` `ESTALE` fanotify-
 ### Refreshed RustSec lockfile audit — 2026-11-05 08:08 UTC
 
 `cargo audit --json` exited 0 for the revision-75 lockfile: 229 locked dependencies, zero vulnerabilities, and no warnings. Report SHA-256: `2f551d1ceee702ba99e3c6676401c46f981ac9a0e75de146ffdba01c5049fd9f`. The local advisory cache was compared with upstream `main`, which remained at commit `965bf9ad083b58e6340d65829d85217b18be9290` dated Nov. 3. `Cargo.lock` SHA-256 matches the revision-75 build manifest. This is a point-in-time dependency advisory scan.
+
+### Partial current-source suite and guarded VM start — 2026-11-05 08:15 UTC
+
+The current-source all-features/all-targets Rust suite discovered 260 tests; 34 completed successfully before the host run was stopped after the live legacy daemon's overflow count rose from 428 to 446. Causation is unknown; the partial run is not a pass. Its preserved log and JSON record are under `target/readiness/rust-r75-20261105/`; test binary SHA-256 `73b00c995e41fd84cf4c1c68adc6c8fccfe3b7f5717870fe71ea900f9f4cf4ae`. A dedicated 2 GiB watch-unit VM was also stopped by its host-pressure guard during boot; SSH never became available and no guest tests ran. The live production index remains dirty and behind. Run filesystem-heavy candidate tests in an isolated guest only when host admission stays clear through VM boot.
