@@ -6152,3 +6152,30 @@ userspace drops, **253** recorded kernel overflow notifications, and the index
 still marked dirty and about **8 hours** behind its last caught-up point. Root
 storage had **64.88 GiB free**. No full-root scan was repeated because the
 exactness gate remains open after two scans reported lost events.
+
+### Clean release build and test-only scan helper — 2026-11-05 04:04 UTC
+
+The non-atomic `scan()` wrapper is only referenced from unit-test code; runtime
+rebuilds use `rebuild_atomic()`. It is now compiled only for tests, removing the
+dead-code warning from optimized release builds. The all-features binary unit
+suite passed **260/260** again after this change in **143.42 seconds**, serially
+and under a transient scope capped at **10% CPU**, **2 GiB memory**, no swap,
+`IOWeight=10`, and `Nice=19`. Formatting and whitespace checks passed.
+
+The default production profile then built successfully from clean commit
+`86e94cf8e42e` using `cargo build --offline --locked --release --bin dux` in
+**7m13s**, under the same resource caps, with no compiler warnings. The
+resulting **5.0 MiB** `target/release/dux` reports version **0.6.3**, revision
+`86e94cf8e42e`, production build kind, and source digest
+`2de4f9eb0a4a36d7efe7480ebaecf06a4b77cbe02f1824d6a2f21fff02157ed4`; its
+`--version` and `--help` smoke checks succeeded. This artifact was not
+installed or used to replace the running daemon.
+
+At **04:04 UTC**, the installed daemon remained live with no reported userspace
+drops, but its pipeline was **22,266 pending** of **500,000** capacity, the
+index was dirty, and the recorded kernel overflow count had risen to **285**.
+There were about **61.88 GiB free** on `/`. A clean release build and passing
+unit suite do not resolve these live event-coverage failures; another full-root
+scan remains inappropriate until host churn and overflow behavior stabilize.
+Current-source packaging/install, live index exactness, fault/scale/endurance
+qualification, and production canary remain open.
