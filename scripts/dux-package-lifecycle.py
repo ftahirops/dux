@@ -262,6 +262,13 @@ def assert_index_access_policy(directory=Path("/var/lib/dux"), expected_uid=0, g
             "index_files": checked}
 
 
+# A status read every two seconds avoids turning qualification polling into a
+# source of database load. Five minutes admits the observed sub-60s first scan
+# plus bounded retries, while limiting a baseline that can never become exact.
+DAEMON_READINESS_POLL_SECONDS = 2.0
+LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS = 300
+
+
 def wait_service_active(timeout, stage):
     deadline = time.monotonic() + timeout
     while True:
@@ -275,7 +282,7 @@ def wait_service_active(timeout, stage):
         if time.monotonic() >= deadline:
             raise AssertionError({"stage": stage, "service_start_timeout": state,
                                   "timeout_seconds": timeout})
-        time.sleep(0.5)
+        time.sleep(DAEMON_READINESS_POLL_SECONDS)
 
 
 def wait_daemon_caught_up(timeout, stage):
@@ -311,7 +318,58 @@ def wait_daemon_caught_up(timeout, stage):
             raise AssertionError({"stage": stage, "daemon_not_caught_up": last_status,
                                   "timeout_seconds": timeout,
                                   "journal": journal.stdout, "journal_error": journal.stderr})
-        time.sleep(0.5)
+        time.sleep(DAEMON_READINESS_POLL_SECONDS)
+
+
+def wait_initial_scan_complete(timeout, stage, not_before_timestamp):
+    """Wait for a completed baseline scan, even when legacy coverage is known incomplete.
+
+    Package transition tests need a stable, readable pre-upgrade index; requiring
+    a legacy binary to represent mount aliases it cannot model prevents testing
+    the candidate at all. Candidate clean-install readiness remains strict via
+    ``wait_daemon_caught_up``.
+    """
+    deadline = time.monotonic() + timeout
+    last_status = None
+    while True:
+        result = command("/usr/bin/dux", "status", "--json", check=False)
+        try:
+            last_status = json.loads(result.stdout)
+        except (json.JSONDecodeError, TypeError):
+            last_status = {
+                "status_command_returncode": result.returncode,
+                "status_stdout": result.stdout[-4000:],
+                "status_stderr": result.stderr[-4000:],
+            }
+        if isinstance(last_status, dict):
+            if (result.returncode == 0 and last_status.get("caught_up") is True
+                    and last_status.get("dirty") is False
+                    and last_status.get("scan_in_progress") is False):
+                return last_status
+            if (result.returncode == 0
+                    and last_status.get("daemon_live") is True
+                    and last_status.get("watch_status_available") is True
+                    and last_status.get("scan_in_progress") is False
+                    and isinstance(last_status.get("last_scan_timestamp_seconds"), int)
+                    and last_status["last_scan_timestamp_seconds"] > not_before_timestamp):
+                return last_status
+            reason = (last_status.get("dirty_reason") or "").lower()
+            if "automatic retries paused" in reason:
+                journal = command(
+                    "journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False
+                )
+                raise AssertionError({
+                    "stage": stage, "baseline_reconciliation_paused": last_status,
+                    "journal": journal.stdout, "journal_error": journal.stderr,
+                })
+        if time.monotonic() >= deadline:
+            journal = command("journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False)
+            raise AssertionError({
+                "stage": stage, "initial_scan_not_completed": last_status,
+                "timeout_seconds": timeout,
+                "journal": journal.stdout, "journal_error": journal.stderr,
+            })
+        time.sleep(DAEMON_READINESS_POLL_SECONDS)
 
 
 def structured_failure_evidence(error):
@@ -495,6 +553,7 @@ def main():
         baseline_reinstall = baseline_install_needed(
             initial, old_version, initial_binary_hash, old_payload_hash
         )
+        baseline_scan_started_at = int(time.time())
         if baseline_reinstall:
             install(args.kind, old_package,
                     downgrade=initial is not None and initial != old_version)
@@ -509,7 +568,11 @@ def main():
             command("systemctl", "reset-failed", "dux.service", check=False)
         command("systemctl", "start", "--no-block", "dux.service", check=False)
         legacy_running = wait_service_active(300, "legacy_baseline_runtime")
-        legacy_baseline = wait_daemon_caught_up(900, "legacy_baseline_reconciliation")
+        legacy_baseline = wait_initial_scan_complete(
+            LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS,
+            "legacy_baseline_initial_scan",
+            baseline_scan_started_at,
+        )
         # Keep optional/missing tunnel units from making systemctl reject the
         # whole multi-unit request before it disables the main service.
         for unit in ("dux.service", "dux-tunnel.service"):
@@ -523,7 +586,8 @@ def main():
                                     "package_payload_binary_sha256": old_payload_hash,
                                     "service_after_install": service_after_baseline_install,
                                     "service_runtime_verified": legacy_running,
-                                    "daemon_caught_up": legacy_baseline,
+                                    "daemon_caught_up": legacy_baseline.get("caught_up") is True,
+                                    "daemon_status": legacy_baseline,
                                     "service": service_state()})
 
         rollback_backup = create_rollback_index_backup(

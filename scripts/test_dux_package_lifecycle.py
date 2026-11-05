@@ -762,6 +762,12 @@ class RollbackIndexBackupTests(unittest.TestCase):
 
 
 class DaemonReadinessTests(unittest.TestCase):
+    def test_legacy_baseline_timeout_is_bounded_for_nonconverging_coverage(self):
+        self.assertEqual(
+            LIFECYCLE.LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, 300
+        )
+        self.assertEqual(LIFECYCLE.DAEMON_READINESS_POLL_SECONDS, 2.0)
+
     def test_waits_until_full_scan_is_caught_up(self):
         scanning = {
             "daemon_live": True, "watch_status_available": True,
@@ -781,7 +787,51 @@ class DaemonReadinessTests(unittest.TestCase):
             observed = LIFECYCLE.wait_daemon_caught_up(10, "test")
 
         self.assertTrue(observed["caught_up"])
-        sleep.assert_called_once_with(0.5)
+        sleep.assert_called_once_with(LIFECYCLE.DAEMON_READINESS_POLL_SECONDS)
+
+    def test_legacy_baseline_records_completed_but_incomplete_scan(self):
+        baseline = {
+            "daemon_live": True, "watch_status_available": True,
+            "dirty": True, "dirty_reason": "incomplete coverage",
+            "paused": False, "scan_in_progress": False, "caught_up": False,
+            "last_scan_timestamp_seconds": 123,
+        }
+        with patch.object(LIFECYCLE, "command", return_value=SimpleNamespace(
+            returncode=0, stdout=json.dumps(baseline), stderr=""
+        )) as command:
+            observed = LIFECYCLE.wait_initial_scan_complete(
+                10, "legacy-baseline", not_before_timestamp=100
+            )
+
+        self.assertEqual(observed, baseline)
+        command.assert_called_once_with("/usr/bin/dux", "status", "--json", check=False)
+
+    def test_legacy_baseline_does_not_accept_dirty_state_without_completed_scan(self):
+        stale = {
+            "daemon_live": True, "watch_status_available": True,
+            "dirty": True, "paused": False, "scan_in_progress": False,
+            "caught_up": False, "last_scan_timestamp_seconds": 99,
+        }
+        scanning = {
+            "daemon_live": True, "watch_status_available": True,
+            "dirty": True, "paused": False, "scan_in_progress": True,
+            "caught_up": False, "last_scan_timestamp_seconds": 100,
+        }
+        complete = {**scanning, "scan_in_progress": False,
+                    "last_scan_timestamp_seconds": 123}
+        with patch.object(LIFECYCLE, "command", side_effect=[
+            SimpleNamespace(returncode=0, stdout=json.dumps(stale), stderr=""),
+            SimpleNamespace(returncode=0, stdout=json.dumps(scanning), stderr=""),
+            SimpleNamespace(returncode=0, stdout=json.dumps(complete), stderr=""),
+        ]), patch.object(LIFECYCLE.time, "monotonic", return_value=0), \
+                patch.object(LIFECYCLE.time, "sleep") as sleep:
+            observed = LIFECYCLE.wait_initial_scan_complete(
+                10, "legacy-baseline", not_before_timestamp=100
+            )
+
+        self.assertFalse(observed["caught_up"])
+        self.assertEqual(sleep.call_count, 2)
+        sleep.assert_called_with(LIFECYCLE.DAEMON_READINESS_POLL_SECONDS)
 
     def test_rejects_active_but_dirty_daemon_at_timeout(self):
         dirty = {

@@ -22,9 +22,25 @@ dirty from fanotify queue overflow, with 18 overflow notifications, 5 pending
 updates, and about 1,349 seconds behind; no scan was running and `write_error`
 was null. No candidate was installed on production. The guest attempt ran on
 the same pressured host and the host index was already dirty before it began;
-do not treat its partial work as proof of safe production behavior. Further
-guest attempts must wait for the host admission gate and the Rocky baseline
-reconciliation issue needs diagnosis before retrying the RPM lifecycle.
+do not treat its partial work as proof of safe production behavior. The
+`/efi`/`/boot/efi` collision is the already documented schema-v6 path-instance
+limitation; exact Rocky qualification requires the v7 path-instance model to
+be published and used by query and event paths, not a relaxation of coverage
+checks. The stale-handle and other scan errors in this short attempt remain
+diagnostic evidence, not a separately proven root cause. Retry only after the
+host admission gate clears and candidate code can pass the strict clean-install
+coverage check.
+
+The qualification harness now caps the legacy baseline's initial scan wait at
+five minutes and polls daemon status every two seconds instead of twice per
+second. It records a completed but dirty legacy baseline and continues package
+mechanics checks, while the candidate's clean-install phase still strictly
+requires `caught_up=true`, no dirty/paused state, and no active scan. This lets
+the test distinguish an old package's known v6 limitation from the candidate's
+own coverage result without holding a guest for 15 minutes. All 62
+package-lifecycle harness unit tests pass, Python compilation passes, and
+`git diff --check` passes. This improves qualification evidence and resource
+use; it does not fix the product's v6 alias limitation or qualify the RPM.
 
 
 ## Current readiness checkpoint — 2026-11-05 10:36 UTC
