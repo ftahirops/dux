@@ -597,13 +597,13 @@ class OomRolePolicySourceTests(unittest.TestCase):
 
 
 class ServiceRestartPolicySourceTests(unittest.TestCase):
-    def test_service_has_bounded_backoff_and_compatible_fallback(self):
+    def test_service_restart_delay_uses_portable_systemd_directives(self):
         root = Path(__file__).resolve().parents[1]
         service = (root / "packaging/dux.service").read_text()
         self.assertIn("Restart=always", service)
-        self.assertIn("RestartSec=10s", service)
-        self.assertIn("RestartSteps=6", service)
-        self.assertIn("RestartMaxDelaySec=1min", service)
+        self.assertIn("RestartSec=30s", service)
+        self.assertNotIn("RestartSteps=", service)
+        self.assertNotIn("RestartMaxDelaySec=", service)
         self.assertIn("TimeoutStopSec=300s", service)
 
     def test_default_daemon_unit_restricts_network_address_families(self):

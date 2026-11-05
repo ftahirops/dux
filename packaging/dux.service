@@ -19,11 +19,9 @@ LimitCORE=0
 # retention window if needed, e.g.: ExecStart=/usr/bin/dux daemon / --growth-days 2
 ExecStart=/usr/bin/dux daemon /
 Restart=always
-# Use native restart backoff where systemd supports it. Older releases ignore
-# these two keys and retain the compatible fixed 10s RestartSec fallback.
-RestartSec=10s
-RestartSteps=6
-RestartMaxDelaySec=1min
+# Keep a conservative restart delay across supported systemd releases. Rocky 9's
+# systemd 252 rejects RestartSteps/RestartMaxDelaySec, so use portable syntax.
+RestartSec=30s
 # Liveness heartbeat lives in /run/dux (tmpfs), not SQLite, so an idle daemon
 # makes zero DB/WAL writes. RuntimeDirectory creates it and removes it on stop,
 # so the heartbeat file vanishes when the daemon dies (no stale "live").
