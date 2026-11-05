@@ -5633,3 +5633,37 @@ unit and status evidence is
 `98aa1aa54a138b5bb3a4751438d0163be50c50bfccee4321fb6d674713cb1d79`). Clean
 current-HEAD package build, package lifecycle, current-source live recovery,
 scale, endurance, and canary gates remain outstanding.
+
+### Current-source all-features test and live-host event pressure — 2026-11-05 00:36 UTC
+
+On clean HEAD `4a1f4a400381cc9885027699bd1b81690f05fd63`, the Rust all-target
+suite with every Cargo feature enabled passed **259/259** in 26.53 seconds
+after a 1m40s build. It ran offline and serially (`cargo test --all-features
+--locked --offline --all-targets -j1 -- --test-threads=1`) in a CPU-, memory-,
+and I/O-limited transient systemd unit with a private `/run` tmpfs target and
+`TMPDIR`. Peak memory was 997.1 MiB with no swap. The full log is
+`target/readiness/current-source-qual-20261105-4a1f4a4/rust-all-features.log`
+(SHA-256 `b8a4a5e39e72c98bb2001f35af7ea64e236a43a9dcf230c631fa504cad03fd79`).
+
+The production service remained active as PID **423219**, with zero restarts
+and no write error. A read-only status sample at 00:36:42 UTC still showed a
+dirty index from fanotify overflow, **144** overflow notifications, **2,909**
+pending updates, no scan in progress, and about **18,623 seconds** behind.
+The overflow counter was **133** in the 00:33 host sample and **144** after
+the test. An unrelated Xgenstack Go test was active throughout; logs include
+events from host compiler/test processes and transient-test PIDs, so the
+11-notification increase cannot be attributed to one workload from this
+observation. The tests used private `/run` build and temp paths; no production
+database write, scan, or service restart was issued. Do not run further
+high-churn qualification workloads on this production host. The captured
+status JSON is
+`target/readiness/current-source-qual-20261105-4a1f4a4/production-status.json`
+(SHA-256 `c2dfd477d3941050bf57ca0eb525a5f7644994bef039aa407b05e81d57961973`).
+
+Root filesystem capacity remains adequate at **66 GiB free (63% used)**. The
+historical `target/readiness` tree occupies **6.5 GiB** and includes release,
+rollback, failure-reproduction, and qualification evidence; it has not been
+purged wholesale because some of it is referenced by this audit. A current
+clean-HEAD release package, package upgrade/rollback lifecycle, exact live
+reconciliation, stable caught-up window, current-source live churn/fault
+recovery, production-scale budgets, endurance, and canary gates remain open.
