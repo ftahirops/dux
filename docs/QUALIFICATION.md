@@ -1716,6 +1716,25 @@ waiting for normal host pressure.” Root had **16 GiB free** and `/dev/shm`
 or index was changed. Current-source Rust build/tests and live exact recovery
 remain open.
 
+### Production event backlog surge during external Vitest run — 2026-11-05 02:35 UTC
+
+At **02:35:11 UTC**, read-only revision 73 status reported **46,806 pending
+updates**, up from **950** at 02:33:56, while the external test runner advanced
+from the Go suite to `npm exec vitest run`. Over that interval, Dux's event
+counter advanced by about **161,000**, resolved events by about **82,000**, and
+committed updates by about **12,900**; indexed nodes fell by about **36,000**.
+The overflow counter remained at **215**, but the index was still dirty and
+about **25,731 seconds** behind with the automatic retry circuit open. Load1
+was **7.20**, CPU PSI `some avg10` **2.41%**, and I/O PSI `full avg10` **3.75%**.
+The host test chain was still active. This shows substantial backlog and index
+churn during concurrent tests even without a new overflow notification in that
+sample; it does not isolate the test runner as the sole cause. Evidence SHA-256
+`10af8443fdd21c526d46bd70dd528ce2bebe785b74c2915f8b91776763ce17e9`:
+`target/readiness/current-source-qual-20261105-c71e822/live-backlog-surge-0235Z.json`.
+No service, package, or database change was made. Recovery scan and exact-HEAD
+release build remain deferred until host test activity ends and both event
+rate and backlog settle.
+
 ### Fifth current-source all-features test attempt stopped at PSI guard — 2026-11-01 14:35 UTC
 
 A fifth attempt used `cargo test --offline --locked --all-features` with the
