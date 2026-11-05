@@ -69,6 +69,45 @@ class PressureGuardTests(unittest.TestCase):
         }
         self.assertEqual(VM.host_pressure_blockers(pressure), [])
 
+    def test_vm_start_requires_three_consecutive_clear_admission_samples(self):
+        pressure = {
+            "load1": 1.0,
+            "cpu": {"some": 0.0, "full": 0.0},
+            "io": {"some": 0.0, "full": 0.0},
+            "memory": {"some": 0.0, "full": 0.0},
+            "active_host_workloads": [],
+            "telemetry_errors": [],
+        }
+        with (
+            patch.object(VM, "host_pressure", return_value=pressure) as probe,
+            patch.object(VM.time, "sleep") as sleep,
+        ):
+            VM.require_stable_host_admission("dux-test", samples=3, interval_seconds=10)
+        self.assertEqual(probe.call_count, 3)
+        self.assertEqual([call.args for call in sleep.call_args_list], [(10,), (10,)])
+
+    def test_vm_start_aborts_if_workload_appears_between_admission_samples(self):
+        clear = {
+            "load1": 1.0,
+            "cpu": {"some": 0.0, "full": 0.0},
+            "io": {"some": 0.0, "full": 0.0},
+            "memory": {"some": 0.0, "full": 0.0},
+            "active_host_workloads": [],
+            "telemetry_errors": [],
+        }
+        busy = {**clear, "active_host_workloads": ["go test pid=456"]}
+        with (
+            patch.object(VM, "host_pressure", side_effect=[clear, busy]) as probe,
+            patch.object(VM.time, "sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(
+                SystemExit,
+                r"sample 2/3 is blocked: active host build/test/install/analysis workload: go test pid=456",
+            ):
+                VM.require_stable_host_admission("dux-test", samples=3, interval_seconds=10)
+        self.assertEqual(probe.call_count, 2)
+        sleep.assert_called_once_with(10)
+
     def test_active_host_workloads_block_vm_admission_and_stop_guard(self):
         pressure = {
             "load1": 1.0,

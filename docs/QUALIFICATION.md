@@ -12,6 +12,9 @@ memory PSI some avg10<=5%. CPU PSI some avg10 up to 35% is admitted only when
 aggregate load1<=10 and CPU PSI full avg10<=5%; PSI some above 55% always
 blocks admission. This distinguishes quota-related runnable wait from broad
 host saturation while retaining hard load, memory, and I/O gates. During a
+VM start requires three consecutive clear workload/pressure samples spaced
+10 seconds apart; any detected build, test, installer, analysis process, or
+pressure blocker aborts startup before QEMU is launched. During a
 run, two consecutive samples above CPU PSI some 40% stop the guest when
 load1>10 or CPU PSI full>5%; CPU PSI some above 70%, CPU PSI full above 10%,
 load1>12, I/O PSI above 40%, or memory PSI above 20% always stop only the

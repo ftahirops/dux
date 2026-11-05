@@ -392,6 +392,25 @@ def host_pressure_blockers(pressure):
     return blockers
 
 
+def require_stable_host_admission(unit, samples=3, interval_seconds=10):
+    """Refuse VM startup unless repeated host samples remain clear.
+
+    A single clear snapshot can race with a new build or test starting while
+    QEMU is prepared. Fail immediately on the first blocked sample; callers can
+    retry after the host has settled. The independent runtime guard remains
+    responsible for stopping a guest if pressure rises after startup.
+    """
+    for sample in range(1, samples + 1):
+        blockers = host_pressure_blockers(host_pressure())
+        if blockers:
+            raise SystemExit(
+                f'refusing to start {unit}: host admission sample '
+                f'{sample}/{samples} is blocked: ' + '; '.join(blockers)
+            )
+        if sample < samples:
+            time.sleep(interval_seconds)
+
+
 def host_pressure_critical_blockers(pressure):
     """Stop guests for aggregate CPU saturation, not quota wait by itself."""
     blockers = [
@@ -548,13 +567,7 @@ def main():
         profile = dict(VM_PROFILES[options.profile])
         if options.cpu_quota_percent is not None:
             profile['cpu_quota_percent'] = options.cpu_quota_percent
-        pressure = host_pressure()
-        blockers = host_pressure_blockers(pressure)
-        if blockers:
-            raise SystemExit(
-                f'refusing to start {unit}: host pressure is elevated: '
-                + '; '.join(blockers)
-            )
+        require_stable_host_admission(unit)
         ephemeral_runtime = options.guest == 'watch-unit' or options.ephemeral_runtime
         if ephemeral_runtime:
             stale_runtimes = cleanup_stale_ephemeral_runtimes(options.guest)
