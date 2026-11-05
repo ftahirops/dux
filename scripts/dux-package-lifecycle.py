@@ -263,8 +263,8 @@ def assert_index_access_policy(directory=Path("/var/lib/dux"), expected_uid=0, g
 
 
 # A status read every two seconds avoids turning qualification polling into a
-# source of database load. Five minutes admits the observed sub-60s first scan
-# plus bounded retries, while limiting a baseline that can never become exact.
+# source of database load. Five minutes gives slow guest boot/scan runs time to
+# finish one baseline scan while bounding nonconverging qualification work.
 DAEMON_READINESS_POLL_SECONDS = 2.0
 LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS = 300
 
