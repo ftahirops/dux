@@ -14,14 +14,9 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
-class SshTunnelQualificationWorkflowTests(unittest.TestCase):
-    def test_ci_installs_sshd_and_runs_privileged_loopback_qualification(self):
-        workflow = WORKFLOW.read_text()
-        self.assertIn("openssh-server", workflow)
-        self.assertIn(
-            "sudo python3 scripts/dux-ssh-tunnel-qualification.py",
-            workflow,
-        )
+class SshTunnelQualificationTests(unittest.TestCase):
+    def test_ci_workflow_removed_by_project_request(self):
+        self.assertFalse(WORKFLOW.exists())
 
     def test_loopback_qualification_covers_pinned_and_rejected_host_keys(self):
         source = QUALIFICATION.read_text()
