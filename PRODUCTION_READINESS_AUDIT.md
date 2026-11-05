@@ -20554,3 +20554,9 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 
 - At **22:24:20**, the workload classifier found no active build/test process, but host load1 was still **13.82**, above the VM admission limit of **10**; admission correctly remained closed on pressure alone. CPU PSI some/full was **7.72% / 0%**, I/O PSI some/full **0.61% / 0.31%**.
 - In the same interval, r89 read-only status pending updates grew **227 → 39,327** from 22:23:08 to 22:24:20 while kernel overflow notifications remained **523**. The index is still dirty/not caught up, reconciliation paused after **2** failures, with no scan or write error. This confirms neither a low pending sample nor a temporary absence of classified test processes establishes recovery.
+
+### r89 DEB lifecycle attempt 4 stopped during guest boot — 2026-11-05 22:25–22:27 UTC
+
+- The three-sample admission gate passed and started Ubuntu 24.04 with 2 GiB RAM, 25% CPU quota, read-only tmpfs input share, and private tmpfs overlay. The guest reached its serial login prompt, but its first SSH command closed before returning output; cloud-init had not completed, package hashes were not checked in the guest, and the lifecycle harness was not invoked.
+- At **22:27:03**, the independent guard found two Go compiler workers and a Go test and stopped the guest (load1 **2.47**, CPU PSI some/full **47.16% / 0%**, I/O PSI some/full **0.86% / 0.38%**, memory PSI some **0.17%**). This is a boot interruption, not a package failure or lifecycle result. Structured record: `target/readiness/r89-deb-lifecycle-input/attempt4-interrupted.json`.
+- Cleanup is verified: the VM unit is inactive, ephemeral state is marked cleaned, the per-run directory is absent, and the controller reports the guest missing. Package actions and production changes did not occur. The next run should wait for a quiet interval longer than first boot and preserve `--progress` output to host-side evidence.
