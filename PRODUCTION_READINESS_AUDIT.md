@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 19:56 UTC
+## Current readiness decision — 2026-11-05 20:07 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **19:56 UTC** it
-reported **451** kernel overflow notifications, **2,005** pending updates,
-about **34,613 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **20:07 UTC** it
+reported **451** kernel overflow notifications, **97** pending updates, about
+**35,233 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness. The service remains
 active with zero restarts.
@@ -49,10 +49,10 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At **19:56 UTC**, root storage was **185 GiB total / 102 GiB used /
-76 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
-available**. The host was under a Go build/test/vet batch; load1 was **19.44**,
-CPU PSI some avg10 **24.40%**, and I/O PSI some avg10 **2.41%** after the Rust
+At **20:07 UTC**, root storage was **185 GiB total / 103 GiB used /
+74 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
+available**. The host was under a Go build/test batch; load1 was **15.82**,
+CPU PSI some avg10 **58.01%**, and I/O PSI some avg10 **0.85%** after the Rust
 test scope had stopped. A RustSec audit of the
 candidate lockfile found no advisories in its 2026-11-05 database snapshot;
 this is dependency evidence, not complete source or binary security
@@ -20378,3 +20378,9 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 - Verified that a private mount namespace can overlay `/home/dux/target`, `/root/.cargo`, and `/root/.rustup` with tmpfs upper layers while preserving their original absolute paths and reusing the existing target cache. Host paths remained unchanged after a write probe. This avoids publishing compiler writes to the live watched filesystems.
 - Retried the stale-ATTRIB regression in that isolated overlay, capped at **5% CPU / 1 GiB memory**, one Cargo job, `nice 19`, and idle I/O. It reused dependencies and reached `Compiling dux`; the test itself had not started when a concurrent Go build/test/vet burst drove host load1 to **24.65** and CPU PSI some avg10 to **83.06%**. Stopped only the Rust scope. It is inactive and ended with status **143**, with no test result. Production's overflow counter remained **451** during the isolated compile, though its pending queue varied. Do not count this as a pass.
 - At **19:56 UTC**, host Go compiler/test processes remained active and load1 was **19.44**. Production remained dirty after **451** overflows, with **2,005** pending updates, no scan, and about **34,613 seconds** reported lag. Disk was **102 GiB used / 76 GiB free** on root and **2.9 GiB used / 10 GiB free** on `/dev/shm`.
+
+### Stale-ATTRIB regression passes; full serial suite interrupted — 2026-11-05 19:58–20:07 UTC
+
+- In the private mount overlay, `cargo test --locked --offline --bin dux attrib -- --nocapture` passed **4/4**: stale target-only ATTRIB classification, startup handle-capability probe, unresolved self-generated ATTRIB handling, and ambiguous v4 history attribution. The overlay preserved the existing Cargo target paths while redirecting target, Cargo, and rustup writes to tmpfs. Production's overflow counter stayed at **451** during this run; the test artifacts did not enter the host-visible target tree.
+- Started the complete **267-test** binary suite serially (`--test-threads=1`) in the same overlay, capped at **10% CPU / 2 GiB memory**. Before tests began, a new Go build/test batch raised load1 to **10.92** and CPU PSI some avg10 to **56.47%**. Stopped only the Rust suite scope; it is inactive and ended with status **143**. This is incomplete evidence, not a suite pass. The production overflow count remained **451**; production status at 20:07 was dirty/not caught up, with **97** pending updates, no scan, and about **35,233 seconds** lag.
+- The private-overlay method enables meaningful local tests without publishing compiler writes to the live watched filesystems. It does not eliminate CPU competition, and the full current-source suite remains an open gate until it completes under an acceptable host window.
