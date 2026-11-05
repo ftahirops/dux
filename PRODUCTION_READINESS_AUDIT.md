@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:49 UTC
+## Current readiness checkpoint — 2026-11-05 06:51 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **381** recorded kernel overflows, **978 pending updates**, and is
-about **11.4 hours** behind. The status reports recovery unpaused, but no scan
-is running and the last scan is about **3.7 hours** old. Revision 74 passed
+overflow, has **381** recorded kernel overflows, **40,623 pending updates**, and
+is about **11.4 hours** behind. The status reports recovery unpaused, but no
+scan is running and the last scan is about **3.8 hours** old. Revision 74 passed
 package lifecycle tests and revision 67 passed the core exact-binary churn
 suite. Exact revision-74 live churn remains unverified, and the current-tree
 revision-75 release build has not completed. The status reports no pause reason
@@ -19631,3 +19631,14 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Between **06:46:30** and **06:49:08 UTC**, the live 0.6.3-66 status remained at **381** recorded overflows and dirty from the same fanotify-loss epoch. Pending work moved from **10** to **978**; no scan was active and `write_error=null`. The later status was about **40,968 seconds** behind. This queue fluctuation is not a clean index or an exactness signal.
 - The service journal reported seven successful **128-update** flushes between **06:47:17** and **06:48:22**, each taking **250–398 ms**; the first recorded `pending_before` was **4,386**, and the last was **138**. These are measurements from the installed legacy binary. They neither establish why flushes are slow nor characterize revision 74/current-source performance.
 - At **06:49:08**, CPU PSI was `some avg10=11.11%`, I/O PSI `some avg10=3.89%` and `full avg10=3.71%`; the previously observed Go test process had exited. No tuning, scan, or service mutation was attempted. Candidate transaction-size/flush throughput still needs a controlled same-binary benchmark.
+
+### PROD-TEST-328 Bounded watcher parse and backlog accounting regressions pass — 2026-11-05 06:50 UTC
+
+- Reused the existing source-matched Rust test executable `target/debug/deps/dux-fc0f5b20131235c5` (SHA-256 `92aa6df79ae15ba5a1adbae93f0a98e4d844e35f664ad25a87e5e79ff7743d0b`); current `src`, Cargo, lockfile, and build script remain identical to revision 74. Ran `watch::tests::bounded_fanotify_parse_returns_ordered_suffix_for_later_ticks` and `watch::tests::backlog_budget_includes_deferred_moves` in a systemd scope capped at **5% CPU / 512 MiB**, `IOWeight=1`, nice 19, idle I/O priority. Both passed (each **1/1**); the parser test used its isolated temporary database, not the production index.
+- These regressions verify bounded event parsing preserves the unread ordered suffix and latches uncertainty, and that deferred-move work counts against the in-memory backlog bound. They do not establish capture throughput, real kernel-overflow behavior, or live recovery. The full current-source Rust suite and fault/scale matrix remain open.
+
+### PROD-HEALTH-329 Pending work surges again with overflow count unchanged — 2026-11-05 06:51 UTC
+
+- Compared the **06:49:08** and **06:51:07 UTC** live status samples: pending updates rose from **978** to **40,623** (**+39,645 in 119 seconds**) while the recorded kernel-overflow count stayed at **381**. The later counters were **80,127,552 seen / 47,191,990 resolved / 8,216,642 committed**, with `events_dropped=0`; these counters are not unique-path or durable capture measurements.
+- The index remains dirty from the prior fanotify-loss epoch, about **41,087 seconds** behind, with no active scan and `write_error=null`. Root had **64 GiB free**. Host I/O PSI at the sample was `some avg10=0.99%`, `full avg10=0.66%` (60-second `full` average **8.90%**). Four unrelated Vitest workers were using roughly **135–151% CPU each**; timing does not establish that workload as the cause.
+- The system remains not caught up even when the overflow count is unchanged. No build, scan, install, or service/index mutation was started; a current-candidate sustained-throughput comparison and exact live reconciliation remain necessary.
