@@ -6240,3 +6240,23 @@ There was no scan or write error; the last scan was **15,299 seconds** old.
 Storage had **66 GiB free** on `/` and **7.8 GiB free** on `/dev/shm`. No manual
 scan or daemon restart was attempted because the event stream had just recorded
 fresh losses and the current index cannot be treated as exact.
+
+### Third release retry under a 5% CPU ceiling — 2026-11-05 07:23 UTC
+
+After the host-wide Go test exited, retried the same cached revision-75 package
+build with `CPUQuota=5%`, `MemoryMax=4G`, one Cargo job, `CPUWeight=10`,
+`IOWeight=1`, nice 19, and idle I/O. It again stopped during
+`libsqlite3-sys` compilation, before producing any release artifact. Host CPU
+PSI some avg10 reached **41.27%** at **07:22:12**; the named build scope was
+stopped. Log SHA-256 is
+`b93aaa4545cd784538a9b3d3fd12fef07769d00651c7959669fb12f9aa4f4de5`. The
+**322 MiB** Cargo cache remains intact.
+
+At **07:22:53**, the Dux service cgroup CPU pressure sample was near zero (some
+avg10 **0.00%**, avg300 **0.06%**). Read-only Dux status at that time showed
+**30 pending updates**, unchanged **413** overflow notifications, no active
+scan, and no write error. These distinct host and service samples do not
+establish which process or resource condition produced the host PSI spike;
+they show that the global stop signal rose while Dux's own cgroup pressure and
+pending queue remained low. The installed index itself remains dirty and about
+**11.9 hours** behind, so this is not evidence of production correctness.

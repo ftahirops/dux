@@ -23,7 +23,7 @@ GiB free**.
 | S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
 | S5 — modules, package/security, operations | **Partial** | Revision 74 passed guarded package upgrade/rollback/removal/clean-install. A fresh RustSec audit of the current lockfile found no known advisories (database current through 2026-11-03). Current full-tree provenance awaits revision 75; root plus `CAP_SYS_ADMIN`/`CAP_DAC_READ_SEARCH` remains, and capability/platform/runbook gates are open. |
-| S6 — integrated release qualification | **Open** | No current-tree revision-75 artifact; exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Two resource-capped build attempts stopped before producing a binary when shared-host CPU pressure rose. |
+| S6 — integrated release qualification | **Open** | No current-tree revision-75 artifact; exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Three resource-capped build attempts stopped before producing a binary when host CPU pressure rose. |
 
 This matrix is an evidence summary, not a maturity percentage. Small tests or an
 older passing candidate do not close a stage that requires current-source,
