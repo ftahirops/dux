@@ -1,16 +1,17 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 08:19 UTC
+## Current readiness checkpoint — 2026-11-05 08:22 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
 0.6.3-66, active with zero restarts. At 08:19 UTC its `/` index was dirty from
 fanotify overflow with **446** recorded kernel-overflow notifications,
-**18,862 pending updates**, and about **12.9 hours** behind; no scan was running
-and `write_error` was null. Pending had been 86 three minutes earlier while
-the overflow counter was unchanged. The queue fluctuates and does not make
-this index trustworthy. Host I/O PSI `some/full avg10` was **27.17% / 26.46%**,
-so no recovery or exactness walk was attempted. The 0.6.3-75 release
+**10,763 pending updates**, and about **12.9 hours** behind; no scan was running
+and `write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
+then down to 10,763 at 08:22 while the overflow counter stayed 446. The queue
+fluctuates and does not make this index trustworthy. At 08:19 host I/O PSI
+`some/full avg10` was **27.17% / 26.46%**; it had fallen to **2.23% / 2.08%**
+at 08:22. The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
 24.04. The effective installed unit in that guest denied `bpf`. RustSec audit
@@ -19701,3 +19702,8 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 
 - Compared the read-only 08:16 and 08:19 status samples: pending updates increased from **86** to **18,862** while the kernel-overflow count remained **446**. At 08:19, status remained dirty from fanotify overflow, about **46,398 seconds** behind, with no scan and `write_error=null`. A low/empty queue would not clear this uncertainty; this large rise independently confirms that a healthy caught-up state has not been established.
 - The installed service remained active on 0.6.3-66 with zero restarts. Host load1 was **6.34**; CPU PSI some avg10 was **2.96%**, while I/O PSI some/full avg10 was **27.17% / 26.46%**. Timing does not establish which workload caused the backlog or I/O pressure. No scan, package install, service restart, or index write was attempted. Root had **64 GiB free** and `/dev/shm` **7.5 GiB free**.
+
+### PROD-PERF-339 Installed daemon sustains high index write volume while draining backlog — 2026-11-05 08:21–08:22 UTC
+
+- Two paired read-only samples of legacy PID **423219**'s `/proc/423219/io` and its systemd cgroup `io.stat` showed `write_bytes` rising **201,986,048 bytes in 10.0 seconds**, then **189,321,216 bytes in 10.0 seconds** (about **19–20 MB/s**). In those same intervals `updates_committed` rose **3,328** and **3,584**; pending moved **22,016 → 18,944**, then **13,296 → 10,763**. The kernel-overflow count remained **446** and WAL size stayed at **128 MiB**. These are observations of the installed 0.6.3-66 process under live filesystem activity; they do not establish the I/O root cause or candidate performance.
+- A slow event flush warning in the interval reported **291 ms** for a successful 128-update batch with **34,315** pending before it. Host I/O PSI some/full avg10 was **2.23% / 2.08%** at 08:22, after a higher 08:19 sample. No performance tuning or index operation was attempted. Measure comparable throughput, write amplification, WAL checkpointing, and query latency on the exact current candidate in an isolated reference environment before accepting these legacy-host costs as candidate behavior.

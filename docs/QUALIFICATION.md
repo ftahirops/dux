@@ -6350,3 +6350,7 @@ The current-source all-features/all-targets Rust suite discovered 260 tests; 34 
 ### Live-index status refresh — 2026-11-05 08:19 UTC
 
 Read-only status on installed 0.6.3-66 showed the dirty index at 446 recorded fanotify overflows and 18,862 pending updates, up from 86 at 08:16 with the overflow count unchanged. It remained about 46,398 seconds behind, with no scan or write error. Host I/O PSI some/full avg10 was 27.17%/26.46%; no recovery or exactness walk was attempted. This is not a clean-index or candidate-release result.
+
+### Legacy daemon write-rate sample — 2026-11-05 08:21–08:22 UTC
+
+Paired 10-second samples of installed daemon PID 423219 showed process `write_bytes` increases of about 202 MB and 189 MB. In the same intervals committed updates rose 3,328 and 3,584, while pending work decreased; kernel-overflow count remained 446 and WAL size was 128 MiB. A successful 128-update flush took 291 ms with 34,315 pending beforehand. This measures only legacy 0.6.3-66 under this host's live workload; it does not identify the cause or qualify candidate performance. Candidate write amplification, WAL/checkpoint, and query latency benchmarks remain open.
