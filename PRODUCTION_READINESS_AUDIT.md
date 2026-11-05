@@ -38,11 +38,18 @@ metadata is `dux 0.6.3-79 amd64/x86_64`; every checksum in the preserved manifes
 passes. This validates payload identity, not install-time scriptlets or the
 effective unit in an installed guest.
 
+An offline invocation smoke also passed the binary's version output and help
+parsing for the root CLI and all 16 subcommands (18 invocations total). The
+no-argument interactive TUI is not qualified by this smoke: when invoked
+without a terminal it exited with `No such device or address`.
+
 The exact-current DEB/RPM lifecycle has **not** passed yet. The manager admitted
 a disposable Ubuntu 24.04 lifecycle guest after stale Cargo build caches were
-removed from `/dev/shm`; its pressure guard stopped the guest 13 seconds later
-when host load reached 15.44, before SSH transfer or package changes. No
-package lifecycle phase ran. The guest overlay is retained for a safe retry.
+removed from `/dev/shm`; three boot attempts were stopped by its pressure guard
+at host load 15.44, 13.12, and 12.37 before SSH transfer or package changes.
+The 25%-quota guest reached cloud-init finalization before the last stop, but
+never accepted a completed SSH session. No package lifecycle phase ran. The
+guest overlay is retained for a safe retry.
 The current-source all-features/all-targets Rust unit suite already passed
 **262/262** in an isolated Ubuntu guest; the revision-79 release build closes
 the source/artifact mismatch but does not close lifecycle, scale, fault,
