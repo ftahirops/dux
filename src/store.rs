@@ -62,16 +62,8 @@ impl<'a> PathResolver<'a> {
         Ok(v)
     }
 
-    /// Resolve the historical lossy UTF-8 path form used by internal callers.
-    /// Missing objects (e.g. deleted history) retain an inode label; SQL failures
-    /// and cycles must reach callers instead of masquerading as successful reads.
-    pub fn resolve(&mut self, dev: i64, inode: i64) -> Result<String> {
-        Ok(String::from_utf8_lossy(&self.resolve_bytes(dev, inode)?).into_owned())
-    }
-
     /// Resolve a terminal/JSON display path without collapsing distinct raw
-    /// filename bytes. `resolve` remains available for callers that need the
-    /// historical lossy filesystem-path string for internal path operations.
+    /// filename bytes.
     pub fn resolve_display(&mut self, dev: i64, inode: i64) -> Result<String> {
         Ok(crate::util::display_path_bytes(
             &self.resolve_bytes(dev, inode)?,
@@ -819,14 +811,8 @@ impl Store {
         Ok(v)
     }
 
-    /// Reconstruct the historical lossy UTF-8 path used for internal path checks.
-    pub fn path_of(&self, dev_id: i64, inode: i64) -> Result<String> {
-        PathResolver::new(&self.conn).resolve(dev_id, inode)
-    }
-
     /// Reconstruct a safe display path while preserving distinct raw filename
-    /// bytes. Use `path_of` when the caller needs the historical lossy path form
-    /// for internal filesystem checks.
+    /// bytes.
     pub fn path_of_display(&self, dev_id: i64, inode: i64) -> Result<String> {
         PathResolver::new(&self.conn).resolve_display(dev_id, inode)
     }
@@ -959,16 +945,16 @@ mod tests {
     #[test]
     fn display_path_propagates_sql_and_row_errors() {
         let conn = Connection::open_in_memory().unwrap();
-        assert!(PathResolver::new(&conn).resolve(1, 2).is_err());
+        assert!(PathResolver::new(&conn).resolve_display(1, 2).is_err());
         conn.execute_batch(SCHEMA_SQL).unwrap();
         conn.execute_batch("INSERT INTO dirents VALUES(1,1,'text-not-blob',1,2,1)")
             .unwrap();
-        assert!(PathResolver::new(&conn).resolve(1, 2).is_err());
+        assert!(PathResolver::new(&conn).resolve_display(1, 2).is_err());
         assert!(Store {
             conn,
             schema_version: SCHEMA_VERSION
         }
-        .path_of(1, 2)
+        .path_of_display(1, 2)
         .is_err());
     }
 
@@ -998,8 +984,6 @@ mod tests {
                 .as_bytes(),
             b"/\xff"
         );
-        assert_eq!(resolver.resolve(1, 2).unwrap(), "/�");
-        assert_eq!(resolver.resolve(1, 3).unwrap(), "/�");
     }
 
     #[test]
@@ -1016,14 +1000,14 @@ mod tests {
             .unwrap();
         }
         let mut resolver = PathResolver::new(&conn);
-        let path = resolver.resolve(1, 1024).unwrap();
+        let path = resolver.resolve_display(1, 1024).unwrap();
         assert!(path.starts_with("/a/a"));
         assert_eq!(path.matches('a').count(), 1023);
-        assert_eq!(resolver.resolve(1, 1024).unwrap(), path);
+        assert_eq!(resolver.resolve_display(1, 1024).unwrap(), path);
         conn.execute("UPDATE dirents SET parent_inode=1024 WHERE inode=2", [])
             .unwrap();
         assert!(PathResolver::new(&conn)
-            .resolve(1, 1024)
+            .resolve_display(1, 1024)
             .unwrap_err()
             .to_string()
             .contains("cycle"));
@@ -1146,13 +1130,13 @@ mod tests {
     }
 
     #[test]
-    fn path_of_unresolved_inode_does_not_panic() {
+    fn path_of_display_unresolved_inode_does_not_panic() {
         let db = tmp("path-of");
         for s in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{s}", db.display()));
         }
         let store = Store::create_fresh(&db).unwrap();
-        assert_eq!(store.path_of(1, 42).unwrap(), "inode:42");
+        assert_eq!(store.path_of_display(1, 42).unwrap(), "inode:42");
         drop(store);
         for s in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{s}", db.display()));
