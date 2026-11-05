@@ -5863,3 +5863,77 @@ Snapshot SHA-256
 disk has **65 GiB free (64% used)**. Package install/upgrade/rollback and
 production index recovery remain unqualified. This entry changes the source
 tree; rebuild the release bundle from its resulting commit before promotion.
+
+### Revision 73 bundle and production reconciliation circuit diagnosis — 2026-11-05 02:15 UTC
+
+Static package revision **73** was built from clean HEAD
+`b1814ae6938c794c2c7251b50124a5f2cd3a5502`. Its manifest binds the binary to
+source-tree SHA-256
+`8058b0c47fe8a10e680cd27cf7eea2f0cde25cfc157fda0c12a70b58405b41f9` and
+records `worktree_dirty=false`. The x86_64 static PIE includes `.dep-v0`; its
+binary SHA-256 is
+`b36227616af18a3740f9897e31031f8ee6a5d87c8b723f9c38371af24d00193c`, matching
+the DEB and RPM payloads. All eight artifact checksums pass. RustSec reports 0
+vulnerabilities and warnings across 229 lockfile dependencies; the exact
+binary scan recovered 202 dependencies without warnings. The Build-ID-matched
+debug artifact passed. The bundle is
+`target/readiness/release-current-head-b1814ae-73/`; SHA256SUMS SHA-256 is
+`49e19210eee3532835076023126f0d1567dd331d5787a2511fa1ce78bc344a42`. Build
+log SHA-256 is
+`7335c206ca81b8ca8f6be424c642fc3ffd522404b84c59ec5927416da2d5ac52`; the
+tmpfs-cached build completed in **2m51s**, used **50.9s CPU**, peaked at
+**672.6 MiB**, and used no swap. Exact-binary smoke scanned a 4 KiB fixture
+with zero coverage issues and matched GNU `du` at **4096 bytes**; log SHA-256
+`201b838f5fd86e2a363a39a7b056c616737ce75fb5a3b46c3687d3d8152b794e`.
+
+The current production service is still the rev66 executable
+`e0cc915f8f37`; it is active as PID **423219** without a write error. A
+read-only query of `/var/lib/dux/dux.db` using the current revision 73 CLI
+confirmed `automatic_reconciliation_paused=true`, **2** failed full scans,
+and a maximum of **1** automatic retry. The installed rev66 status output
+does not expose these fields. Journal entries for incomplete reconciliations
+record `lost_events=true` and zero scan errors, consistent with event loss
+during host churn rather than a filesystem traversal error. The queue has
+drained near zero between external build bursts, but its overflow count has
+risen to **200**. At **02:14:34 UTC**, the candidate status showed **233**
+pending events, no scan in progress, and about **24,495 seconds** behind;
+the host-load admission check still rejected intensive work at load1 **14.27**.
+
+The installed rev66 CLI supports the documented `dux scan /` recovery path:
+it signals the live daemon with SIGHUP and waits for an in-place, single-writer
+rescan and accounting verification. The current source reports the paused
+retry circuit in JSON and human status. The recovery request remains deferred
+until external Go build/test and analysis workloads subside and the host
+pressure gate passes; a rescan during another overflow could fail the same
+circuit again. Candidate status evidence SHA-256 is
+`9a993c613a647630bb04643dd3999a3663932a15397dccc74c0a30c6dbf12728`.
+
+A further guarded Ubuntu start reached userspace and completed cloud-init, but
+host CPU PSI then crossed the guard's hard limit before either package could
+be copied. No package lifecycle step ran; the base image was untouched and
+the tmpfs runtime was removed. Guest console SHA-256
+`66447af3fe2329f67c17bdf94183f050fe029a261667be5ce8af7454d969a58c`; guard
+log SHA-256
+`9b34303f050d951623e74a1677800d21450b92a333cb60d21bb410f83e000601`. This
+entry changes the source-tree digest, so revision 73 is bound to the previous
+commit; build from the commit containing this diagnosis before promotion.
+Package installation/upgrade/rollback and live-index recovery remain open.
+
+### Live-host rescan admission recheck — 2026-11-05 02:19 UTC
+
+The production daemon remains the installed rev66 process (PID **423219**).
+Revision 73's read-only status at **02:19:45 UTC** reported the reconciliation
+circuit still paused after **2** failures, **200** recorded kernel overflow
+notifications, no active scan, no write error, and **9** pending updates. The
+last scan is about **24,805 seconds** old; the index has about **1.37 million**
+nodes. Pending work drained from **20,126** at 02:17:10 to single digits, but
+the event stream remained active and unrelated Go race tests plus an automatic
+host repair process were running. Load1 was **3.36**, CPU PSI `some avg10` **1.47%**,
+and I/O PSI `full avg10` **2.65%**. Root had **66 GiB free**. The low pending
+count is not sufficient admission evidence while host filesystem churn and a
+repair operation continue; no recovery scan, service restart, or package
+change was made. Recheck only after those live processes exit and counters
+remain stable across observation windows. `/tmp` contained about **14 GiB**,
+including active Go build data and unrelated application caches, so it was
+preserved; `target/readiness` retained about **6.6 GiB** of qualification
+evidence.
