@@ -6047,3 +6047,19 @@ window did not hold: the low pending count is transient while new short-lived
 build processes continue generating events. No scan or package/service
 operation was performed. The rescan gate remains closed until host churn and
 unresolved event warnings stop over repeated samples.
+
+### Repeated test churn prevents sustained recovery window — 2026-11-05 02:57 UTC
+
+At **02:56:38 UTC**, unrelated `/home/xgenstack.com` workloads had restarted:
+`npm exec vitest run` under the UI tree and `go test ./...` under the backend.
+Dux remained live without an active scan or write error, but status showed
+**44,272 pending updates**, `dirty=true`, **236** recorded kernel overflows,
+and about **27,019 seconds** since the last completed scan. The preceding 30
+seconds contained **21** unresolved fanotify/stale-handle or slow-flush log
+entries. Load1 was **10.40**, CPU PSI `some avg10` **9.84%**, and I/O PSI
+`some avg10` **0.70%**; root had **66 GiB free**. The overflow count had not
+increased in this sample, but ongoing unresolved events and the growing queue
+show that the earlier low-pending observation was not a durable recovery
+window. No scan, restart, package change, or direct database operation was
+performed. Retry admission only after the external tests/builds finish and
+multiple quiet samples show the queue and event-loss signals have settled.
