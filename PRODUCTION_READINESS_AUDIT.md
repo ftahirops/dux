@@ -1,17 +1,17 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 08:22 UTC
+## Current readiness checkpoint — 2026-11-05 08:28 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 08:19 UTC its `/` index was dirty from
+0.6.3-66, active with zero restarts. At 08:28 UTC its `/` index was dirty from
 fanotify overflow with **446** recorded kernel-overflow notifications,
-**10,763 pending updates**, and about **12.9 hours** behind; no scan was running
+**337 pending updates**, and about **13.0 hours** behind; no scan was running
 and `write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
-then down to 10,763 at 08:22 while the overflow counter stayed 446. The queue
-fluctuates and does not make this index trustworthy. At 08:19 host I/O PSI
-`some/full avg10` was **27.17% / 26.46%**; it had fallen to **2.23% / 2.08%**
-at 08:22. The 0.6.3-75 release
+10,763 at 08:22, and 337 at 08:28 while the overflow counter stayed 446. The
+queue fluctuates and does not make this index trustworthy. I/O PSI some/full
+avg10 had fallen to **1.37% / 1.35%** at 08:28, after the high 08:19 sample.
+The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
 24.04. The effective installed unit in that guest denied `bpf`. RustSec audit
