@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -36,6 +37,18 @@ def _sha256_file(path):
 def command(*args, check=True):
     return subprocess.run([str(arg) for arg in args], check=check,
                           capture_output=True, text=True)
+
+
+def emit_progress(event, stream=None):
+    """Write one machine-readable lifecycle checkpoint and flush it now.
+
+    A host can tee SSH stdout to durable evidence while the guest report is
+    still being built. This preserves the last completed or active stage if a
+    disposable guest is stopped before its final report can be fetched.
+    """
+    stream = sys.stdout if stream is None else stream
+    print("DUX_PACKAGE_LIFECYCLE " + json.dumps(event, sort_keys=True),
+          file=stream, flush=True)
 
 
 def _exec_start_has_option(exec_start, option):
@@ -554,6 +567,8 @@ def main():
     parser.add_argument("old_package")
     parser.add_argument("new_package")
     parser.add_argument("--report", required=True)
+    parser.add_argument("--progress", action="store_true",
+                        help="flush machine-readable phase checkpoints to stdout")
     args = parser.parse_args()
     report_path = validate_report_destination(args.report)
     sandbox = require_disposable_qualification_vm()
@@ -573,8 +588,16 @@ def main():
         temporary = report_path.with_suffix(report_path.suffix + ".tmp")
         temporary.write_text(json.dumps(report, indent=2) + "\n")
         temporary.replace(report_path)
+        if args.progress:
+            emit_progress({"event": "stage_complete", "stage": name,
+                           "status": report["status"]})
+
+    def progress(stage, **details):
+        if args.progress:
+            emit_progress({"event": "stage_started", "stage": stage, **details})
 
     try:
+        progress("legacy_baseline_preparation")
         initial = installed_version(args.kind)
         old_version = installed_version_from_package(args.kind, old_package)
         old_payload_hash = package_binary_hash(args.kind, old_package)
@@ -587,6 +610,8 @@ def main():
             initial, old_version, initial_binary_hash, old_payload_hash
         )
         baseline_scan_started_at = int(time.time())
+        progress("legacy_baseline_runtime", expected_version=old_version,
+                 package_reinstall_required=baseline_reinstall)
         if baseline_reinstall:
             install(args.kind, old_package,
                     downgrade=initial is not None and initial != old_version)
@@ -627,6 +652,7 @@ def main():
             "/var/lib/dux/dux.db",
             rollback_backup_path_for_report(report_path),
         )
+        progress("upgrade", target_version=installed_version_from_package(args.kind, new_package))
         install(args.kind, new_package)
         upgraded = installed_version(args.kind)
         assert upgraded and upgraded != installed_version_from_package(args.kind, old_package), upgraded
@@ -650,6 +676,7 @@ def main():
                                                         "rollback_index_backup": rollback_backup,
                                                         "service": service_state()})
 
+        progress("rollback", target_version=old_version)
         install(args.kind, old_package, downgrade=True)
         rolled_back = installed_version(args.kind)
         assert rolled_back == installed_version_from_package(args.kind, old_package), rolled_back
@@ -688,6 +715,7 @@ def main():
             command("systemctl", "stop", unit, check=False)
             command("systemctl", "disable", unit, check=False)
 
+        progress("re_upgrade", target_version=upgraded)
         install(args.kind, new_package)
         assert installed_version(args.kind) == upgraded
         assert _sha256_file(Path("/usr/bin/dux")) == new_payload_hash
@@ -701,8 +729,10 @@ def main():
                                "service": service_state()})
 
         if args.kind == "rpm":
+            progress("remove_and_purge", package_manager="rpm")
             command("rpm", "-e", "dux")
         else:
+            progress("remove_and_purge", package_manager="deb")
             command("dpkg", "-r", "dux")
         assert installed_version(args.kind) is None
         assert not Path("/usr/bin/dux").exists()
@@ -730,6 +760,7 @@ def main():
         # test starts from clean state so it verifies the current package does
         # not create remote-access identities by default.
         shutil.rmtree("/etc/dux", ignore_errors=True)
+        progress("clean_install", target_version=upgraded)
         install(args.kind, new_package)
         clean_version = installed_version(args.kind)
         assert clean_version == upgraded, clean_version
@@ -783,11 +814,15 @@ def main():
             report["failure_evidence"] = evidence
         report["installed_version_at_failure"] = installed_version(args.kind)
         report["service_at_failure"] = service_state()
+        if args.progress:
+            emit_progress({"event": "lifecycle_failed", "error": repr(error)})
         raise
     finally:
         report["elapsed_seconds"] = round(time.time() - report["started_at_epoch"], 3)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2) + "\n")
+    if args.progress:
+        emit_progress({"event": "lifecycle_passed", "completed_stages": len(report["steps"])})
     print(json.dumps(report, indent=2))
 
 

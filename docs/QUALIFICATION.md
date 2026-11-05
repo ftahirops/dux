@@ -583,6 +583,13 @@ controller rather than manually marked. The lifecycle runner removes package
 state during its purge phase, so never bypass this guard or point it at a
 production host.
 
+For SSH-driven lifecycle runs, pass `--progress` and tee the lifecycle
+command's stdout on the host to a per-attempt evidence log. It emits flushed,
+single-line JSON checkpoints at stage start and completion so the host retains
+the last known stage if the runtime guard stops the disposable guest. Keep the
+host log outside the guest's read-only input share; never give the guest a
+writable host evidence directory.
+
 The stress and mount-qualification entry points use the shared
 `scripts/dux_qualification_sandbox.py` guard and also require this controller
 marker before starting loop mounts, transient daemons, scale workloads, or TUI

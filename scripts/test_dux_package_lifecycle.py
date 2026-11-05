@@ -2,6 +2,7 @@
 import grp
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,24 @@ SPEC = importlib.util.spec_from_file_location(
 )
 LIFECYCLE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(LIFECYCLE)
+
+
+class ProgressOutputTests(unittest.TestCase):
+    def test_progress_checkpoint_is_prefixed_json_and_flushed(self):
+        class FlushTrackingStream(io.StringIO):
+            flushed = False
+
+            def flush(self):
+                self.flushed = True
+                super().flush()
+
+        stream = FlushTrackingStream()
+        event = {"event": "stage_started", "stage": "upgrade"}
+        LIFECYCLE.emit_progress(event, stream)
+        prefix, payload = stream.getvalue().rstrip("\n").split(" ", 1)
+        self.assertEqual(prefix, "DUX_PACKAGE_LIFECYCLE")
+        self.assertEqual(json.loads(payload), event)
+        self.assertTrue(stream.flushed)
 
 
 class QualificationInterpreterSafetyTests(unittest.TestCase):
