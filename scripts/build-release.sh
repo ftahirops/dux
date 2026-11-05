@@ -265,6 +265,7 @@ sys.path.insert(0, str(pathlib.Path.cwd() / 'scripts'))
 from dux_source_archive import (
     SOURCE_TREE_EXCLUDES,
     collect_source_entries,
+    source_tree_dirty,
     write_source_archive,
 )
 
@@ -312,7 +313,7 @@ manifest = {
     'version': version,
     'package_release': package_release,
     'commit': subprocess.run(['git', 'rev-parse', 'HEAD'], text=True, capture_output=True).stdout.strip(),
-    'worktree_dirty': bool(subprocess.run(['git', 'status', '--porcelain'], text=True, capture_output=True).stdout.strip()),
+    'worktree_dirty': source_tree_dirty(pathlib.Path.cwd()),
     'source_tree_sha256': source_tree_digest,
     'source_file_count': len(source_entries),
     'source_tree_excludes': sorted(SOURCE_TREE_EXCLUDES),

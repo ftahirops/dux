@@ -42,6 +42,19 @@ def add_fake_cargo_audit(fake_tools):
         "raise SystemExit('unexpected cargo-audit invocation: ' + repr(args))\n"
     )
     audit.chmod(0o755)
+    cargo = fake_tools / "cargo"
+    cargo.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, subprocess, sys\n"
+        "args = sys.argv[1:]\n"
+        "if args and args[0] == 'audit':\n"
+        " result = subprocess.run(['cargo-audit', 'audit', *args[1:]], check=False)\n"
+        " raise SystemExit(result.returncode)\n"
+        "if args and args[0] == 'metadata':\n"
+        " print(json.dumps({'packages': []})); raise SystemExit(0)\n"
+        "raise SystemExit('unexpected cargo invocation: ' + repr(args))\n"
+    )
+    cargo.chmod(0o755)
 
 
 def add_fake_release_binary(root):
@@ -51,9 +64,7 @@ def add_fake_release_binary(root):
     revision = subprocess.check_output(
         ["git", "rev-parse", "--short=12", "HEAD"], cwd=REPO, text=True
     ).strip()
-    dirty = bool(
-        subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True).strip()
-    )
+    dirty = dux_source_archive.source_tree_dirty(REPO)
     _, source_digest = dux_source_archive.collect_source_entries(REPO)
     modified = "+modified" if dirty else ""
     binary = root / "dux-current-source"
@@ -439,7 +450,11 @@ class BuildReleaseCliTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn(expected, result.stderr)
+                self.assertIn(
+                    expected,
+                    result.stderr,
+                    f"returncode={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}",
+                )
                 self.assertFalse(output.exists() and list(output.iterdir()))
 
     def test_failed_package_build_does_not_publish_partial_artifacts(self):
@@ -598,7 +613,11 @@ class BuildReleaseCliTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("injected-rename-failure", result.stderr)
+            self.assertIn(
+                "injected-rename-failure",
+                result.stderr,
+                f"returncode={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}",
+            )
             self.assertEqual(
                 {item.name: item.read_bytes() for item in output.iterdir() if item.is_file()},
                 previous,

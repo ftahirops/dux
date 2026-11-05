@@ -49,6 +49,26 @@ def collect_source_entries(root: Path) -> tuple[list[dict[str, object]], str]:
     return entries, digest.hexdigest()
 
 
+def source_tree_dirty(root: Path) -> bool:
+    """Report changes only to files included in the canonical source archive."""
+    root = Path(root).resolve()
+    command = [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--",
+        ".",
+        *(f":(exclude){name}" for name in sorted(SOURCE_TREE_EXCLUDES)),
+    ]
+    result = subprocess.run(command, cwd=root, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"cannot determine source-tree cleanliness: {result.stderr.decode(errors='replace')}"
+        )
+    return bool(result.stdout)
+
+
 def write_source_archive(
     root: Path, entries: Iterable[Mapping[str, object]], destination: Path
 ) -> None:

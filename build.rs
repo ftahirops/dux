@@ -56,6 +56,25 @@ fn source_tree_sha256() -> Option<String> {
     Some(digest)
 }
 
+fn source_tree_dirty() -> bool {
+    let mut command = Command::new("git");
+    command.args([
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--",
+        ".",
+    ]);
+    for excluded in SOURCE_TREE_EXCLUDES {
+        let pathspec = format!(":(exclude){}", String::from_utf8_lossy(excluded));
+        command.arg(pathspec);
+    }
+    command
+        .output()
+        .map(|output| !output.status.success() || !output.stdout.is_empty())
+        .unwrap_or(true)
+}
+
 fn main() {
     let revision = Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
@@ -64,11 +83,7 @@ fn main() {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .unwrap_or_else(|| "source-archive".into());
-    let dirty = Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()
-        .is_some_and(|o| o.status.success() && !o.stdout.is_empty());
+    let dirty = source_tree_dirty();
     println!(
         "cargo:rustc-env=DUX_BUILD_REVISION={revision}{}",
         if dirty { "+modified" } else { "" }

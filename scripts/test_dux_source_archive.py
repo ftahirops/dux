@@ -10,6 +10,33 @@ import dux_source_archive
 
 
 class SourceArchiveTests(unittest.TestCase):
+    def test_dirty_state_ignores_excluded_local_files_but_tracks_source_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            source = root / "src" / "module.rs"
+            source.parent.mkdir()
+            source.write_text("fn main() {}\n")
+            audit = root / "PRODUCTION_READINESS_AUDIT.md"
+            audit.write_text("audit evidence\n")
+            settings = root / ".claude" / "settings.local.json"
+            settings.parent.mkdir()
+            settings.write_text('{"local": true}\n')
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "initial"], cwd=root, check=True)
+
+            audit.write_text("updated audit evidence\n")
+            settings.write_text('{"local": false}\n')
+            self.assertFalse(dux_source_archive.source_tree_dirty(root))
+
+            source.write_text("fn main() { /* changed */ }\n")
+            self.assertTrue(dux_source_archive.source_tree_dirty(root))
+            source.write_text("fn main() {}\n")
+            (root / "src" / "new.rs").write_text("// untracked source\n")
+            self.assertTrue(dux_source_archive.source_tree_dirty(root))
+
     def test_source_tree_digest_binds_paths_and_contents_but_excludes_local_data(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

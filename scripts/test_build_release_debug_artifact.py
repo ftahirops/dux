@@ -37,11 +37,7 @@ class ReleaseDebugArtifactTests(unittest.TestCase):
             revision = subprocess.check_output(
                 ["git", "rev-parse", "--short=12", "HEAD"], cwd=REPO, text=True
             ).strip()
-            modified = bool(
-                subprocess.check_output(
-                    ["git", "status", "--porcelain"], cwd=REPO, text=True
-                ).strip()
-            )
+            modified = dux_source_archive.source_tree_dirty(REPO)
             _, source_digest = dux_source_archive.collect_source_entries(REPO)
             suffix = "+modified" if modified else ""
             version_output = (
