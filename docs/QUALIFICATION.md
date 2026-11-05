@@ -6449,3 +6449,12 @@ inactive and its Rust compiler processes exited. Removed only the named tmpfs
 scratch directories; `/dev/shm` returned to 7.5 GiB free. Log SHA-256:
 `42e67ce4e9538be173b024fe78834c9a9a26e2082ac1dcae95ceb9485a025642`. No current
 release artifact was produced; source-matched package qualification remains open.
+
+### Legacy daemon write-rate sample — 2026-11-05 09:18:47–09:18:57 UTC
+
+Paired read-only samples of installed PID 423219 showed `write_bytes` increasing
+145,870,848 bytes in 10.00 seconds (~14.6 MB/s). Committed updates rose 1,792;
+pending fell 40,749 to 39,321; the overflow count stayed 472 and WAL stayed
+128 MiB. The index remained dirty from fanotify overflow. At the second sample,
+CPU PSI some/full was 1.21%/0.00% and I/O PSI some/full was 1.97%/1.73%. This is
+legacy behavior only; it does not establish cause or qualify candidate writes.

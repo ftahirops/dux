@@ -1,19 +1,21 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 09:16 UTC
+## Current readiness checkpoint — 2026-11-05 09:18 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 09:16 UTC its `/` index was dirty from
+0.6.3-66, active with zero restarts. At 09:18 UTC its `/` index was dirty from
 fanotify overflow with **472** recorded kernel-overflow notifications,
-**126 pending updates**, and **49,788 seconds** behind; no scan was running and
-`write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
+**39,321 pending updates**, and **49,957 seconds** behind; no scan was running
+and `write_error` was null. At 09:17:52 it had been paused by I/O pressure;
+the pause had cleared by the paired 09:18:47–09:18:57 sample, while dirty
+uncertainty remained. Pending moved from 86 at 08:16 to 18,862 at 08:19,
 10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, 19 at 08:57,
-3,557 at 09:04, 85 at 09:13, then 126 at 09:16. The queue fluctuates and does
-not make this index trustworthy. At 09:16, CPU PSI some/full avg10 was
-**67.05% / 0.00%** and I/O PSI some/full was **0.36% / 0.00%**, while load1 was
-**30.99** after a `staticcheck ./...` burst. Three current-source release-build
-attempts were stopped between 09:03 and 09:16 at the host pressure limits; none
+3,557 at 09:04, 85 at 09:13, 126 at 09:16, then 39,321 at 09:18. The queue
+fluctuates and does not make this index trustworthy. At 09:18:57, CPU PSI
+some/full avg10 was **1.21% / 0.00%** and I/O PSI some/full was **1.97% / 1.73%**.
+Earlier load spikes included a `staticcheck ./...` burst. Three current-source
+release-build attempts were stopped between 09:03 and 09:16 at the host pressure limits; none
 compiled Dux or published an artifact. A `staticcheck ./...` burst was observed
 during the third attempt, without causal attribution. The earlier 4 GiB scale
 VM was stopped before SSH at 08:36; a 2 GiB current-source Rust test VM passed
@@ -29,7 +31,7 @@ from the same Rust sources as revision 75. Current HEAD adds the tunnel
 worker-start refactor and now passes the full **262/262** current-source Rust
 suite in an isolated guest. The current source still has no matching release
 artifact; revision 75 does not inherit this new suite result. Root storage is
-**185 GiB total, 113 GiB used, 65 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
+**185 GiB total, 112 GiB used, 65 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -19783,3 +19785,7 @@ Retried the current-source release build from commit `2afd321` as package revisi
 ### Revision-78 current-source build stopped during external staticcheck burst — 2026-11-05 09:16 UTC
 
 Started the source-current release build from commit `1a09e9b` for package revision 78 with a one-job auditable musl build, CPUQuota=25%, MemoryMax=4 GiB, no swap, low I/O weight, and all Cargo target/tmp/output paths on `/dev/shm`. A separate `staticcheck -checks=SA* ./...` process was observed using multiple cores. At 09:15:51 host load1 reached **27.85** and CPU PSI some avg10 **79.43%**; staticcheck had exited by the next process sample, but pressure remained high. Stopped only `dux-release-build-current-1a09e9b.scope` at 09:16:01 when load1 was **28.82** and CPU PSI some avg10 **73.35%**. The build had compiled dependencies only (about **71 MiB** target observed) and produced no Dux binary/package. Systemd confirms the scope inactive; no Cargo/Rust compiler remains. Removed only its exact tmpfs target/tmp/output dirs, restoring `/dev/shm` to **7.5 GiB free**. Preserved log `target/readiness/current-release-build-1a09e9b.log`, SHA-256 `42e67ce4e9538be173b024fe78834c9a9a26e2082ac1dcae95ceb9485a025642`. No production package, service, or index operation was performed. The temporal overlap does not establish causation. Current-source artifact qualification remains open.
+
+### Legacy daemon write rate while draining dirty backlog — 2026-11-05 09:18:47–09:18:57 UTC
+
+Synchronized read-only samples for installed Dux PID **423219** showed `write_bytes` rising from **228,903,809,024** to **229,049,679,872** (**145,870,848 bytes in 10.00 seconds**, about **14.6 MB/s**). Over the same interval, `updates_committed` rose **1,792**, pending updates fell **40,749 → 39,321**, `kernel_overflow_notifications` remained **472**, and WAL size remained **128 MiB**. The index was still dirty from overflow. At the second sample CPU PSI some/full avg10 was **1.21% / 0.00%** and I/O PSI some/full avg10 was **1.97% / 1.73%**. This confirms the legacy daemon continues substantial writes while backlog drains, but does not establish root cause, write amplification, or current-candidate performance. The brief prior `paused: io pressure` status cleared by this interval without an index recovery.
