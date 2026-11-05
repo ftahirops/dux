@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 18:44 UTC
+## Current readiness decision — 2026-11-05 18:58 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **18:44:19 UTC** it
-reported **401** kernel overflow notifications, **1,686** pending updates, about
-**30,268 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **18:58:37 UTC** it
+reported **417** kernel overflow notifications, **3,201** pending updates, about
+**31,127 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness.
 
@@ -46,8 +46,8 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At the latest disk sample, root storage was **185 GiB total / 104 GiB used /
-73 GiB available** and `/dev/shm` was **13 GiB total / 3.0 GiB used / 9.9 GiB
+At **18:58 UTC**, root storage was **185 GiB total / 105 GiB used /
+73 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
 available**. A RustSec audit of the candidate lockfile found no advisories in
 its 2026-11-05 database snapshot; this is dependency evidence, not complete
 source or binary security certification.
@@ -20320,3 +20320,10 @@ A fourth fresh Ubuntu 24.04 ephemeral guest was admitted at 17:12:50 UTC with th
 
 - Read-only source review confirms the path-instance graph is still a staging model, not the live index contract: `src/store.rs` declares `SCHEMA_VERSION = 6` and explicitly documents `PATH_GRAPH_TABLES_SQL` as v7 staging; `src/scan.rs` builds and validates staged `paths`/`dir_totals`, then projects scan results into v6 `inodes` and `dirents`; live watcher maintenance still keys entries and parent chains by `(dev,inode)`. Query/path resolution likewise reads the v6 dirent graph. Thus the passing v7 staging tests demonstrate useful isolated invariants, while the production blocker is integration across atomic publication, event updates, query semantics, migration/rollback, and exactness for aliases.
 - The broad external coverage workload remains active; at **18:49 UTC** it had advanced to a router integration coverage command. Host load1 was **7.81** and CPU PSI some avg10 **12.81%**. No live migration or schema change was attempted.
+
+### Build-workload admission guard and lifecycle attempt 6 — 2026-11-05 18:52–18:58 UTC
+
+- Attempt 6 used the verified read-only ext4 input fixture, 2 GiB Ubuntu 24.04 guest, 15% configured CPU quota, 2.5 GiB memory cap, and isolated tmpfs overlay. The guard stopped it at **18:52:24 UTC**, before SSH, when load1 reached **12.92** and CPU PSI some avg10 reached **63.85%**. The ephemeral overlay was removed and state marked cleaned. At **18:52:39 UTC**, `go build ./...` (PID **162830**) and multiple Go compiler workers were active; the parent build had started before VM admission. This timing shows a workload that was missed by the prior Go-test-only process inspection, though it does not prove that build was the sole pressure source. The attempt record is `target/readiness/r88-deb-lifecycle-input/attempt6-interrupted.json` and is not lifecycle evidence.
+- Fixed that qualification-controller gap in `scripts/dux-qualification-vm.py`: admission and the running pressure guard now inspect `/proc` for active Go/Cargo build/test drivers, Go compiler workers, and common native/Rust compilers. The evidence label includes only process type and PID, not the full command line. A process disappearing during inspection is ignored; other `/proc` scan errors become telemetry errors and fail closed. This prevents a known active build from passing the initial PSI-only admission and stops an admitted guest if a build/test workload starts later.
+- Added regressions for Go/Cargo build and test detection, compiler-worker detection, false-positive avoidance for a Python command containing the words `go build`, admission and guard blocking, and unreadable process/telemetry behavior. `scripts/test_dux_qualification_vm.py` passed **36/36** under a scope capped at 10% CPU, 512 MiB memory, and low I/O priority; Python byte-compilation and `git diff --check` passed. A live smoke sample detected the active host `go test` process and returned an admission blocker.
+- At **18:58:37 UTC**, that external `go test -p 2` batch was still active. Production Dux remained dirty/not caught up at **417** kernel overflows, **3,201** pending updates, about **31,127 seconds** behind, no active scan, and no write error. Root had **73 GiB free**. The current-source control-plane fix improves VM admission but does not resolve production event loss or qualify the r88 package lifecycle.

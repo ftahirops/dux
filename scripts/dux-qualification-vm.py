@@ -208,6 +208,43 @@ def parse_psi_avg10(contents, line_name='some'):
     return None
 
 
+def active_build_workloads(proc_root=Path('/proc')):
+    """Return short labels for active host builds/tests that invalidate VM admission.
+
+    Pressure is a lagging signal: a whole-module compiler can start between the
+    initial PSI sample and guest boot, then trip the independent guard after it
+    has already consumed host CPU. Detect common build drivers and compiler
+    workers directly; omit full command lines so paths and arguments do not get
+    copied into guard evidence.
+    """
+    workloads = []
+    with os.scandir(proc_root) as processes:
+        for process in processes:
+            if not process.name.isdigit():
+                continue
+            try:
+                raw = Path(process.path, 'cmdline').read_bytes()
+            except FileNotFoundError:
+                # Processes can exit between scandir and cmdline read. Other
+                # read failures are not safe to treat as an empty workload set.
+                continue
+            argv = [part.decode('utf-8', errors='replace')
+                    for part in raw.split(b'\0') if part]
+            if not argv:
+                continue
+            executable = Path(argv[0]).name
+            if executable in {'go', 'cargo'} and len(argv) > 1:
+                if argv[1] in {'build', 'test'}:
+                    workloads.append(f'{executable} {argv[1]} pid={process.name}')
+            elif executable == 'compile' and '/pkg/tool/' in argv[0]:
+                workloads.append(f'Go compiler pid={process.name}')
+            elif executable in {'rustc', 'rustdoc', 'cc', 'gcc', 'g++',
+                                'clang', 'clang++', 'cc1', 'cc1plus',
+                                'ld', 'ld.lld', 'collect2', 'make', 'ninja'}:
+                workloads.append(f'{executable} pid={process.name}')
+    return sorted(workloads)
+
+
 def host_pressure():
     """Return host PSI avg10 values using the daemon's Elevated thresholds."""
     result = {}
@@ -239,6 +276,11 @@ def host_pressure():
             telemetry_errors.append(
                 '/proc/pressure/cpu full avg10 is missing or invalid'
             )
+    try:
+        result['active_build_workloads'] = active_build_workloads()
+    except OSError as error:
+        result['active_build_workloads'] = []
+        telemetry_errors.append(f'/proc workload scan is unavailable: {error}')
     result['telemetry_errors'] = telemetry_errors
     return result
 
@@ -254,6 +296,10 @@ def host_pressure_blockers(pressure):
         f'host pressure telemetry unavailable: {error}'
         for error in pressure.get('telemetry_errors', [])
     ]
+    blockers.extend(
+        f'active host build/test workload: {workload}'
+        for workload in pressure.get('active_build_workloads', [])
+    )
     load1 = pressure.get('load1')
     if load1 is not None and load1 > 10.0:
         blockers.append(f'host load1={load1:.2f} exceeds 10')
@@ -284,6 +330,10 @@ def host_pressure_critical_blockers(pressure):
         f'host pressure telemetry unavailable: {error}'
         for error in pressure.get('telemetry_errors', [])
     ]
+    blockers.extend(
+        f'active host build/test workload: {workload}'
+        for workload in pressure.get('active_build_workloads', [])
+    )
     load1 = pressure.get('load1')
     cpu = pressure.get('cpu', {}).get('some')
     cpu_full = pressure.get('cpu', {}).get('full')

@@ -69,6 +69,70 @@ class PressureGuardTests(unittest.TestCase):
         }
         self.assertEqual(VM.host_pressure_blockers(pressure), [])
 
+    def test_active_build_and_test_processes_block_vm_admission_and_stop_guard(self):
+        pressure = {
+            "load1": 1.0,
+            "cpu": {"some": 0.0, "full": 0.0},
+            "io": {"some": 0.0},
+            "memory": {"some": 0.0},
+            "active_build_workloads": ["go build pid=42"],
+        }
+        expected = ["active host build/test workload: go build pid=42"]
+        self.assertEqual(VM.host_pressure_blockers(pressure), expected)
+        self.assertEqual(VM.host_pressure_critical_blockers(pressure), expected)
+
+    def test_host_workload_probe_detects_build_drivers_and_compilers(self):
+        with tempfile.TemporaryDirectory(prefix="dux-host-workloads-") as temporary:
+            proc_root = Path(temporary)
+            processes = {
+                "101": ["/usr/local/go/bin/go", "build", "./..."],
+                "102": ["/usr/bin/go", "test", "./..."],
+                "103": ["/root/.cargo/bin/cargo", "test", "--workspace"],
+                "104": ["/root/.rustup/toolchains/stable/bin/rustc", "lib.rs"],
+                "105": ["/root/go/pkg/mod/golang.org/toolchain/pkg/tool/linux_amd64/compile", "-o", "/tmp/go-build"],
+                "106": ["/usr/bin/python3", "-c", "print('go build')"],
+                "107": ["/usr/bin/go", "version"],
+            }
+            for pid, argv in processes.items():
+                process = proc_root / pid
+                process.mkdir()
+                (process / "cmdline").write_bytes(
+                    b"\0".join(part.encode() for part in argv) + b"\0"
+                )
+
+            self.assertEqual(
+                VM.active_build_workloads(proc_root),
+                [
+                    "Go compiler pid=105",
+                    "cargo test pid=103",
+                    "go build pid=101",
+                    "go test pid=102",
+                    "rustc pid=104",
+                ],
+            )
+
+    def test_host_workload_probe_fails_closed_when_process_cmdline_is_unreadable(self):
+        with tempfile.TemporaryDirectory(prefix="dux-host-workloads-unreadable-") as temporary:
+            process = Path(temporary) / "101"
+            process.mkdir()
+            (process / "cmdline").write_bytes(b"/usr/bin/go\0build\0./...\0")
+            with patch.object(Path, "read_bytes", side_effect=PermissionError("denied")):
+                with self.assertRaises(PermissionError):
+                    VM.active_build_workloads(Path(temporary))
+
+    def test_unavailable_host_workload_probe_blocks_admission(self):
+        with patch.object(VM, "active_build_workloads", side_effect=PermissionError("denied")):
+            pressure = VM.host_pressure()
+        self.assertEqual(pressure["active_build_workloads"], [])
+        self.assertIn(
+            "/proc workload scan is unavailable: denied",
+            pressure["telemetry_errors"],
+        )
+        self.assertIn(
+            "host pressure telemetry unavailable: /proc workload scan is unavailable: denied",
+            VM.host_pressure_blockers(pressure),
+        )
+
     def test_watch_unit_guest_uses_fresh_ubuntu_base(self):
         self.assertEqual(VM.GUEST_IMAGES["watch-unit"], "ubuntu24")
         self.assertEqual(VM.GUEST_IMAGES["ubuntu24-scale-reuse"], "ubuntu24")
@@ -245,7 +309,10 @@ class PressureGuardTests(unittest.TestCase):
         )
 
     def test_unavailable_pressure_files_block_vm_admission(self):
-        with patch.object(VM.Path, 'read_text', side_effect=OSError('unavailable')):
+        with (
+            patch.object(VM.Path, 'read_text', side_effect=OSError('unavailable')),
+            patch.object(VM, 'active_build_workloads', return_value=[]),
+        ):
             pressure = VM.host_pressure()
         blockers = VM.host_pressure_blockers(pressure)
         self.assertEqual(len(blockers), 4)
