@@ -45,6 +45,13 @@ parsing for the root CLI and all 16 subcommands (18 invocations total). The
 no-argument interactive TUI is not qualified by this smoke: when invoked
 without a terminal it exited with `No such device or address`.
 
+Both packaged systemd unit files passed `systemd-analyze verify` on host
+systemd 255. Its static hardening report rated `dux.service` exposure 3.3 and
+`dux-tunnel.service` 3.2 (OK). Packaging shell hooks passed `bash -n`, and the
+package lifecycle, VM manager, and backup-helper Python files passed
+`py_compile`. These host-side checks do not prove the effective unit or
+behavior on supported guest distributions.
+
 The exact-current DEB/RPM lifecycle has **not** passed yet. The manager admitted
 a disposable Ubuntu 24.04 lifecycle guest after stale Cargo build caches were
 removed from `/dev/shm`; three boot attempts were stopped by its pressure guard
