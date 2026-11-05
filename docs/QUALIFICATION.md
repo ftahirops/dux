@@ -6216,3 +6216,27 @@ correlated workload evidence only, not proof that it caused the Dux backlog.
 Storage was **67 GiB free** on `/` and **7.8 GiB free** on `/dev/shm`. The
 production index remains dirty, so exactness and controlled live recovery are
 still unqualified.
+
+### Overflow burst and second guarded current-source build stop — 2026-11-05 07:20 UTC
+
+Retried the revision-75 auditable static-musl package build from the preserved
+tmpfs Cargo target on commit `a4d11faed3af`. Limits remained one Cargo job,
+`CPUQuota=10%`, `MemoryMax=4G`, `CPUWeight=10`, `IOWeight=1`, nice 19, and idle
+I/O. It again reached `libsqlite3-sys` compilation and produced no Dux binary or
+package. Host CPU PSI some avg10 reached **37.04%** at **07:17:28 UTC**, so the
+named build scope was stopped. Its log SHA-256 is
+`15a77b0d254c2b851ddeb1d6433a079ba27e61a237a3965ea94a61a5aa140f6a`; the
+preserved cache remains **322 MiB**. The installed daemon was not modified.
+
+The host-wide Go command `go test -json -p 2 -count=1 -timeout 5m ./...` (PID
+551594) was live during this attempt and remained active at **07:19:36 UTC**.
+This records concurrent load only; it does not prove that command caused either
+CPU pressure or Dux event loss. Read-only status at **07:19:59** showed the
+installed **0.6.3-66** daemon active with zero restarts, but the index dirty,
+**42,820 seconds** behind, and **1,613 pending updates**. Kernel overflow
+notifications increased from **396** at 07:16:37 to **413**. Journal entries
+showed repeated queue-overflow warnings from **07:18:37 through 07:19:21**.
+There was no scan or write error; the last scan was **15,299 seconds** old.
+Storage had **66 GiB free** on `/` and **7.8 GiB free** on `/dev/shm`. No manual
+scan or daemon restart was attempted because the event stream had just recorded
+fresh losses and the current index cannot be treated as exact.

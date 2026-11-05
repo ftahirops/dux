@@ -1,18 +1,18 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 07:14 UTC
+## Current readiness checkpoint — 2026-11-05 07:19 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **396** recorded kernel overflows, **33,523 pending updates**, and
-is about **11.8 hours** behind. Recovery is unpaused, no scan is running, and the
-last scan is about **4.2 hours** old. The current Cargo.lock audit found no
+overflow, has **413** recorded kernel overflows, **1,613 pending updates**, and
+is about **11.9 hours** behind. Recovery is unpaused, no scan is running, and the
+last scan is about **4.25 hours** old. The current Cargo.lock audit found no
 known RustSec advisories in **229 dependencies** against a database updated
 2026-11-03; current-tree release packaging is still incomplete. Revision 74
 passed package lifecycle tests and revision 67 passed the core exact-binary
 churn suite. Exact revision-74 live churn remains unverified. Root storage is
-**185 GiB total, 111 GiB used, 67 GiB free (63% used)**; `/dev/shm` has **7.8
+**185 GiB total, 112 GiB used, 66 GiB free (63% used)**; `/dev/shm` has **7.8
 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
@@ -23,7 +23,7 @@ GiB free**.
 | S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
 | S5 — modules, package/security, operations | **Partial** | Revision 74 passed guarded package upgrade/rollback/removal/clean-install. A fresh RustSec audit of the current lockfile found no known advisories (database current through 2026-11-03). Current full-tree provenance awaits revision 75; root plus `CAP_SYS_ADMIN`/`CAP_DAC_READ_SEARCH` remains, and capability/platform/runbook gates are open. |
-| S6 — integrated release qualification | **Open** | No current-tree revision-75 artifact; exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. The resource-capped build was stopped before producing a binary when shared-host CPU/I/O pressure rose. |
+| S6 — integrated release qualification | **Open** | No current-tree revision-75 artifact; exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Two resource-capped build attempts stopped before producing a binary when shared-host CPU pressure rose. |
 
 This matrix is an evidence summary, not a maturity percentage. Small tests or an
 older passing candidate do not close a stage that requires current-source,
