@@ -9,7 +9,8 @@ fanotify queue overflow and is not caught up: **226** recorded kernel
 overflows, **2,196** pending updates, about **18,084 seconds** behind, and no
 reported write error. This is a point-in-time status, not proof of exactness.
 
-The current pushed source is commit `7d64622`. Its Rust unit suite passes
+The latest source code revision tested is commit `2744c79`; subsequent commits
+on this branch update the readiness record only. Its Rust unit suite passes
 **267/267** on Ubuntu 24.04, including regressions for safe, distinct display
 of invalid Unix filename bytes. The suite does not replace a release artifact,
 package lifecycle, live-index convergence, or production canary.
