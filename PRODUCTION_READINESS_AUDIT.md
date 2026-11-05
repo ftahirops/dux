@@ -1,17 +1,19 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 10:02 UTC
+## Current readiness checkpoint — 2026-11-05 10:11 UTC
 
 **Overall state: not production-ready.** The installed daemon remains package
 0.6.3-66, active with zero restarts. A read-only `dux status --json` sample at
-10:00 UTC reports `/` dirty from fanotify queue overflow, **506** kernel
-overflow notifications, **83 pending updates**, and **52,562 seconds** behind;
+10:11 UTC reports `/` dirty from fanotify queue overflow, **506** kernel
+overflow notifications, **18 pending updates**, and **53,121 seconds** behind;
 no scan is running, the service is unpaused, and `write_error` is null. The
-pending queue fluctuates and does not make this index trustworthy. At 10:02,
-host load was 34.23 with CPU PSI some avg10 78.90%; separate Go/security jobs
-were active. No production service, executable, unit, database, or index was
-changed.
+pending queue fluctuates and does not make this index trustworthy. Host load
+reached 34.23 with CPU PSI some avg10 78.90% during the qualification window;
+at 10:11 it was 12.61. The VM guard stopped three guest boots at load 15.44,
+13.12, and 12.37. No production service, executable, unit, database, or index
+was changed. The paired 10:11 CPU and I/O PSI some avg10 values were 1.48% and
+2.81%.
 
 The current source from clean commit `ff5f44394eb6981e0e5585fdccf09dd86d053a9f`
 now has matching release revision 79 artifacts. The optimized static-musl
@@ -54,7 +56,7 @@ The current-source all-features/all-targets Rust unit suite already passed
 **262/262** in an isolated Ubuntu guest; the revision-79 release build closes
 the source/artifact mismatch but does not close lifecycle, scale, fault,
 platform, endurance, canary, or live-index gates. Root storage is **185 GiB
-total, 110 GiB used, 67 GiB free**; `/dev/shm` is **13 GiB total, 1.1 GiB used,
+total, 109 GiB used, 68 GiB free**; `/dev/shm` is **13 GiB total, 1.1 GiB used,
 12 GiB free** after removing only unreferenced temporary Cargo build caches.
 
 | Stage | Current disposition | Evidence and remaining gate |
