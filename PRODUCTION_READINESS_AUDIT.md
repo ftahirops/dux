@@ -1,16 +1,19 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 08:28 UTC
+## Current readiness checkpoint — 2026-11-05 08:38 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 08:28 UTC its `/` index was dirty from
+0.6.3-66, active with zero restarts. At 08:38 UTC its `/` index was dirty from
 fanotify overflow with **446** recorded kernel-overflow notifications,
-**337 pending updates**, and about **13.0 hours** behind; no scan was running
-and `write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
-10,763 at 08:22, and 337 at 08:28 while the overflow counter stayed 446. The
-queue fluctuates and does not make this index trustworthy. I/O PSI some/full
-avg10 had fallen to **1.37% / 1.35%** at 08:28, after the high 08:19 sample.
+**28 pending updates**, and **47,542 seconds** behind; no scan was running and
+`write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
+10,763 at 08:22, 337 at 08:28, and 28 at 08:38 while the overflow counter
+stayed 446. The queue fluctuates and does not make this index trustworthy.
+At 08:38, CPU PSI some/full avg10 was **2.71% / 0.00%** and I/O PSI some/full
+avg10 was **18.32% / 17.66%**. A disposable 4 GiB scale-test VM was stopped by
+the pressure guard during boot at 08:36; SSH never became available and no
+scale test ran. Do not restart it until the host pressure gates are sustained.
 The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
@@ -21,7 +24,7 @@ passed **260/260** in the isolated Ubuntu watch VM using a test harness built
 from the same Rust sources as revision 75.
 Revision 75 predates later documentation-only commits, so its source manifest
 matches the clean release commit, not current HEAD. Root storage is **185 GiB
-total, 113 GiB used, 64 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
+total, 110 GiB used, 68 GiB free (62% used)**; `/dev/shm` has **7.5 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -19713,3 +19716,21 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Ran the complete compiled all-features/all-targets Rust binary serially inside the marker-provisioned Ubuntu 24.04 `watch-unit` KVM guest. The host test executable SHA-256 matched the guest copy: **`73b00c995e41fd84cf4c1c68adc6c8fccfe3b7f5717870fe71ea900f9f4cf4ae`**. It discovered **260 tests** and completed **260 passed, 0 failed, 0 ignored** in **111.12 seconds**. The Rust sources, Cargo manifests/lockfile, build script, and vendored walker are unchanged from revision-75 product commit `e3863f0`; later commits through test time changed documentation only.
 +- Guest profile was **2 GiB RAM**, **25% QEMU CPU quota**, **2.5 GiB QEMU cgroup memory limit**. QEMU cgroup memory peak was **1,705,988,096 bytes**; guest `/proc/vmstat` reported `oom_kill 0`. Guest log is `target/readiness/rust-r75-20261105/rust-all-features-guest.log`, SHA-256 `78c4c5daef35f9b64ad13efc12adec20e15ffb4aa76995c1b4bd7ebbe9aad495`; structured report is `target/readiness/rust-r75-20261105/rust-all-features-guest.json`. The guest was stopped through the VM manager after evidence collection.
 +- Production Dux remained active on 0.6.3-66 with zero restarts. The overflow count remained **446** across the isolated run; at **08:28:26** status was still dirty and about **46,926 seconds** behind, with **337 pending**, no scan, and no write error. This completes Rust unit coverage for the release candidate's product sources; it does not close live exactness, scale/fault, RPM/Rocky, endurance, or canary gates.
+
+### Scale qualification VM stopped by host pressure guard — 2026-11-05 08:36–08:38 UTC
+
+A disposable 4 GiB Ubuntu qualification VM was admitted at 08:35:59 but stopped
+by its host-pressure guard at 08:36:47, before SSH became available. The guard
+recorded load1 **12.60**, CPU PSI some **71.8%**, I/O PSI some/full **0.95% / 0.33%**.
+No scale fixture or candidate binary ran; this is neither a pass nor a product
+failure. The VM manager stopped the unit and cleaned its private `/dev/shm`
+runtime. At 08:38:36, host load1 was **16.04**; CPU PSI some/full avg10 was
+**2.71% / 0.00%** and I/O PSI some/full was **18.32% / 17.66%**. Root storage
+was **185 GiB total, 110 GiB used, 68 GiB free (62%)**; `/dev/shm` had **7.5 GiB
+free**. Read-only `/usr/bin/dux status --json` showed production `dux.service`
+active, still on 0.6.3-66, dirty from fanotify overflow with **446** overflow
+notifications, **28 pending**, **47,542 seconds** behind, no active scan, and
+`write_error=null`. No package, service, or index mutation was made. Scale,
+fault, RPM lifecycle, live-index recovery, endurance, and canary gates remain
+open. Resume the scale attempt only after host pressure remains below the
+documented admission thresholds through boot.

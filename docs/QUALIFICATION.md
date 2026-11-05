@@ -6358,3 +6358,16 @@ Paired 10-second samples of installed daemon PID 423219 showed process `write_by
 ### Revision-75 Rust unit suite passes in isolated guest — 2026-11-05 08:28 UTC
 
 The revision-75 all-features/all-targets Rust test harness passed **260/260** in a marker-provisioned Ubuntu 24.04 KVM guest, serially, in **111.12 seconds**. Host and guest test binary SHA-256: `73b00c995e41fd84cf4c1c68adc6c8fccfe3b7f5717870fe71ea900f9f4cf4ae`. The guest had 2 GiB RAM, 25% QEMU CPU quota, and a 2.5 GiB QEMU cgroup memory cap; cgroup peak was 1,705,988,096 bytes and guest `/proc/vmstat` showed `oom_kill 0`. Full log SHA-256 is `78c4c5daef35f9b64ad13efc12adec20e15ffb4aa76995c1b4bd7ebbe9aad495`, with structured evidence in `target/readiness/rust-r75-20261105/rust-all-features-guest.json`. Product Rust sources and build inputs match revision 75 commit `e3863f0`; later changes through test time were docs-only. Live-index recovery, scale/fault coverage, RPM/Rocky lifecycle, endurance, and canary remain open.
+
+### Scale VM stopped before boot completed — 2026-11-05 08:36–08:38 UTC
+
+A disposable 4 GiB qualification VM was admitted at 08:35:59 and automatically
+stopped at 08:36:47 by the host-pressure guard before SSH was available. The
+guard logged load1 12.60 and CPU PSI some 71.8%; no guest command ran and no
+scale result was produced. The VM manager stopped the unit and cleaned its
+private `/dev/shm` runtime. At 08:38, the live 0.6.3-66 service was active but
+its index remained dirty from 446 fanotify overflows, 28 updates pending, and
+47,542 seconds behind; there was no scan or write error. Host I/O PSI some/full
+avg10 was 18.32%/17.66%. Root had 68 GiB free and `/dev/shm` 7.5 GiB free. No
+production package, service, or index mutation was made. Retry scale qualification
+only after host admission conditions remain safe through VM boot.
