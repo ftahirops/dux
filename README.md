@@ -306,8 +306,9 @@ the previous executable; retain both before replacing a live installation.
 
 JSON evidence, including executable hashes, is written to
 `target/readiness/report.json`. Fault hooks are compiled out of default builds;
-never install the explicitly enabled `dux-faults` executable. The manual
-`Isolated Linux failure qualification` CI workflow runs the same bounded suite.
+never install the explicitly enabled `dux-faults` executable. Run the bounded
+isolated Linux failure suite using the qualification procedures in
+`docs/QUALIFICATION.md`; no GitHub Actions workflow is currently configured.
 `dux metrics --top 0` exposes dirty, paused, scan, backlog and caught-up signals;
 alert on `dux_index_dirty=1` and sustained `dux_index_caught_up=0` alongside
 `dux_daemon_up`. Treat `dux_fanotify_overflow_count_available=0` as unknown
