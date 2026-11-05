@@ -237,6 +237,17 @@ def active_host_workloads(proc_root=Path('/proc')):
             executable = process_title[0]
             args = process_title[1:] + argv[1:]
             if executable in {'node', 'nodejs'} and args:
+                node_script = Path(args[0]).stem.lower()
+                node_test_runners = {
+                    'ava', 'cypress', 'jasmine', 'jest', 'mocha',
+                    'playwright', 'tap', 'vitest',
+                }
+                if node_script in node_test_runners:
+                    workloads.append(f'node {node_script} pid={process.name}')
+                    continue
+                if '--test' in args:
+                    workloads.append(f'node --test pid={process.name}')
+                    continue
                 node_tools = {
                     'npm-cli.js': 'npm',
                     'pnpm.cjs': 'pnpm', 'pnpm.js': 'pnpm',

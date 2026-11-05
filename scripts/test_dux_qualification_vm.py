@@ -107,6 +107,11 @@ class PressureGuardTests(unittest.TestCase):
                 "118": ["/usr/bin/npm", "--version"],
                 "119": ["/usr/bin/node", "/usr/lib/node_modules/npm/bin/npm-cli.js", "ci"],
                 "120": ["npm ci", "/usr/lib/node_modules/npm/bin/npm-cli.js", "ci"],
+                "121": ["/usr/bin/node", "/home/project/ui/node_modules/.bin/vitest", "run"],
+                "122": ["/usr/bin/node", "/home/project/ui/node_modules/jest/bin/jest.js", "--runInBand"],
+                "123": ["/usr/bin/node", "/srv/app/server.js"],
+                "124": ["/usr/bin/node", "--version"],
+                "125": ["/usr/bin/node", "--test", "test/*.test.js"],
             }
             for pid, argv in processes.items():
                 process = proc_root / pid
@@ -129,6 +134,9 @@ class PressureGuardTests(unittest.TestCase):
                     "go vet pid=110",
                     "golangci-lint pid=114",
                     "gosec pid=113",
+                    "node --test pid=125",
+                    "node jest pid=122",
+                    "node vitest pid=121",
                     "npm ci pid=115",
                     "npm ci pid=119",
                     "npm ci pid=120",
