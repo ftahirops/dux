@@ -16,9 +16,9 @@ candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
 24.04. The effective installed unit in that guest denied `bpf`. RustSec audit
 covered 229 locked dependencies with zero vulnerabilities against the upstream
-database current through Nov. 3. The full current-candidate Rust suite remains
-incomplete: it discovered 260 tests but host pressure/overflow guards stopped
-it after 34 passed; a dedicated watch VM was stopped before SSH readiness.
+database current through Nov. 3. The all-features/all-targets Rust unit suite
+passed **260/260** in the isolated Ubuntu watch VM using a test harness built
+from the same Rust sources as revision 75.
 Revision 75 predates later documentation-only commits, so its source manifest
 matches the clean release commit, not current HEAD. Root storage is **185 GiB
 total, 113 GiB used, 64 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
@@ -31,7 +31,7 @@ total, 113 GiB used, 64 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
 | S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
 | S5 — modules, package/security, operations | **Partial** | Revision 75 passed guarded Ubuntu DEB upgrade/rollback/removal/clean-install and its effective unit denies unused `bpf`; fresh RustSec audit found no known advisories through 2026-11-03. RPM/Rocky lifecycle, default capability minimization, platform coverage, and operations gates remain open. |
-| S6 — integrated release qualification | **Open** | Revision-75 DEB/RPM/static artifacts exist from clean commit `e3863f0`; later HEAD changes are documentation-only. The complete Rust suite, current-source manifest refresh, RPM/Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
+| S6 — integrated release qualification | **Open** | Revision-75 DEB/RPM/static artifacts exist from clean commit `e3863f0`; its all-features/all-targets Rust unit suite passed 260/260 in an isolated Ubuntu guest. Later HEAD changes are documentation-only. Current-source manifest refresh, RPM/Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
 
 This matrix is an evidence summary, not a maturity percentage. Small tests or an
 older passing candidate do not close a stage that requires current-source,
@@ -19707,3 +19707,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 
 - Two paired read-only samples of legacy PID **423219**'s `/proc/423219/io` and its systemd cgroup `io.stat` showed `write_bytes` rising **201,986,048 bytes in 10.0 seconds**, then **189,321,216 bytes in 10.0 seconds** (about **19–20 MB/s**). In those same intervals `updates_committed` rose **3,328** and **3,584**; pending moved **22,016 → 18,944**, then **13,296 → 10,763**. The kernel-overflow count remained **446** and WAL size stayed at **128 MiB**. These are observations of the installed 0.6.3-66 process under live filesystem activity; they do not establish the I/O root cause or candidate performance.
 - A slow event flush warning in the interval reported **291 ms** for a successful 128-update batch with **34,315** pending before it. Host I/O PSI some/full avg10 was **2.23% / 2.08%** at 08:22, after a higher 08:19 sample. No performance tuning or index operation was attempted. Measure comparable throughput, write amplification, WAL checkpointing, and query latency on the exact current candidate in an isolated reference environment before accepting these legacy-host costs as candidate behavior.
+
+### PROD-TEST-340 Revision-75 Rust all-features suite passes in isolated Ubuntu VM — 2026-11-05 08:28 UTC
+
+- Ran the complete compiled all-features/all-targets Rust binary serially inside the marker-provisioned Ubuntu 24.04 `watch-unit` KVM guest. The host test executable SHA-256 matched the guest copy: **`73b00c995e41fd84cf4c1c68adc6c8fccfe3b7f5717870fe71ea900f9f4cf4ae`**. It discovered **260 tests** and completed **260 passed, 0 failed, 0 ignored** in **111.12 seconds**. The Rust sources, Cargo manifests/lockfile, build script, and vendored walker are unchanged from revision-75 product commit `e3863f0`; later commits through test time changed documentation only.
++- Guest profile was **2 GiB RAM**, **25% QEMU CPU quota**, **2.5 GiB QEMU cgroup memory limit**. QEMU cgroup memory peak was **1,705,988,096 bytes**; guest `/proc/vmstat` reported `oom_kill 0`. Guest log is `target/readiness/rust-r75-20261105/rust-all-features-guest.log`, SHA-256 `78c4c5daef35f9b64ad13efc12adec20e15ffb4aa76995c1b4bd7ebbe9aad495`; structured report is `target/readiness/rust-r75-20261105/rust-all-features-guest.json`. The guest was stopped through the VM manager after evidence collection.
++- Production Dux remained active on 0.6.3-66 with zero restarts. The overflow count remained **446** across the isolated run; at **08:28:26** status was still dirty and about **46,926 seconds** behind, with **337 pending**, no scan, and no write error. This completes Rust unit coverage for the release candidate's product sources; it does not close live exactness, scale/fault, RPM/Rocky, endurance, or canary gates.
