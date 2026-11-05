@@ -1,16 +1,15 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 15:36 UTC
+## Current readiness decision — 2026-11-05 15:44 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed service
 is the legacy Dux **0.6.3** binary (`e0cc915f8f37`, source digest
 `b7c9a8d…`), active with zero systemd restarts. Its `/` index is dirty from
 fanotify queue overflow and is not caught up: **241** recorded kernel
-overflows, **3,279** pending updates, about **18,979 seconds** behind, and no
+overflows, **7** pending updates, about **19,490 seconds** behind, and no
 reported write error. This is a point-in-time status, not proof of exactness.
 
-The latest source code revision tested is commit `2744c79`; subsequent commits
-on this branch update the readiness record only. Its Rust unit suite passes
+The latest source code revision tested is commit `c216b14`. Its Rust unit suite passes
 **267/267** on Ubuntu 24.04, including regressions for safe, distinct display
 of invalid Unix filename bytes. The suite does not replace a release artifact,
 package lifecycle, live-index convergence, or production canary.
@@ -35,8 +34,8 @@ Open release gates, in priority order:
    convergence remain unqualified. Current unit tests are not evidence for
    these system-level properties.
 
-Root storage is **185 GiB total / 104 GiB used / 74 GiB available**;
-`/dev/shm` is **13 GiB total / 2.7 GiB used / 11 GiB available**. The retained
+Root storage is **185 GiB total / 100 GiB used / 77 GiB available**;
+`/dev/shm` is **13 GiB total / 2.8 GiB used / 11 GiB available**. The retained
 `target/readiness` evidence occupies **6.8 GiB** and was kept. A RustSec audit
 of the current lockfile found no advisories, but that is dependency evidence,
 not a complete source or binary security certification.
@@ -20153,6 +20152,18 @@ Synchronized read-only samples for installed Dux PID **423219** showed `write_by
 - Retried package revision 84 from pushed branch head `13ae194`, reusing `/dev/shm/dux-r84-target`. The build advanced through bundled SQLite and Rust dependencies to `Compiling dux`, reaching **492 MiB** of cached target artifacts. It still produced no Dux executable, package, or manifest.
 - At **15:35:37 UTC**, host load1 was **13.02**, over the critical limit 12, while CPU PSI some avg10 was **53.68%** and CPU-full/I/O pressure remained low. Stopped only `dux-release-current-13ae194-r84-retry.service` at **15:35:50 UTC**. Systemd confirms it inactive; the session reports SIGTERM, **85.20 CPU seconds**, **761.7 MiB peak memory**, and no swap. No Cargo/Rust compiler remained afterward. The process table showed concurrent Go package test/compile activity; timing does not establish causation.
 - The **492 MiB** `/dev/shm/dux-r84-target` is retained for the next retry; `/dev/shm` still has **11 GiB free**. No package or persistent build output was produced, and no production service, DB, or index command was issued. At **15:36 UTC**, production Dux was active with zero restarts but remained dirty/not caught up (**241** overflows, **3,279** pending, about **18,979 seconds** behind, no write error); root had **74 GiB free**. The release build and production exactness gates remain open.
+
+### Cached r84 retry reached Dux compilation, then stopped on load — 2026-11-05 15:37–15:38 UTC
+
+- Retried the auditable static musl build from clean branch head `0036a74`, reusing `/dev/shm/dux-r84-target`. It reached `Compiling dux`; rustc emitted dead-code warnings for the now-unused lossy `PathResolver::resolve` and `Store::path_of` helpers. No Dux executable or package was produced.
+- At **15:38:45 UTC**, host load1 was **17.96** and CPU PSI some avg10 **69.80%**. Stopped only `dux-release-current-0036a74-r84-final.service` at **15:38:55 UTC**. Systemd reports it inactive; the session reports SIGTERM, **19.19 CPU seconds**, **321.2 MiB peak memory**, and no swap. No Rust/Cargo compiler remained afterward. The partial target was **536 MiB**. Host pressure and concurrent test activity were observed; no single workload is assigned as the cause.
+- Removed the obsolete lossy helpers and their unsafe expectations; all production callers already use explicit display paths or byte-preserving `PathBuf`s. The complete suite below validates the updated code. The r84 build remains unqualified.
+
+### Removed obsolete lossy path APIs; full current-source suite passes — 2026-11-05 15:44 UTC
+
+- Removed unused `PathResolver::resolve` and `Store::path_of`, which performed lossy UTF-8 conversion and produced release dead-code warnings. Updated error, deep-path, unresolved-inode, and raw-byte regression tests to use `resolve_display` / `path_of_display`.
+- `cargo test --locked store::tests -- --test-threads=1` passed **19/19** in constrained unit `dux-store-tests-after-path-cleanup.service` (CPUQuota=40%, MemoryMax=2 GiB, no swap, idle I/O). The complete Rust suite then passed **267/267**, **0 failed/ignored**, in **74.08 seconds** in a fresh disposable Ubuntu 24.04 guest with a private tmpfs overlay, 2 GiB RAM, and 40% CPU quota. Test binary SHA-256 `ae68964ffde015b122c32b8f9ea58158bdde8252f3f0397527f7510f07e85029`; log `target/readiness/current-source-rust-tests-20261105-1543.log`, SHA-256 `8b76f0e223efc34fb2c0c434a9d24a0e4ce0dd58bd583f8a93311d7365152ef2`. The test binary was compiled from the exact source tree immediately before commit `c216b14` and carried the expected temporary `+modified` build marker; no source changed between test and commit. The guest runtime was stopped and cleaned.
+- At **15:44 UTC**, installed Dux remained active on legacy **0.6.3**, `NRestarts=0`. Index status is still dirty/not caught up from overflow (**241** notifications, **7** pending updates, about **19,490 seconds** behind, no write error); the small pending count does not prove exactness. Root had **77 GiB free**, `/dev/shm` **11 GiB free**. Current-source release build, package lifecycle, and live recovery remain open.
 
 ### Raw filename byte collisions fixed; current-source Rust suite passes on Ubuntu 24.04 — 2026-11-05 15:08 UTC
 
