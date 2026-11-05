@@ -1048,6 +1048,25 @@ pub fn run_daemon(
                     let fd_guard = RawFdGuard(fd);
                     match mark_fs(fan, &mp) {
                         Ok(()) => {
+                            if probe_handle_capability(&mp, fd) {
+                                // Establish this before draining the initial event
+                                // queue. A deleted target may produce ESTALE before
+                                // the first ordinary path event proves the FSID can
+                                // reopen handles; that order must not poison every
+                                // startup reconciliation on a capable filesystem.
+                                handle_capable_fsids.insert(fsid);
+                                tracing::debug!(
+                                    path = %mp.display(),
+                                    fsid = ?fsid,
+                                    "filesystem FID handle round-trip probe succeeded"
+                                );
+                            } else {
+                                tracing::debug!(
+                                    path = %mp.display(),
+                                    fsid = ?fsid,
+                                    "filesystem FID handle round-trip probe unavailable; stale target events remain conservative"
+                                );
+                            }
                             e.insert(fd);
                             fsfd_guards.push(fd_guard);
                         }
@@ -3524,6 +3543,56 @@ fn open_handle(
     }
     handle_capable_fsids.insert(fsid);
     Ok(fd)
+}
+
+/// Probe name_to_handle_at/open_by_handle_at on one mounted directory before
+/// queued fanotify events are consumed. This distinguishes a normal ESTALE
+/// delete race from a filesystem that cannot reopen FIDs even when that stale
+/// notification arrives first. Require the opened handle to resolve to the
+/// same device/inode as the descriptor used for the probe.
+fn probe_handle_capability(path: &Path, mount_fd: RawFd) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut handle = FileHandle {
+        handle_bytes: MAX_HANDLE_SZ as u32,
+        handle_type: 0,
+        f_handle: [0; MAX_HANDLE_SZ],
+    };
+    let mut mount_id = 0;
+    let named = unsafe {
+        libc::name_to_handle_at(
+            libc::AT_FDCWD,
+            path.as_ptr(),
+            (&mut handle as *mut FileHandle).cast::<libc::file_handle>(),
+            &mut mount_id,
+            0,
+        )
+    };
+    if named != 0 || handle.handle_bytes == 0 || handle.handle_bytes as usize > MAX_HANDLE_SZ {
+        return false;
+    }
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_open_by_handle_at,
+            mount_fd,
+            &mut handle as *mut FileHandle,
+            libc::O_PATH | libc::O_CLOEXEC,
+        ) as RawFd
+    };
+    if fd < 0 {
+        return false;
+    }
+    let probe_fd = RawFdGuard(fd);
+    let mut expected: libc::stat = unsafe { std::mem::zeroed() };
+    let mut resolved: libc::stat = unsafe { std::mem::zeroed() };
+    unsafe {
+        libc::fstat(mount_fd, &mut expected) == 0
+            && libc::fstat(probe_fd.0, &mut resolved) == 0
+            && expected.st_dev == resolved.st_dev
+            && expected.st_ino == resolved.st_ino
+    }
 }
 
 fn classify_handle_open_error(errno: Option<i32>) -> HandleOpenError {
@@ -6445,6 +6514,142 @@ mod tests {
             HandleOpenError::Other
         );
         assert_eq!(classify_handle_open_error(None), HandleOpenError::Other);
+    }
+
+    #[test]
+    fn startup_handle_probe_prequalifies_stale_attrib_filter() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = tmp("handle-capability-probe");
+        let db = tmp("handle-capability-probe-db");
+        cleanup(&root, &db);
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("deleted-target");
+        std::fs::write(&target, b"short-lived").unwrap();
+        let mount_fd = RawFdGuard(open_dir(&root).unwrap());
+        let root_probe_succeeded = probe_handle_capability(&root, mount_fd.0);
+        if !root_probe_succeeded {
+            eprintln!("skipping stale-FID order check: filesystem cannot round-trip file handles");
+            drop(mount_fd);
+            cleanup(&root, &db);
+            return;
+        }
+
+        let path = std::ffi::CString::new(target.as_os_str().as_bytes()).unwrap();
+        let mut target_handle = FileHandle {
+            handle_bytes: MAX_HANDLE_SZ as u32,
+            handle_type: 0,
+            f_handle: [0; MAX_HANDLE_SZ],
+        };
+        let mut mount_id = 0;
+        let named = unsafe {
+            libc::name_to_handle_at(
+                libc::AT_FDCWD,
+                path.as_ptr(),
+                (&mut target_handle as *mut FileHandle).cast::<libc::file_handle>(),
+                &mut mount_id,
+                0,
+            )
+        };
+        if named != 0 {
+            eprintln!("skipping stale-FID order check: target handle is unsupported");
+            drop(mount_fd);
+            cleanup(&root, &db);
+            return;
+        }
+        let fsid = statfs_fsid(&root).unwrap();
+        let handle_bytes = target_handle.handle_bytes as usize;
+        assert!((1..=MAX_HANDLE_SZ).contains(&handle_bytes));
+        std::fs::remove_file(&target).unwrap();
+
+        // Build a target-only FAN_ATTRIB carrying a handle that became stale
+        // after unlink. The startup probe must make this benign before any
+        // ordinary named event has populated the runtime capability set.
+        let info_len = 4 + 8 + 4 + 4 + handle_bytes;
+        let metadata = FanotifyEventMetadata {
+            event_len: (FAN_EVENT_METADATA_LEN + info_len) as u32,
+            vers: FANOTIFY_METADATA_VERSION,
+            reserved: 0,
+            metadata_len: FAN_EVENT_METADATA_LEN as u16,
+            mask: FAN_ATTRIB,
+            fd: -1,
+            pid: 123,
+        };
+        let info = InfoHeader {
+            info_type: FAN_EVENT_INFO_TYPE_FID,
+            pad: 0,
+            len: info_len as u16,
+        };
+        let mut event = vec![0u8; metadata.event_len as usize];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
+                event.as_mut_ptr(),
+                FAN_EVENT_METADATA_LEN,
+            );
+            std::ptr::copy_nonoverlapping(
+                (&info as *const InfoHeader).cast::<u8>(),
+                event.as_mut_ptr().add(FAN_EVENT_METADATA_LEN),
+                std::mem::size_of::<InfoHeader>(),
+            );
+        }
+        let payload = FAN_EVENT_METADATA_LEN + std::mem::size_of::<InfoHeader>();
+        event[payload..payload + 4].copy_from_slice(&fsid.0.to_ne_bytes());
+        event[payload + 4..payload + 8].copy_from_slice(&fsid.1.to_ne_bytes());
+        event[payload + 8..payload + 12].copy_from_slice(&target_handle.handle_bytes.to_ne_bytes());
+        event[payload + 12..payload + 16].copy_from_slice(&target_handle.handle_type.to_ne_bytes());
+        event[payload + 16..payload + 16 + handle_bytes]
+            .copy_from_slice(&target_handle.f_handle[..handle_bytes]);
+
+        let mut store = Store::create_fresh(&db).unwrap();
+        let mut pending = HashMap::new();
+        let mut born = HashSet::new();
+        let mut targets = HashSet::new();
+        let mut parent_paths = IndexedParentPathCache::default();
+        let mut lost = false;
+        let fsfds = HashMap::from([(fsid, mount_fd.0)]);
+        let mut capable_fsids = HashSet::from([fsid]);
+        let result = parse_events(
+            &event,
+            &fsfds,
+            &mut capable_fsids,
+            &root,
+            &db,
+            &mut pending,
+            &mut born,
+            &mut targets,
+            &mut parent_paths,
+            &mut store,
+            true,
+            &mut lost,
+        );
+        assert_eq!(result, (1, 0, 0));
+        assert!(!lost, "prequalified stale ATTRIB must not poison coverage");
+
+        // Without the round-trip proof, the exact same event remains uncertain.
+        lost = false;
+        let mut unknown_fsids = HashSet::new();
+        let mut parent_paths = IndexedParentPathCache::default();
+        let result = parse_events(
+            &event,
+            &fsfds,
+            &mut unknown_fsids,
+            &root,
+            &db,
+            &mut pending,
+            &mut born,
+            &mut targets,
+            &mut parent_paths,
+            &mut store,
+            true,
+            &mut lost,
+        );
+        assert_eq!(result, (1, 0, 0));
+        assert!(lost, "unqualified stale ATTRIB must remain conservative");
+
+        drop(store);
+        drop(mount_fd);
+        cleanup(&root, &db);
     }
 
     #[test]
