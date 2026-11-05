@@ -1,15 +1,16 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 19:01 UTC
+## Current readiness decision — 2026-11-05 19:20 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **19:01:07 UTC** it
-reported **417** kernel overflow notifications, **23,126** pending updates, about
-**31,276 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **19:20 UTC** it
+reported **417** kernel overflow notifications, **301** pending updates, about
+**32,446 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
-repair historical event loss or prove index exactness.
+repair historical event loss or prove index exactness. The service remains
+active with zero restarts.
 
 A clean static-musl **0.6.3-88** candidate does exist. It was built from clean
 source commit `9c59d0edaf77b0f20a74f8de63107f136dcedc8b`; the build manifest binds
@@ -19,22 +20,24 @@ exists at `target/readiness/r88-clean-release-20261105/`, but successful
 artifact construction does not qualify installation, rollback, or production
 operation. The full **267/267** Rust suite was run on source commit `c216b14`
 before later release-provenance tooling changes; focused stale-FID regressions
-were run on the r88 source. Lifecycle harness tests pass **66/66** and VM guard
-tests **32/32**, but these do not substitute for a valid guest package lifecycle
-or a production-scale recovery test.
+were run on the r88 source. Lifecycle harness tests pass **66/66** and the
+qualification VM controller tests pass **36/36**. These do not substitute for
+a valid guest package lifecycle or a production-scale recovery test.
 
 Open release gates, in priority order:
 
-1. **Live index exactness and recovery:** production remains dirty after 381
+1. **Live index exactness and recovery:** production remains dirty after 417
    recorded overflows. No successful quiet-window reconciliation plus
    independent exactness/accounting check has been demonstrated. Do not read a
    low pending count as caught up.
 2. **Candidate package lifecycle:** no valid completed r88 install, upgrade,
    rollback, re-upgrade, remove, and purge lifecycle is available. Attempt 4
    used a 9p fixture on which fanotify marking is unsupported; attempt 5 used a
-   verified fanotify-compatible ext4 fixture but the host pressure guard
-   stopped it. Neither attempt is a pass. Rocky Linux 9 and RPM lifecycle
-   qualification also remain open.
+   verified fanotify-compatible ext4 fixture but host pressure interrupted it.
+   Attempts 6 and 7 were also stopped by the host workload/pressure guard; in
+   attempt 7 the old package baseline scan began, but the lifecycle report did
+   not complete. None is a pass. Rocky Linux 9 and RPM lifecycle qualification
+   also remain open.
 3. **Data-model correctness:** the known v6 inode/path representation cannot
    prove full path-instance semantics for aliases and hardlinks. The v7 path
    instance/schema, event, query, and atomic-publication gates remain open.
@@ -46,11 +49,13 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At **19:01 UTC**, root storage was **185 GiB total / 105 GiB used /
+At **19:20 UTC**, root storage was **185 GiB total / 105 GiB used /
 72 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
-available**. A RustSec audit of the candidate lockfile found no advisories in
-its 2026-11-05 database snapshot; this is dependency evidence, not complete
-source or binary security certification.
+available**. The host workload gate found an active Go test process and
+load1 **10.64**, so another VM was not admitted. A RustSec audit of the
+candidate lockfile found no advisories in its 2026-11-05 database snapshot;
+this is dependency evidence, not complete source or binary security
+certification.
 
 ## Watcher diagnostic hardening — 2026-11-05 11:05 UTC
 
