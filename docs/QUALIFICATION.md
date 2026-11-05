@@ -6425,3 +6425,16 @@ Paired read-only samples of installed PID 423219 showed `write_bytes` increasing
 460 and WAL size stayed 128 MiB. The index was already dirty on legacy 0.6.3-66.
 Nearby I/O PSI some/full avg10 fell from 48.45%/46.51% to 9.38%/8.97%. The
 sample does not establish cause and cannot qualify candidate performance.
+
+### Current-source release build retry stopped — 2026-11-05 09:12 UTC
+
+A revision-77 build from commit `2afd321` compiled dependencies only and was
+stopped before Dux compilation or artifact publication. It used one Cargo job,
+CPUQuota 25% (lowered to 15% during the run), MemoryMax 4 GiB, no swap, low I/O
+weight, and tmpfs scratch/output. An external Go test/compiler workload was
+active; at stop load1 was 18.76 and CPU PSI some avg10 57.51%, with no causal
+attribution. The Dux scope is inactive, its Cargo processes exited, and only its
+incomplete tmpfs directories were removed. Log SHA-256:
+`1c64ac69b6c09919c615ed69cfe771c94e81b180b0800fe053a80734942da8b8`. No current
+release artifact exists; retry only after host load stays below the established
+limits for the build window.

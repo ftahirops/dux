@@ -1,22 +1,22 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 09:04 UTC
+## Current readiness checkpoint — 2026-11-05 09:13 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 09:04 UTC its `/` index was dirty from
-fanotify overflow with **460** recorded kernel-overflow notifications,
-**3,557 pending updates**, and **49,077 seconds** behind; no scan was running
-and `write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
-10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, then 19 at 08:57
-and 3,557 at 09:04; the overflow count remained 460 through the current-source
-suite. The queue fluctuates and does not make this index trustworthy. At 09:04,
-CPU PSI some/full avg10 was **24.31% / 0.00%** and I/O PSI some/full avg10 was
-**1.40% / 0.96%**; load1 was **19.89** during an unrelated Go compile. A later
-current-source release build was stopped at 09:03 when load1 reached **18.85**
-and CPU PSI some avg10 **71.03%**. The earlier 4 GiB scale-test VM was stopped
-before SSH at 08:36; a 2 GiB current-source Rust test VM passed and was cleaned
-up through the manager.
+0.6.3-66, active with zero restarts. At 09:13 UTC its `/` index was dirty from
+fanotify overflow with **472** recorded kernel-overflow notifications,
+**85 pending updates**, and **49,624 seconds** behind; no scan was running and
+`write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
+10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, 19 at 08:57,
+3,557 at 09:04, then 85 at 09:13. The queue fluctuates and does not make this
+index trustworthy. At 09:13, CPU PSI some/full avg10 was **10.94% / 0.00%** and
+I/O PSI some/full was **0.34% / 0.14%**, while load1 remained **16.47** during
+an unrelated Go test/compiler workload. The first current-source release build
+was stopped at 09:03 under pressure; a second attempt was stopped at 09:12
+before compiling Dux or publishing an artifact. The earlier 4 GiB scale VM was
+stopped before SSH at 08:36; a 2 GiB current-source Rust test VM passed and was
+cleaned up through the manager.
 The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
@@ -28,7 +28,7 @@ from the same Rust sources as revision 75. Current HEAD adds the tunnel
 worker-start refactor and now passes the full **262/262** current-source Rust
 suite in an isolated guest. The current source still has no matching release
 artifact; revision 75 does not inherit this new suite result. Root storage is
-**185 GiB total, 110 GiB used, 67 GiB free (63% used)**; `/dev/shm` has **7.5 GiB free**.
+**185 GiB total, 113 GiB used, 65 GiB free (64% used)**; `/dev/shm` has **7.5 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -19774,3 +19774,7 @@ Started `scripts/build-release.sh` for package revision 76 from pushed source co
 ### Legacy daemon write/backlog sample during host I/O pressure — 2026-11-05 08:50:47–08:50:57 UTC
 
 Read-only paired samples for production PID **423219** showed process `write_bytes` rising from **221,713,768,448** to **221,830,553,600** (**116,785,152 bytes / 10 seconds**, about **11.7 MB/s**). In the same interval `updates_committed` advanced **1,408**, pending rose **17,266 → 44,844**, `kernel_overflow_notifications` stayed **460**, and the 128 MiB WAL size stayed unchanged. The daemon remained active on legacy 0.6.3-66; its index was already dirty. I/O PSI some/full avg10 fell from **48.45% / 46.51%** at the first nearby sample to **9.38% / 8.97%** after the interval. This is a short observation of legacy write volume under changing host load, not a causal diagnosis or candidate performance result. Candidate write amplification, checkpoint behavior, and calibrated throughput remain open.
+
+### Revision-77 current-source release build stopped under renewed host load — 2026-11-05 09:12 UTC
+
+Retried the current-source release build from commit `2afd321` as package revision 77 in an isolated tmpfs target/output scope: one Cargo job, offline dependency resolution, CPUQuota=25% initially, MemoryMax=4 GiB, no swap, IOWeight=10, Nice=19, idle I/O. The Dux build did not begin; dependency compilation had produced about **321 MiB** of partial target files. External Go `go test -p 2`/race compilation was active, including concurrent compiler/linker processes. At 09:12:31 load1 was **16.38** and CPU PSI some avg10 **54.06%**; lowered only this build scope to CPUQuota=15%. At 09:12:48 load1 reached **18.76** and CPU PSI some avg10 **57.51%**; stopped only `dux-release-build-current-2afd321.scope`. It is inactive and no Cargo/Rust compiler remains. Removed this run's exact tmpfs target, temp, and output directories; `/dev/shm` returned to **7.5 GiB free**. No artifact was produced and no production operation occurred. Preserved log `target/readiness/current-release-build-2afd321.log`, SHA-256 `1c64ac69b6c09919c615ed69cfe771c94e81b180b0800fe053a80734942da8b8`. Workload timing is not causal attribution. Retry the build after host pressure remains below thresholds throughout the build window.
