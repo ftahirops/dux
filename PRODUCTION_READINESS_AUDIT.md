@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:45 UTC
+## Current readiness checkpoint — 2026-11-05 06:49 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **381** recorded kernel overflows, **14,919 pending updates**, and
-is about **11.3 hours** behind. The status reports recovery unpaused, but no
-scan is running and the last scan is about **3.7 hours** old. Revision 74 passed
+overflow, has **381** recorded kernel overflows, **978 pending updates**, and is
+about **11.4 hours** behind. The status reports recovery unpaused, but no scan
+is running and the last scan is about **3.7 hours** old. Revision 74 passed
 package lifecycle tests and revision 67 passed the core exact-binary churn
 suite. Exact revision-74 live churn remains unverified, and the current-tree
 revision-75 release build has not completed. The status reports no pause reason
@@ -19625,3 +19625,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Compared live status at **06:43:13** and **06:45:05 UTC**. The kernel overflow count remained **381**, but pending updates grew from **101** to **14,919** (**+14,818 in 112 seconds**). Event counters moved from **79,721,410 seen / 46,961,317 resolved / 8,121,069 committed** to **79,855,410 / 47,024,231 / 8,151,267**, respectively. These aggregate counters are not unique paths or a durable-capture measure; their change does not identify a cause.
 - At the later sample, the index remained dirty and **40,725 seconds** behind, no scan was active, and `write_error=null`. Root had **65 GiB** free. Host CPU PSI `some avg10` had risen to **52.09%**, with a large external Go compile visible. No additional build, scan, package install, or service mutation was run.
 - This is another confirmed period where pending work grows without a new overflow notification, while the prior dirty marker remains. It further blocks treating an empty/low queue as proof of a recovered exact index; controlled recovery and sustained candidate convergence remain open.
+
+### PROD-PERF-327 Legacy daemon backlog fluctuates; slow SQLite flush warnings persist — 2026-11-05 06:49 UTC
+
+- Between **06:46:30** and **06:49:08 UTC**, the live 0.6.3-66 status remained at **381** recorded overflows and dirty from the same fanotify-loss epoch. Pending work moved from **10** to **978**; no scan was active and `write_error=null`. The later status was about **40,968 seconds** behind. This queue fluctuation is not a clean index or an exactness signal.
+- The service journal reported seven successful **128-update** flushes between **06:47:17** and **06:48:22**, each taking **250–398 ms**; the first recorded `pending_before` was **4,386**, and the last was **138**. These are measurements from the installed legacy binary. They neither establish why flushes are slow nor characterize revision 74/current-source performance.
+- At **06:49:08**, CPU PSI was `some avg10=11.11%`, I/O PSI `some avg10=3.89%` and `full avg10=3.71%`; the previously observed Go test process had exited. No tuning, scan, or service mutation was attempted. Candidate transaction-size/flush throughput still needs a controlled same-binary benchmark.
