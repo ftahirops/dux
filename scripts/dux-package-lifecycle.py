@@ -171,7 +171,7 @@ def assert_service_security_policy(proc_root=Path("/proc")):
         "swapon", "swapoff", "reboot", "kexec_load", "kexec_file_load",
         "ioperm", "iopl", "pciconfig_iobase", "pciconfig_read", "pciconfig_write",
         "lookup_dcookie", "perf_event_open", "pidfd_getfd", "ptrace",
-        "modify_ldt", "vm86", "vm86old",
+        "modify_ldt", "vm86", "vm86old", "bpf",
     }
     group_members = systemd_syscall_filter_group_members({"@clock", "@obsolete"})
     missing_group_members = {

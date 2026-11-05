@@ -349,7 +349,7 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
                 "kexec_load lookup_dcookie modify_ldt mount pciconfig_iobase "
                 "pciconfig_read pciconfig_write perf_event_open pidfd_getfd "
                 "pivot_root ptrace reboot swapoff swapon umount umount2 ioperm "
-                "iopl vm86 vm86old"
+                "iopl vm86 vm86old bpf"
             ),
             "RestrictAddressFamilies": "AF_UNIX",
             "ExecStart": (
@@ -527,6 +527,13 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
 
     def test_rejects_missing_module_syscall_filter(self):
         self.properties["SystemCallFilter"] = ""
+        with self.assertRaises(AssertionError):
+            self.check_properties()
+
+    def test_rejects_bpf_with_sys_admin_capability(self):
+        self.properties["SystemCallFilter"] = self.properties["SystemCallFilter"].replace(
+            " bpf", ""
+        )
         with self.assertRaises(AssertionError):
             self.check_properties()
 

@@ -95,11 +95,13 @@ ProtectKernelLogs=yes
 # systemd 252 and 255; it does not include open_by_handle_at. Also deny syscall
 # groups with no Dux use: swap control, reboot/kexec, clock changes, obsolete
 # compatibility calls, raw port I/O, ptrace/perf debugging, and CPU emulation.
+# Deny the BPF syscall too: Dux does not use it, and CAP_SYS_ADMIN may authorize
+# legacy BPF operations on kernels that predate CAP_BPF checks.
 # Keep @resources (nice/ioprio) and @privileged (fanotify and
 # open_by_handle_at) available as required.
 # clock_gettime and clock_nanosleep are implicitly allowed by systemd's filter;
 # ProtectClock and @clock deny wall-clock changes.
-SystemCallFilter=~@module @mount @swap @reboot @clock @obsolete @raw-io @debug @cpu-emulation
+SystemCallFilter=~@module @mount @swap @reboot @clock @obsolete @raw-io @debug @cpu-emulation bpf
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictRealtime=yes
