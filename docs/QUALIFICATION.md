@@ -6260,3 +6260,18 @@ establish which process or resource condition produced the host PSI spike;
 they show that the global stop signal rose while Dux's own cgroup pressure and
 pending queue remained low. The installed index itself remains dirty and about
 **11.9 hours** behind, so this is not evidence of production correctness.
+
+### Backlog growth during a new host-wide Go vet run — 2026-11-05 07:26 UTC
+
+At **07:25:50**, read-only status still showed the installed **0.6.3-66**
+daemon active with no restart, dirty from fanotify overflow, **413** recorded
+kernel overflow notifications, **4,946 pending updates**, no active scan, and no
+write error. Pending work had risen from **30** at 07:22:53 while host Go
+compilation and then `go vet ./...` were observed; the Go vet process was PID
+613967 at the sample. The timing is correlational and does not identify the
+cause of Dux's backlog. Last scan age was **15,650 seconds**. Host PSI some
+avg10 reached **46.55%** during a Go compile/vet sample, while Dux service
+cgroup CPU PSI some avg10 was **2.82%**. Storage had **64 GiB free** on `/` and
+**7.8 GiB free** on `/dev/shm`. No release build was started during this
+workload; the revision-75 cache remains available, but live exactness and
+recovery remain unqualified.

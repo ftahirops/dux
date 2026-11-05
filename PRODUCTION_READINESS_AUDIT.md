@@ -1,18 +1,18 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 07:19 UTC
+## Current readiness checkpoint — 2026-11-05 07:25 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **413** recorded kernel overflows, **1,613 pending updates**, and
-is about **11.9 hours** behind. Recovery is unpaused, no scan is running, and the
-last scan is about **4.25 hours** old. The current Cargo.lock audit found no
+overflow, has **413** recorded kernel overflows, **4,946 pending updates**, and
+is about **12.0 hours** behind. Recovery is unpaused, no scan is running, and the
+last scan is about **4.35 hours** old. The current Cargo.lock audit found no
 known RustSec advisories in **229 dependencies** against a database updated
 2026-11-03; current-tree release packaging is still incomplete. Revision 74
 passed package lifecycle tests and revision 67 passed the core exact-binary
 churn suite. Exact revision-74 live churn remains unverified. Root storage is
-**185 GiB total, 112 GiB used, 66 GiB free (63% used)**; `/dev/shm` has **7.8
+**185 GiB total, 113 GiB used, 64 GiB free (64% used)**; `/dev/shm` has **7.8
 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
