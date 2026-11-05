@@ -6403,3 +6403,16 @@ VM was stopped and its private tmpfs runtime cleaned. Production remained active
 on legacy 0.6.3-66 with the same 460 overflow notifications; its index remains
 dirty and behind. This is a source unit-suite pass, not a matching release build,
 package lifecycle, scale/fault, live-recovery, endurance, or canary pass.
+
+### Current-source release build stopped by host pressure — 2026-11-05 09:03 UTC
+
+A revision-76 release build from source commit `f7d6a9a` started in a bounded
+scope with all Cargo target, temporary, and output paths on `/dev/shm`. It
+compiled dependencies only and produced no Dux binary/package. At 09:03:45 host
+load1 was 18.85 and CPU PSI some avg10 was 71.03%; a separate Go build/compiler
+was also visible, with no causal attribution. Stopped only the Dux build scope,
+verified it inactive and no Cargo/Rust compiler remained, then removed only its
+incomplete tmpfs target/tmp/output directories. Preserved log SHA-256:
+`c8236cf73fa00a6c98ee4398e89a22ea9edfda37b08e91813180c92cac049a67`. No
+production package, service, or index operation occurred. Current-source
+artifact and package qualification remain open.

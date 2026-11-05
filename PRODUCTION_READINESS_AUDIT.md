@@ -1,20 +1,22 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 08:57 UTC
+## Current readiness checkpoint — 2026-11-05 09:04 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 08:57 UTC its `/` index was dirty from
+0.6.3-66, active with zero restarts. At 09:04 UTC its `/` index was dirty from
 fanotify overflow with **460** recorded kernel-overflow notifications,
-**19 pending updates**, and **48,683 seconds** behind; no scan was running and
-`write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
-10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, then 19 at 08:57;
-the overflow count rose to 460 and remained there through the current-source
-suite. The queue fluctuates and does not make this index trustworthy. At 08:57,
-CPU PSI some/full avg10 was **5.06% / 0.00%** and I/O PSI some/full avg10 was
-**2.93% / 2.89%**. The earlier 4 GiB scale-test VM was stopped by the pressure
-guard during boot at 08:36; a later 2 GiB test VM passed the current-source
-Rust suite and was cleaned up through the manager.
+**3,557 pending updates**, and **49,077 seconds** behind; no scan was running
+and `write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
+10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, then 19 at 08:57
+and 3,557 at 09:04; the overflow count remained 460 through the current-source
+suite. The queue fluctuates and does not make this index trustworthy. At 09:04,
+CPU PSI some/full avg10 was **24.31% / 0.00%** and I/O PSI some/full avg10 was
+**1.40% / 0.96%**; load1 was **19.89** during an unrelated Go compile. A later
+current-source release build was stopped at 09:03 when load1 reached **18.85**
+and CPU PSI some avg10 **71.03%**. The earlier 4 GiB scale-test VM was stopped
+before SSH at 08:36; a 2 GiB current-source Rust test VM passed and was cleaned
+up through the manager.
 The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
@@ -26,7 +28,7 @@ from the same Rust sources as revision 75. Current HEAD adds the tunnel
 worker-start refactor and now passes the full **262/262** current-source Rust
 suite in an isolated guest. The current source still has no matching release
 artifact; revision 75 does not inherit this new suite result. Root storage is
-**185 GiB total, 109 GiB used, 69 GiB free (62% used)**; `/dev/shm` has **7.5 GiB free**.
+**185 GiB total, 110 GiB used, 67 GiB free (63% used)**; `/dev/shm` has **7.5 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -19764,3 +19766,7 @@ suite plus exact-binary tunnel/package qualification remain open.
 The exact test executable built from current commit `aadb04a5478578b3c0a81fd747d77814b6e30fd7` passed **262/262 tests, 0 failures, 0 ignored**, serially, in **128.46 seconds** inside a disposable Ubuntu 24.04 `watch-unit` VM. This includes the two new Dropbear thread-spawn policy regressions. Test executable SHA-256: `06fe1a4a2d02c30d13b2746ef826e98ba24a56989ea972af0212a8676fb4d774`; changed `src/tunnel.rs` SHA-256: `cd7987032699701ef1300c4ae5bd35fedb0889ad4cc7d0d95a158bef1ea11186`. Log SHA-256: `af7fa3df97a35bebf14ba514b2078e827c9c7c245e6d3fd6358aa248a457e032`; machine-readable report is `target/readiness/rust-current-aadb04a-20261105.json`.
 
 The guest used 2 GiB RAM, two vCPUs, QEMU CPUQuota=25% and MemoryMax=2.5 GiB. The serial test worker had CPUQuota=50%, MemoryMax=1536 MiB, no swap, and IOWeight=10. QEMU cgroup memory peak was **1,677,881,344 bytes**; guest `oom_kill` remained **0** and swap was disabled. Host admission at VM start had no blockers. The VM was stopped through the manager; its private tmpfs runtime was removed. Production `dux.service` remained active on 0.6.3-66 with zero restarts. The overflow count stayed **460** across the run; at 08:57 the index remained dirty, **19 pending**, and **48,683 seconds** behind. Timing does not establish causation for queue changes. This closes the current-source Rust unit-suite gate only. A current-source release build, exact package lifecycle after this source change, scale/fault, live-index recovery, RPM lifecycle, endurance, and canary remain open.
+
+### Current-source release build stopped at host-pressure limit — 2026-11-05 09:03 UTC
+
+Started `scripts/build-release.sh` for package revision 76 from pushed source commit `f7d6a9a`, with `CARGO_BUILD_JOBS=1`, offline Cargo, CPUQuota=25%, MemoryMax=4 GiB, no swap, IOWeight=10, Nice=19/idle I/O, and Cargo target/TMPDIR/output on `/dev/shm`. The build had compiled dependency crates only (about 292 MiB of target files) and had produced no Dux executable, package, or published artifact. At 09:03:45 the host crossed the stop condition: load1 **18.85**, CPU PSI some avg10 **71.03%**; a separate Go `go build ./...` and compiler process were visible. Timing does not prove attribution. Stopped only `dux-release-build-current-f7d6a9a.scope`; systemd reports it inactive, no Cargo/Rust compiler remains, and the command ended `Terminated`. Removed only this run's incomplete `/dev/shm/dux-current-target-r76-f7d6a9a`, `dux-current-build-tmp-r76-f7d6a9a`, and output directories; `/dev/shm` returned to **7.5 GiB free**. Preserved build log `target/readiness/current-release-build-f7d6a9a.log`, SHA-256 `c8236cf73fa00a6c98ee4398e89a22ea9edfda37b08e91813180c92cac049a67`. No production package, service, or index operation was performed. Retry the source-current release build after host pressure remains below the documented thresholds; exact artifact/package gates remain open.
