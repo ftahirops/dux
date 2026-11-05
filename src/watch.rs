@@ -2500,7 +2500,7 @@ pub fn run_daemon(
             if wal_write_guarded != was_wal_guarded {
                 if wal_write_guarded {
                     tracing::error!(wal_bytes = ?wal_bytes,
-                        "SQLite WAL exceeded its budget and a checkpoint could not advance; event writes are paused until checkpoint progress resumes");
+                        "SQLite WAL exceeded its budget; event writes are paused until checkpointing resumes");
                 } else {
                     tracing::info!(wal_bytes = ?wal_bytes,
                         "SQLite WAL checkpoint recovered; event writes resumed");
