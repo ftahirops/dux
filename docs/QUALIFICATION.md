@@ -5607,3 +5607,29 @@ endurance, and canary qualification remain open. Current status and hashes are
 recorded in
 `target/readiness/current-source-qual-20261105-fed53d7/qualification-report.json`
 and `scale100k-result.json`.
+
+### Effective systemd hardening matches the checked-in unit — 2026-11-05 00:30 UTC
+
+The effective `/usr/lib/systemd/system/dux.service` is now byte-for-byte equal
+to `packaging/dux.service`, both SHA-256
+`dd34d3086af76117b18b06a23c5c70ace4353ff6a33ae9b3fa3c10f13c04d920`.
+`systemd-analyze security dux.service` reports **3.3 / OK**. Effective
+properties include `NoNewPrivileges=yes`, `LimitCORE=0`, locked root bits,
+only `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH` in bounding/ambient sets,
+`CPUQuota=100%`, `MemoryMax=4G`, and `PrivateMounts=no` (required for the
+host-wide fanotify mark). This supersedes earlier unit-drift findings; it does
+not establish that the running binary or index is qualified.
+
+At **00:30:51 UTC**, production still ran rev66 commit `e0cc915f8f37`, with
+zero restarts, dirty state from fanotify overflow, **133** overflow
+notifications, **13,855 pending updates**, **18,272 seconds** behind, and no
+active scan. Recent journal lines show repeated unresolved stale-handle
+fanotify events and successful but slow **128-update** flushes. The falling
+pending count shows ongoing progress, but the stale event resolutions and
+dirty marker leave exactness unproven. The samples do not isolate the source
+of each event. The read-only
+unit and status evidence is
+`target/readiness/unit-hardening-20261105/report.json` (SHA-256
+`98aa1aa54a138b5bb3a4751438d0163be50c50bfccee4321fb6d674713cb1d79`). Clean
+current-HEAD package build, package lifecycle, current-source live recovery,
+scale, endurance, and canary gates remain outstanding.
