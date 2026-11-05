@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 19:40 UTC
+## Current readiness decision — 2026-11-05 19:44 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **19:40 UTC** it
-reported **429** kernel overflow notifications, **40** pending updates, about
-**33,653 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **19:44 UTC** it
+reported **451** kernel overflow notifications, **3,729** pending updates,
+about **33,867 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness. The service remains
 active with zero restarts.
@@ -49,11 +49,11 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At **19:40 UTC**, root storage was **185 GiB total / 105 GiB used /
+At **19:44 UTC**, root storage was **185 GiB total / 105 GiB used /
 72 GiB available** and `/dev/shm` was **13 GiB total / 3.0 GiB used / 9.9 GiB
-available**. A Go test process remained active; load1 was **2.95** and I/O PSI
-some/full avg10 **5.72% / 5.31%**. The source regression has not been run while
-these host tests continue. A RustSec audit of the
+available**. A Go test process remained active; after the focused-test scope
+was stopped, load1 was **6.34**, CPU PSI some avg10 **11.64%**, and I/O PSI
+some/full avg10 **15.54% / 13.80%**. A RustSec audit of the
 candidate lockfile found no advisories in its 2026-11-05 database snapshot;
 this is dependency evidence, not complete source or binary security
 certification.
@@ -20365,3 +20365,8 @@ At **19:23 UTC**, the same Go test PID remained active after nearly four minutes
 - Source review found that the candidate's benign-stale ATTRIB predicate checked the known handle-capable filesystem and unresolved entry, but did not retain the complete event-info shape. A compound event with an unresolved parent/name and a stale target could therefore satisfy the target-only exception. The fix in commit `075f3f5` now requires exactly one complete FID record; compound and malformed records remain unresolved coverage loss. A parser/classifier regression covers target-only, compound, and truncated records. `cargo fmt --all -- --check` and `git diff --check` pass. The Rust regression has **not** been run: repeated Go test/compiler batches and elevated host load have prevented a clean test window. Keep this fix unpromoted until the focused test passes.
 
 At **19:40 UTC**, production still had no reconciliation scan. Pending updates fell **20,174 → 40** while `events_seen` rose by about **245,549** and committed updates rose by about **111,015** since 19:35. The overflow counter remained **429**, but the last scan was about **24,681 seconds** old and the index remained dirty; this transient queue drain is not an exactness check. The workload probe still found Go test PID **490406**, so no Rust build/test was started.
+
+### Focused stale-ATTRIB test interrupted by renewed host pressure — 2026-11-05 19:42–19:44 UTC
+
+- The focused unit test was launched in a systemd scope capped at **5% CPU / 1 GiB memory**, with one Cargo job, `nice 19`, and idle I/O priority. An initial invocation selected `--lib`, but this package has only a `dux` binary test target; Cargo exited before compiling. The corrected `--bin dux` invocation reached compilation. When concurrent Go tests became active and I/O PSI some avg10 rose to **11.29%**, stopped only the Dux test scope. The scope is confirmed inactive; the session exited **143**, and no test summary was produced. This is interrupted, not passed.
+- During the interval, production overflow notifications rose **429 → 451**, and dirty reason/time advanced. The concurrent Go tests and this brief Rust compile overlapped; their individual contributions cannot be separated. Production Dux remains active with zero restarts and no write error, but the index is dirty with **3,729** pending updates, no scan, and about **33,867 seconds** of lag. Stop further local compile/test attempts while host event/I/O pressure is elevated; retest in the disposable guest after a clean admission window.
