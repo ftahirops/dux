@@ -5937,3 +5937,25 @@ remain stable across observation windows. `/tmp` contained about **14 GiB**,
 including active Go build data and unrelated application caches, so it was
 preserved; `target/readiness` retained about **6.6 GiB** of qualification
 evidence.
+
+### Repeated production fanotify overflow during external test churn — 2026-11-05 02:27 UTC
+
+The admission gate did not clear. At **02:26:53 UTC**, the revision 73
+read-only status showed the overflow counter had increased from **200** at
+02:25:06 to **215**, with the retry circuit still paused after **2** failed
+reconciliations. The status showed **1,435 pending updates**, no scan in
+progress, no write error, and about **25,233 seconds** since the last scan.
+Since 02:26:00, the production journal recorded **15** additional
+`fanotify queue overflow` warnings; individual warnings appeared seconds
+apart alongside unresolved stale file handles. An unrelated Go suite remained
+active in `/home/xgenstack.com/backend` (PIDs **2764614/2786939**). At this
+sample, load1 was **5.51**, CPU PSI `some avg10` **1.41%**, and I/O PSI `full
+avg10` **9.20%**. These observations show continuing event loss during
+concurrent host churn; they do not establish that this external workload is
+the sole cause. Snapshot and journal SHA-256:
+`c5ad88f0cf22d03baedb9bec59eab9478f0bbe84c3985dca17c9b5686c3170e7` at
+`target/readiness/current-source-qual-20261105-0bd433d/fanotify-overflow-repeat-0226Z.json`.
+No recovery scan, service restart, package change, or index mutation was
+attempted. Rescan admission remains closed until overflow stops across quiet
+observation windows; package lifecycle and current-source release qualification
+remain open.
