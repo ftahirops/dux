@@ -5823,3 +5823,43 @@ documentation. This entry changes the source-tree digest, so revision 71 is
 bound to the prior clean commit. Rebuild from the commit containing this entry
 before promotion. Package installation/upgrade/rollback and all live-index
 recovery gates remain open.
+
+### Clean post-record release bundle and guest pressure stop — 2026-11-05 01:45 UTC
+
+After committing the previous qualification entry, static package revision
+**72** built from clean HEAD `b9780b3272ed17edcd39cf858683a3cec040ee46`.
+Its source-tree digest is
+`11a45aaf6597fb7b28c94c7ceb2e9620072b81b6318ff5ea1224c1976ef27900`, and
+the manifest records `worktree_dirty=false`. The static PIE contains
+`.dep-v0`; its binary SHA-256 is
+`d008c69717927cc9a426c202bfde4210d883af7a06e5314160499e27706eb032`, which
+matches both DEB and RPM payloads. All eight bundle checksums pass. RustSec
+reported zero vulnerabilities and warnings across 229 lockfile dependencies;
+the exact binary inventory recovered 202 dependencies without warnings. The
+Build-ID-matched debug artifact passed. Bundle:
+`target/readiness/release-current-head-b9780b3-72/`; SHA256SUMS SHA-256
+`49e19210eee3532835076023126f0d1567dd331d5787a2511fa1ce78bc344a42`. Build
+log SHA-256
+`4418dbb6a2e183112dee58bb88f646e32571361cbbf5a575bb13804301b491e3`.
+The capped build completed in **3m10s**, with **56.3s CPU**, **671.8 MiB** peak
+memory, and no swap.
+
+A later standard Ubuntu 24 guest passed storage and host admission, reached
+Ubuntu 24.04.5 userspace, and completed cloud-init. SSH became available, but
+the pressure guard stopped QEMU before the package copy began: CPU PSI some
+avg10 reached **71.64%**, above its 70% critical limit, at load1 **10.19**.
+The failed SCP happened after QEMU had stopped; no package was copied or
+installed. The base image was unchanged and the private runtime was cleaned.
+Console SHA-256
+`66447af3fe2329f67c17bdf94183f050fe029a261667be5ce8af7454d969a58c`; guard
+event log SHA-256
+`97d3b46e05528cd36266eb87c62ccea0f4d67deb2012a38b367f83680eb21a51`.
+
+The production daemon remained active without a write error. Its index was
+still dirty after fanotify overflow, **171** overflow notifications, **75**
+pending updates, no scan in progress, and about **22,655 seconds** behind.
+Snapshot SHA-256
+`47dbfbd759de77f86c01d6ac159aeac6c64386c4fb1d28fb8bde1bb3bd06a225`. Root
+disk has **65 GiB free (64% used)**. Package install/upgrade/rollback and
+production index recovery remain unqualified. This entry changes the source
+tree; rebuild the release bundle from its resulting commit before promotion.
