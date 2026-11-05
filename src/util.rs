@@ -962,9 +962,10 @@ fn append_display_text(out: &mut String, text: &str) {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 || c as u32 == 0x7f || (0x80..=0x9f).contains(&(c as u32)) => {
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
                 out.push_str(&format!("\\x{:02x}", c as u32));
             }
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
             c => out.push(c),
         }
     }
@@ -977,10 +978,7 @@ pub fn display_path(s: &str) -> String {
 
 fn escape_controls(s: &str) -> String {
     // Fast path: most paths have no control characters.
-    if !s
-        .chars()
-        .any(|c| (c as u32) < 0x20 || c as u32 == 0x7f || (0x80..=0x9f).contains(&(c as u32)))
-    {
+    if !s.chars().any(char::is_control) {
         return s.to_string();
     }
     let mut out = String::with_capacity(s.len() + 8);
@@ -989,9 +987,10 @@ fn escape_controls(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 || c as u32 == 0x7f || (0x80..=0x9f).contains(&(c as u32)) => {
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
                 out.push_str(&format!("\\x{:02x}", c as u32));
             }
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
             c => out.push(c),
         }
     }
@@ -1023,7 +1022,10 @@ mod tests {
         assert_eq!(display_name("�".as_bytes()), "�");
         assert_eq!(display_name(br"\xff"), r"\\xff");
         assert_eq!(display_name(b"a\n\x1b"), r"a\n\x1b");
+        assert_eq!(display_name(b"\x85"), r"\x85");
+        assert_eq!(display_name("\u{85}".as_bytes()), r"\u{85}");
         assert_eq!(display_path_bytes(b"/bad/\xff"), r"/bad/\xff");
+        assert_eq!(display_path("\u{85}"), r"\u{85}");
     }
 
     #[test]
