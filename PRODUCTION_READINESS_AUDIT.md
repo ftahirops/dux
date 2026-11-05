@@ -1,24 +1,26 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:08 UTC
+## Current readiness checkpoint — 2026-11-05 06:26 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **350** recorded kernel overflows, **2,976 pending updates**, and
-is about **10.7 hours** behind. Revision 74 passed package lifecycle tests;
+overflow, has **366** recorded kernel overflows, **169 pending updates**, and is
+about **11.0 hours** behind. The status reports recovery unpaused, but no scan
+is running and the last scan is about **3.4 hours** old. Revision 74 passed
+package lifecycle tests;
 revision 67 passed the core exact-binary churn suite. Exact revision-74 live
 churn remains unverified, and the current-tree revision-75 release build has
-not completed. The index recovery circuit is
-paused after two failed reconciliations. Root storage is **185 GiB total, 114
-GiB used, 63 GiB free (65% used)**; `/dev/shm` has **8.1 GiB free**.
+not completed. The status reports no pause reason at the latest sample. Root
+storage is **185 GiB total,
+112 GiB used, 66 GiB free (64% used)**; `/dev/shm` has **8.1 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
 | S0 — patched SQLite, telemetry, lazy lookups, explicit errors | **Partial** | Candidate bundles SQLite 3.54.1 and core regressions pass. A current-source release build is pending, and the required independent before/after throughput comparison is not established. |
 | S1 — incarnation identity and path-instance schema | **Open** | Active schema remains v6 (`SCHEMA_VERSION=6`); the spec's schema-v7 path-instance/object-incarnation model, exact migration, and rollback are not delivered. |
 | S2 — durable journal and separate capture/apply | **Open** | The watcher still resolves events and applies in-memory work on its live pipeline; there is no versioned durable event journal, replay/cursor protocol, or torn-segment recovery proof. |
-| S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; the current retry circuit is paused and a controlled recovery has not passed. |
+| S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
 | S5 — modules, package/security, operations | **Partial** | Revision 74 passed guarded package upgrade/rollback/removal/clean-install and dependency audit. Current full-tree provenance awaits revision 75; root plus `CAP_SYS_ADMIN`/`CAP_DAC_READ_SEARCH` remains, and capability/platform/runbook gates are open. |
 | S6 — integrated release qualification | **Open** | No current-tree revision-75 artifact; exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. |
@@ -19588,3 +19590,9 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Compared packaged revision-74 CLI reads of the live DB at **06:20:39** and **06:22:26 UTC** (107 seconds apart). Cumulative event counters changed from **76,608,083 seen / 45,097,969 resolved / 7,865,400 updates committed** to **76,881,382 seen / 45,281,339 resolved / 7,886,359 committed**: approximately **2,554 seen events/s**, **1,714 resolved events/s**, and **196 committed updates/s**. Pending updates rose from **75** to **34,506**, while the recorded kernel overflow count remained **366**. These are daemon status counters, not unique-path or durable-event rates.
 - At **06:22:26 UTC**, the service remained dirty and about **39,365 seconds** behind, with its automatic reconciliation circuit paused after **2** failures; no scan or write error was reported. Host load1 was **8.23**, CPU PSI `some avg10` **3.20%**, I/O PSI `some avg10` **11.75%** and `full avg10` **11.57%**. An external `npm ci` process was active. The timing does not prove this workload caused the backlog.
 - This sample quantifies the live legacy pipeline's inability to converge during the observed event rate even without a new overflow notification. It does not measure the newer candidate and does not establish that all observed events became unique pending paths. A candidate benchmark should preserve these seen/resolved/committed/backlog counters and measure capture-to-apply throughput under a controlled workload. No scan, install, service, or index operation was performed.
+
+### PROD-HEALTH-321 Queue drained but overflow-dirty index remains unreconciled — 2026-11-05 06:26 UTC
+
+- Read-only `/usr/bin/dux status --json` at **06:26:31 UTC** reports the installed **0.6.3-66** daemon live with zero restarts, **366** recorded kernel overflows, **169 pending updates**, and **0 userspace drops**. The index remains dirty with reason `fanotify queue overflow`, about **39,612 seconds** behind, and its last full scan is **12,091 seconds** old. No scan is active and `write_error` is null. The service status now reports `paused=false` and no pause reason, unlike the earlier 06:22 sample; unpausing alone has not reconciled the index.
+- Root storage is **185 GiB total / 112 GiB used / 66 GiB free (64%)**; `/dev/shm` has **8.1 GiB free**. Host I/O PSI at the sample was `some avg10=1.66%`, `full avg10=1.37%`; CPU PSI `some avg10=11.37%`. An unrelated `go test ./...` had an active Go test process and ongoing compile/test processes. The daemon used about **948 MiB** resident cgroup memory.
+- Did not start a scan, build, install, or service/index operation during the external compile/test workload. The contradictory-to-earlier pause state is recorded as a fresh observation, not evidence that the service recovered. Exact live index correctness, controlled recovery, and current-source release qualification remain open.
