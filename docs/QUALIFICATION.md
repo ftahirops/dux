@@ -6063,3 +6063,27 @@ show that the earlier low-pending observation was not a durable recovery
 window. No scan, restart, package change, or direct database operation was
 performed. Retry admission only after the external tests/builds finish and
 multiple quiet samples show the queue and event-loss signals have settled.
+
+### Live production service security posture recheck — 2026-11-05 02:58 UTC
+
+The running service is `/usr/bin/dux` version **0.6.3** (production source ID
+`e0cc915f8f37`, source SHA-256
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`, binary
+SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`),
+PID **423219**. Effective systemd settings were re-read from the manager and
+live process: `NoNewPrivileges=yes`, `SecureBits=noroot noroot-locked`,
+`LimitCORE=0`, `MemoryMax=4G`, `CPUQuota=100%`, `RestrictAddressFamilies=AF_UNIX`,
+`SystemCallFilter=~@module @mount @swap @reboot @clock @obsolete @raw-io
+@debug @cpu-emulation`, and capability bounding/ambient sets limited to
+`CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`. `/proc/423219/status` confirmed
+those effective/permitted capabilities, `NoNewPrivs=1`, and seccomp mode 2.
+`systemd-analyze security --no-pager dux.service` scored the effective unit
+**3.3 (OK)**. The state directory is mode **0750 root:dux**; the database,
+WAL, and SHM are mode **0640 root:dux**, with no additional ACL grants. The
+index remains sensitive because it lists host paths, and the daemon still runs
+as root with `CAP_SYS_ADMIN`; residual privilege acceptance/reduction remains
+open. `ProtectSystem`, `ProtectHome`, and `PrivateTmp` remain disabled to
+preserve the host filesystem view required by fanotify. This security check
+does not change the separate live-correctness gate: at the preceding
+02:57:34 sample Dux was dirty with **34,471 pending updates** and about
+**27,074 seconds** behind. No service, package, or database change was made.
