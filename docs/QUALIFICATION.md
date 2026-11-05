@@ -5685,3 +5685,44 @@ and `installed-binary-audit.log` (SHA-256
 **3,923 pending updates**; its after-audit status snapshot is
 `production-status-after-audit.json` (SHA-256
 `1ccf8496d27b7d7f0b2a6f6cf61e22b17a9a39b715b32b7591d6ea9865938c87`).
+
+### Clean current-HEAD static release package — 2026-11-05 00:51 UTC
+
+The production release builder completed successfully from clean commit
+`83b19059778157cb4846ab2d5c34e49c07d62680` as package revision **70**. The
+build ran in a private tmpfs scratch/target with CPU quota **50%**, memory cap
+**4 GiB**, and no swap; elapsed time was **5m46s**, CPU time **2m52s**, and
+peak memory **1.5 GiB**. The manifest records `worktree_dirty=false`, 124 source
+files, and source-tree SHA-256
+`bfe06c58f1ace0be9173cecf7006eb1ccbd572f485c2284ce0644aca071c8986`.
+
+The builder's refreshed RustSec gate passed with 229 locked dependencies,
+zero vulnerabilities and zero warnings; the exact static executable scan
+recovered 202 dependencies without warnings. Checksums for every artifact
+passed. The ELF is static PIE and includes `.dep-v0`; the debug sidecar Build
+ID matches. The reported production version/revision/source digest matches
+HEAD, and the DEB and RPM payload binary hashes match the standalone binary.
+The binary, DEB metadata, and RPM metadata were inspected. SHA-256 values:
+
+- Static executable: `fc62b1d7bf3aaa4332a0cfb73db5685ba714409a1d12a35d3a4b8ac6c3bd77e7`
+- DEB: `472ec5d991633951d38436aa2c125e473cee9649425e23da51ea9710bcc20bef`
+- RPM: `2322c20344d97ed1de0a34324bc175b62411a8c047cdde795d71ea0fb7526ca6`
+- Build manifest: `9e6ef497bfe545a553daa11ef5d1dfa250e1b8537e7fbd8cc7e0edd8b7a4b42d`
+- `SHA256SUMS`: `1bfb173aaf118b0d0805821009794bdab1d43346f893a59c2d485954de07fc53`
+
+The full bundle is retained in
+`target/readiness/release-current-head-83b1905-70/`. It is a clean, audited
+artifact bound to commit `83b1905`; this qualification entry is a subsequent
+docs-only source-tree change, so the bundle will not match the newer HEAD
+after this entry is committed. Rebuild as revision 71 from that latest HEAD
+before promotion. Package lifecycle and promotion readiness are also open. At
+**00:51 UTC**, the running production service was still the rev66
+binary, active with zero restarts. Its index remained dirty from fanotify
+overflow, with **144** overflow notifications, **5,248 pending updates**, no
+scan in progress, and **19,498 seconds** behind; status snapshot SHA-256 is
+`73644e9c55935b62bd2403c6495a8cfbad0dba199772aaae5f0099658a862463`. An
+external Go compile/vet workload was active and host CPU PSI some avg10 was
+**43.87%**. Current-package upgrade/rollback lifecycle and any live production
+promotion are deferred until host pressure permits and the dirty index is
+reconciled and exactly verified. Existing current-source live churn/fault,
+scale, endurance, and canary gates remain open.
