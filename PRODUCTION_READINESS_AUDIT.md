@@ -1,29 +1,34 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 07:33 UTC
+## Current readiness checkpoint — 2026-11-05 08:16 UTC
 
-**Overall state: not production-ready.** The current installed daemon is package
-0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **428** recorded kernel overflows, **24,511 pending updates**, and
-is about **12.1 hours** behind. Recovery is unpaused, no scan is running, and the
-last scan is about **4.47 hours** old. The current Cargo.lock audit found no
-known RustSec advisories in **229 dependencies** against a database updated
-2026-11-03; current-tree release packaging is still incomplete. Revision 74
-passed package lifecycle tests and revision 67 passed the core exact-binary
-churn suite. Exact revision-74 live churn remains unverified. Root storage is
-**185 GiB total, 114 GiB used, 63 GiB free (65% used)**; `/dev/shm` has **7.8
-GiB free**.
+**Overall state: not production-ready.** The installed daemon is still package
+0.6.3-66, active with zero restarts. At 08:16 UTC its `/` index was dirty from
+fanotify overflow with **446** recorded kernel-overflow notifications, **86
+pending updates**, and about **12.8 hours** behind; no scan was running and
+`write_error` was null. A separate 08:15 sample had 1,751 pending updates. The
+queue fluctuates and does not make this index trustworthy. The 0.6.3-75 release
+candidate was built from clean commit `e3863f0`; checksums and embedded audit
+metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
+24.04. The effective installed unit in that guest denied `bpf`. RustSec audit
+covered 229 locked dependencies with zero vulnerabilities against the upstream
+database current through Nov. 3. The full current-candidate Rust suite remains
+incomplete: it discovered 260 tests but host pressure/overflow guards stopped
+it after 34 passed; a dedicated watch VM was stopped before SSH readiness.
+Revision 75 predates later documentation-only commits, so its source manifest
+matches the clean release commit, not current HEAD. Root storage is **185 GiB
+total, 114 GiB used, 63 GiB free (65% used)**; `/dev/shm` has **7.5 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
-| S0 — patched SQLite, telemetry, lazy lookups, explicit errors | **Partial** | Candidate bundles SQLite 3.54.1 and core regressions pass. A current-source release build is pending, and the required independent before/after throughput comparison is not established. |
+| S0 — patched SQLite, telemetry, lazy lookups, explicit errors | **Partial** | Revision 75 bundles patched SQLite and the clean release build is verified. Core regressions pass; independent before/after throughput comparison is not established. |
 | S1 — incarnation identity and path-instance schema | **Open** | Active schema remains v6 (`SCHEMA_VERSION=6`); the spec's schema-v7 path-instance/object-incarnation model, exact migration, and rollback are not delivered. |
 | S2 — durable journal and separate capture/apply | **Open** | The watcher still resolves events and applies in-memory work on its live pipeline; there is no versioned durable event journal, replay/cursor protocol, or torn-segment recovery proof. |
 | S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
-| S5 — modules, package/security, operations | **Partial** | Revision 74 passed guarded package upgrade/rollback/removal/clean-install. A fresh RustSec audit of the current lockfile found no known advisories (database current through 2026-11-03). Current full-tree provenance awaits revision 75; root plus `CAP_SYS_ADMIN`/`CAP_DAC_READ_SEARCH` remains, and capability/platform/runbook gates are open. |
-| S6 — integrated release qualification | **Open** | No current-tree revision-75 artifact; exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Three resource-capped build attempts stopped before producing a binary when host CPU pressure rose. |
+| S5 — modules, package/security, operations | **Partial** | Revision 75 passed guarded Ubuntu DEB upgrade/rollback/removal/clean-install and its effective unit denies unused `bpf`; fresh RustSec audit found no known advisories through 2026-11-03. RPM/Rocky lifecycle, default capability minimization, platform coverage, and operations gates remain open. |
+| S6 — integrated release qualification | **Open** | Revision-75 DEB/RPM/static artifacts exist from clean commit `e3863f0`; later HEAD changes are documentation-only. The complete Rust suite, current-source manifest refresh, RPM/Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
 
 This matrix is an evidence summary, not a maturity percentage. Small tests or an
 older passing candidate do not close a stage that requires current-source,
