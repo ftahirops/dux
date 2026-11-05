@@ -6438,3 +6438,14 @@ incomplete tmpfs directories were removed. Log SHA-256:
 `1c64ac69b6c09919c615ed69cfe771c94e81b180b0800fe053a80734942da8b8`. No current
 release artifact exists; retry only after host load stays below the established
 limits for the build window.
+
+### Revision-78 source-current build stopped during host load burst — 2026-11-05 09:16 UTC
+
+The source-current release build from commit `1a09e9b` was stopped before Dux
+compilation or artifact publication. A separate multi-core `staticcheck ./...`
+process was observed; host load1 reached 27.85 and CPU PSI some avg10 reached
+79.43%, with no causal attribution. Stopped only the Dux build scope; it is
+inactive and its Rust compiler processes exited. Removed only the named tmpfs
+scratch directories; `/dev/shm` returned to 7.5 GiB free. Log SHA-256:
+`42e67ce4e9538be173b024fe78834c9a9a26e2082ac1dcae95ceb9485a025642`. No current
+release artifact was produced; source-matched package qualification remains open.

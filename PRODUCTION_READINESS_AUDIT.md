@@ -1,22 +1,23 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 09:13 UTC
+## Current readiness checkpoint — 2026-11-05 09:16 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 09:13 UTC its `/` index was dirty from
+0.6.3-66, active with zero restarts. At 09:16 UTC its `/` index was dirty from
 fanotify overflow with **472** recorded kernel-overflow notifications,
-**85 pending updates**, and **49,624 seconds** behind; no scan was running and
+**126 pending updates**, and **49,788 seconds** behind; no scan was running and
 `write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
 10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, 19 at 08:57,
-3,557 at 09:04, then 85 at 09:13. The queue fluctuates and does not make this
-index trustworthy. At 09:13, CPU PSI some/full avg10 was **10.94% / 0.00%** and
-I/O PSI some/full was **0.34% / 0.14%**, while load1 remained **16.47** during
-an unrelated Go test/compiler workload. The first current-source release build
-was stopped at 09:03 under pressure; a second attempt was stopped at 09:12
-before compiling Dux or publishing an artifact. The earlier 4 GiB scale VM was
-stopped before SSH at 08:36; a 2 GiB current-source Rust test VM passed and was
-cleaned up through the manager.
+3,557 at 09:04, 85 at 09:13, then 126 at 09:16. The queue fluctuates and does
+not make this index trustworthy. At 09:16, CPU PSI some/full avg10 was
+**67.05% / 0.00%** and I/O PSI some/full was **0.36% / 0.00%**, while load1 was
+**30.99** after a `staticcheck ./...` burst. Three current-source release-build
+attempts were stopped between 09:03 and 09:16 at the host pressure limits; none
+compiled Dux or published an artifact. A `staticcheck ./...` burst was observed
+during the third attempt, without causal attribution. The earlier 4 GiB scale
+VM was stopped before SSH at 08:36; a 2 GiB current-source Rust test VM passed
+and was cleaned up through the manager.
 The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
@@ -19778,3 +19779,7 @@ Read-only paired samples for production PID **423219** showed process `write_byt
 ### Revision-77 current-source release build stopped under renewed host load — 2026-11-05 09:12 UTC
 
 Retried the current-source release build from commit `2afd321` as package revision 77 in an isolated tmpfs target/output scope: one Cargo job, offline dependency resolution, CPUQuota=25% initially, MemoryMax=4 GiB, no swap, IOWeight=10, Nice=19, idle I/O. The Dux build did not begin; dependency compilation had produced about **321 MiB** of partial target files. External Go `go test -p 2`/race compilation was active, including concurrent compiler/linker processes. At 09:12:31 load1 was **16.38** and CPU PSI some avg10 **54.06%**; lowered only this build scope to CPUQuota=15%. At 09:12:48 load1 reached **18.76** and CPU PSI some avg10 **57.51%**; stopped only `dux-release-build-current-2afd321.scope`. It is inactive and no Cargo/Rust compiler remains. Removed this run's exact tmpfs target, temp, and output directories; `/dev/shm` returned to **7.5 GiB free**. No artifact was produced and no production operation occurred. Preserved log `target/readiness/current-release-build-2afd321.log`, SHA-256 `1c64ac69b6c09919c615ed69cfe771c94e81b180b0800fe053a80734942da8b8`. Workload timing is not causal attribution. Retry the build after host pressure remains below thresholds throughout the build window.
+
+### Revision-78 current-source build stopped during external staticcheck burst — 2026-11-05 09:16 UTC
+
+Started the source-current release build from commit `1a09e9b` for package revision 78 with a one-job auditable musl build, CPUQuota=25%, MemoryMax=4 GiB, no swap, low I/O weight, and all Cargo target/tmp/output paths on `/dev/shm`. A separate `staticcheck -checks=SA* ./...` process was observed using multiple cores. At 09:15:51 host load1 reached **27.85** and CPU PSI some avg10 **79.43%**; staticcheck had exited by the next process sample, but pressure remained high. Stopped only `dux-release-build-current-1a09e9b.scope` at 09:16:01 when load1 was **28.82** and CPU PSI some avg10 **73.35%**. The build had compiled dependencies only (about **71 MiB** target observed) and produced no Dux binary/package. Systemd confirms the scope inactive; no Cargo/Rust compiler remains. Removed only its exact tmpfs target/tmp/output dirs, restoring `/dev/shm` to **7.5 GiB free**. Preserved log `target/readiness/current-release-build-1a09e9b.log`, SHA-256 `42e67ce4e9538be173b024fe78834c9a9a26e2082ac1dcae95ceb9485a025642`. No production package, service, or index operation was performed. The temporal overlap does not establish causation. Current-source artifact qualification remains open.
