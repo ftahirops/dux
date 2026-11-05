@@ -1,0 +1,17 @@
+{
+  "status": "inconclusive_interrupted_by_host_pressure_guard",
+  "guest": "rocky9-lifecycle-ephemeral",
+  "distribution": "Rocky Linux 9.8",
+  "filesystem": "XFS",
+  "started_at_utc": "2026-11-05T10:37:51Z",
+  "stopped_at_utc": "2026-11-05T10:41:53Z",
+  "profile": "standard (2 GiB RAM, 2 vCPU, 25% CPU quota)",
+  "old_package": "dux 0.6.3-66 x86_64 RPM",
+  "candidate_package": "dux 0.6.3-79 x86_64 RPM",
+  "lifecycle_report": "not produced; the harness did not complete legacy_baseline",
+  "observed_guest_baseline": "legacy daemon remained dirty/incomplete after its initial scan, reporting 4 repeated directory identities, stale open_by_handle_at file handles, and 20 scan coverage issues; one bounded retry was scheduled. Candidate r79 was not installed.",
+  "termination": "pressure guard stopped disposable guest when host load1 reached 13.46 (critical threshold 12); CPU PSI some avg10 19.39%, I/O PSI full avg10 0.23%, I/O PSI some avg10 0.68%.",
+  "console_log": "console.log",
+  "console_log_sha256": "b6e54bd68fdf2eac4d6cf759665995d38667830f79bbad262199a857d226a311",
+  "production": "installed package remains 0.6.3-66; no candidate installed on production. At 10:42 UTC daemon active, dirty from fanotify queue overflow, 18 overflow notifications, 5 pending, about 1,349 seconds behind, no scan or write error."
+}

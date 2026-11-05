@@ -1,6 +1,32 @@
 # dux Production Readiness Audit
 
 
+## Qualification continuation — 2026-11-05 10:42 UTC
+
+The revision-79 RPM lifecycle on Rocky Linux 9.8 is **inconclusive and
+interrupted**, not passed. The guest booted from the checksum-verified Rocky
+image with 2 GiB RAM, a 25% QEMU CPU quota, and an active pressure guard. The
+test harness started the legacy 0.6.3-66 RPM baseline, but its daemon remained
+dirty after scanning the XFS root: it reported four repeated directory
+identities, stale `open_by_handle_at` handles, and 20 scan errors, then scheduled
+one bounded retry. The harness requires a caught-up baseline before recording a
+phase, so it had not yet recorded `legacy_baseline`; revision 79 was never
+installed in that guest. At 10:41:53 the host pressure guard stopped the guest
+when load1 reached 13.46 (critical threshold 12). The console transcript and
+structured attempt record are preserved under
+`docs/qualification/rocky9-rpm-r79-attempt-20261105/`; this is not a completed
+package lifecycle report.
+
+At 10:42 UTC production still ran package 0.6.3-66. The daemon was active but
+dirty from fanotify queue overflow, with 18 overflow notifications, 5 pending
+updates, and about 1,349 seconds behind; no scan was running and `write_error`
+was null. No candidate was installed on production. The guest attempt ran on
+the same pressured host and the host index was already dirty before it began;
+do not treat its partial work as proof of safe production behavior. Further
+guest attempts must wait for the host admission gate and the Rocky baseline
+reconciliation issue needs diagnosis before retrying the RPM lifecycle.
+
+
 ## Current readiness checkpoint — 2026-11-05 10:36 UTC
 
 **Overall state: not production-ready.** The exact-current revision-79 DEB
