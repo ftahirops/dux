@@ -31,6 +31,13 @@ metadata for 202 dependencies and exited successfully without warnings. Full
 artifact set and manifest are preserved at
 `target/readiness/release-r79-ff5f443/`.
 
+Independent offline package inspection also extracted both package payloads:
+the DEB and RPM `/usr/bin/dux` hashes exactly match the static artifact, and
+both rollback-helper hashes exactly match the reviewed source helper. Package
+metadata is `dux 0.6.3-79 amd64/x86_64`; every checksum in the preserved manifest
+passes. This validates payload identity, not install-time scriptlets or the
+effective unit in an installed guest.
+
 The exact-current DEB/RPM lifecycle has **not** passed yet. The manager admitted
 a disposable Ubuntu 24.04 lifecycle guest after stale Cargo build caches were
 removed from `/dev/shm`; its pressure guard stopped the guest 13 seconds later
