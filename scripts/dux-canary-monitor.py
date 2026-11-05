@@ -17,6 +17,7 @@ OBSERVER_PATH = Path(__file__).with_name("dux-live-observer.py")
 OBSERVER_SPEC = importlib.util.spec_from_file_location("dux_live_observer", OBSERVER_PATH)
 OBSERVER = importlib.util.module_from_spec(OBSERVER_SPEC)
 OBSERVER_SPEC.loader.exec_module(OBSERVER)
+EXPECTED_SCHEMA_VERSION = "6"
 
 
 def sha256_file(path):
@@ -188,8 +189,11 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
 
     if not isinstance(sample.get("accounting"), dict) or not OBSERVER.invariant_passed(sample["accounting"]):
         errors.append("exact accounting snapshot failed")
-    elif sample["accounting"].get("schema_version") != "6":
-        errors.append("database schema is not candidate schema 5")
+    elif sample["accounting"].get("schema_version") != EXPECTED_SCHEMA_VERSION:
+        actual = sample["accounting"].get("schema_version")
+        errors.append(
+            f"database schema {actual!r} differs from candidate schema {EXPECTED_SCHEMA_VERSION}"
+        )
     history = sample.get("history")
     if not isinstance(history, dict):
         errors.append("growth history snapshot is missing")

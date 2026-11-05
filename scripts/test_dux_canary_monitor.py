@@ -130,7 +130,10 @@ class CanaryMonitorTests(unittest.TestCase):
         value = sample()
         value["accounting"]["schema_version"] = "4"
         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
-        self.assertIn("database schema is not candidate schema 5", errors)
+        self.assertIn("database schema '4' differs from candidate schema 6", errors)
+
+    def test_candidate_schema_version_is_explicit(self):
+        self.assertEqual(MONITOR.EXPECTED_SCHEMA_VERSION, "6")
 
     def test_restart_and_resource_limit_breach_fail(self):
         value = sample()

@@ -1,19 +1,19 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 06:26 UTC
+## Current readiness checkpoint — 2026-11-05 06:30 UTC
 
 **Overall state: not production-ready.** The current installed daemon is package
 0.6.3-66, active with zero restarts, but its `/` index is dirty from fanotify
-overflow, has **366** recorded kernel overflows, **169 pending updates**, and is
-about **11.0 hours** behind. The status reports recovery unpaused, but no scan
+overflow, has **366** recorded kernel overflows, **106 pending updates**, and is
+about **11.1 hours** behind. The status reports recovery unpaused, but no scan
 is running and the last scan is about **3.4 hours** old. Revision 74 passed
-package lifecycle tests;
-revision 67 passed the core exact-binary churn suite. Exact revision-74 live
-churn remains unverified, and the current-tree revision-75 release build has
-not completed. The status reports no pause reason at the latest sample. Root
-storage is **185 GiB total,
-112 GiB used, 66 GiB free (64% used)**; `/dev/shm` has **8.1 GiB free**.
+package lifecycle tests and revision 67 passed the core exact-binary churn
+suite. Exact revision-74 live churn remains unverified, and the current-tree
+revision-75 release build has not completed. The status reports no pause reason
+at the latest sample. Root
+storage is **185 GiB total, 112 GiB used, 65 GiB free (64% used)**; `/dev/shm`
+has **8.1 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -19602,3 +19602,8 @@ The full unit result is preserved in `target/readiness/current-source-rust-unit-
 - Verified the Rust product source under test is unchanged from the revision-74 product-source commit (`git diff --quiet 1ed23b9 HEAD -- src Cargo.toml Cargo.lock build.rs` returned success); the current branch changes after that point are documentation. Reused the existing test executable `target/debug/deps/dux-fc0f5b20131235c5` (SHA-256 `92aa6df79ae15ba5a1adbae93f0a98e4d844e35f664ad25a87e5e79ff7743d0b`) to avoid compiling on the shared production host.
 - Ran `watch::tests::stale_target_attrib_is_ignored_only_for_a_known_handle_capable_filesystem` in a transient systemd scope with `CPUQuota=5%`, `MemoryMax=512M`, `IOWeight=10`, and one test thread. It passed (**1 passed, 259 filtered**, 0.09 seconds). The regression checks benign target-only `FAN_ATTRIB`/`ESTALE` only for a known handle-capable filesystem, and rejects other masks, unknown filesystems, name-bearing records, and non-`ESTALE` handle errors.
 - This isolated in-memory test does not exercise live fanotify delivery, exact current binary packaging, or index convergence; it closes only this focused regression check. Broader Rust, fault, scale, package, endurance, canary, and live recovery gates remain open. A new external Go test process started during the follow-up resource check, with I/O PSI `full avg10=12.31%`; no larger suite or scan was started.
+
+### PROD-CORRECTNESS-323 Canary monitor reports the wrong candidate schema — 2026-11-05 06:31 UTC
+
+- Static review found the fail-closed canary monitor correctly accepted only schema version **6**, but emitted the contradictory diagnostic `database schema is not candidate schema 5` for a mismatch. That could misdirect an operator during a failed canary. The monitor now has one explicit expected-schema constant and reports both the actual and expected versions; the regression test verifies the v6 expectation and checks the mismatch diagnostic.
+- Ran the complete `scripts/test_dux_canary_monitor.py` suite in transient scope `dux-canary-monitor-tests-20261105.scope` with `CPUQuota=5%`, `MemoryMax=256M`, `IOWeight=10`, and `Nice=19`; **16/16 tests passed**. The test imports and exercises the monitor logic but does not run a real 24-hour canary or invoke live systemd/database capture. No production service, package, or index was changed.
