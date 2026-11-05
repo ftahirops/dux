@@ -6294,3 +6294,27 @@ does **not** match the revision-74 binary's embedded digest. The artifact is
 checksum-valid and remains suitable for runtime-code qualification, but it
 cannot satisfy current-HEAD release provenance or replace the pending revision
 75 package build. No artifact was installed or modified.
+
+### Focused fanotify regression rerun and live pipeline checkpoint — 2026-11-05 07:33 UTC
+
+Reused the checksum-verified test executable
+`target/debug/deps/dux-fc0f5b20131235c5` (SHA-256
+`92aa6df79ae15ba5a1adbae93f0a98e4d844e35f664ad25a87e5e79ff7743d0b`) to rerun
+five relevant Rust tests without compiling: stale target-only `FAN_ATTRIB`
+filtering, unresolved self-generated `FAN_ATTRIB` handling, bounded fanotify
+suffix ordering, deferred-move backlog accounting, and separate kernel
+overflow/userspace-drop counters. All **5/5 passed**; each test reported
+**1 passed, 0 failed**. Tests ran serially with `CPUQuota=5%`, `MemoryMax=1G`,
+`CPUWeight=1`, `IOWeight=1`, nice 19, idle I/O, and `TMPDIR=/dev/shm`. They
+exercise selected regressions only; they are not a current-source full-suite or
+live-kernel overflow qualification.
+
+At **07:33:05**, the installed daemon was active with zero restarts but status
+remained dirty, **43,606 seconds** behind, with **24,511 pending updates** and
+**428 kernel overflow notifications**. The last scan was **16,085 seconds** old;
+there was no active scan or write error. The journal recorded a fresh sequence
+of overflow warnings from **07:30:31 through 07:30:52**. Host CPU PSI some
+avg10 was **36.10%** at the status sample; an external Go race-test compile was
+active then. The process timing is not sufficient to attribute the overflows
+or host pressure to that test. Storage had **63 GiB free** on `/` and **7.8 GiB
+free** on `/dev/shm`.
