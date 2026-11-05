@@ -914,12 +914,60 @@ pub fn ceil_div_nonnegative(bytes: i64, unit: i64) -> i64 {
     bytes / unit + i64::from(bytes % unit != 0)
 }
 
-/// Render a raw filename (bytes) for SAFE terminal display: decode lossily, then
-/// escape control/escape characters. A local user can otherwise craft a filename
-/// containing newlines or ANSI/OSC escape sequences (e.g. OSC 52 clipboard
-/// writes) that forge or hijack the terminal of an admin running `dux`.
+/// Render a raw filename (bytes) for safe terminal display. Preserve valid UTF-8,
+/// escape invalid bytes and literal backslashes distinctly, and escape controls.
+/// A local user can otherwise craft a filename containing newlines or ANSI/OSC
+/// escape sequences (e.g. OSC 52 clipboard writes) that forge or hijack an admin's
+/// terminal. Byte escapes also keep different Linux filenames distinguishable.
 pub fn display_name(raw: &[u8]) -> String {
-    escape_controls(&String::from_utf8_lossy(raw))
+    display_path_bytes(raw)
+}
+
+/// Render a raw absolute path without collapsing distinct non-UTF-8 components.
+/// Slash bytes remain path separators; invalid bytes and literal backslashes are
+/// escaped so the display form remains unambiguous to a human reader.
+pub fn display_path_bytes(raw: &[u8]) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut offset = 0;
+    while offset < raw.len() {
+        match std::str::from_utf8(&raw[offset..]) {
+            Ok(valid) => {
+                append_display_text(&mut out, valid);
+                break;
+            }
+            Err(error) => {
+                let valid_len = error.valid_up_to();
+                if valid_len > 0 {
+                    // `from_utf8` reported this prefix as valid.
+                    let valid = std::str::from_utf8(&raw[offset..offset + valid_len])
+                        .expect("UTF-8 validator accepted prefix");
+                    append_display_text(&mut out, valid);
+                    offset += valid_len;
+                }
+                let invalid_len = error.error_len().unwrap_or(raw.len() - offset);
+                for byte in &raw[offset..offset + invalid_len] {
+                    out.push_str(&format!("\\x{byte:02x}"));
+                }
+                offset += invalid_len;
+            }
+        }
+    }
+    out
+}
+
+fn append_display_text(out: &mut String, text: &str) {
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f || (0x80..=0x9f).contains(&(c as u32)) => {
+                out.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
 }
 
 /// Same escaping for an already-decoded path string (CLI output paths).
@@ -967,6 +1015,16 @@ pub fn ago(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn byte_path_display_keeps_invalid_names_distinct_and_controls_safe() {
+        assert_eq!(display_name(b"\xff"), r"\xff");
+        assert_eq!(display_name(b"\xfe"), r"\xfe");
+        assert_eq!(display_name("�".as_bytes()), "�");
+        assert_eq!(display_name(br"\xff"), r"\\xff");
+        assert_eq!(display_name(b"a\n\x1b"), r"a\n\x1b");
+        assert_eq!(display_path_bytes(b"/bad/\xff"), r"/bad/\xff");
+    }
 
     #[test]
     fn scan_progress_rejects_future_mtime_instead_of_treating_it_as_fresh() {

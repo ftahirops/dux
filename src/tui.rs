@@ -12,6 +12,7 @@ use ratatui::{
 };
 use rusqlite::{params, OptionalExtension};
 use std::io::stdout;
+use std::os::unix::ffi::OsStrExt;
 use std::time::{Duration, Instant};
 
 /// Max children loaded per directory in the tree view. A directory with more
@@ -167,7 +168,8 @@ struct App {
     window_secs: i64,
     scroll: usize,
     metric: Metric,
-    root_path: String,
+    root_path: std::path::PathBuf,
+    root_display_path: String,
     db: std::path::PathBuf,
     docker_paths: Vec<String>,
     group_view: GroupView,
@@ -407,7 +409,7 @@ fn storage_worker(
             let mut shadow = App::new(&store, &db, dev, inode)?;
             // No read transaction is held during these potentially slow calls.
             shadow.refresh_storage(&store)?;
-            let fs = crate::util::fs_stat_checked(std::path::Path::new(&shadow.root_path))?;
+            let fs = crate::util::fs_stat_checked(&shadow.root_path)?;
             Ok(StorageUpdate {
                 fs,
                 containers: shadow.containers,
@@ -554,9 +556,10 @@ impl App {
     /// background refresh worker's shadow context (which reuses rebuild/
     /// refresh_panels to compute off the input thread — see RefreshWorker).
     fn new(store: &Store, db: &std::path::Path, dev: i64, inode: i64) -> Result<App> {
-        let root_path = store.path_of(dev, inode)?;
+        let root_path = store.path_buf_of(dev, inode)?;
+        let root_display_path = store.path_of_display(dev, inode)?;
         anyhow::ensure!(
-            !root_path.starts_with("inode:"),
+            !root_path.as_os_str().as_bytes().starts_with(b"inode:"),
             "indexed TUI root ({dev},{inode}) has no visible path"
         );
         Ok(App {
@@ -581,6 +584,7 @@ impl App {
             scroll: 0,
             metric: Metric::Size,
             root_path,
+            root_display_path,
             db: db.to_path_buf(),
             docker_paths: docker_paths()?,
             group_view: GroupView::Top,
@@ -748,7 +752,7 @@ impl App {
             params![self.root_dev, self.root_inode],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
-        let name = crate::util::display_path(&self.root_path);
+        let name = self.root_display_path.clone();
         let root_expanded = self.expanded.contains(&(self.root_dev, self.root_inode));
         out.push(Row {
             dev: self.root_dev,
@@ -770,14 +774,13 @@ impl App {
                 .unwrap_or(0),
         });
         if root_expanded {
-            let root_path = self.root_path.clone();
             self.append_children(
                 store,
                 &mut out,
                 self.root_dev,
                 self.root_inode,
                 1,
-                &root_path,
+                &self.root_display_path,
             )?;
         }
 
@@ -800,7 +803,7 @@ impl App {
         self.groups = if self.distribution == Distribution::Apps {
             compute_groups(
                 store,
-                &self.root_path,
+                &self.root_path.to_string_lossy(),
                 self.root_dev,
                 self.root_inode,
                 self.total_size,
@@ -825,7 +828,7 @@ impl App {
         dev: i64,
         inode: i64,
         depth: usize,
-        parent_path: &str, // real (unescaped) path of this parent, for joining
+        parent_display_path: &str,
     ) -> Result<()> {
         let order = if self.metric == Metric::Inodes {
             "recursive_inodes"
@@ -859,13 +862,12 @@ impl App {
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
                 crate::util::display_name(&nb), // escaped, for the tree
-                String::from_utf8_lossy(&nb).into_owned(), // lossy, for path joins
                 k,
                 size,
                 inodes,
             ))
         })?;
-        let mut kids: Vec<(i64, i64, String, String, char, i64, i64)> = Vec::new();
+        let mut kids: Vec<(i64, i64, String, char, i64, i64)> = Vec::new();
         for row in rows {
             kids.push(row?);
         }
@@ -877,25 +879,24 @@ impl App {
         if truncated {
             kids.truncate(CHILD_LIMIT);
         }
-        let maxs = kids.iter().map(|k| k.5).max().unwrap_or(1).max(1);
-        let maxi = kids.iter().map(|k| k.6).max().unwrap_or(1).max(1);
+        let maxs = kids.iter().map(|k| k.4).max().unwrap_or(1).max(1);
+        let maxi = kids.iter().map(|k| k.5).max().unwrap_or(1).max(1);
 
-        for (cdev, cino, name, raw_name, kind, size, inodes) in kids {
+        for (cdev, cino, name, kind, size, inodes) in kids {
             let is_expanded = kind == 'd' && self.expanded.contains(&(cdev, cino));
             // a directory is only collapsible/expandable if it actually has
             // descendants (recursive_inodes counts itself, so >1 means non-empty).
             let has_children = kind == 'd' && inodes > 1;
-            // join this entry onto its parent's real path; escape only for display.
-            let real_path = if parent_path.ends_with('/') {
-                format!("{parent_path}{raw_name}")
+            let display_path = if parent_display_path.ends_with('/') {
+                format!("{parent_display_path}{name}")
             } else {
-                format!("{parent_path}/{raw_name}")
+                format!("{parent_display_path}/{name}")
             };
             out.push(Row {
                 dev: cdev,
                 inode: cino,
                 name,
-                path: crate::util::display_path(&real_path),
+                path: display_path.clone(),
                 kind,
                 size,
                 inodes,
@@ -908,7 +909,7 @@ impl App {
                 growth: self.growth_map.get(&(cdev, cino)).copied().unwrap_or(0),
             });
             if is_expanded {
-                self.append_children(store, out, cdev, cino, depth + 1, &real_path)?;
+                self.append_children(store, out, cdev, cino, depth + 1, &display_path)?;
             }
         }
         if truncated {
@@ -1048,18 +1049,19 @@ impl App {
                 r.get::<_, i64>(2)?,
             ))
         })?;
-        let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut seen_paths: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
         let mut top_growth = Vec::new();
         for row in g {
             let (d, i, delta) = row?;
-            let path = pr.resolve(d, i)?;
-            if path.starts_with("inode:")
-                || crate::util::is_index_artifact(std::path::Path::new(&path), &self.db)
+            let path = pr.resolve_path_buf(d, i)?;
+            if path.as_os_str().as_bytes().starts_with(b"inode:")
+                || crate::util::is_index_artifact(&path, &self.db)
                 || !seen_paths.insert(path.clone())
             {
                 continue;
             }
-            top_growth.push((crate::util::display_path(&path), delta));
+            top_growth.push((pr.resolve_display(d, i)?, delta));
             if top_growth.len() == 6 {
                 break;
             }
@@ -1099,9 +1101,9 @@ impl App {
         for row in f {
             let (d, i, blocks, mtime) = row?;
             let growth = self.growth_map.get(&(d, i)).copied().unwrap_or(0);
-            let path = pr.resolve(d, i)?;
-            if !crate::util::is_index_artifact(std::path::Path::new(&path), &self.db) {
-                top_files.push((crate::util::display_path(&path), blocks, mtime, growth));
+            let path = pr.resolve_path_buf(d, i)?;
+            if !crate::util::is_index_artifact(&path, &self.db) {
+                top_files.push((pr.resolve_display(d, i)?, blocks, mtime, growth));
             }
         }
         self.top_files = top_files;
@@ -1189,7 +1191,7 @@ impl App {
                     Ok(LargeFileRow {
                         dev,
                         inode,
-                        path: crate::util::display_path(&resolver.resolve(dev, inode)?),
+                        path: resolver.resolve_display(dev, inode)?,
                         allocated,
                         modified,
                         growth,
@@ -2896,7 +2898,7 @@ fn draw_nav(f: &mut Frame, area: Rect, app: &App, title: &str) {
             Style::default().fg(Color::DarkGray),
         ));
         brand.push(Span::styled(
-            short(&app.root_path, 20),
+            short(&app.root_display_path, 20),
             Style::default().fg(Color::Gray),
         ));
     }
@@ -4995,6 +4997,7 @@ mod tests {
             scroll: 0,
             metric: Metric::Size,
             root_path: "/".into(),
+            root_display_path: "/".into(),
             db,
             docker_paths: Vec::new(),
             group_view: GroupView::Top,

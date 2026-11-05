@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 /// and fully-resolved paths so shared ancestors aren't re-queried per row.
 pub struct PathResolver<'a> {
     conn: &'a Connection,
-    node: HashMap<(i64, i64), (String, i64, i64)>, // (dev,inode) -> (name, parent_dev, parent_inode)
-    full: HashMap<(i64, i64), String>,             // (dev,inode) -> absolute path
+    node: HashMap<(i64, i64), (Vec<u8>, i64, i64)>, // (dev,inode) -> raw name and parent
+    full: HashMap<(i64, i64), Vec<u8>>,             // (dev,inode) -> raw absolute path
 }
 
 impl<'a> PathResolver<'a> {
@@ -33,23 +33,18 @@ impl<'a> PathResolver<'a> {
         parent_dev: i64,
         parent_inode: i64,
     ) {
-        self.node.insert(
-            (dev, inode),
-            (
-                String::from_utf8_lossy(name).into_owned(),
-                parent_dev,
-                parent_inode,
-            ),
-        );
+        self.node
+            .insert((dev, inode), (name.to_vec(), parent_dev, parent_inode));
     }
 
-    fn lookup(&mut self, dev: i64, inode: i64) -> Result<Option<(String, i64, i64)>> {
+    fn lookup(&mut self, dev: i64, inode: i64) -> Result<Option<(Vec<u8>, i64, i64)>> {
         if let Some(v) = self.node.get(&(dev, inode)) {
             return Ok(Some(v.clone()));
         }
         // an inode may have several dirents (hardlinks); pick the prime one for a
-        // stable canonical path. name is a BLOB — decode lossily for display.
-        let v: Option<(String, i64, i64)> = self
+        // stable canonical path. Keep the BLOB raw until display encoding so
+        // distinct non-UTF-8 path components cannot collapse to U+FFFD.
+        let v: Option<(Vec<u8>, i64, i64)> = self
             .conn
             .query_row(
                 "SELECT name, parent_dev, parent_inode FROM dirents
@@ -57,11 +52,7 @@ impl<'a> PathResolver<'a> {
                 params![dev, inode],
                 |r| {
                     let nb: Vec<u8> = r.get(0)?;
-                    Ok((
-                        String::from_utf8_lossy(&nb).into_owned(),
-                        r.get(1)?,
-                        r.get(2)?,
-                    ))
+                    Ok((nb, r.get(1)?, r.get(2)?))
                 },
             )
             .optional()?;
@@ -71,10 +62,31 @@ impl<'a> PathResolver<'a> {
         Ok(v)
     }
 
-    /// Resolve display paths without recursive stack growth. Missing objects
-    /// (e.g. deleted history) retain an inode label; SQL failures and cycles
-    /// must reach callers instead of masquerading as a successfully read path.
+    /// Resolve the historical lossy UTF-8 path form used by internal callers.
+    /// Missing objects (e.g. deleted history) retain an inode label; SQL failures
+    /// and cycles must reach callers instead of masquerading as successful reads.
     pub fn resolve(&mut self, dev: i64, inode: i64) -> Result<String> {
+        Ok(String::from_utf8_lossy(&self.resolve_bytes(dev, inode)?).into_owned())
+    }
+
+    /// Resolve a terminal/JSON display path without collapsing distinct raw
+    /// filename bytes. `resolve` remains available for callers that need the
+    /// historical lossy filesystem-path string for internal path operations.
+    pub fn resolve_display(&mut self, dev: i64, inode: i64) -> Result<String> {
+        Ok(crate::util::display_path_bytes(
+            &self.resolve_bytes(dev, inode)?,
+        ))
+    }
+
+    /// Resolve the exact indexed path for filesystem operations. Unlike either
+    /// string form, this preserves arbitrary Unix filename bytes losslessly.
+    pub fn resolve_path_buf(&mut self, dev: i64, inode: i64) -> Result<PathBuf> {
+        Ok(PathBuf::from(OsString::from_vec(
+            self.resolve_bytes(dev, inode)?,
+        )))
+    }
+
+    fn resolve_bytes(&mut self, dev: i64, inode: i64) -> Result<Vec<u8>> {
         let mut current = (dev, inode);
         let mut chain = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -88,7 +100,7 @@ impl<'a> PathResolver<'a> {
                 "indexed display path exceeds depth limit"
             );
             let Some((name, pdev, pino)) = self.lookup(current.0, current.1)? else {
-                break format!("inode:{}", current.1);
+                break format!("inode:{}", current.1).into_bytes();
             };
             if (pdev, pino) == current || pino == 0 {
                 self.full.insert(current, name.clone());
@@ -98,10 +110,10 @@ impl<'a> PathResolver<'a> {
             current = (pdev, pino);
         };
         for (id, name) in chain.into_iter().rev() {
-            if !prefix.ends_with('/') {
-                prefix.push('/');
+            if !prefix.ends_with(b"/") {
+                prefix.push(b'/');
             }
-            prefix.push_str(&name);
+            prefix.extend_from_slice(&name);
             self.full.insert(id, prefix.clone());
         }
         Ok(prefix)
@@ -807,9 +819,21 @@ impl Store {
         Ok(v)
     }
 
-    /// Reconstruct an absolute path for a node by walking parents (across mounts).
+    /// Reconstruct the historical lossy UTF-8 path used for internal path checks.
     pub fn path_of(&self, dev_id: i64, inode: i64) -> Result<String> {
         PathResolver::new(&self.conn).resolve(dev_id, inode)
+    }
+
+    /// Reconstruct a safe display path while preserving distinct raw filename
+    /// bytes. Use `path_of` when the caller needs the historical lossy path form
+    /// for internal filesystem checks.
+    pub fn path_of_display(&self, dev_id: i64, inode: i64) -> Result<String> {
+        PathResolver::new(&self.conn).resolve_display(dev_id, inode)
+    }
+
+    /// Reconstruct the exact indexed path as a Unix `PathBuf`.
+    pub fn path_buf_of(&self, dev_id: i64, inode: i64) -> Result<PathBuf> {
+        PathResolver::new(&self.conn).resolve_path_buf(dev_id, inode)
     }
 }
 
@@ -946,6 +970,36 @@ mod tests {
         }
         .path_of(1, 2)
         .is_err());
+    }
+
+    #[test]
+    fn display_path_resolution_preserves_distinct_non_utf8_names() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "INSERT INTO dirents VALUES(1,1,X'2f',1,1,1);
+             INSERT INTO dirents VALUES(1,1,X'ff',1,2,1);
+             INSERT INTO dirents VALUES(1,1,X'fe',1,3,1);
+             INSERT INTO dirents VALUES(1,1,X'efbfbd',1,4,1);
+             INSERT INTO dirents VALUES(1,1,X'5c786666',1,5,1);",
+        )
+        .unwrap();
+
+        let mut resolver = PathResolver::new(&conn);
+        assert_eq!(resolver.resolve_display(1, 2).unwrap(), r"/\xff");
+        assert_eq!(resolver.resolve_display(1, 3).unwrap(), r"/\xfe");
+        assert_eq!(resolver.resolve_display(1, 4).unwrap(), "/�");
+        assert_eq!(resolver.resolve_display(1, 5).unwrap(), r"/\\xff");
+        assert_eq!(
+            resolver
+                .resolve_path_buf(1, 2)
+                .unwrap()
+                .as_os_str()
+                .as_bytes(),
+            b"/\xff"
+        );
+        assert_eq!(resolver.resolve(1, 2).unwrap(), "/�");
+        assert_eq!(resolver.resolve(1, 3).unwrap(), "/�");
     }
 
     #[test]

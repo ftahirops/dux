@@ -660,7 +660,7 @@ fn real_main() -> Result<()> {
                         .ok_or_else(|| anyhow::anyhow!("no index root — run `dux scan` first"))?,
                 };
                 let bytes = query::subtree_bytes(&store, rd, ri)?;
-                let p = store.path_of(rd, ri).unwrap_or_else(|_| "/".into());
+                let p = store.path_of_display(rd, ri).unwrap_or_else(|_| "/".into());
                 if json {
                     emit::du(&[query::DuRow {
                         path: p,

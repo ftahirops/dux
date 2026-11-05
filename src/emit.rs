@@ -1,7 +1,7 @@
 //! Machine-readable (`--json`) output for the read commands. JSON is emitted to
-//! stdout as a single pretty-printed value so it pipes cleanly into `jq`. Paths
-//! are already lossy-UTF-8 Strings from the query layer; serde escapes them, so
-//! no terminal-control sanitising is needed here (that's only for TTY output).
+//! stdout as a single pretty-printed value so it pipes cleanly into `jq`. Query
+//! paths are safe UTF-8 display forms: invalid filename bytes and literal
+//! backslashes are escaped, and serde handles JSON control-character escaping.
 
 use crate::{classify, containers, deleted, query};
 use serde_json::{json, Value};

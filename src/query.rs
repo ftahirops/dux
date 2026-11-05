@@ -256,7 +256,7 @@ pub fn top(
     for row in rows {
         let (dev, inode, size, inodes, mtime, kind, uid) = row?;
         out.push(Row {
-            path: pr.resolve(dev, inode)?,
+            path: pr.resolve_display(dev, inode)?,
             size,
             inodes: if kind == 'd' { inodes } else { 1 },
             mtime,
@@ -373,7 +373,7 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
             r.get::<_, String>(4)?, // kind
             r.get::<_, i64>(5)?,    // parent_dev
             r.get::<_, i64>(6)?,    // parent_inode
-            String::from_utf8_lossy(&name).into_owned(),
+            crate::util::display_name(&name),
             r.get::<_, i64>(8)?,
         ))
     })?;
@@ -386,7 +386,7 @@ pub fn find(store: &Store, o: &FindOpts) -> Result<Vec<Row>> {
         let path = if (pdev == dev && pino == inode) || pino == 0 {
             name
         } else {
-            let prefix = pr.resolve(pdev, pino)?;
+            let prefix = pr.resolve_display(pdev, pino)?;
             if prefix.ends_with('/') {
                 format!("{prefix}{name}")
             } else {
@@ -508,7 +508,7 @@ pub fn growth(
     for row in rows {
         let (dev, inode, delta) = row?;
         out.push(GrowthRow {
-            path: pr.resolve(dev, inode)?,
+            path: pr.resolve_display(dev, inode)?,
             delta,
         });
     }
@@ -553,13 +553,19 @@ pub fn by_ext(store: &Store, limit: usize) -> Result<Vec<ExtRow>> {
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?)))?;
     use std::collections::HashMap;
-    let mut map: HashMap<String, (i64, i64)> = HashMap::new();
+    let mut map: HashMap<Vec<u8>, (i64, i64)> = HashMap::new();
     for row in rows {
         let (name_bytes, size) = row?;
-        let name = String::from_utf8_lossy(&name_bytes).into_owned();
-        let ext = match name.rsplit_once('.') {
-            Some((_, e)) if !e.is_empty() && e.len() <= 16 => e.to_lowercase(),
-            _ => "(none)".to_string(),
+        let ext = match name_bytes.iter().rposition(|byte| *byte == b'.') {
+            Some(dot) if dot + 1 < name_bytes.len() && name_bytes.len() - dot - 1 <= 16 => {
+                let raw_ext = &name_bytes[dot + 1..];
+                if let Ok(valid_ext) = std::str::from_utf8(raw_ext) {
+                    valid_ext.to_lowercase().into_bytes()
+                } else {
+                    raw_ext.iter().map(u8::to_ascii_lowercase).collect()
+                }
+            }
+            _ => b"(none)".to_vec(),
         };
         let e = map.entry(ext).or_insert((0, 0));
         e.0 =
@@ -571,7 +577,11 @@ pub fn by_ext(store: &Store, limit: usize) -> Result<Vec<ExtRow>> {
     }
     let mut v: Vec<ExtRow> = map
         .into_iter()
-        .map(|(ext, (bytes, files))| ExtRow { ext, bytes, files })
+        .map(|(ext, (bytes, files))| ExtRow {
+            ext: crate::util::display_name(&ext),
+            bytes,
+            files,
+        })
         .collect();
     v.sort_by_key(|r| std::cmp::Reverse(r.bytes));
     v.truncate(limit);
@@ -622,7 +632,7 @@ pub fn changed(
     for row in rows {
         let (dev, inode, delta) = row?;
         out.push(GrowthRow {
-            path: pr.resolve(dev, inode)?,
+            path: pr.resolve_display(dev, inode)?,
             delta,
         });
     }
@@ -776,7 +786,7 @@ pub fn du(
         .into_iter()
         .map(|(dev, inode, bytes, is_dir, mtime)| -> Result<DuRow> {
             Ok(DuRow {
-                path: pr.resolve(dev, inode)?,
+                path: pr.resolve_display(dev, inode)?,
                 bytes,
                 is_dir,
                 mtime,
@@ -1900,6 +1910,63 @@ mod tests {
 
         drop(store);
         rm(&db);
+    }
+
+    #[test]
+    fn find_and_extension_reports_keep_non_utf8_names_distinct() {
+        let store = Store {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+            schema_version: crate::store::SCHEMA_VERSION,
+        };
+        store.conn.execute_batch(crate::store::SCHEMA_SQL).unwrap();
+        store
+            .conn
+            .execute_batch(
+                "INSERT INTO inodes(dev_id,inode,kind,blocks,uid,mtime)
+                   VALUES(1,1,'d',0,0,0),(1,2,'f',10,0,0),(1,3,'f',11,0,0),
+                         (1,4,'f',12,0,0),(1,5,'f',13,0,0);
+                 INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+                   VALUES(1,1,X'2f',1,1,1),(1,1,X'612eff',1,2,1),
+                         (1,1,X'622efe',1,3,1),(1,1,X'632eefbfbd',1,4,1),
+                         (1,1,X'642e5c786666',1,5,1);",
+            )
+            .unwrap();
+
+        let rows = find(
+            &store,
+            &FindOpts {
+                name: None,
+                ext: None,
+                newer_than: None,
+                larger_than: Some(1),
+                owner_uid: None,
+                limit: 20,
+                scope: None,
+            },
+        )
+        .unwrap();
+        let paths: std::collections::HashSet<_> =
+            rows.iter().map(|row| row.path.as_str()).collect();
+        assert_eq!(paths.len(), 4);
+        for path in [r"/a.\xff", r"/b.\xfe", "/c.�", r"/d.\\xff"] {
+            assert!(
+                paths.contains(path),
+                "missing distinct display path {path:?}"
+            );
+        }
+
+        let extensions: std::collections::HashSet<_> = by_ext(&store, 20)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.ext)
+            .collect();
+        assert_eq!(extensions.len(), 4);
+        for extension in [r"\xff", r"\xfe", "�", r"\\xff"] {
+            assert!(
+                extensions.contains(extension),
+                "missing extension {extension:?}"
+            );
+        }
     }
 
     #[test]

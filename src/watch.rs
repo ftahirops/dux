@@ -3,6 +3,7 @@ use crate::util::now_secs;
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 use std::collections::{HashMap, HashSet};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -5583,11 +5584,12 @@ fn check_alerts(
         }
         last.insert((dev, inode), now);
         let path = store
-            .path_of(dev, inode)
-            .unwrap_or_else(|_| format!("inode:{inode}"));
+            .path_buf_of(dev, inode)
+            .unwrap_or_else(|_| PathBuf::from(format!("inode:{inode}")));
+        let display_path = crate::util::display_path_bytes(path.as_os_str().as_bytes());
         tracing::warn!(
             "ALERT: {} grew {} in {}s",
-            crate::util::display_path(&path),
+            display_path,
             crate::util::human(delta),
             cfg.window
         );
@@ -5604,7 +5606,7 @@ fn check_alerts(
             command
                 .arg("-c")
                 .arg(cmd)
-                .env("DUX_PATH", &path)
+                .env("DUX_PATH", path.as_os_str())
                 .env("DUX_DELTA", delta.to_string())
                 .env("DUX_DELTA_HUMAN", crate::util::human(delta))
                 .env("DUX_WINDOW", cfg.window.to_string());
