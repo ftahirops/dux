@@ -1,20 +1,20 @@
 # dux Production Readiness Audit
 
 
-## Current readiness checkpoint — 2026-11-05 08:46 UTC
+## Current readiness checkpoint — 2026-11-05 08:57 UTC
 
 **Overall state: not production-ready.** The installed daemon is still package
-0.6.3-66, active with zero restarts. At 08:46 UTC its `/` index was dirty from
+0.6.3-66, active with zero restarts. At 08:57 UTC its `/` index was dirty from
 fanotify overflow with **460** recorded kernel-overflow notifications,
-**7,061 pending updates**, and **47,999 seconds** behind; no scan was running
-and `write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
-10,763 at 08:22, 337 at 08:28, 28 at 08:38, then 7,061 at 08:46; the overflow
-count rose from 446 to 460. The queue fluctuates and does not make this index
-trustworthy. At 08:46, CPU PSI some/full avg10 was **1.81% / 0.72%** and I/O
-PSI some/full avg10 was **33.61% / 0.00%**. A disposable 4 GiB scale-test VM
-was stopped by the pressure guard during boot at 08:36; SSH never became
-available and no scale test ran. Do not restart it until host pressure remains
-below the admission limits.
+**19 pending updates**, and **48,683 seconds** behind; no scan was running and
+`write_error` was null. Pending moved from 86 at 08:16 to 18,862 at 08:19,
+10,763 at 08:22, 337 at 08:28, 28 at 08:38, 7,061 at 08:46, then 19 at 08:57;
+the overflow count rose to 460 and remained there through the current-source
+suite. The queue fluctuates and does not make this index trustworthy. At 08:57,
+CPU PSI some/full avg10 was **5.06% / 0.00%** and I/O PSI some/full avg10 was
+**2.93% / 2.89%**. The earlier 4 GiB scale-test VM was stopped by the pressure
+guard during boot at 08:36; a later 2 GiB test VM passed the current-source
+Rust suite and was cleaned up through the manager.
 The 0.6.3-75 release
 candidate was built from clean commit `e3863f0`; checksums and embedded audit
 metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
@@ -22,11 +22,11 @@ metadata verify, and the exact DEB passed all six lifecycle phases in Ubuntu
 covered 229 locked dependencies with zero vulnerabilities against the upstream
 database current through Nov. 3. The all-features/all-targets Rust unit suite
 passed **260/260** in the isolated Ubuntu watch VM using a test harness built
-from the same Rust sources as revision 75. Current HEAD now also has a small
-tunnel worker-start refactor; its 16 tunnel tests pass, but that source change
-is not in revision 75 and does not inherit its package or full-suite
-qualification. Root storage is **185 GiB total, 112 GiB used, 65 GiB free (64%
-used)**; `/dev/shm` has **7.5 GiB free**.
+from the same Rust sources as revision 75. Current HEAD adds the tunnel
+worker-start refactor and now passes the full **262/262** current-source Rust
+suite in an isolated guest. The current source still has no matching release
+artifact; revision 75 does not inherit this new suite result. Root storage is
+**185 GiB total, 109 GiB used, 69 GiB free (62% used)**; `/dev/shm` has **7.5 GiB free**.
 
 | Stage | Current disposition | Evidence and remaining gate |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ used)**; `/dev/shm` has **7.5 GiB free**.
 | S3 — scoped recovery and incremental accounting | **Partial** | Atomic scan publication, bounded retry, loss signaling, and incremental updates exist. Live exactness is unverified; latest legacy status has no active scan and a controlled recovery has not passed. |
 | S4 — whole-scope UI, bounded queries/history/storage | **Partial** | Existing UI includes ranked-page treemaps and growth queries. The specified whole-scope hierarchical view, full query/history budgets, and owned-storage retention/pruning acceptance are not complete. |
 | S5 — modules, package/security, operations | **Partial** | Revision 75 passed guarded Ubuntu DEB upgrade/rollback/removal/clean-install and its effective unit denies unused `bpf`; fresh RustSec audit found no known advisories through 2026-11-03. RPM/Rocky lifecycle, default capability minimization, platform coverage, and operations gates remain open. |
-| S6 — integrated release qualification | **Open** | Revision-75 DEB/RPM/static artifacts exist from clean commit `e3863f0`; that source passed 260/260 in an isolated Ubuntu guest. Current HEAD includes the tunnel worker-start refactor and 16 tunnel tests pass, but a current-source release artifact and full suite are not built. RPM/Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
+| S6 — integrated release qualification | **Open** | Revision-75 DEB/RPM/static artifacts exist from clean commit `e3863f0`; that source passed 260/260 in an isolated Ubuntu guest. Current HEAD includes the tunnel worker-start refactor and its all-features/all-targets suite passed 262/262 in an isolated Ubuntu guest, but a current-source release artifact is not built. RPM/Rocky lifecycle, exact-current scale/fault/capability matrix, 72-hour dedicated endurance, 24-hour canary, and live-index recovery remain incomplete. Do not install while the production index is dirty and host pressure is unstable. |
 
 This matrix is an evidence summary, not a maturity percentage. Small tests or an
 older passing candidate do not close a stage that requires current-source,
@@ -19758,3 +19758,9 @@ pending, and 47,999 seconds behind; the overflow count had increased since
 Host I/O PSI some avg10 was 33.61%, so VM/full-suite qualification was deferred.
 This change is not yet included in a release artifact, and the full current-source
 suite plus exact-binary tunnel/package qualification remain open.
+
+### Current-source all-features/all-targets Rust suite passes in isolated guest — 2026-11-05 08:57 UTC
+
+The exact test executable built from current commit `aadb04a5478578b3c0a81fd747d77814b6e30fd7` passed **262/262 tests, 0 failures, 0 ignored**, serially, in **128.46 seconds** inside a disposable Ubuntu 24.04 `watch-unit` VM. This includes the two new Dropbear thread-spawn policy regressions. Test executable SHA-256: `06fe1a4a2d02c30d13b2746ef826e98ba24a56989ea972af0212a8676fb4d774`; changed `src/tunnel.rs` SHA-256: `cd7987032699701ef1300c4ae5bd35fedb0889ad4cc7d0d95a158bef1ea11186`. Log SHA-256: `af7fa3df97a35bebf14ba514b2078e827c9c7c245e6d3fd6358aa248a457e032`; machine-readable report is `target/readiness/rust-current-aadb04a-20261105.json`.
+
+The guest used 2 GiB RAM, two vCPUs, QEMU CPUQuota=25% and MemoryMax=2.5 GiB. The serial test worker had CPUQuota=50%, MemoryMax=1536 MiB, no swap, and IOWeight=10. QEMU cgroup memory peak was **1,677,881,344 bytes**; guest `oom_kill` remained **0** and swap was disabled. Host admission at VM start had no blockers. The VM was stopped through the manager; its private tmpfs runtime was removed. Production `dux.service` remained active on 0.6.3-66 with zero restarts. The overflow count stayed **460** across the run; at 08:57 the index remained dirty, **19 pending**, and **48,683 seconds** behind. Timing does not establish causation for queue changes. This closes the current-source Rust unit-suite gate only. A current-source release build, exact package lifecycle after this source change, scale/fault, live-index recovery, RPM lifecycle, endurance, and canary remain open.

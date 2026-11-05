@@ -6387,3 +6387,19 @@ zero restarts. The 08:46 live snapshot was dirty with 460 overflow notifications
 7,061 pending updates, and 47,999 seconds behind; current-source full suite and
 exact release artifact qualification remain open. Do not infer the cause of the
 overflow-counter increase from timing.
+
+### Current-source Rust suite passes in isolated guest — 2026-11-05 08:57 UTC
+
+The current-source all-features/all-targets Rust test executable passed **262/262**
+with no failures or ignored tests in **128.46 seconds**, serially, on the Ubuntu
+24.04 `watch-unit` guest. The executable SHA-256 is
+`06fe1a4a2d02c30d13b2746ef826e98ba24a56989ea972af0212a8676fb4d774`; its log SHA-256
+is `af7fa3df97a35bebf14ba514b2078e827c9c7c245e6d3fd6358aa248a457e032`, and the
+structured report is `target/readiness/rust-current-aadb04a-20261105.json`. The
+guest had 2 GiB RAM, QEMU CPUQuota 25%, and a 2.5 GiB QEMU memory cap. The test
+worker had CPUQuota 50%, MemoryMax 1536 MiB, swap disabled, and IOWeight 10.
+QEMU cgroup memory peak was 1,677,881,344 bytes; guest `oom_kill` was 0. The
+VM was stopped and its private tmpfs runtime cleaned. Production remained active
+on legacy 0.6.3-66 with the same 460 overflow notifications; its index remains
+dirty and behind. This is a source unit-suite pass, not a matching release build,
+package lifecycle, scale/fault, live-recovery, endurance, or canary pass.
