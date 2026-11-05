@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 19:44 UTC
+## Current readiness decision — 2026-11-05 19:56 UTC
 
 **Not production ready; do not promote a new binary yet.** The installed
 production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
 source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **19:44 UTC** it
-reported **451** kernel overflow notifications, **3,729** pending updates,
-about **33,867 seconds** behind, no active scan, and no write error. Pending updates
+dirty from fanotify queue overflow and is not caught up. At **19:56 UTC** it
+reported **451** kernel overflow notifications, **2,005** pending updates,
+about **34,613 seconds** behind, no active scan, and no write error. Pending updates
 have recently fluctuated between zero and thousands; a drained queue does not
 repair historical event loss or prove index exactness. The service remains
 active with zero restarts.
@@ -49,11 +49,11 @@ Open release gates, in priority order:
    candidate's live recovery and service behavior under a controlled canary;
    the installed package/index have not been changed as part of this review.
 
-At **19:44 UTC**, root storage was **185 GiB total / 105 GiB used /
-72 GiB available** and `/dev/shm` was **13 GiB total / 3.0 GiB used / 9.9 GiB
-available**. A Go test process remained active; after the focused-test scope
-was stopped, load1 was **6.34**, CPU PSI some avg10 **11.64%**, and I/O PSI
-some/full avg10 **15.54% / 13.80%**. A RustSec audit of the
+At **19:56 UTC**, root storage was **185 GiB total / 102 GiB used /
+76 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
+available**. The host was under a Go build/test/vet batch; load1 was **19.44**,
+CPU PSI some avg10 **24.40%**, and I/O PSI some avg10 **2.41%** after the Rust
+test scope had stopped. A RustSec audit of the
 candidate lockfile found no advisories in its 2026-11-05 database snapshot;
 this is dependency evidence, not complete source or binary security
 certification.
@@ -20372,3 +20372,9 @@ At **19:40 UTC**, production still had no reconciliation scan. Pending updates f
 - During the interval, production overflow notifications rose **429 → 451**, and dirty reason/time advanced. The concurrent Go tests and this brief Rust compile overlapped; their individual contributions cannot be separated. Production Dux remains active with zero restarts and no write error, but the index is dirty with **3,729** pending updates, no scan, and about **33,867 seconds** of lag. Stop further local compile/test attempts while host event/I/O pressure is elevated; retest in the disposable guest after a clean admission window.
 
 At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **2.42%**), but Go test PID **521227** and compiler PID **521648** remained active, so the workload gate continued to block qualification. Production pending updates fell **3,729 → 1,269** as events continued; overflow count remained **451**, no reconciliation scan was active, and lag was about **34,013 seconds**. This queue reduction does not close the live exactness gate.
+
+### Cached Cargo regression in a private mount overlay — 2026-11-05 19:47–19:56 UTC
+
+- Verified that a private mount namespace can overlay `/home/dux/target`, `/root/.cargo`, and `/root/.rustup` with tmpfs upper layers while preserving their original absolute paths and reusing the existing target cache. Host paths remained unchanged after a write probe. This avoids publishing compiler writes to the live watched filesystems.
+- Retried the stale-ATTRIB regression in that isolated overlay, capped at **5% CPU / 1 GiB memory**, one Cargo job, `nice 19`, and idle I/O. It reused dependencies and reached `Compiling dux`; the test itself had not started when a concurrent Go build/test/vet burst drove host load1 to **24.65** and CPU PSI some avg10 to **83.06%**. Stopped only the Rust scope. It is inactive and ended with status **143**, with no test result. Production's overflow counter remained **451** during the isolated compile, though its pending queue varied. Do not count this as a pass.
+- At **19:56 UTC**, host Go compiler/test processes remained active and load1 was **19.44**. Production remained dirty after **451** overflows, with **2,005** pending updates, no scan, and about **34,613 seconds** reported lag. Disk was **102 GiB used / 76 GiB free** on root and **2.9 GiB used / 10 GiB free** on `/dev/shm`.
