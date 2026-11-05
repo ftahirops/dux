@@ -6014,3 +6014,21 @@ No recovery scan, service restart, package change, or index mutation was
 attempted. Rescan admission remains closed until overflow stops across quiet
 observation windows; package lifecycle and current-source release qualification
 remain open.
+
+### Recovery gate remains closed during renewed race tests — 2026-11-05 02:50 UTC
+
+At **02:50:44 UTC**, an unrelated `go test -race -count=1 -timeout 5m`
+batch was active in `/home/xgenstack.com/backend`. Read-only Dux status showed
+the daemon still live as PID **423219**, no active scan, no write error, and
+the overflow counter unchanged at **236**. Pending updates had climbed to
+**24,395** during churn and then drained to **9,901**; the last event commit
+was current to **02:50:44 UTC**, but the index remained dirty and about
+**26,664 seconds** behind. The preceding minute contained **36** unresolved
+fanotify/stale-handle or slow-flush log entries. Host load1 was **12.76**, CPU
+PSI `some avg10` **49.25%**, and I/O PSI `some avg10` **0.89%**. Root had
+**62 GiB free** and `/dev/shm` **8.7 GiB free**. The falling pending count is
+useful drain progress, but the active race-test batch, high CPU pressure,
+continuing unresolved events, and stale index age do not satisfy the live
+recovery gate. No scan, restart, package change, or direct database operation
+was performed. Recheck after the external batch exits and require stable
+pending/overflow samples before the next daemon-mediated scan.
