@@ -6338,3 +6338,7 @@ The locked/offline all-features/all-targets Rust suite compiled and discovered *
 ### Legacy watcher stale-handle observation — 2026-11-05 08:07 UTC
 
 The installed 0.6.3-66 daemon emitted 143 `open_by_handle_at` `ESTALE` fanotify-resolution warnings in a five-minute read-only journal sample; no new overflow warning appeared in that interval. The daemon remained dirty from its earlier 428-overflow epoch and about 45,663 seconds behind, so the live index is not trustworthy. The warning stream's varying event PIDs do not identify cause and must not be attributed to one workload. This is legacy-host evidence; it does not override isolated candidate stale-target test results or qualify current-candidate high-churn behavior.
+
+### Refreshed RustSec lockfile audit — 2026-11-05 08:08 UTC
+
+`cargo audit --json` exited 0 for the revision-75 lockfile: 229 locked dependencies, zero vulnerabilities, and no warnings. Report SHA-256: `2f551d1ceee702ba99e3c6676401c46f981ac9a0e75de146ffdba01c5049fd9f`. The local advisory cache was compared with upstream `main`, which remained at commit `965bf9ad083b58e6340d65829d85217b18be9290` dated Nov. 3. `Cargo.lock` SHA-256 matches the revision-75 build manifest. This is a point-in-time dependency advisory scan.
