@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-06 12:57 UTC
+## Current readiness decision — 2026-11-06 13:01 UTC
 
 **Not production ready; do not promote a new binary.** The installed service
 remains legacy Dux **0.6.3** (`e0cc915f8f37`, source digest
 `b7c9a8d…`). It is active, but its root index is dirty from fanotify queue
 overflow and is not caught up. The latest live status reported **974** kernel
-overflow notifications, **5** pending updates, about **95,831 seconds** behind,
-last full scan about **86,860 seconds** ago, no active scan, and no write error.
+overflow notifications, **3** pending updates, about **96,077 seconds** behind,
+last full scan about **87,105 seconds** ago, no active scan, and no write error.
 A low pending count does not restore coverage after event loss.
 
 The clean static-musl **0.6.3-89** candidate is source-bound to release commit
@@ -20611,3 +20611,8 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 - A fresh Rocky Linux 9 guest passed the controller's three-sample host admission gate and started with a private tmpfs overlay, 2 GiB guest memory, and 40% CPU quota. During first boot, before SSH became available or any package/script inputs were copied, host `go test ./...` (PID **1445204**) started. The guest was stopped immediately; systemd confirms the VM unit inactive and the private overlay/runtime removed. No package operation or Dux production mutation occurred.
 - Current `/usr/bin/dux status --json` at **12:57 UTC** still reports the legacy production daemon active but dirty from fanotify overflow (**974** notifications), not caught up, **5** pending updates, about **95,831 seconds** behind, last scan about **86,860 seconds** ago, no active scan, and no write error. This cleanly illustrates why a small queue cannot be accepted as proof of index correctness.
 - Root storage is **185 GiB total, 123 GiB used, 54 GiB available**; `/dev/shm` is **3.0 GiB used / 9.9 GiB available**. The 23 GiB of `/tmp` caches remains untouched while a host Go test is active and Dux watches `/`; do not delete these trees during that workload. The Rocky RPM lifecycle gate remains open.
+
+### Rocky lifecycle retry stopped during cloud-init after another host test began — 2026-11-06 12:59–13:00 UTC
+
+- A second retry passed the three-sample admission gate at **12:59:27 UTC** and launched Rocky Linux 9. Cloud-init completed at **13:00:20 UTC**; before any inputs were copied or lifecycle command was run, a new host `go test ./engine/verifier -count=1` process appeared. The VM was manually stopped at **13:00:34 UTC**. The controller confirms the VM inactive and the ephemeral runtime removed. This run performed no package actions and yields no RPM lifecycle result.
+- At **13:01 UTC**, production Dux remained active but dirty from fanotify overflow (**974**), not caught up, **3** pending updates, about **96,077 seconds** behind, no scan, and no write error. Root disk was **123 GiB used / 54 GiB free**; `/dev/shm` was **3.0 GiB used / 9.9 GiB free**. The recurring unrelated host tests continue to overlap attempted guest-qualification windows. Continue source/code review, but gate more guests and any cache cleanup on a sufficiently long quiet interval or working authorized remote test shell.
