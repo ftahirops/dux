@@ -6655,3 +6655,53 @@ RSS, 11 FDs, and 4,532,032 WAL bytes. Production still reports dirty/not caught
 up after 1,081 overflow notifications, with **6 pending updates**, **132,384.739
 seconds behind**, no scan active, and a 128 MiB WAL. The pending count is not an
 exactness result.
+
+### Current source tested on VPS2 — 2026-11-06 23:27–23:43 UTC
+
+The clean `hardening/audit-remediation` source at commit `d87876d` was copied to
+the KVM qualification VM `192.168.5.106`. The VM checkout's tree hash matches
+the local commit (`b05224943d352b0b4ec96cf3cd13060a10b548fd`); its
+`dux --version` reports source SHA-256
+`8e521ef0121068fb0326f8ca9125075051a6cd2fad5cba5def67c374668c8f06`. A
+release-profile native GNU/Linux binary was built and ran successfully, but it
+is dynamically linked; the VM has no `musl-gcc`, so this does not qualify the
+static musl release package. The exact-candidate binary SHA-256 is
+`2983971ac160e218c9369aa3d8150cd3677ae2f1aa325574f4ac7daec99f0263`; the
+fault-injection test binary SHA-256 is
+`5b4cc04564ae61e93fa8430be308597f5e3f61f9e0a7126cc0c482c2eb37968e`.
+
+On this source, `cargo test --locked --all-targets --all-features --offline`
+passed **268/268** Rust tests (22.59 seconds). All **293/293** Python harness
+tests passed (9.75 seconds). `cargo fmt --all -- --check` passed, and strict
+Clippy passed with `--all-targets --all-features -- -D warnings`. The release
+binary smoke test scanned a fixture containing a hard link, symlink, nested
+directory, and non-UTF-8 filename: **5 files, 2 directories, 7 path instances,
+24,576 visible bytes, 20,480 unique bytes across 6 inodes, and zero coverage
+issues**. `status`, `du`, `top`, and `find` returned successfully.
+
+The isolated P0 recovery run passed all six selected suites in **4m36s**:
+five crash-boundary recoveries; real 16,384-event fanotify queue overflow plus
+failed dirty-metadata persistence and exact reconciliation; a 12,125-event CPU
+burst; watch-first startup/upgrade and live inode-kind repair; bounded persisted
+retry-circuit recovery; and elevated/critical pressure handling with exact
+recovery. It used a 768 MiB ext4 loop fixture on `/dev/shm`, a 25% worker CPU
+quota, and a 4 GiB worker memory ceiling. The structured report is
+`target/readiness/vps2-qualification-20261106/p0-recovery.json` (SHA-256
+`9940b622f96a6489edc2128e6483e741133ff3eea84c8fd546e110687679d2d6`). The
+Python log is alongside it (SHA-256
+`08e3c5236315880a6fedbfe906d9e2f9e699a0f29726bd13ad1b0db41195d4de`).
+
+This remains a partial qualification. `capability`, `churn`, `coverage`,
+disk-full, mount, OOM, root scan, WAL, candidate soak, 100k/1m/10m performance,
+package upgrade/rollback, static musl packaging, multi-day reader-held WAL,
+power-loss/media-corruption, and canary gates remain open. The independent
+72-hour VPS2 soak is still running the earlier binary
+`510f49d146a9` / source SHA `dfb9045c…`; at 23:40 UTC it had 8,046 seconds,
+181,795 operations, 1,807 exactness samples, two mutation bursts, and zero
+service restarts. Its final exactness/history/integrity checks are pending.
+
+The production index was not used by these tests. Its read-only status at
+23:42 UTC remained dirty/not caught up after fanotify overflow: 1,081 kernel
+overflow notifications, 3 pending updates, 134,489.281 seconds behind, no scan
+in progress, no write error, and a 128 MiB WAL. The small pending count does not
+prove exact recovery.
