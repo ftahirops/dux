@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-06 13:01 UTC
+## Current readiness decision — 2026-11-06 13:09 UTC
 
 **Not production ready; do not promote a new binary.** The installed service
 remains legacy Dux **0.6.3** (`e0cc915f8f37`, source digest
 `b7c9a8d…`). It is active, but its root index is dirty from fanotify queue
 overflow and is not caught up. The latest live status reported **974** kernel
-overflow notifications, **3** pending updates, about **96,077 seconds** behind,
-last full scan about **87,105 seconds** ago, no active scan, and no write error.
+overflow notifications, **24** pending updates, about **96,596 seconds** behind,
+last full scan about **87,624 seconds** ago, no active scan, and no write error.
 A low pending count does not restore coverage after event loss.
 
 The clean static-musl **0.6.3-89** candidate is source-bound to release commit
@@ -44,10 +44,10 @@ Open release gates, in priority order:
    candidate recovery and service behavior under a controlled canary. The
    installed service and index have not been changed by this review.
 
-Root storage at the latest snapshot was **185 GiB total / 123 GiB used /
-54 GiB available**; `/dev/shm` was **3.0 GiB used / 9.9 GiB available**. `/tmp`
-contained **23 GiB**, largely shared Go/test caches on the same watched ext4
-filesystem. Cleanup is deferred until a controlled recovery window because a
+Root storage at **13:10 UTC** was **185 GiB total / 120 GiB used /
+58 GiB available**; `/dev/shm` was **3.0 GiB used / 9.9 GiB available**. `/tmp`
+was last measured at **23 GiB** at 12:49 UTC, largely shared Go/test caches on
+the same watched ext4 filesystem. Cleanup is deferred until a controlled recovery window because a
 mass delete can create more root-wide fanotify churn. The CI workflow file was
 removed in commit `071c99a`; no `.github/workflows/ci.yml` exists in this branch.
 
@@ -20620,3 +20620,8 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 
 - A second retry passed the three-sample admission gate at **12:59:27 UTC** and launched Rocky Linux 9. Cloud-init completed at **13:00:20 UTC**; before any inputs were copied or lifecycle command was run, a new host `go test ./engine/verifier -count=1` process appeared. The VM was manually stopped at **13:00:34 UTC**. The controller confirms the VM inactive and the ephemeral runtime removed. This run performed no package actions and yields no RPM lifecycle result.
 - At **13:01 UTC**, production Dux remained active but dirty from fanotify overflow (**974**), not caught up, **3** pending updates, about **96,077 seconds** behind, no scan, and no write error. Root disk was **123 GiB used / 54 GiB free**; `/dev/shm` was **3.0 GiB used / 9.9 GiB free**. The recurring unrelated host tests continue to overlap attempted guest-qualification windows. Continue source/code review, but gate more guests and any cache cleanup on a sufficiently long quiet interval or working authorized remote test shell.
+
+### Rocky lifecycle guest stopped by Go test/build/vet burst — 2026-11-06 13:08–13:09 UTC
+
+- A guarded Rocky 9 guest passed the three-sample admission check and started at **13:08:29 UTC** with a private tmpfs overlay. At **13:09:23 UTC**, the runtime guard stopped it after detecting `go test ./...`, two Go builds, Go vet, and multiple compiler workers in another checkout. The guard recorded CPU PSI some **65.94%**, I/O PSI some/full **0.49% / 0.25%**, and load1 **8.92**. No RPM inputs were copied and no lifecycle/package operation ran. The disposable VM and overlay were cleaned.
+- Production status at **13:09:46 UTC** remained dirty after **974** kernel queue overflows, not caught up, with **24** pending updates, about **96,596 seconds** behind, no scan, and no write error. The pending queue remains a volatile count, not a coverage proof. Root storage at **13:10 UTC** was **120 GiB used / 58 GiB free of 185 GiB**, with **3.0 GiB used / 9.9 GiB free** in `/dev/shm`. This is another aborted qualification attempt, not an RPM result.
