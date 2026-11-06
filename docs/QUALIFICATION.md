@@ -6502,3 +6502,12 @@ in **291 ms** at **5,404 KiB RSS**, 11 file descriptors, and a **4,268,352-byte
 WAL**. `/dev/shm` remained 4% used. Keep the VM free of competing qualification
 work until this endurance run completes; these samples do not establish 72-hour
 stability.
+
+**Production status follow-up — 2026-11-06 22:22:32 UTC:** a second read-only
+`dux status --json` sample still reports dirty/not caught up after fanotify
+queue overflow, no active scan, no write error, **3,344 pending updates**, and
+**129,761.947 seconds behind**. It reports **1,070 kernel overflow notifications**
+and zero userspace drops; the WAL remains **128 MiB**. Compared with 22:18:07,
+pending increased by 1,339 and lag by 245.001 seconds while 48,037 updates were
+committed. This does not show convergence, and no causal attribution is made.
+The host has 67 GiB free on `/`; production state remains unmodified.
