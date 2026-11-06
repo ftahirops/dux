@@ -20766,3 +20766,10 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 - A low-priority `du -xhd1 /tmp /home/dux/target` inventory measured `/tmp` at **1.9 GiB**, including **1.4 GiB** in `/tmp/x.UovV3`, and Dux `target` at **8.5 GiB**, including **6.9 GiB** of retained `target/readiness` evidence, **1.1 GiB** of debug artifacts, and **485 MiB** of release artifacts. The scan saw a transient Go-test-named child disappear while traversing `/tmp`, so the directory tree was changing during measurement.
 - A fresh read-only admission probe shortly afterward found two Go test binaries, a large multi-package `go test -p 2 -count=1 -timeout 5m ...` run, and shell test scripts. Host load1 was **11.46** and I/O PSI some/full avg10 **7.41% / 7.10%**. Root storage at **15:09 UTC** was **102 GiB used / 75 GiB available (58%)**. The temporary test tree was preserved; no cleanup was performed because the external test ownership/open-file state is active or changing. Qualification evidence and release artifacts were preserved.
 - The project workload guard correctly blocks another Dux test during these external jobs and high load. No Dux test or production mutation occurred.
+
+
+### Repeated test admission blocker persists — 2026-11-06 15:10 UTC
+
+- Re-ran the qualification host-pressure/workload probe. Admission remains blocked by two active Go test binaries, `go test` plus shell test scripts, and I/O PSI some avg10 **16.24%** (configured limit **10%**). This is the same external shared-host test churn that has refused or interrupted Dux watcher and Rust-suite work across consecutive continuation turns. No Dux test was started.
+- Root disk is **102 GiB used / 75 GiB available (58%)**. Production Dux is live but dirty from fanotify overflow (**983** notifications), about **103,836 seconds** behind, **33** pending updates, no scan active, and no write error. Exact production recovery remains unproven.
+- Further aggressive local tests and package/VM qualification require a quiet host window; remote testing still requires an authorized root SSH identity. The goal is blocked on those external-state changes, not complete.
