@@ -1,13 +1,13 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-06 12:49 UTC
+## Current readiness decision — 2026-11-06 12:57 UTC
 
 **Not production ready; do not promote a new binary.** The installed service
 remains legacy Dux **0.6.3** (`e0cc915f8f37`, source digest
 `b7c9a8d…`). It is active, but its root index is dirty from fanotify queue
 overflow and is not caught up. The latest live status reported **974** kernel
-overflow notifications, **35** pending updates, about **95,393 seconds** behind,
-last full scan about **86,421 seconds** ago, no active scan, and no write error.
+overflow notifications, **5** pending updates, about **95,831 seconds** behind,
+last full scan about **86,860 seconds** ago, no active scan, and no write error.
 A low pending count does not restore coverage after event loss.
 
 The clean static-musl **0.6.3-89** candidate is source-bound to release commit
@@ -41,7 +41,7 @@ Open release gates, in priority order:
    installed service and index have not been changed by this review.
 
 Root storage at the latest snapshot was **185 GiB total / 123 GiB used /
-55 GiB available**; `/dev/shm` was **3.0 GiB used / 9.9 GiB available**. `/tmp`
+54 GiB available**; `/dev/shm` was **3.0 GiB used / 9.9 GiB available**. `/tmp`
 contained **23 GiB**, largely shared Go/test caches on the same watched ext4
 filesystem. Cleanup is deferred until a controlled recovery window because a
 mass delete can create more root-wide fanotify churn. The CI workflow file was
@@ -20605,3 +20605,9 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 - At **12:49:43 UTC**, installed `/usr/bin/dux` was still legacy **0.6.3 (`e0cc915f8f37`)**, active, dirty with reason `fanotify queue overflow`, **974** kernel overflow notifications, **35** pending updates, not caught up and about **95,393 seconds** behind. The last full scan was about **86,421 seconds** old; no scan or write error was reported. This is a production blocker; a low pending count does not prove complete coverage.
 - The first guarded Rocky 9 attempt was rejected before QEMU because a Go test appeared in admission sample 3/3. A later three-sample admission passed and a private tmpfs-overlay guest booted. Guest-local old/new RPMs and the current progress-enabled lifecycle harness were hash-verified. The first harness invocation used a stale staged copy and exited at CLI parsing before package actions; after replacing it with the current harness, the independent runtime guard stopped the guest when another `go test ./...` and Go compiler appeared. The guard record reports load1 **7.03**, CPU PSI some **45.05%**, I/O PSI some/full **1.55% / 1.03%**, and identifies both host test processes. No RPM package action ran and no RPM lifecycle result is claimed. The ephemeral VM service is inactive and its private runtime was cleaned. A further start was refused at admission sample **1/3** at **12:54 UTC** when Go build, test, vet, and three compiler processes were detected. The next attempt must wait for host admission to remain clear through first boot and the full lifecycle; stream progress output to host evidence.
 - At the same time, systemd journal continued recording stale fanotify handle (`ESTALE`) events from host churn and Dux paused/resumed index writes under I/O pressure. Their timing is observed, but this snapshot does not establish that one workload caused all historical overflows.
+
+### Rocky lifecycle guest stopped during first boot when host Go tests resumed — 2026-11-06 12:55–12:56 UTC
+
+- A fresh Rocky Linux 9 guest passed the controller's three-sample host admission gate and started with a private tmpfs overlay, 2 GiB guest memory, and 40% CPU quota. During first boot, before SSH became available or any package/script inputs were copied, host `go test ./...` (PID **1445204**) started. The guest was stopped immediately; systemd confirms the VM unit inactive and the private overlay/runtime removed. No package operation or Dux production mutation occurred.
+- Current `/usr/bin/dux status --json` at **12:57 UTC** still reports the legacy production daemon active but dirty from fanotify overflow (**974** notifications), not caught up, **5** pending updates, about **95,831 seconds** behind, last scan about **86,860 seconds** ago, no active scan, and no write error. This cleanly illustrates why a small queue cannot be accepted as proof of index correctness.
+- Root storage is **185 GiB total, 123 GiB used, 54 GiB available**; `/dev/shm` is **3.0 GiB used / 9.9 GiB available**. The 23 GiB of `/tmp` caches remains untouched while a host Go test is active and Dux watches `/`; do not delete these trees during that workload. The Rocky RPM lifecycle gate remains open.
