@@ -6646,3 +6646,12 @@ dirty/not caught up after overflow, with 1,081 notifications, 16 pending,
 count is not an exactness check. The VPS2 soak remained active with zero
 restarts; latest persisted progress was 5,824.2 seconds and 131,441 operations,
 one mutation burst, with operation 131,400 converging in 263 ms.
+
+**23:06 UTC readiness poll:** host load and PSI were below numeric limits, but
+an active Go compiler/test still blocked admission; no Dux test workload was
+started. The VPS2 soak remained active with zero restarts at **5,944.3 seconds**
+and **134,118 operations**; operation 134,100 converged in 342 ms at 7,140 KiB
+RSS, 11 FDs, and 4,532,032 WAL bytes. Production still reports dirty/not caught
+up after 1,081 overflow notifications, with **6 pending updates**, **132,384.739
+seconds behind**, no scan active, and a 128 MiB WAL. The pending count is not an
+exactness result.
