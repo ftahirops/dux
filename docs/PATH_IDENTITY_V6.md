@@ -147,6 +147,16 @@ after the v6 projection and are not published in the live index. Production v7
 publication, directory totals, event updates, queries, cycle-mount
 qualification, and Rocky alias exactness remain open blockers.
 
+Parallel walking assigns provisional path IDs according to worker scheduling.
+Because prime allocation and the v6 compatibility projection need a stable
+tie-breaker, the staging pass assigns a separate breadth-first order by stable
+parent order and raw component bytes before those derivations. It uses a
+disk-backed ID map and updates one integer column, preserving provisional IDs
+and parent links without copying the full node table. A regression builds the
+same two-alias tree with reversed provisional ID orders and requires identical
+prime paths and totals. Large-tree time, temporary disk use, and I/O cost still
+require scale qualification.
+
 Build the new schema in a private staging database, preserve compatible growth
 history, replay captured events through the scan boundary, verify path counts,
 inode allocation attribution, both directory-total definitions, and cycle/

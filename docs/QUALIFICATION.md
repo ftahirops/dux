@@ -6546,3 +6546,48 @@ checkpoint reported **3,662.6 seconds**, **82,975 operations**, **824 exactness
 samples**, and one burst. Operation 82,900 converged in **290 ms** at **5,356
 KiB RSS**, 11 file descriptors, and a **4,532,032-byte WAL**. Final checks and
 the 6-hour reader / 12-hour restart milestones remain pending.
+
+### Make staged path attribution deterministic across parallel scan schedules — 2026-11-06 22:36–22:50 UTC
+
+Code review found that provisional path IDs come from concurrent jwalk workers,
+while staged v7 prime-path choice and the v6 edge projection use path ID as a
+tie-breaker. The same alias tree could therefore attribute unique directory
+bytes to different paths after a rescan solely because worker scheduling
+changed. The scan now assigns a disk-backed breadth-first `stable_order`,
+ordered by stable parent order and raw component bytes, before those
+derivations. It updates one integer column and leaves provisional IDs and
+parent links intact; it does not retain full paths or copy the full node table.
+A regression permutes alias allocation order and requires identical prime
+paths and root totals.
+
+The revised source passed the full scan unit module: **34 passed, 0 failed**
+with `cargo test --locked --offline scan::tests -- --test-threads=1`, under a
+10% CPU quota, 1 GiB memory cap, low I/O weight, and tmpfs test directory. This
+includes the allocation-order regression and the real rebuild-path hardlink
+accounting test. `cargo fmt --all -- --check` and `git diff --check` pass. The
+active VPS2 soak remained on its existing hash-bound binary; at 22:42:18 UTC it
+had **4,503 seconds**, **101,904 operations**, **1,014 exactness samples**, one
+mutation burst, and zero restarts. Latest convergence was 364 ms, RSS 6,132
+KiB, 11 file descriptors, and 4,532,032 WAL bytes.
+
+A 100k-file performance scan was attempted but produced **no valid scan result**:
+Dux excludes pseudo-filesystems by default, and the first command reported an
+empty scan of the `/dev/shm` root. The 100k-entry fixture was removed. Host
+load then reached 19.94 and CPU PSI some avg10 60.85%; no retry was admitted.
+Large-tree scan time, peak disk use, memory, and I/O amplification therefore
+remain unmeasured with this change. No schema version or production index was
+changed.
+
+**Live host and VPS2 follow-up — 2026-11-06 22:51:50 UTC:** the read-only
+production status is dirty/not caught up after fanotify overflow, with **1,081
+kernel overflow notifications**, **10,134 pending updates**, **131,520.153
+seconds behind**, no scan active, and a 128 MiB WAL. It reports zero userspace
+drops and no write error. This sample shows a newer overflow epoch; no cause is
+assigned to concurrent qualification activity. No production package, service,
+or database was modified.
+
+The separate VPS2 soak remains active with zero restarts. It reported **5,103.8
+seconds**, **115,318 operations**, **1,148 exactness samples**, and one completed
+mutation burst. The latest sample (115,300 operations) converged in 533 ms at
+6,656 KiB RSS, 11 file descriptors, and 4,532,032 WAL bytes. Controlled restart,
+held reader, final exact/history checks, and SQLite integrity remain pending.

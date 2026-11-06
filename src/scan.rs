@@ -736,7 +736,8 @@ fn scan_inner(
          PRAGMA temp_store=FILE;
          PRAGMA cache_size=-16384;
          CREATE TABLE scan_nodes (
-           path_id INTEGER PRIMARY KEY CHECK(path_id>0), parent_path_id INTEGER NOT NULL,
+           path_id INTEGER PRIMARY KEY CHECK(path_id>0), stable_order INTEGER NOT NULL DEFAULT 0,
+           parent_path_id INTEGER NOT NULL,
            mount_id INTEGER,
            dev INTEGER NOT NULL, inode INTEGER NOT NULL,
            parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL,
@@ -775,6 +776,11 @@ fn scan_inner(
             root_birth_ns,
         ],
     )?;
+
+    // The walker assigns provisional IDs concurrently, so their order depends
+    // on worker scheduling. Compute a deterministic disk-backed order before
+    // using it as a tie-breaker for prime-path allocation or the v6 projection.
+    assign_stable_scan_path_order(&mut stage)?;
 
     stage.execute_batch(
         "CREATE INDEX scan_nodes_target ON scan_nodes(dev,inode,parent_dev,parent_inode,name);",
@@ -1017,6 +1023,83 @@ fn allocate_scan_path_id(next: &AtomicI64) -> Option<i64> {
         .ok()
 }
 
+/// Assign a stable breadth-first order to provisional parallel-walk IDs. At
+/// each depth, paths sort by their parent's stable order and raw name bytes.
+/// This makes tie-breaks reproducible across worker schedules without
+/// retaining complete paths in memory or rewriting the path graph.
+fn assign_stable_scan_path_order(stage: &mut Connection) -> Result<()> {
+    let tx = stage.transaction()?;
+    tx.execute_batch(
+        "CREATE INDEX scan_nodes_stable_order ON scan_nodes(depth,parent_path_id,name);
+         CREATE TEMP TABLE stable_path_ids(
+           old_id INTEGER PRIMARY KEY,
+           stable_id INTEGER NOT NULL UNIQUE
+         );",
+    )?;
+    let root_rows = tx.execute(
+        "INSERT INTO stable_path_ids(old_id,stable_id)
+         SELECT path_id,1 FROM scan_nodes WHERE parent_path_id=-1",
+        [],
+    )?;
+    anyhow::ensure!(
+        root_rows == 1,
+        "cannot stabilize scan IDs without exactly one root"
+    );
+
+    let max_depth: i64 =
+        tx.query_row("SELECT COALESCE(MAX(depth),0) FROM scan_nodes", [], |row| {
+            row.get(0)
+        })?;
+    for depth in 1..=max_depth {
+        let base: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(stable_id),0) FROM stable_path_ids",
+            [],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "INSERT INTO stable_path_ids(old_id,stable_id)
+             SELECT child.path_id,
+                    ?2 + ROW_NUMBER() OVER (ORDER BY parent.stable_id,child.name)
+             FROM scan_nodes child
+             JOIN stable_path_ids parent ON parent.old_id=child.parent_path_id
+             WHERE child.depth=?1",
+            rusqlite::params![depth, base],
+        )?;
+    }
+
+    let node_count: i64 = tx.query_row("SELECT COUNT(*) FROM scan_nodes", [], |row| row.get(0))?;
+    let mapped_count: i64 =
+        tx.query_row("SELECT COUNT(*) FROM stable_path_ids", [], |row| row.get(0))?;
+    anyhow::ensure!(
+        mapped_count == node_count,
+        "cannot assign stable scan order: mapped {mapped_count} of {node_count} path instances"
+    );
+    let assigned = tx.execute(
+        "UPDATE scan_nodes
+         SET stable_order=(SELECT stable_id FROM stable_path_ids WHERE old_id=scan_nodes.path_id)",
+        [],
+    )?;
+    anyhow::ensure!(
+        assigned as i64 == node_count,
+        "cannot assign stable scan order: updated {assigned} of {node_count} path instances"
+    );
+    let (min_order, max_order, distinct_orders): (i64, i64, i64) = tx.query_row(
+        "SELECT MIN(stable_order),MAX(stable_order),COUNT(DISTINCT stable_order) FROM scan_nodes",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    anyhow::ensure!(
+        min_order == 1 && max_order == node_count && distinct_orders == node_count,
+        "invalid stable scan order: min={min_order}, max={max_order}, distinct={distinct_orders}, rows={node_count}"
+    );
+    tx.execute_batch(
+        "DROP TABLE stable_path_ids;
+         DROP INDEX scan_nodes_stable_order;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Verify the private walk's path-instance edges before deriving v6 inode
 /// edges. A lost parent context must fail the candidate scan, not publish
 /// apparently complete inode-keyed totals.
@@ -1155,7 +1238,7 @@ fn build_and_validate_staged_path_graph(stage: &Connection) -> Result<(i64, i64)
         "INSERT INTO paths(path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle)
          SELECT path_id,parent_path_id,name,dev,inode,birth_ns,kind,COALESCE(mount_id,-1),
                 CASE WHEN ROW_NUMBER() OVER (
-                  PARTITION BY dev,inode,birth_ns ORDER BY blocks DESC,path_id
+                  PARTITION BY dev,inode,birth_ns ORDER BY blocks DESC,stable_order
                 )=1 THEN 1 ELSE 0 END,cycle
          FROM scan_nodes",
         [],
@@ -1319,7 +1402,7 @@ SELECT * FROM scan.scan_nodes
 WHERE cycle=0 AND path_id IN (
   SELECT path_id FROM (
     SELECT path_id,ROW_NUMBER() OVER (
-      PARTITION BY parent_dev,parent_inode,name ORDER BY path_id
+      PARTITION BY parent_dev,parent_inode,name ORDER BY stable_order
     ) AS edge_rank
     FROM scan.scan_nodes
     WHERE cycle=0
@@ -1836,11 +1919,12 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE scan_nodes(
-               path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,mount_id INTEGER,
+               path_id INTEGER PRIMARY KEY,stable_order INTEGER NOT NULL DEFAULT 0,
+               parent_path_id INTEGER,mount_id INTEGER,
                dev INTEGER,inode INTEGER,parent_dev INTEGER,parent_inode INTEGER,
                depth INTEGER,kind TEXT,name BLOB,blocks INTEGER,birth_ns INTEGER,cycle INTEGER
              );
-             INSERT INTO scan_nodes VALUES
+             INSERT INTO scan_nodes(path_id,parent_path_id,mount_id,dev,inode,parent_dev,parent_inode,depth,kind,name,blocks,birth_ns,cycle) VALUES
                (1,-1,1,1,1,1,1,0,'d',X'2f',4096,1000,0),
                (2,1,7,2,10,1,1,1,'d',X'6f726967696e616c',4096,2000,0),
                (3,2,7,2,11,2,10,2,'d',X'6e6573746564',4096,3000,0),
@@ -1849,7 +1933,8 @@ mod tests {
                (6,3,7,2,42,2,11,3,'f',X'70726f6265',8192,4000,0),
                (7,5,8,2,42,2,11,3,'f',X'70726f6265',8192,4000,0),
                (8,5,8,1,1,2,11,3,'d',X'6c6f6f70',4096,1000,1),
-               (9,1,8,2,42,1,1,1,'f',X'6f746865722d70726f6265',8192,5000,0);",
+               (9,1,8,2,42,1,1,1,'f',X'6f746865722d70726f6265',8192,5000,0);
+             UPDATE scan_nodes SET stable_order=path_id;",
         )
         .unwrap();
         conn.execute_batch(crate::store::PATH_GRAPH_TABLES_SQL)
@@ -1881,6 +1966,173 @@ mod tests {
             )
             .unwrap();
         assert_eq!(alias_totals, (20_480, 4, 0, 0));
+    }
+
+    #[test]
+    fn prime_attribution_ignores_parallel_allocation_order() {
+        fn run(ids: [i64; 5]) -> (PathBuf, PathBuf, (i64, i64, i64, i64)) {
+            let conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE scan_nodes (
+                   path_id INTEGER PRIMARY KEY CHECK(path_id>0),
+                   stable_order INTEGER NOT NULL DEFAULT 0, parent_path_id INTEGER NOT NULL,
+                   mount_id INTEGER, dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+                   parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL,
+                   depth INTEGER NOT NULL, kind TEXT NOT NULL, blocks INTEGER NOT NULL,
+                   uid INTEGER NOT NULL, mtime INTEGER NOT NULL, name BLOB NOT NULL,
+                   birth_ns INTEGER NOT NULL, cycle INTEGER NOT NULL DEFAULT 0,
+                   UNIQUE(parent_path_id,name)
+                 );",
+            )
+            .unwrap();
+            let rows = [
+                (
+                    ids[0],
+                    -1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    0,
+                    "d",
+                    4096,
+                    0,
+                    1,
+                    b"/".as_slice(),
+                    1,
+                    0,
+                ),
+                (
+                    ids[1],
+                    ids[0],
+                    1,
+                    1,
+                    2,
+                    1,
+                    1,
+                    1,
+                    "d",
+                    4096,
+                    0,
+                    1,
+                    b"a".as_slice(),
+                    2,
+                    0,
+                ),
+                (
+                    ids[2],
+                    ids[0],
+                    2,
+                    1,
+                    2,
+                    1,
+                    1,
+                    1,
+                    "d",
+                    4096,
+                    0,
+                    1,
+                    b"z".as_slice(),
+                    2,
+                    0,
+                ),
+                (
+                    ids[3],
+                    ids[1],
+                    1,
+                    1,
+                    3,
+                    1,
+                    2,
+                    2,
+                    "f",
+                    8192,
+                    0,
+                    1,
+                    b"item".as_slice(),
+                    3,
+                    0,
+                ),
+                (
+                    ids[4],
+                    ids[2],
+                    2,
+                    1,
+                    3,
+                    1,
+                    2,
+                    2,
+                    "f",
+                    8192,
+                    0,
+                    1,
+                    b"item".as_slice(),
+                    3,
+                    0,
+                ),
+            ];
+            for (
+                path_id,
+                parent_path_id,
+                mount_id,
+                dev,
+                inode,
+                parent_dev,
+                parent_inode,
+                depth,
+                kind,
+                blocks,
+                uid,
+                mtime,
+                name,
+                birth_ns,
+                cycle,
+            ) in rows
+            {
+                conn.execute(
+                    "INSERT INTO scan_nodes(path_id,parent_path_id,mount_id,dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name,birth_ns,cycle) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                    rusqlite::params![path_id,parent_path_id,mount_id,dev,inode,parent_dev,parent_inode,depth,kind,blocks,uid,mtime,name,birth_ns,cycle],
+                ).unwrap();
+            }
+
+            let mut conn = conn;
+            assign_stable_scan_path_order(&mut conn).unwrap();
+            validate_scan_path_stage(&conn, 1, 1).unwrap();
+            conn.execute_batch(crate::store::PATH_GRAPH_TABLES_SQL)
+                .unwrap();
+            build_and_validate_staged_path_graph(&conn).unwrap();
+            let dir_id: i64 = conn
+                .query_row(
+                    "SELECT path_id FROM paths WHERE dev_id=1 AND inode=2 AND birth_ns=2 AND prime=1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let file_id: i64 = conn
+                .query_row(
+                    "SELECT path_id FROM paths WHERE dev_id=1 AND inode=3 AND birth_ns=3 AND prime=1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let dir_path = crate::store::path_graph_resolve(&conn, dir_id)
+                .unwrap()
+                .unwrap();
+            let file_path = crate::store::path_graph_resolve(&conn, file_id)
+                .unwrap()
+                .unwrap();
+            let totals = build_staged_path_totals(&mut conn).unwrap();
+            (dir_path, file_path, totals)
+        }
+
+        let first = run([1, 2, 3, 4, 5]);
+        // Reverse alias allocation order while keeping each parent before its children.
+        let second = run([1, 3, 2, 5, 4]);
+        assert_eq!(first, second);
+        assert_eq!(first.0, Path::new("/a"));
+        assert_eq!(first.1, Path::new("/a/item"));
+        assert_eq!(first.2, (28_672, 5, 16_384, 3));
     }
 
     #[test]
@@ -1976,15 +2228,15 @@ mod tests {
         conn.execute_batch(
             "ATTACH DATABASE ':memory:' AS scan;
              CREATE TABLE scan.scan_nodes(
-               path_id INTEGER PRIMARY KEY, parent_dev INTEGER, parent_inode INTEGER,
+               path_id INTEGER PRIMARY KEY, stable_order INTEGER, parent_dev INTEGER, parent_inode INTEGER,
                name BLOB, cycle INTEGER, depth INTEGER
              );
              INSERT INTO scan.scan_nodes VALUES
-               (1,1,1,X'2f',0,0),
-               (2,1,1,X'61',0,1),
-               (3,1,2,X'78',0,2),
-               (4,1,2,X'78',0,3),
-               (5,1,2,X'6c6f6f70',1,4);",
+               (1,1,1,1,X'2f',0,0),
+               (2,2,1,1,X'61',0,1),
+               (3,3,1,2,X'78',0,2),
+               (4,4,1,2,X'78',0,3),
+               (5,5,1,2,X'6c6f6f70',1,4);",
         )
         .unwrap();
 
