@@ -14,11 +14,13 @@ The clean static-musl **0.6.3-89** candidate is source-bound to release commit
 `510f49d146a9280231a69e09c4d4dbf95365527b` (Rust inputs unchanged in the current
 worktree). Its RustSec lockfile and embedded-binary dependency audits reported
 no known advisories in the checked 2026-11-05 database snapshot. Current-source
-Rust tests passed **262/262** on Ubuntu 24.04. The complete DEB lifecycle passed
-in a disposable Ubuntu 24.04 guest: baseline, upgrade, rollback, re-upgrade,
-remove/purge, and clean install, with clean-install service/index policy checks.
-This is package lifecycle evidence, not live recovery, RPM qualification, or
-production safety certification.
+normal-feature Rust binary tests passed **267/267** against the exact r89 source
+in a private mount overlay; focused stale-ATTRIB regressions passed **4/4**.
+The full all-features/all-targets run was interrupted and remains open. The
+complete DEB lifecycle passed in a disposable Ubuntu 24.04 guest: baseline,
+upgrade, rollback, re-upgrade, remove/purge, and clean install, with clean-install
+service/index policy checks. These are package/unit-test results, not live
+recovery, RPM qualification, or production safety certification.
 
 Open release gates, in priority order:
 
@@ -30,8 +32,10 @@ Open release gates, in priority order:
    pressure guard after unrelated host Go tests began; no RPM package action
    ran.
 3. **Data-model correctness:** the current v6 inode/path representation cannot
-   prove full path-instance semantics for aliases and hardlinks. The v7 path
-   instance/schema, event, query, and atomic-publication gates remain open.
+   represent directory mount aliases such as Rocky's `/efi` and `/boot/efi`
+   with distinct descendant path instances. The v7 path/schema, event, query,
+   and atomic-publication gates remain open; regular-file hardlink paths are
+   already represented separately in v6.
 4. **Reliability and performance envelope:** current-candidate production-scale
    churn and overflow recovery, low-memory/disk/I/O fault injection, long
    endurance, and canary convergence remain unqualified. Unit tests and one
