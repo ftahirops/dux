@@ -21,6 +21,24 @@ READINESS_SPEC.loader.exec_module(READINESS)
 
 
 class ReadinessHarnessTests(unittest.TestCase):
+    def test_short_soak_does_not_claim_the_72_hour_gate(self):
+        gates = READINESS.not_qualified_by_this_run({"soak"}, 259_199, "ext4")
+        self.assertIn("72-hour dedicated soak and 24-hour canary", gates)
+
+    def test_requested_but_incomplete_72_hour_soak_keeps_gate(self):
+        gates = READINESS.not_qualified_by_this_run({"soak"}, 259_200, "ext4")
+        self.assertIn("72-hour dedicated soak and 24-hour canary", gates)
+
+    def test_completed_72_hour_soak_only_leaves_canary_unqualified(self):
+        gates = READINESS.not_qualified_by_this_run(
+            {"soak"}, 259_200, "ext4", completed=True)
+        self.assertNotIn("72-hour dedicated soak and 24-hour canary", gates)
+        self.assertIn("24-hour production canary", gates)
+
+    def test_duration_does_not_qualify_soak_when_suite_was_not_run(self):
+        gates = READINESS.not_qualified_by_this_run({"root"}, 259_200, "ext4")
+        self.assertIn("72-hour dedicated soak and 24-hour canary", gates)
+
     def test_overflow_suite_rejects_fixture_with_insufficient_recovery_headroom(self):
         required = READINESS.OVERFLOW_RECOVERY_MIN_FREE_BYTES
         self.assertEqual(READINESS.validate_overflow_recovery_headroom(required), required)

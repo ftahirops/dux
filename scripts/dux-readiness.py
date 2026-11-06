@@ -1990,6 +1990,23 @@ def promote_suite_resources(args):
     return messages
 
 
+def not_qualified_by_this_run(suites, duration_seconds, filesystem_type, completed=False):
+    """List gates this exact readiness run does not cover."""
+    not_qualified = [
+        "power loss or media corruption",
+        f"filesystems other than {filesystem_type} and other kernels",
+        "multi-day reader-held WAL endurance",
+        "100k/1m/10m performance budgets",
+        "package upgrade/rollback and musl",
+        "dependency and default-privilege release review",
+        "72-hour dedicated soak and 24-hour canary",
+    ]
+    if completed and "soak" in suites and duration_seconds >= 259_200:
+        not_qualified.remove("72-hour dedicated soak and 24-hour canary")
+        not_qualified.append("24-hour production canary")
+    return not_qualified
+
+
 SUITES = {"crash": crash_tests, "overflow": overflow_test, "cpu": cpu_event_burst_test,
           "churn": production_churn_test, "disk": disk_tests, "coverage": coverage_test, "soak": soak_test,
           "capability": capability_test, "oom": oom_test, "pressure": pressure_reconciliation_test,
@@ -2069,10 +2086,8 @@ def worker(args):
               "seed_files": args.seed_files, "filesystem_image_mib": args.filesystem_mib,
               "qualification_worker_limits": {"cpu_quota_percent": args.cpu_quota_percent,
                                                "memory_max_mib": QUALIFICATION_WORKER_MEMORY_MIB},
-              "not_qualified_by_this_run": ["power loss or media corruption",
-                  f"filesystems other than {args.filesystem_type} and other kernels",
-                  "multi-day reader-held WAL endurance", "100k/1m/10m performance budgets", "package upgrade/rollback and musl",
-                  "dependency and default-privilege release review", "72-hour dedicated soak and 24-hour canary"],
+              "not_qualified_by_this_run": not_qualified_by_this_run(
+                  set(args.suites), args.duration_seconds, args.filesystem_type),
               "suites_not_run": sorted(set(SUITES)-set(args.suites)),
               "suites": {}, "status": "running",
               "current_suite": None,
@@ -2203,6 +2218,9 @@ def worker(args):
         raise
     finally:
         report["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        report["not_qualified_by_this_run"] = not_qualified_by_this_run(
+            set(args.suites), args.duration_seconds, args.filesystem_type,
+            completed=report["status"] == "passed")
         if args.keep_failed_workspace and report["status"] != "passed":
             report.setdefault("preserved_workspace", str(workspace))
         else:
