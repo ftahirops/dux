@@ -6636,3 +6636,13 @@ remained active with zero restarts at **5,644 seconds** and **127,423 operations
 latest exactness sample was operation 127,400, 524 ms convergence, 6,968 KiB RSS,
 11 FDs, and 4,532,032 WAL bytes. The 6-hour held-reader and 12-hour restart
 milestones and final checks remain pending.
+
+**100k scan admission attempt interrupted before workload — 2026-11-06 23:04 UTC:**
+the stable-host guard passed sample 1 but rejected sample 2 when a new Go
+compiler and Go test appeared. No fixture creation or scan began. The follow-up
+23:04:38 telemetry still listed those workloads. Production remained
+dirty/not caught up after overflow, with 1,081 notifications, 16 pending,
+132,288.166 seconds behind, no scan active, and a 128 MiB WAL; a low pending
+count is not an exactness check. The VPS2 soak remained active with zero
+restarts; latest persisted progress was 5,824.2 seconds and 131,441 operations,
+one mutation burst, with operation 131,400 converging in 263 ms.
