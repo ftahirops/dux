@@ -6493,3 +6493,12 @@ restarts. No production process, package, service, or database was changed.
 The overflow history and large lag keep exact live recovery and canary gates
 open. No additional VM workload was admitted alongside the soak, to avoid
 invalidating its timing/resource evidence.
+
+**VPS2 soak progress sample — 2026-11-06 22:20 UTC:** a fresh poll found the
+same systemd unit active with zero restarts. The harness reported **73,027
+operations** in **3,242 seconds**, **730 exactness samples**, and no final
+result yet. The latest completed exactness sample (operation 73,000) converged
+in **291 ms** at **5,404 KiB RSS**, 11 file descriptors, and a **4,268,352-byte
+WAL**. `/dev/shm` remained 4% used. Keep the VM free of competing qualification
+work until this endurance run completes; these samples do not establish 72-hour
+stability.
