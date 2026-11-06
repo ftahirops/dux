@@ -6526,3 +6526,16 @@ The concurrent isolated VPS2 run remained active with zero restarts. Its
 277 ms at 5,576 KiB RSS, 11 file descriptors, and 4,268,352 WAL bytes. The
 6-hour held-reader, 1-hour mutation-burst, and 12-hour controlled-restart
 milestones remain ahead; do not interpret their empty progress fields as passed.
+
+### VPS2 endurance first mutation-burst milestone — 2026-11-06 22:26 UTC
+
+The hash-bound r89 72-hour run completed its first scheduled hourly mutation
+burst on the isolated VPS2. At 22:26:39 UTC the systemd unit was active with
+zero restarts; the progress checkpoint reported **3,602.6 seconds**, **81,600
+operations**, **811 exactness samples**, and **one completed 500-file atomic
+mutation burst**. The exactness and growth-history checks after the burst
+completed, with the latest sample (operation 81,600) converging in **344 ms**
+at **4,416 KiB RSS**, 11 file descriptors, and a **4,532,032-byte WAL**.
+Controlled restart, held-reader, final exactness, final history, and final
+SQLite integrity checks have not run. The soak remains in progress and is not
+a release pass.
