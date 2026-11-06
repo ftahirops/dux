@@ -6605,3 +6605,15 @@ behind**, no scan active, and a 128 MiB WAL. No write error or userspace drops
 were reported. The VPS2 soak stayed active with zero restarts at **5,163.8
 seconds** and **116,623 operations**; final checks and reader/restart milestones
 remain pending.
+
+**Follow-up during the blocked benchmark window — 2026-11-06 22:55:47 UTC:**
+read-only admission telemetry showed load1 **24.59**, CPU PSI some **30.25%**,
+and active Go compiler/test workloads; no qualification build or scan was
+started. Production still reports dirty/not caught up after the same overflow
+epoch (**1,081** notifications), **1,356 pending updates**, **131,756.864
+seconds behind**, and no active scan. Pending fell from 2,054 at 22:53:56, but
+lag increased by 111.467 seconds; this is not evidence of exact recovery. The
+separate soak remained active with zero restarts at **5,343.8 seconds** and
+**120,620 operations**; operation 120,600 converged in 241 ms at 6,732 KiB RSS,
+11 FDs, and 4,532,032 WAL bytes. No causal link is assigned between host test
+workloads and the production overflow or backlog.
