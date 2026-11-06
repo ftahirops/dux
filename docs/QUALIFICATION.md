@@ -6617,3 +6617,22 @@ separate soak remained active with zero restarts at **5,343.8 seconds** and
 **120,620 operations**; operation 120,600 converged in 241 ms at 6,732 KiB RSS,
 11 FDs, and 4,532,032 WAL bytes. No causal link is assigned between host test
 workloads and the production overflow or backlog.
+
+**Rebuild current stable-order source; scale scan deferred — 2026-11-06 23:01 UTC:**
+three-sample host admission passed at 22:58, then a locked/offline debug build
+completed under `CPUQuota=10%`, `MemoryMax=2G`, `IOWeight=10`. The binary SHA-256
+is `3eb725108d382c87efbd3a2027f6bd4b81e802fcbc3c410e8a4c905fa14d3a71`; its
+version reports source SHA-256
+`a80d0943aafcb0d70e73af27d8447d5e002887886c43c0f8cb9a08c4ee9ae055`. The
+subsequent admission sample at 23:01:06 was blocked by load1 **14.28**, CPU PSI
+some **64.34%**, and active Go build/test, vet, and Vitest workloads. No 100k
+fixture or scan was started. Do not attribute the pressure change to the build
+without evidence.
+
+At 23:01:17 production remained dirty/not caught up after fanotify overflow,
+with **1,081 kernel overflow notifications**, **5,928 pending**, **132,086.954
+seconds behind**, no scan active, and a 128 MiB WAL. The independent VPS2 soak
+remained active with zero restarts at **5,644 seconds** and **127,423 operations**;
+latest exactness sample was operation 127,400, 524 ms convergence, 6,968 KiB RSS,
+11 FDs, and 4,532,032 WAL bytes. The 6-hour held-reader and 12-hour restart
+milestones and final checks remain pending.
