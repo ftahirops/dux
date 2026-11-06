@@ -1,62 +1,51 @@
 # dux Production Readiness Audit
 
-## Current readiness decision — 2026-11-05 20:07 UTC
+## Current readiness decision — 2026-11-06 12:49 UTC
 
-**Not production ready; do not promote a new binary yet.** The installed
-production service remains the legacy Dux **0.6.3** binary (`e0cc915f8f37`,
-source digest `b7c9a8d…`), active with zero systemd restarts. Its `/` index is
-dirty from fanotify queue overflow and is not caught up. At **20:07 UTC** it
-reported **451** kernel overflow notifications, **97** pending updates, about
-**35,233 seconds** behind, no active scan, and no write error. Pending updates
-have recently fluctuated between zero and thousands; a drained queue does not
-repair historical event loss or prove index exactness. The service remains
-active with zero restarts.
+**Not production ready; do not promote a new binary.** The installed service
+remains legacy Dux **0.6.3** (`e0cc915f8f37`, source digest
+`b7c9a8d…`). It is active, but its root index is dirty from fanotify queue
+overflow and is not caught up. The latest live status reported **974** kernel
+overflow notifications, **35** pending updates, about **95,393 seconds** behind,
+last full scan about **86,421 seconds** ago, no active scan, and no write error.
+A low pending count does not restore coverage after event loss.
 
-A clean static-musl **0.6.3-88** candidate does exist. It was built from clean
-source commit `9c59d0edaf77b0f20a74f8de63107f136dcedc8b`; the build manifest binds
-the DEB/RPM payloads to the standalone binary, and its source digest, hashes,
-systemd units, and offline dependency audit were revalidated. The artifact
-exists at `target/readiness/r88-clean-release-20261105/`, but successful
-artifact construction does not qualify installation, rollback, or production
-operation. The full **267/267** Rust suite was run on source commit `c216b14`
-before later release-provenance tooling changes; focused stale-FID regressions
-were run on the r88 source. Lifecycle harness tests pass **66/66** and the
-qualification VM controller tests pass **36/36**. These do not substitute for
-a valid guest package lifecycle or a production-scale recovery test.
+The clean static-musl **0.6.3-89** candidate is source-bound to release commit
+`510f49d146a9280231a69e09c4d4dbf95365527b` (Rust inputs unchanged in the current
+worktree). Its RustSec lockfile and embedded-binary dependency audits reported
+no known advisories in the checked 2026-11-05 database snapshot. Current-source
+Rust tests passed **262/262** on Ubuntu 24.04. The complete DEB lifecycle passed
+in a disposable Ubuntu 24.04 guest: baseline, upgrade, rollback, re-upgrade,
+remove/purge, and clean install, with clean-install service/index policy checks.
+This is package lifecycle evidence, not live recovery, RPM qualification, or
+production safety certification.
 
 Open release gates, in priority order:
 
-1. **Live index exactness and recovery:** production remains dirty after 417
-   recorded overflows. No successful quiet-window reconciliation plus
-   independent exactness/accounting check has been demonstrated. Do not read a
-   low pending count as caught up.
-2. **Candidate package lifecycle:** no valid completed r88 install, upgrade,
-   rollback, re-upgrade, remove, and purge lifecycle is available. Attempt 4
-   used a 9p fixture on which fanotify marking is unsupported; attempt 5 used a
-   verified fanotify-compatible ext4 fixture but host pressure interrupted it.
-   Attempts 6 and 7 were also stopped by the host workload/pressure guard; in
-   attempt 7 the old package baseline scan began, but the lifecycle report did
-   not complete. None is a pass. Rocky Linux 9 and RPM lifecycle qualification
-   also remain open.
-3. **Data-model correctness:** the known v6 inode/path representation cannot
+1. **Live index exactness and recovery:** the installed root index remains dirty
+   after 974 recorded overflows. No quiet-window full reconciliation followed
+   by independent filesystem exactness/accounting verification has passed.
+2. **Rocky/RPM lifecycle:** no valid r89 RPM upgrade/rollback/remove/purge and
+   clean-install lifecycle passed. The latest attempt was stopped by the
+   pressure guard after unrelated host Go tests began; no RPM package action
+   ran.
+3. **Data-model correctness:** the current v6 inode/path representation cannot
    prove full path-instance semantics for aliases and hardlinks. The v7 path
    instance/schema, event, query, and atomic-publication gates remain open.
-4. **Reliability and performance envelope:** production-scale churn and
-   overflow recovery, low-memory/disk/I/O fault injection, long endurance, and
-   canary convergence remain unqualified. Unit and harness tests do not prove
-   these system-level properties.
-5. **Operational promotion:** only after the above gates pass, qualify the
-   candidate's live recovery and service behavior under a controlled canary;
-   the installed package/index have not been changed as part of this review.
+4. **Reliability and performance envelope:** current-candidate production-scale
+   churn and overflow recovery, low-memory/disk/I/O fault injection, long
+   endurance, and canary convergence remain unqualified. Unit tests and one
+   package lifecycle cannot prove these system-level properties.
+5. **Operational promotion:** only after the above gates pass, qualify live
+   candidate recovery and service behavior under a controlled canary. The
+   installed service and index have not been changed by this review.
 
-At **20:07 UTC**, root storage was **185 GiB total / 103 GiB used /
-74 GiB available** and `/dev/shm` was **13 GiB total / 2.9 GiB used / 10 GiB
-available**. The host was under a Go build/test batch; load1 was **15.82**,
-CPU PSI some avg10 **58.01%**, and I/O PSI some avg10 **0.85%** after the Rust
-test scope had stopped. A RustSec audit of the
-candidate lockfile found no advisories in its 2026-11-05 database snapshot;
-this is dependency evidence, not complete source or binary security
-certification.
+Root storage at the latest snapshot was **185 GiB total / 123 GiB used /
+55 GiB available**; `/dev/shm` was **3.0 GiB used / 9.9 GiB available**. `/tmp`
+contained **23 GiB**, largely shared Go/test caches on the same watched ext4
+filesystem. Cleanup is deferred until a controlled recovery window because a
+mass delete can create more root-wide fanotify churn. The CI workflow file was
+removed in commit `071c99a`; no `.github/workflows/ci.yml` exists in this branch.
 
 ## Watcher diagnostic hardening — 2026-11-05 11:05 UTC
 
@@ -20609,3 +20598,10 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 - The warning path in current source deliberately marks event coverage lost when an event's identity cannot be resolved; it rate-limits warning output. Treating the stale FID as harmless globally would be unsafe without proving that event class cannot represent a missed mutation. Preserve the fail-closed behavior while investigating why the root-wide fanotify stream overflows and whether a controlled quiescent reconciliation can recover.
 - Root disk was **107 GiB used / 71 GiB free of 185 GiB**; `/dev/shm` had **9.9 GiB free**. No lifecycle VM was launched during the unrelated host test load. Dux's production service and index were not modified.
 - The same service's cgroup recorded **184.8 GB written on each of the stacked block devices** during its 12-hour runtime; systemd's aggregate `IOWriteBytes` summed those duplicated layer counters to **369.5 GB**, so that aggregate must not be read as unique physical bytes. A 15-second sample on one device layer advanced **70.4 MB** (about **4.7 MB/s**) while the host test batch was active. In a nearby 12-second `/proc/1627143/io` sample, Dux's process `write_bytes` advanced **5.9 MB** (about **0.49 MB/s**). These are different accounting layers and short, churn-heavy samples; they demonstrate substantial I/O under load but do not establish steady-state write amplification or attribute every block write to index payload. Retest after the host is quiet and compare device, cgroup, process, DB, and WAL deltas before proposing an I/O optimization.
+### RPM lifecycle retry blocked by shared-host tests; current disk and index snapshot — 2026-11-06 12:47–12:54 UTC
+
+- The requested test-host shell is not currently available from this workspace: `/root/.ssh/id_ed25519` is configured for the Forgejo Git endpoint, not a root shell account. Direct SSH to port 22 timed out; the configured Git endpoint rejects shell access. The root SSH attempt therefore cannot provide the requested VPS test environment until its public key is authorized for a shell account or a usable port/key pair is configured. The host address is intentionally not recorded here.
+- Current root filesystem capacity is **185 GiB total, 123 GiB used, 55 GiB available (70%)**. `/dev/shm` is **3.0 GiB used / 9.9 GiB available**. `/tmp` occupies **23 GiB** on the same ext4 filesystem Dux watches at `/`; the largest known caches are `/tmp/xgs-readiness-gocache` **8.7 GiB**, `/tmp/xgs-current-readiness-cache` **3.1 GiB**, `/tmp/xgs-cov-full-gocache` **1.9 GiB**, `/tmp/xgs-go-cache` **1.2 GiB**, and `/tmp/xtop-audit-cache` **1.3 GiB**. No temp cleanup was performed: the live index is already uncertain, and the host has recurring unrelated Go tests that exercise these shared caches. Deleting cache trees under the root-wide watcher would add a large event burst and could worsen queue loss. Revisit cleanup after a controlled recovery window and cache-owner check.
+- At **12:49:43 UTC**, installed `/usr/bin/dux` was still legacy **0.6.3 (`e0cc915f8f37`)**, active, dirty with reason `fanotify queue overflow`, **974** kernel overflow notifications, **35** pending updates, not caught up and about **95,393 seconds** behind. The last full scan was about **86,421 seconds** old; no scan or write error was reported. This is a production blocker; a low pending count does not prove complete coverage.
+- The first guarded Rocky 9 attempt was rejected before QEMU because a Go test appeared in admission sample 3/3. A later three-sample admission passed and a private tmpfs-overlay guest booted. Guest-local old/new RPMs and the current progress-enabled lifecycle harness were hash-verified. The first harness invocation used a stale staged copy and exited at CLI parsing before package actions; after replacing it with the current harness, the independent runtime guard stopped the guest when another `go test ./...` and Go compiler appeared. The guard record reports load1 **7.03**, CPU PSI some **45.05%**, I/O PSI some/full **1.55% / 1.03%**, and identifies both host test processes. No RPM package action ran and no RPM lifecycle result is claimed. The ephemeral VM service is inactive and its private runtime was cleaned. A further start was refused at admission sample **1/3** at **12:54 UTC** when Go build, test, vet, and three compiler processes were detected. The next attempt must wait for host admission to remain clear through first boot and the full lifecycle; stream progress output to host evidence.
+- At the same time, systemd journal continued recording stale fanotify handle (`ESTALE`) events from host churn and Dux paused/resumed index writes under I/O pressure. Their timing is observed, but this snapshot does not establish that one workload caused all historical overflows.
