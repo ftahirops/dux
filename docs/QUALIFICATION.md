@@ -6511,3 +6511,18 @@ and zero userspace drops; the WAL remains **128 MiB**. Compared with 22:18:07,
 pending increased by 1,339 and lag by 245.001 seconds while 48,037 updates were
 committed. This does not show convergence, and no causal attribution is made.
 The host has 67 GiB free on `/`; production state remains unmodified.
+
+**Production low-queue follow-up — 2026-11-06 22:24:46 UTC:** the next
+read-only sample showed **56 pending updates** (15 at 22:22:58), while
+`dirty=true`, `dirty_reason=fanotify queue overflow`, `scan_in_progress=false`,
+and `caught_up=false` remained. `behind_seconds` rose from 129,788.561 to
+129,896.227 over 108 seconds; overflow notifications remained 1,070, userspace
+drops zero, and WAL 128 MiB. A small pending queue therefore does not mean the
+index recovered: no exact comparison or reconciliation has occurred.
+
+The concurrent isolated VPS2 run remained active with zero restarts. Its
+22:24:46 progress file reported **78,405 operations** in **3,482 seconds**,
+784 exactness samples, and no final result. Operation 78,400 converged in
+277 ms at 5,576 KiB RSS, 11 file descriptors, and 4,268,352 WAL bytes. The
+6-hour held-reader, 1-hour mutation-burst, and 12-hour controlled-restart
+milestones remain ahead; do not interpret their empty progress fields as passed.
