@@ -6539,3 +6539,10 @@ at **4,416 KiB RSS**, 11 file descriptors, and a **4,532,032-byte WAL**.
 Controlled restart, held-reader, final exactness, final history, and final
 SQLite integrity checks have not run. The soak remains in progress and is not
 a release pass.
+
+**VPS2 soak continuation — 2026-11-06 22:27:39 UTC:** the endurance service
+remained active with zero restarts after its first mutation burst. The latest
+checkpoint reported **3,662.6 seconds**, **82,975 operations**, **824 exactness
+samples**, and one burst. Operation 82,900 converged in **290 ms** at **5,356
+KiB RSS**, 11 file descriptors, and a **4,532,032-byte WAL**. Final checks and
+the 6-hour reader / 12-hour restart milestones remain pending.
