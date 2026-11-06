@@ -6591,3 +6591,17 @@ seconds**, **115,318 operations**, **1,148 exactness samples**, and one complete
 mutation burst. The latest sample (115,300 operations) converged in 533 ms at
 6,656 KiB RSS, 11 file descriptors, and 4,532,032 WAL bytes. Controlled restart,
 held reader, final exact/history checks, and SQLite integrity remain pending.
+
+**Qualification admission and live status — 2026-11-06 22:53:56 UTC:** the
+host admission probe refused a benchmark retry: load1 was **11.85** against a
+limit of 10, with active Go test/compiler and `staticcheck` processes. CPU PSI
+some avg10 was 36.21%; I/O PSI some was 1.85%; memory PSI some was 0.05%.
+No build or 100k scan was started. This is an external workload observation,
+not evidence that it caused the production index condition.
+
+Production remained dirty/not caught up after overflow, with **1,081 kernel
+overflow notifications**, **2,054 pending updates**, **131,645.397 seconds
+behind**, no scan active, and a 128 MiB WAL. No write error or userspace drops
+were reported. The VPS2 soak stayed active with zero restarts at **5,163.8
+seconds** and **116,623 operations**; final checks and reader/restart milestones
+remain pending.
