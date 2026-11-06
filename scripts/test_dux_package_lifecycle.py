@@ -41,6 +41,31 @@ class ProgressOutputTests(unittest.TestCase):
         self.assertEqual(json.loads(payload), event)
         self.assertTrue(stream.flushed)
 
+    def test_completed_stage_checkpoint_carries_its_full_evidence(self):
+        step = {
+            "name": "upgrade",
+            "evidence": {
+                "version": "0.6.3-89",
+                "binary_sha256": "abc123",
+                "service": {"enabled": "disabled", "active": "inactive"},
+            },
+        }
+        event = LIFECYCLE.stage_complete_progress_event(step, "running")
+        self.assertEqual(event, {
+            "event": "stage_complete", "stage": "upgrade",
+            "status": "running", "step": step,
+        })
+        self.assertEqual(json.loads(json.dumps(event))["step"], step)
+
+    def test_terminal_progress_event_contains_a_self_contained_report(self):
+        report = {"status": "passed", "steps": [{"name": "upgrade", "evidence": {"ok": True}}]}
+        event = LIFECYCLE.lifecycle_outcome_progress_event(report)
+        self.assertEqual(event, {"event": "lifecycle_passed", "report": report})
+
+    def test_nonterminal_report_cannot_be_emitted_as_an_outcome(self):
+        with self.assertRaisesRegex(ValueError, "not terminal"):
+            LIFECYCLE.lifecycle_outcome_progress_event({"status": "running"})
+
 
 class QualificationInterpreterSafetyTests(unittest.TestCase):
     def test_qualification_harnesses_refuse_optimized_python(self):

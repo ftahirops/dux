@@ -51,6 +51,25 @@ def emit_progress(event, stream=None):
           file=stream, flush=True)
 
 
+def stage_complete_progress_event(step, report_status):
+    """Carry completed evidence in the host-streamed checkpoint.
+
+    Qualification guests may be stopped before their private overlay can be
+    fetched. A stage name alone is not enough to preserve what the lifecycle
+    actually verified, so include the exact report step in the durable stream.
+    """
+    return {"event": "stage_complete", "stage": step["name"],
+            "status": report_status, "step": step}
+
+
+def lifecycle_outcome_progress_event(report):
+    """Make the streamed terminal event a self-contained final report."""
+    status = report["status"]
+    if status not in {"passed", "failed"}:
+        raise ValueError(f"lifecycle outcome is not terminal: {status!r}")
+    return {"event": f"lifecycle_{status}", "report": report}
+
+
 def _exec_start_has_option(exec_start, option):
     """Match a real ExecStart argv option, not an option-name substring."""
     _, separator, arguments = exec_start.partition("argv[]=")
@@ -589,8 +608,8 @@ def main():
         temporary.write_text(json.dumps(report, indent=2) + "\n")
         temporary.replace(report_path)
         if args.progress:
-            emit_progress({"event": "stage_complete", "stage": name,
-                           "status": report["status"]})
+            emit_progress(stage_complete_progress_event(
+                report["steps"][-1], report["status"]))
 
     def progress(stage, **details):
         if args.progress:
@@ -814,15 +833,15 @@ def main():
             report["failure_evidence"] = evidence
         report["installed_version_at_failure"] = installed_version(args.kind)
         report["service_at_failure"] = service_state()
-        if args.progress:
-            emit_progress({"event": "lifecycle_failed", "error": repr(error)})
         raise
     finally:
         report["elapsed_seconds"] = round(time.time() - report["started_at_epoch"], 3)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2) + "\n")
+        if args.progress and report["status"] == "failed":
+            emit_progress(lifecycle_outcome_progress_event(report))
     if args.progress:
-        emit_progress({"event": "lifecycle_passed", "completed_stages": len(report["steps"])})
+        emit_progress(lifecycle_outcome_progress_event(report))
     print(json.dumps(report, indent=2))
 
 
