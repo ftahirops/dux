@@ -6468,3 +6468,28 @@ pending fell 40,749 to 39,321; the overflow count stayed 472 and WAL stayed
 128 MiB. The index remained dirty from fanotify overflow. At the second sample,
 CPU PSI some/full was 1.21%/0.00% and I/O PSI some/full was 1.97%/1.73%. This is
 legacy behavior only; it does not establish cause or qualify candidate writes.
+
+### VPS2 r89 endurance in progress and live blocker refresh — 2026-11-06 22:18 UTC
+
+The isolated Ubuntu 24.04 VPS2 soak remains active under
+`dux-readiness-803796.service` with zero restarts. Its hash-bound candidate is
+`babed51d6e004237b679fec16859b08de97698e12b7a049c7c615118615a1a3c`; the run
+started at 21:26:36 UTC with a 72-hour duration and a 25% CPU quota. At
+22:17:38 it had completed **68,946 operations** in **3,062 seconds** and
+recorded **689 exactness samples**. The latest sample (operation 68,900) showed
+397 ms exact convergence, 5,216 KiB RSS, 11 file descriptors, and a 4,268,352
+byte WAL. Final exactness, history, and SQLite integrity fields are correctly
+still pending. VM root has 27 GiB free; the soak uses private `/dev/shm` state
+and does not touch the installed database. Expected completion is Nov. 9 at
+21:26 UTC if uninterrupted. This is preliminary endurance evidence, not a
+passed soak.
+
+A read-only production status at 22:18:07 UTC still reports dirty/not caught
+up after **fanotify queue overflow**, **2,005 pending updates**, **129,516.946
+seconds behind**, **1,070 kernel overflow notifications**, **zero** userspace
+drops, no active scan, and a **128 MiB WAL**. The installed daemon remains
+`0.6.3 (e0cc915f8f37) [production]`; service state is active with zero systemd
+restarts. No production process, package, service, or database was changed.
+The overflow history and large lag keep exact live recovery and canary gates
+open. No additional VM workload was admitted alongside the soak, to avoid
+invalidating its timing/resource evidence.
