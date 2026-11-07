@@ -7277,3 +7277,13 @@ database open; no separate process had those files open at the 04:18 `fuser`
 sample, which cannot identify a reader that existed during the earlier stall.
 The transient write pause is real, but its reader/pinning cause is unproven.
 Root filesystem free space was 66 GiB, so this was not a disk-capacity guard.
+
+The exact-candidate P0 `wal` suite held a consistent reader snapshot and
+reclaimed the WAL after release, but its report records a peak of only
+1,615,072 bytes (zero after quiescent truncate). Its workload is 12 rounds of
+48 small file writes, far below the 128 MiB event-write guard and the
+269,707,592-byte production checkpoint incident. Therefore the P0 WAL pass
+does not qualify large-WAL guard behavior or recovery under production-scale
+reader pinning. Add a bounded high-volume held-reader test that crosses the
+guard threshold, proves event-write pause/resume and exact catch-up, then proves
+WAL reclamation before treating this behavior as release-qualified.
