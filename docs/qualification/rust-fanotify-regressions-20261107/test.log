@@ -1,0 +1,31 @@
+Running as unit: dux-rust-fid-20261107.service
+
+running 1 test
+test watch::tests::fanotify_overflow_is_counted_separately_from_userspace_drops ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 267 filtered out; finished in 0.00s
+
+
+running 1 test
+test watch::tests::stale_target_attrib_is_ignored_only_for_a_known_handle_capable_filesystem ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 267 filtered out; finished in 0.00s
+
+
+running 1 test
+test watch::tests::startup_handle_probe_prequalifies_stale_attrib_filter ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 267 filtered out; finished in 0.10s
+
+
+running 1 test
+test watch::tests::unresolved_event_diagnostics_are_rate_limited_with_suppressed_count ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 267 filtered out; finished in 0.00s
+
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 116ms
+CPU time consumed: 20ms
+Memory peak: 2.1M
+Memory swap peak: 0B

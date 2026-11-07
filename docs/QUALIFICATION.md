@@ -7946,3 +7946,30 @@ pass. The successful run is separate. Immediately afterward the production
 daemon remained active, but read-only status still showed dirty state after 16
 kernel overflow notifications, schema v6, 11 pending updates, and no scan in
 progress; the suite ran on tmpfs and did not modify its database or service.
+
+### Fanotify identity and overflow regressions — 2026-11-07 07:17 UTC
+
+Ran four focused Rust tests against the current candidate Rust sources:
+overflow accounting, stale target-only `FAN_ATTRIB` filtering, startup
+file-handle capability prequalification, and unresolved-event log
+rate-limiting. All **4/4 passed**. The local debug test executable
+(`target/debug/deps/dux-f830783577e924f2`, SHA-256
+`2cd1f79b3bb278dd13ea7582a8b0c8fb8f6cbaefcbdbd9254452d3cdba9b079b`) was
+built Nov. 6; a source comparison confirmed no changes in `src/`,
+`Cargo.toml`, `Cargo.lock`, or `build.rs` since candidate source commit
+`0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5`. It is a debug test artifact, not
+the static release executable. The exact tests and resource profile are in
+`docs/qualification/rust-fanotify-regressions-20261107/run-metadata.json`
+(SHA-256
+`c7eed878edb4014c80aae70530b4bf60eb09213ce735b1eb1b41fdee6b2d8579`); raw
+test output is in the adjacent `test.log` (SHA-256
+`e61880f980d44ba6d76e16d6600995a68c9d4636b42ebaa0f7dec83792399e85`).
+
+At **07:18:44 UTC**, the independent VPS2 candidate soak remained active with
+zero restarts at **19,470.1 seconds** and **429,874 operations**. It had not
+reached 480,200 operations; no held-reader or controlled-crash phase had
+occurred, and final exactness/history/integrity remained pending. The production
+service remained active but dirty after 16 lifetime kernel overflows, schema
+v6, with 13 pending updates, about 4h50m behind, and no scan in progress. Root
+disk had **65 GiB free / 64% used**. The new tests changed neither the
+production service nor its database.
