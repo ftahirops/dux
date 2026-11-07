@@ -8111,3 +8111,24 @@ binary hash/version, command exit statuses, and provenance are in
 `docs/qualification/security-audit-20261107/`. The audited binary is the
 installed older `e0cc915` production build, not the newer VPS2 candidate; this
 audit therefore does not qualify the candidate or prove runtime security.
+
+### VPS2 endurance-soak checkpoint — 2026-11-07 07:36 UTC
+
+The candidate soak is still active (`dux-soak-candidate-0b81fa8.service`, zero
+restarts). A read-only checkpoint records 20,552.6 seconds elapsed, 453,294
+reported mutations (22.055/s observed average against a configured pacing value
+of 25/s), 4,507 exact samples, and five hourly mutation bursts. Sampled exact
+convergence was 406 ms median / 848 ms p95 / 2,483 ms maximum; sampled peak RSS
+was 9,720 KiB, peak descriptors 13, and peak WAL 13,913,272 bytes. The first
+six-hour held-reader phase and first twelve-hour controlled-crash phase are not
+due yet; final exactness, history, and integrity checks remain pending. This is
+intermediate evidence only and does not qualify the soak. Full progress snapshot
+and its digest are preserved under
+`docs/qualification/soak-candidate-20261107/`.
+
+The inspected candidate harness source contains one counter increment per
+mutation. An apparent duplicate in an earlier source display was caused by
+overlapping inspection ranges and was not a product or harness defect. The
+measured throughput below the configured pacing value is explained by the
+synchronous exactness checks taking wall time; it is retained as a measured
+workload limit and no claim is made that the requested 25/s was sustained.
