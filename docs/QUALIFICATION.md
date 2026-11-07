@@ -6856,3 +6856,57 @@ KiB RSS, 12 file descriptors, and a 4,251,872-byte WAL; this is interim
 telemetry, not a completed endurance/integrity result. The independent older
 72-hour soak also remained active with zero restarts. Both soak finalizers,
 including final exactness/history and SQLite integrity, remain pending.
+
+### Static release package and lifecycle qualification — 2026-11-07 02:36 UTC
+
+The standard `scripts/build-release.sh` path completed from a clean detached
+worktree at commit `0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5`, using
+`cargo-auditable 0.7.7`, the static `x86_64-unknown-linux-musl` target, and the
+fresh RustSec database recorded above. This produced package revision 23, a
+stripped static binary with a separate Build-ID-matched debug-symbol file, a
+source archive, DEB, RPM, audit reports, manifest, and checksums. All entries
+in `SHA256SUMS` passed; the RPM build emitted no missing-build-ID warning. The
+manifest records a clean worktree, source digest
+`39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3`, binary
+SHA-256 `0ce0d2eba91f6325fad8c6e6e5d61380805d56c57bc774d2714567d1be5b417e`,
+debug-symbol SHA-256
+`9f0f62d307151d65267d4d584a8a97ef3f1a9578ee6882f2d433996c0a9cfe8f`, and
+matching Build ID `d08d9e94f2ca34812fdb4f33f50a1e7cbd0c9399`. The package
+SHA-256 values are DEB
+`41a50ea031d666c6d782d2c5432a7b1363e1271f757b39bfbf33c6ae055521e1` and RPM
+`b45e495e6d6b592e79376619ef01dda2722b12e9ae82b4f70e437fde5930a76b`. The
+manifest SHA-256 is
+`f12e63fb8fc18c60cf9bfdfe34da6fa28846d05f3e6cabe7891bae3f2520386f`.
+
+Package lifecycle was exercised in disposable Debian 12 and Rocky Linux 9
+containers without systemd. In each, revision 22 installed, revision 23
+upgraded it, revision 22 rollback completed, and removal completed. A
+sentinel index file survived upgrade and rollback. Debian package removal
+preserved state and purge removed `/var/lib/dux`, as configured; RPM erase
+preserved state. Both installed binaries reported the expected production
+commit and source digest. Logs are
+`target/readiness/vps2-qualification-20261106/packages-r23/deb-lifecycle-debian12.log`
+(SHA-256
+`7db9acdcd032d81c1f792d8b6a29897839616a6c14e1561945ce6405a3c59ed2`) and
+`rpm-lifecycle-rocky9.log` (SHA-256
+`e48be5870a83c4641250802a52ef0d4c07f49f2635f41ba94670633d0c03fb60`). This
+qualifies package file lifecycle and state preservation on those images, but
+does not test systemd-enabled service activation/restart or a live daemon
+upgrade. `systemd-analyze verify` passed for both packaged unit files.
+
+The exact revision-23 package binary passed an additional runtime smoke scan:
+4 files, 2 directories, 6 path instances, 20,480 visible bytes, 16,384 unique
+bytes over 5 inodes, and zero coverage issues. `status` reported a clean exact
+index; `du`, `top`, and `find` JSON parsed successfully, including lookup of a
+non-UTF-8 filename and a hard-linked/symlinked fixture. Log SHA-256 is
+`ca024bcc05a0c7312860dd33c759884992b98de7a5b21035b41b2a6540736bff`.
+
+This supersedes the preceding open package-generation and basic
+install/upgrade/rollback gates for the tested Debian 12 and Rocky 9 package
+paths. Systemd-enabled service transitions, other distributions, canary, and
+full P0 qualification remain outstanding. At 02:36 UTC the current-source P0
+matrix was still running: **15/30** crash-recovery rounds had passed, with no
+worker restarts and a 1.28 GiB observed memory peak. The exact static candidate
+soak and independent older soak also remained active with zero restarts. The
+candidate soak's latest persisted checkpoint was 2,461.2 seconds, 55,325
+mutations, and 553 exactness checks; final endurance checks remain pending.
