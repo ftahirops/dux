@@ -1929,7 +1929,8 @@ def root_scan_test(case, _args, evidence):
     evidence.update(root_path_scanned=True, files=counts[0], directories=counts[1], dirents=entries,
                     database_excluded=True, one_filesystem=True,
                     coverage_complete=dirty_reason is None, dirty_reason=dirty_reason)
-    print(f'PASS scan root /: {counts[0]} files, {counts[1]} dirs, {entries} entries', flush=True)
+    outcome = "PASS" if dirty_reason is None else "INCOMPLETE coverage"
+    print(f'{outcome} scan root /: {counts[0]} files, {counts[1]} dirs, {entries} entries', flush=True)
 
 
 def validate_workspace_parent(path, image_mib):
@@ -2016,6 +2017,20 @@ SUITES = {"crash": crash_tests, "overflow": overflow_test, "cpu": cpu_event_burs
           # isolated crash/pressure suites so that it cannot cause those tests
           # to exercise their intentional pressure deferral path accidentally.
           "root": root_scan_test}
+
+
+def suite_result_status(name, evidence):
+    """Separate a successful test of fail-closed behavior from qualification."""
+    if name == "root" and evidence.get("coverage_complete") is False:
+        return "incomplete"
+    return "passed"
+
+
+def aggregate_result_status(suites):
+    """An incomplete suite makes the qualification report incomplete."""
+    if any(result.get("status") == "incomplete" for result in suites.values()):
+        return "incomplete"
+    return "passed"
 
 # The packaged production service uses MemoryMax=4G. The consolidated worker
 # includes both the harness and a tmpfs-backed loop fixture, so its cgroup must
@@ -2118,7 +2133,9 @@ def worker(args):
                     report["last_checkpoint_at"] = report["current_suite_started_at"]
                     write_report(args.report, report)
                     SUITES[name](case, args, evidence)
-                    report["suites"][name].update(status="passed", elapsed_seconds=round(time.monotonic()-started, 3))
+                    report["suites"][name].update(
+                        status=suite_result_status(name, evidence),
+                        elapsed_seconds=round(time.monotonic()-started, 3))
                     report["current_suite"] = None
                     report["last_checkpoint_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     write_report(args.report, report)
@@ -2209,7 +2226,7 @@ def worker(args):
                 finally:
                     log = base / "daemon.log"
                     report["log_tail"] = log.read_text()[-12000:] if log.exists() else ""
-        report["status"] = "passed"
+        report["status"] = aggregate_result_status(report["suites"])
     except BaseException as error:
         report.update(status="failed", error=f"{type(error).__name__}: {error}")
         for suite in report["suites"].values():
@@ -2221,7 +2238,7 @@ def worker(args):
         report["not_qualified_by_this_run"] = not_qualified_by_this_run(
             set(args.suites), args.duration_seconds, args.filesystem_type,
             completed=report["status"] == "passed")
-        if args.keep_failed_workspace and report["status"] != "passed":
+        if args.keep_failed_workspace and report["status"] == "failed":
             report.setdefault("preserved_workspace", str(workspace))
         else:
             shutil.rmtree(workspace, ignore_errors=True)

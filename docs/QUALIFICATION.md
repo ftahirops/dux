@@ -7993,3 +7993,73 @@ with three pending updates and no rescan in progress; near-empty pending does
 not establish exact recovery. Root had 65 GiB free. VPS2's dedicated candidate
 soak remained active with zero restarts at **19,650.3 seconds / 433,764
 operations**; its reader, restart, and final checks were still pending.
+
+## Consolidated failure modes and test coverage — 2026-11-07
+
+This section groups the failure classes observed in qualification and the
+coverage available for them. “Passed” means the named bounded test passed; it
+does not qualify untested operating environments or long-duration behavior.
+The artifact paths below are relative to the repository root.
+
+### Failure classes and current disposition
+
+| Failure class | Observed or injected failure | Expected safe behavior / evidence | Current disposition |
+|---|---|---|---|
+| Filesystem event loss | Fanotify queue overflow; unresolved/stale file handles; unavailable or unsupported handle capability | Count kernel overflow separately from userspace drops; mark index dirty; avoid treating unresolved state as exact; reconcile when possible. Four focused fanotify regression tests passed (`docs/qualification/rust-fanotify-regressions-20261107/`). | **Production blocker remains.** Live daemon snapshot at 2026-11-07 07:01 UTC was dirty after 16 kernel overflow notifications, had two failed reconciliations, was about 4.5 hours behind, and ran schema v6. The isolated shared-ext4 probe also remained dirty after a stale FID/lost event associated with ClickHouse (`docs/qualification/systemd-smoke-20261107/shared-ext4-failure.log`). |
+| Filesystem/index accounting divergence | Recursive directory totals or root aggregate disagree with filesystem state; zero-total allocated leaves; stale index rows | Detect invariant violation, mark dirty, rebuild/reconcile, and require exact filesystem comparison before claiming clean. Historical captures in this document record a 573-inode / 15,171,584-byte root mismatch; a unit regression for the zero-total leaf shape passed. | Historical legacy-daemon failures are reproducible evidence. Current production exactness is **not established** while dirty/behind; candidate live equivalence is still open. |
+| Startup and schema migration | Pre-existing index not built by this daemon; watch-first startup; v4 upgrade; offline changes while stopped | Start event ingestion, reconcile, preserve correctness across upgrade and stopped intervals. Startup/v4 and restart scenarios are covered by earlier P0 evidence; isolated package smoke ended with an exact schema-v6 index. | Bounded scenarios passed. Current live schema is v6; no claim is made here that a schema-v7 migration is qualified. |
+| Crash, restart, and partial work | SIGKILL, process restart, interrupted scan, cancellation, crash during mutations | Keep/recover a valid prior generation, replay changes, and reach exact state without silently losing work. P0 evidence includes 30/30 crash rounds; isolated systemd smoke verified SIGKILL restart and exact recovery after 32 offline mutations. | Bounded tests passed; power-loss/media-corruption behavior is explicitly not covered by WAL report. |
+| Concurrent mutation and churn | Create/delete/rename/replace/hardlink activity during watching or scans | Track/replay mutations and compare final index with filesystem. Historical churn suite was OOM-killed during its second 100k-file baseline scan under a 768 MiB worker cap; this was a harness resource failure before assertions, not a product pass or a proven product defect. | Some bounded isolated mutation tests passed. The interrupted churn run must not be counted as passing; rerun under qualified worker limits is required. |
+| Queue overflow and backlog | Event queue overflow or a large pending backlog | Expose overflow and pending state, force dirty/reconciliation, recover exactly. Overflow P0 coverage and focused counter tests exist; WAL stress observed backlog while checkpoint guard was active and exact catch-up after release. | Bounded scenarios passed. The same class is occurring on live production, so end-to-end live recovery is still open. |
+| Resource exhaustion / pressure | Memory or CPU pressure, OOM, cancellation under pressure, long scan | Respect resource caps, preserve valid prior state, recover when pressure clears. Pressure-recovery P0 suite passed after extending its deadline to 600 seconds. A separate consolidated P0 attempt was OOM-killed at a 768 MiB cap during churn; scale 10m four-job scan exceeded the 256 MiB RSS budget (909,528 KiB); one-job diagnostic used 170,348 KiB but was not a complete scale qualification. | Pressure behavior has bounded pass evidence. Churn and four-job 10m scale remain unqualified. |
+| WAL growth and long readers | Reader pins old snapshot while writes continue; WAL approaches guard threshold | Retain reader snapshot, hold/checkpoint guard, then reclaim WAL and catch up after release. 158,500-file WAL stress passed: peak 268,541,632 bytes against a 268,435,456-byte guard target; WAL returned to zero and exact catch-up passed (`docs/qualification/wal-budget-20261107/report.json`). | This bounded stress passed. Multi-day reader-held WAL endurance remains untested. |
+| Mount and filesystem transitions | Mount loss/recovery, ext4 behavior, unsupported filesystem or kernel differences | Avoid claiming exactness through uncertain transitions; recover and verify. Earlier P0 mount recovery passed. A shared ext4 subtree probe failed closed as described above; isolated ext4 runtime passed. | One Ubuntu 24.04 / kernel 6.8 / systemd 255 / ext4 configuration only; cross-kernel/filesystem qualification remains open. |
+| Package, service, and privilege boundary | Incorrect unit settings, capability drift, unsafe restart/resource policy, packaging or activation errors | Verify extracted package units and runtime restrictions, then exercise service lifecycle. `systemd-analyze verify` passed; isolated transient-unit runtime passed startup, mutation, manual restart and kill/restart. | **Partial only.** DEB was extracted, not installed via dpkg; transient unit was used; shortened restart delay; RPM activation, upgrade/rollback, and live production upgrade were not qualified. |
+| Security/dependency/build integrity | Vulnerable or unexpected dependencies, binary/build mismatch, privilege surface | Audit lockfile and binary, pin evidence to source/binary hashes and inspect unit restrictions. Security-audit artifacts exist under `docs/qualification/security-audit-a62ac2d/`; package unit restrictions were inspected in systemd smoke. | These are point-in-time checks; they do not establish a complete security certification or replace release review for default privileges and dependency updates. |
+| Performance and scale | 100k/1m/10m scan cost, peak RSS, query/TUI latency | Require all exactness and resource/latency budgets at the intended configuration. Historical 100k and 1m levels passed; 10m four-job run failed RSS at 909,528 KiB. One-job 10m diagnostic met 256 MiB but omitted the complete combined gate. | **Scale qualification open** until the complete intended profile passes all levels and budgets together. |
+| Sustained operation / canary | Slow leaks, repeated overflow, accumulated drift, long-run recovery | 72-hour endurance and 24-hour canary with stable exactness and operational alarms. | Not run; explicit release blockers. |
+| Qualification harness/reporting | Worker OOM, timeout, cleanup leak, interrupted remote report, incomplete coverage mislabeled as a pass | Preserve logs and progress, distinguish test pass from qualification completeness, fail closed on incomplete coverage. Historical issues include 768 MiB OOM, pressure-suite daemon cleanup leak, and a 180-second recovery timeout (recovered under a 600-second bound). The root-scan status bug was corrected on 2026-11-07; the separate coverage suite intentionally passes when it verifies that incompleteness is detected. | Historical harness failures and timeouts are not product passes. Regression tests for incomplete/complete root status pass; broader report publication/integration behavior still requires matrix-level evidence. |
+
+### Tests run on the current source candidate
+
+| Test / check | Result | Scope and limits | Evidence |
+|---|---:|---|---|
+| Full Rust unit suite | 268 passed, 0 failed | Local debug test executable; source tree matched candidate commit `0b81fa8`; not the static release executable. Ran with one test thread, 25% CPU, 2 GiB memory, swap disabled. | `docs/qualification/rust-suite-20261107/run-metadata.json`, `test.log` |
+| Full Python harness suite | 296 passed, 0 failed | Harness tests only; 10% CPU, 1 GiB memory, swap disabled. Initial attempt was stopped by pressure guardrails and is excluded from the passing run. | `docs/qualification/python-suite-20261107/run-metadata.json` |
+| Fanotify/FID regression selection | 4 passed, 0 failed | Overflow accounting, known-filesystem stale-attrib handling, startup capability prequalification, and rate-limited unresolved-event diagnostics. | `docs/qualification/rust-fanotify-regressions-20261107/` |
+| WAL reader/backlog stress | Passed | 158,500 created files; held-reader snapshot preserved; backlog observed; checkpoint recovery, exact catch-up, and zero quiescent WAL verified. | `docs/qualification/wal-budget-20261107/` |
+| All-features Rust tests, lint/format, soak progress | Test/lint logs and progress snapshots retained | A soak progress snapshot is not a completed soak. Consult final log/report for terminal status; this evidence does not replace 72-hour endurance or canary. | `docs/qualification/all-features-20261107/` |
+| Systemd/package smoke | Isolated runtime passed; shared subtree probe failed closed | Extracted DEB and transient unit, disposable ext4 image; not dpkg installation or production activation. Exact counts and limitations are recorded in the summary. | `docs/qualification/systemd-smoke-20261107/summary.json` and logs |
+| Live production observation | Failed readiness gate / remains dirty | Read-only snapshot: daemon active, schema v6, dirty due fanotify overflow, 16 kernel overflows, failed reconciliation attempts 2, behind about 16,355 seconds at 07:01 UTC. This is operational observation, not an isolated candidate pass. | `docs/qualification/live-prod-20261107/production-0701.json` |
+
+### Release interpretation
+
+The test suites above demonstrate useful bounded behavior, not “100% production
+ready.” Release remains blocked on clean exact live recovery, a complete scale profile within
+the intended RSS budget, rerunning interrupted churn under admitted limits,
+package install/upgrade/rollback validation, broader platform coverage, a
+72-hour endurance run, and a 24-hour canary. Any failed, timed-out, OOM-killed,
+or incomplete run stays recorded as such and must not be counted as a pass.
+
+### Qualification-report status correction — 2026-11-07
+
+Fixed the readiness harness so an executed root scan with
+`coverage_complete=false` receives suite status `incomplete`, makes the
+aggregate report `incomplete`, and does not claim the run completed for gate
+calculation. The separate `coverage` suite still reports `passed` when it
+successfully verifies that incomplete coverage is detected. Incomplete runs
+also follow normal workspace cleanup; only failed runs retain a failed
+workspace when requested. The root-scan console message now says
+`INCOMPLETE coverage` instead of `PASS` when the scan is dirty.
+
+Regression tests cover incomplete root coverage, complete root coverage, and
+the distinct expected behavior of the coverage test. All three focused tests
+passed. The full Python discovery suite passed **299/299** in 60.292 seconds
+under a 10% CPU quota, 1 GiB memory limit, and zero swap; systemd recorded 6.053
+CPU seconds and 3.0 MiB peak memory. `git diff --check` passed. The first full
+suite invocation failed because its configured `/dev/shm` `TMPDIR` had not
+been created; 11 test assertions then failed downstream with `mktemp` errors.
+After creating the directory, the suite passed. This setup failure is not
+counted as product evidence. Machine-readable evidence for this post-fix run
+has not yet been exported to a qualification JSON artifact; the command output
+and systemd result are the evidence for this run.

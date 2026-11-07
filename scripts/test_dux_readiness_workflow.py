@@ -22,6 +22,35 @@ READINESS_SPEC.loader.exec_module(READINESS)
 
 
 class ReadinessHarnessTests(unittest.TestCase):
+    def test_incomplete_root_coverage_does_not_pass_qualification(self):
+        self.assertEqual(
+            READINESS.suite_result_status("root", {"coverage_complete": False}),
+            "incomplete",
+        )
+        self.assertEqual(
+            READINESS.aggregate_result_status({"root": {"status": "incomplete"}}),
+            "incomplete",
+        )
+
+    def test_complete_root_coverage_passes(self):
+        self.assertEqual(
+            READINESS.suite_result_status("root", {"coverage_complete": True}),
+            "passed",
+        )
+        self.assertEqual(
+            READINESS.aggregate_result_status({"root": {"status": "passed"}}),
+            "passed",
+        )
+
+    def test_coverage_suite_can_pass_while_testing_incomplete_coverage(self):
+        # The coverage suite's purpose is to verify that incompleteness is
+        # surfaced correctly; unlike the root qualification suite, this is a
+        # successful test when its assertions pass.
+        self.assertEqual(
+            READINESS.suite_result_status("coverage", {"coverage_complete": False}),
+            "passed",
+        )
+
     def test_wal_budget_stress_matches_guard_threshold_and_proves_pause_recovery(self):
         source = WAL_STRESS.read_text()
         self.assertIn('DUX_WAL_STRESS_TARGET_MIB", "256"', source)
