@@ -6692,7 +6692,7 @@ Python log is alongside it (SHA-256
 `08e3c5236315880a6fedbfe906d9e2f9e699a0f29726bd13ad1b0db41195d4de`).
 
 This remains a partial qualification. `capability`, `churn`, `coverage`,
-disk-full, mount, OOM, root scan, WAL, candidate soak, 100k/1m/10m performance,
+disk-full, mount, OOM, formal root fault/recovery, WAL, candidate soak, 100k/1m/10m performance,
 package upgrade/rollback, static musl packaging, multi-day reader-held WAL,
 power-loss/media-corruption, and canary gates remain open. The independent
 72-hour VPS2 soak is still running the earlier binary
@@ -6705,3 +6705,31 @@ The production index was not used by these tests. Its read-only status at
 overflow notifications, 3 pending updates, 134,489.281 seconds behind, no scan
 in progress, no write error, and a 128 MiB WAL. The small pending count does not
 prove exact recovery.
+
+### VPS2 continuation — 2026-11-07
+
+The manual, read-only root scan completed on the same production-kind debug
+candidate as the previous qualification (`dux` SHA-256
+`3eb725108d382c87efbd3a2027f6bd4b81e802fcbc3c410e8a4c905fa14d3a71`, source
+SHA `a80d0943…`). Its Rust sources and qualification harness were verified
+identical to the then-current branch. It traversed **853,796 files and 97,769
+directories**, staged **951,565 path instances**, reported **66,738,708,480
+visible bytes** and **66,657,234,944 unique bytes across 948,230 inodes**, and
+finished in **194.7 seconds with zero coverage issues**. The scan used a
+private tmpfs index, `--one-file-system`, a 2 GiB memory ceiling, low CPU/I/O
+weights, and low process priority. Its JSON status and `du` output are retained
+in `target/readiness/vps2-qualification-20261106/root-direct-status.log`
+(SHA-256 `9867192869984ca9fa50630088ee0b23d43215e4170f9a0b5e061a6d4921b926`).
+This is a direct scan result; it does not establish daemon/watch exactness or
+production-root catch-up.
+
+The separate formal `root` fault/recovery suite was stopped after its CPU
+pressure admission threshold was exceeded, so it remains **incomplete**, not a
+pass or a product failure. The isolated 72-hour soak remains active on the
+older `510f49d146a9` binary with zero restarts at 00:31 UTC; it is not evidence
+for the current candidate. The VM has no Rust toolchain and its DNS could not
+resolve `static.rust-lang.org`, so a current optimized release binary and the
+100k/1m/10m performance matrix were not produced. The staging host also remains
+under unrelated Go build pressure, so no local build was started. Current
+optimized performance, full root recovery, current-candidate soak, and the
+other release gates listed above remain open.
