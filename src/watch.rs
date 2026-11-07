@@ -49,7 +49,121 @@ struct FanotifyHintReader {
 }
 
 const HINT_READER_CHANNEL_CAPACITY: usize = 128;
+const HINT_RESOLVER_CHANNEL_CAPACITY: usize = 128;
 const HINT_READER_POLL_MS: libc::c_int = 100;
+const HINT_READER_MAX_READS_PER_TICK: usize = 48;
+const HINT_READER_DRAIN_SLICE: Duration = Duration::from_millis(100);
+// A 32 KiB reader chunk can contain fewer than 1,400 minimum-size metadata
+// records. Keep one parse result per reader chunk so its outstanding-work
+// counter stays exact while the resolver runs asynchronously.
+const MAX_HINT_EVENTS_PER_CHUNK: usize = 2048;
+
+#[derive(Debug)]
+struct HintResolutionJob {
+    handles: Vec<(Vec<u8>, u64)>,
+}
+
+struct HintResolutionResult {
+    seen: u64,
+    lost: bool,
+}
+
+fn queue_hint_resolution_result(
+    tx: &SyncSender<HintResolutionResult>,
+    result: HintResolutionResult,
+    queued_chunks: &std::sync::atomic::AtomicUsize,
+    dropped: &AtomicBool,
+    notify: RawFd,
+) {
+    if tx.try_send(result).is_err() {
+        queued_chunks.fetch_sub(1, Ordering::AcqRel);
+        dropped.store(true, Ordering::Release);
+    }
+    notify_hint_reader(notify);
+}
+
+/// Resolve coalesced parent handles away from the coordinator thread. Both
+/// directions are bounded and nonblocking; saturation is converted to an
+/// explicit full-observation request.
+struct FanotifyHintResolver {
+    tx: SyncSender<HintResolutionJob>,
+    rx: Receiver<HintResolutionResult>,
+    dropped: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl FanotifyHintResolver {
+    fn start(
+        fsfds: HashMap<(i32, i32), RawFd>,
+        mut handle_capable_fsids: HashSet<(i32, i32)>,
+        ambiguous_fsids: HashSet<(i32, i32)>,
+        root: PathBuf,
+        notify: RawFd,
+        queued_chunks: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Result<Self> {
+        let (tx, rx_jobs): (SyncSender<HintResolutionJob>, Receiver<HintResolutionJob>) =
+            mpsc::sync_channel(HINT_RESOLVER_CHANNEL_CAPACITY);
+        let (tx_results, rx): (
+            SyncSender<HintResolutionResult>,
+            Receiver<HintResolutionResult>,
+        ) = mpsc::sync_channel(HINT_RESOLVER_CHANNEL_CAPACITY);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_dropped = Arc::clone(&dropped);
+        let thread_stop = Arc::clone(&stop);
+        let join = std::thread::Builder::new()
+            .name("dux-hint-resolver".into())
+            .spawn(move || {
+                while !thread_stop.load(Ordering::Acquire) {
+                    let job = match rx_jobs.recv_timeout(Duration::from_millis(100)) {
+                        Ok(job) => job,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
+                    let (seen, scope_lost) = resolve_fanotify_hint_scope(
+                        job.handles,
+                        &fsfds,
+                        &mut handle_capable_fsids,
+                        &ambiguous_fsids,
+                        &root,
+                    );
+                    let result = HintResolutionResult {
+                        seen,
+                        lost: scope_lost,
+                    };
+                    queue_hint_resolution_result(
+                        &tx_results,
+                        result,
+                        &queued_chunks,
+                        &thread_dropped,
+                        notify,
+                    );
+                }
+            })
+            .context("starting fanotify hint resolver")?;
+        Ok(Self {
+            tx,
+            rx,
+            dropped,
+            stop,
+            join: Some(join),
+        })
+    }
+
+    fn stop_and_join(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for FanotifyHintResolver {
+    fn drop(&mut self) {
+        self.stop_and_join();
+    }
+}
 
 impl FanotifyHintReader {
     fn start(fan: RawFd) -> Result<Self> {
@@ -149,6 +263,21 @@ fn queue_hint_chunk(
     }
 }
 
+fn note_hint_pipeline_drop(
+    reader: Option<&FanotifyHintReader>,
+    resolver: Option<&FanotifyHintResolver>,
+) {
+    if let Some(reader) = reader {
+        reader.queued_chunks.fetch_sub(1, Ordering::AcqRel);
+        if let Some(resolver) = resolver {
+            resolver.dropped.store(true, Ordering::Release);
+        } else {
+            reader.dropped.store(true, Ordering::Release);
+        }
+        notify_hint_reader(reader.notify.0);
+    }
+}
+
 fn fanotify_reader_loop(
     fan: RawFd,
     notify: RawFd,
@@ -182,10 +311,21 @@ fn fanotify_reader_loop(
                 }
             }
         }
+        let drain_deadline = Instant::now() + HINT_READER_DRAIN_SLICE;
+        let mut reads = 0usize;
         loop {
+            if stop.load(Ordering::Acquire)
+                || reads >= HINT_READER_MAX_READS_PER_TICK
+                || Instant::now() >= drain_deadline
+            {
+                kernel_empty.store(false, Ordering::Release);
+                notify_hint_reader(notify);
+                break;
+            }
             let n = unsafe { libc::read(fan, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
             if n > 0 {
                 kernel_empty.store(false, Ordering::Release);
+                reads += 1;
                 let bytes = buf[..n as usize].to_vec();
                 // Full and disconnected are both unrecoverable hint loss;
                 // keep draining the kernel and force a full observation.
@@ -453,6 +593,36 @@ fn scan_first_can_use_in_place(
     one_file_system: bool,
 ) -> bool {
     reconcile_first && baseline_ready && !one_file_system
+}
+
+fn scan_first_event_race_only(
+    reconcile_first: bool,
+    lost_events: bool,
+    forced_reconciliation: bool,
+    coverage_incomplete: bool,
+    resolve_warned: bool,
+    scan_errors: u64,
+) -> bool {
+    reconcile_first
+        && lost_events
+        && !forced_reconciliation
+        && !coverage_incomplete
+        && !resolve_warned
+        && scan_errors == 0
+}
+
+fn scan_first_forced_followup(
+    reconcile_first: bool,
+    forced_reconciliation: bool,
+    coverage_incomplete: bool,
+    resolve_warned: bool,
+    scan_errors: u64,
+) -> bool {
+    reconcile_first
+        && forced_reconciliation
+        && !coverage_incomplete
+        && !resolve_warned
+        && scan_errors == 0
 }
 
 fn automatic_reconciliation_request_allowed(
@@ -1976,6 +2146,18 @@ pub fn run_daemon(
     } else {
         None
     };
+    let mut hint_resolver = if let Some(reader) = hint_reader.as_ref() {
+        Some(FanotifyHintResolver::start(
+            fsfds.clone(),
+            handle_capable_fsids.clone(),
+            ambiguous_hint_fsids.clone(),
+            root_canon.clone(),
+            reader.notify.0,
+            Arc::clone(&reader.queued_chunks),
+        )?)
+    } else {
+        None
+    };
     if let Some(a) = &alert {
         tracing::info!(
             "alerts: >{} growth in {}s{}",
@@ -2093,6 +2275,10 @@ pub fn run_daemon(
     let mut pending_reconciliation_check: Option<bool> = None;
     let mut scan_cancel: Option<Arc<AtomicBool>> = None;
     let mut lost_events = false;
+    // Distinguish normal changes observed during a walk from known hint loss.
+    // A normal race may wait for cadence; an overflow or lost scope needs a
+    // follow-up observation immediately after the current walk completes.
+    let mut forced_reconciliation_after_scan = false;
     // Latched independently from SQLite: a full/read-only database must not
     // hide event loss merely because its dirty metadata cannot be updated.
     let mut index_uncertain =
@@ -2117,6 +2303,51 @@ pub fn run_daemon(
     crate::util::write_watch_status(db, 0, true, 0, 0, 0, 0, 0, 0, MAX_PENDING, index_uncertain);
 
     loop {
+        if let (Some(reader), Some(resolver)) = (hint_reader.as_ref(), hint_resolver.as_ref()) {
+            while let Ok(result) = resolver.rx.try_recv() {
+                reader.queued_chunks.fetch_sub(1, Ordering::AcqRel);
+                ev_seen = ev_seen.saturating_add(result.seen);
+                if result.seen > 0 || result.lost {
+                    if !index_uncertain {
+                        persist_dirty_marker_best_effort(
+                            &store,
+                            "filesystem changes await a reconciliation scan",
+                        );
+                    }
+                    index_uncertain = true;
+                    if scan_job.is_some() {
+                        lost_events = true;
+                    }
+                    if let Some(check) = &accounting_check {
+                        check.cancel.store(true, Ordering::Relaxed);
+                        pending_reconciliation_check = None;
+                    }
+                }
+                if result.lost {
+                    // An unresolvable parent widens the next repair to a full
+                    // observation, but it is not proof of kernel/user-ring loss.
+                    // Keep the index stale and let the fixed cadence repair it;
+                    // immediately rescanning an active, noisy filesystem can
+                    // otherwise form an unbounded scan loop.
+                    tracing::debug!(
+                        "fanotify parent scope could not be resolved; full observation remains scheduled"
+                    );
+                }
+            }
+            if resolver.dropped.swap(false, Ordering::AcqRel) {
+                lost_events = true;
+                forced_reconciliation_after_scan = true;
+                index_uncertain = true;
+                persist_dirty_marker_best_effort(
+                    &store,
+                    "fanotify hint resolver capacity was exceeded",
+                );
+                RESCAN.store(true, Ordering::SeqCst);
+                tracing::warn!(
+                    "fanotify hint resolver backlog overflowed; discarded scopes require a full observation"
+                );
+            }
+        }
         if accounting_check
             .as_ref()
             .is_some_and(|check| check.join.is_finished())
@@ -2304,6 +2535,9 @@ pub fn run_daemon(
             if reconcile_first {
                 if let Some(reader) = hint_reader.as_mut() {
                     reader.stop_and_join();
+                }
+                if let Some(resolver) = hint_resolver.as_mut() {
+                    resolver.stop_and_join();
                 }
                 // Events may remain in the bounded ring or kernel queue when
                 // the reader stops. Startup always performs a complete
@@ -2650,11 +2884,21 @@ pub fn run_daemon(
                             && !resolve_warned
                             && !lost_events
                             && stats.errors == 0;
-                        let event_race_only = reconcile_first
-                            && lost_events
-                            && !coverage_incomplete
-                            && !resolve_warned
-                            && stats.errors == 0;
+                        let event_race_only = scan_first_event_race_only(
+                            reconcile_first,
+                            lost_events,
+                            forced_reconciliation_after_scan,
+                            coverage_incomplete,
+                            resolve_warned,
+                            stats.errors,
+                        );
+                        let forced_followup = scan_first_forced_followup(
+                            reconcile_first,
+                            forced_reconciliation_after_scan,
+                            coverage_incomplete,
+                            resolve_warned,
+                            stats.errors,
+                        );
                         index_uncertain = true;
                         pending_reconciliation_check = safe_to_clear.then_some(true);
                         store.set_meta("dirty_since", &now_secs().to_string())?;
@@ -2664,6 +2908,8 @@ pub fn run_daemon(
                                 RECONCILIATION_ACCOUNTING_PENDING
                             } else if event_race_only {
                                 "filesystem changed during observation; next periodic scan scheduled"
+                            } else if forced_followup {
+                                "fanotify loss during observation; immediate follow-up scheduled"
                             } else {
                                 "incomplete coverage or changes lost during reconciliation"
                             },
@@ -2681,6 +2927,13 @@ pub fn run_daemon(
                             lost_events = false;
                             tracing::info!(
                                 "filesystem changed during scan-first observation; next full observation is scheduled"
+                            );
+                        } else if forced_followup {
+                            RESCAN.store(true, Ordering::SeqCst);
+                            lost_events = false;
+                            forced_reconciliation_after_scan = false;
+                            tracing::warn!(
+                                "fanotify loss overlapped the observation; scheduling immediate follow-up"
                             );
                         } else if !safe_to_clear {
                             failed_reconciliation_attempts =
@@ -2943,6 +3196,7 @@ pub fn run_daemon(
                 last_reconcile = Instant::now();
                 born.clear();
                 lost_events = false;
+                forced_reconciliation_after_scan = false;
                 let scan_db = db.to_path_buf();
                 let scan_root = root_canon.clone();
                 let use_in_place_observation =
@@ -3048,7 +3302,6 @@ pub fn run_daemon(
                             Ok(bytes) => {
                                 debug_assert!(bytes.len() <= buf.len());
                                 buf[..bytes.len()].copy_from_slice(&bytes);
-                                reader.queued_chunks.fetch_sub(1, Ordering::AcqRel);
                                 reads += 1;
                                 bytes.len() as isize
                             }
@@ -3057,6 +3310,7 @@ pub fn run_daemon(
                                     && reader.queued_chunks.load(Ordering::Acquire) == 0;
                                 if reader.dropped.swap(false, Ordering::AcqRel) {
                                     lost_events = true;
+                                    forced_reconciliation_after_scan = true;
                                     index_uncertain = true;
                                     persist_dirty_marker_best_effort(
                                         &store,
@@ -3072,6 +3326,7 @@ pub fn run_daemon(
                             Err(TryRecvError::Disconnected) => {
                                 kernel_empty = false;
                                 lost_events = true;
+                                forced_reconciliation_after_scan = true;
                                 index_uncertain = true;
                                 RESCAN.store(true, Ordering::SeqCst);
                                 tracing::error!(
@@ -3100,6 +3355,7 @@ pub fn run_daemon(
                                 Some(libc::EAGAIN) => {}
                                 _ => {
                                     lost_events = true;
+                                    forced_reconciliation_after_scan = true;
                                     kernel_empty = false;
                                     tracing::warn!("fanotify read error: {err}");
                                     break;
@@ -3114,36 +3370,47 @@ pub fn run_daemon(
 
                 let parse_deadline = (Instant::now() + EVENT_PARSE_SLICE).min(drain_deadline);
                 let (seen, resolved, overflows, consumed) = if reconcile_first {
-                    let (overflows, consumed, mut lost, handles) =
-                        parse_fanotify_hints(&buf[..buf_len], MAX_EVENTS_PER_PARSE);
-                    let (seen, scope_lost) = resolve_fanotify_hint_scope(
-                        handles,
-                        &fsfds,
-                        &mut handle_capable_fsids,
-                        &ambiguous_hint_fsids,
-                        &root_canon,
-                    );
-                    lost |= scope_lost;
-                    if seen > 0 || lost {
+                    let input_len = buf_len;
+                    let (overflows, mut consumed, mut lost, handles) =
+                        parse_fanotify_hints(&buf[..input_len], MAX_HINT_EVENTS_PER_CHUNK);
+                    if consumed != input_len {
+                        // The fanotify read is expected to contain complete
+                        // records. Widen instead of carrying an unaccounted
+                        // suffix across asynchronous resolver jobs.
+                        lost = true;
+                        consumed = input_len;
+                    }
+                    kernel_overflow_notifications =
+                        kernel_overflow_notifications.saturating_add(overflows);
+                    if lost || overflows > 0 {
                         if !index_uncertain {
                             persist_dirty_marker_best_effort(
                                 &store,
-                                "filesystem changes await a reconciliation scan",
+                                if overflows > 0 {
+                                    "fanotify queue overflow"
+                                } else {
+                                    "fanotify hint scope could not be validated"
+                                },
                             );
                         }
                         index_uncertain = true;
-                        if scan_job.is_some() || lost {
+                        if scan_job.is_some() || overflows > 0 {
                             lost_events = true;
                         }
-                        if let Some(check) = &accounting_check {
-                            check.cancel.store(true, Ordering::Relaxed);
-                            pending_reconciliation_check = None;
+                        if overflows > 0 {
+                            forced_reconciliation_after_scan = true;
+                            RESCAN.store(true, Ordering::SeqCst);
                         }
                     }
-                    if overflows > 0 || lost {
-                        RESCAN.store(true, Ordering::SeqCst);
+                    let job = HintResolutionJob { handles };
+                    if let Some(resolver) = hint_resolver.as_ref() {
+                        if resolver.tx.try_send(job).is_err() {
+                            note_hint_pipeline_drop(hint_reader.as_ref(), Some(resolver));
+                        }
+                    } else {
+                        note_hint_pipeline_drop(hint_reader.as_ref(), None);
                     }
-                    (seen, 0, overflows, consumed)
+                    (0, 0, 0, consumed)
                 } else {
                     parse_events_bounded(
                         &buf[..buf_len],
@@ -6897,6 +7164,67 @@ mod tests {
     }
 
     #[test]
+    fn hint_resolver_processes_bounded_jobs_off_coordinator() {
+        let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        assert!(notify_fd >= 0);
+        let notify = RawFdGuard(notify_fd);
+        let queued = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        let mut resolver = FanotifyHintResolver::start(
+            HashMap::new(),
+            HashSet::new(),
+            HashSet::new(),
+            PathBuf::from("/"),
+            notify_fd,
+            Arc::clone(&queued),
+        )
+        .unwrap();
+
+        resolver
+            .tx
+            .try_send(HintResolutionJob {
+                handles: Vec::new(),
+            })
+            .unwrap();
+        let result = resolver.rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(result.seen, 0);
+        assert!(!result.lost);
+        assert_eq!(queued.load(Ordering::Acquire), 1);
+        resolver.stop_and_join();
+        drop(notify);
+    }
+
+    #[test]
+    fn resolver_result_queue_saturation_records_loss_without_blocking() {
+        let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        assert!(notify_fd >= 0);
+        let notify = RawFdGuard(notify_fd);
+        let (tx, rx) = mpsc::sync_channel(1);
+        let queued = std::sync::atomic::AtomicUsize::new(2);
+        let dropped = AtomicBool::new(false);
+        let result = HintResolutionResult {
+            seen: 1,
+            lost: false,
+        };
+
+        queue_hint_resolution_result(&tx, result, &queued, &dropped, notify_fd);
+        queue_hint_resolution_result(
+            &tx,
+            HintResolutionResult {
+                seen: 2,
+                lost: false,
+            },
+            &queued,
+            &dropped,
+            notify_fd,
+        );
+
+        assert!(dropped.load(Ordering::Acquire));
+        assert_eq!(queued.load(Ordering::Acquire), 1);
+        assert_eq!(rx.try_recv().unwrap().seen, 1);
+        drop(notify);
+    }
+
+    #[test]
     fn alert_shell_is_resolved_by_absolute_path() {
         assert_eq!(ALERT_SHELL_BIN, "/bin/sh");
         assert!(Path::new(ALERT_SHELL_BIN).is_absolute());
@@ -7562,6 +7890,19 @@ mod tests {
             due.duration_since(finished) < SCAN_FIRST_INTERVAL,
             "a raced scan must not add its duration to the next observation interval"
         );
+    }
+
+    #[test]
+    fn scan_first_distinguishes_event_race_from_known_loss() {
+        assert!(scan_first_event_race_only(
+            true, true, false, false, false, 0
+        ));
+        assert!(!scan_first_event_race_only(
+            true, true, true, false, false, 0
+        ));
+        assert!(scan_first_forced_followup(true, true, false, false, 0));
+        assert!(!scan_first_forced_followup(true, true, true, false, 0));
+        assert!(!scan_first_forced_followup(false, true, false, false, 0));
     }
 
     #[test]

@@ -97,10 +97,12 @@ flowchart LR
   bounded 128-chunk channel (32 KiB per chunk). It never waits for queue
   capacity, handle resolution, or database work. A full channel discards that
   chunk, records explicit loss, and requests a full observation. The coordinator
-  validates DFID_NAME records, coalesces at most 32 distinct parent handles per parse
-  slice, then resolves those parents on the watcher thread to filter events
-  outside the indexed root. This separates kernel draining from slower work,
-  but the coordinator can still backlog and force a full observation.
+  validates DFID_NAME records and coalesces at most 32 distinct parent handles
+  per parse slice. A separate resolver thread performs bounded handle-to-root
+  checks; both work queues are bounded, and saturation is recorded as loss.
+  Ordinary unresolvable scopes leave the view stale for the fixed scan cadence
+  rather than forcing repeated immediate scans. Kernel overflow and userspace
+  pipeline loss still request a follow-up observation after an active scan.
 - Repeated hints coalesce by filesystem and directory identity. If a parent
   cannot be resolved safely, widen to a known ancestor or the whole filesystem.
   The current implementation widens to a full-root observation; subtree

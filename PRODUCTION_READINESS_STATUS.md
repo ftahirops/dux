@@ -131,12 +131,9 @@ executable also started a new daemon with no mode flag and reported
 dispatch. That tmpfs run also showed the current hint path treats unrelated
 activity on the same marked filesystem as a stale hint; the current candidate
 now filters resolved hints by indexed-root scope. Each batch validates
-DFID_NAME parent handles, coalesces equal handles, and resolves at most 32
-distinct parents. Malformed, stale, overflowed, or saturated hints widen to a
-full observation. The dedicated reader now separates kernel draining from
-parsing and resolution, but both of those coordinator tasks still run on the
-watcher thread. Hints do not prioritize or reconcile subtrees; scans remain
-full-root observations.
+DFID_NAME parent handles and coalesces at most 32 distinct parents. Malformed,
+stale, overflowed, or saturated hints widen to a full observation. Hints do
+not prioritize or reconcile subtrees; scans remain full-root observations.
 
 **Dedicated fanotify intake (2026-11-07):** reconciliation-first now has a
 separate reader thread that continuously drains the nonblocking fanotify fd into
@@ -146,10 +143,10 @@ sets an explicit loss flag, and the coordinator requests a full observation.
 The channel still has a short internal synchronization cost and allocates one
 buffer per read; its throughput and CPU cost need load measurement.
 The CPU governor still applies to the coordinator, not the intake thread. The
-coordinator parses chunks and resolves coalesced parent handles, so that work
-can still fill the ring under enough pressure. Shutdown stops and joins the
-reader and persists a startup-observation requirement instead of racing a
-second consumer against it.
+coordinator parses chunks and submits coalesced parent handles to a separate
+resolver worker through bounded queues. Parsing and resolution can still fill
+the ring under enough pressure. Shutdown stops and joins both workers and
+persists a startup-observation requirement instead of racing another consumer.
 
 On VPS2, the current candidate passed 289 Rust tests (2 ignored), strict
 all-target/all-feature Clippy, and the two focused reader tests. An ext4 tmpfs-
@@ -176,10 +173,33 @@ source SHA-256 was
 `88e0ae444bf7e171196d77503a20ee8f703ef0c2bf7d1c40b2bdc7dacdef30bc`.
 
 These checks are not production-scale qualification: directory-level hint
-prioritization, off-thread hint resolution, forced-overflow replay, and
-concurrent-churn recovery remain open. There is no production-shaped endurance,
+prioritization, forced-overflow replay, and concurrent-churn recovery remain
+open. There is no production-shaped endurance,
 package rollout, or canary evidence. Do not interpret this change as production
 readiness or as a production deployment.
+
+**Bounded hint resolution and scan-race policy (2026-11-07):** handle-to-root
+resolution now runs on a separate worker behind bounded input/output queues;
+the coordinator does not block on `open_by_handle_at`. At most 2,048 event
+records are accepted from one 32 KiB reader chunk, keeping result accounting
+bounded. Queue saturation is explicit loss and requests a full follow-up scan.
+An unresolvable individual scope instead leaves freshness stale for the normal
+cadence; ordinary churn during a scan no longer schedules an immediate scan
+loop. Actual kernel overflow and userspace pipeline loss still trigger an
+immediate follow-up after the current scan. The full VPS2 suite passed **292
+tests, 2 ignored** after this change. Strict Clippy and exact candidate build
+are in progress. This is still a partial scan-first implementation: event
+prioritization remains full-root, and forced-overflow replay and concurrent
+churn convergence have not yet been qualified. The 72-hour soak is running a
+previous candidate build and is not evidence for this source revision.
+An exact-source VPS2 ext4/tmpfs E2E run then created 500 files outside the
+indexed root while the startup observation ran: it completed one scan with no
+immediate-follow-up loop and no overflow. A second run created a file in the
+indexed root after baseline and sent the supported `SIGHUP` rescan request; the
+candidate completed the follow-up observation with the new file included in
+the scan totals. Both runs had zero forced-followup log entries and zero kernel
+overflow reports. These are short functional checks, not burst-capacity or
+long-duration qualification.
 
 **Status correctness fix (2026-11-07):** human and JSON status now consult the
 live watch mode before interpreting persisted retry counters. A legacy counter
