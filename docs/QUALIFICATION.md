@@ -7053,6 +7053,30 @@ The live P0 report SHA-256 is
 progress SHA-256 is
 `d90fcce95fdcf16f9294ed78b01562efa0a6bfa94f5ca5b82160d0613da5d719`.
 
+**03:48 UTC resumed P0 checkpoint:** after three stable admission samples, I
+reran the interrupted P0 remainder in a separate tmpfs workspace under the
+same 25% CPU and 4 GiB memory cgroup limits. The capability, scoped OOM,
+pressure/cancellation, mount lifecycle, reader-held WAL, startup/upgrade, and
+retry-circuit suites all passed. This brings the exact-candidate P0 evidence
+to **13/14 suites passed**; only the host-root scan remains incomplete. During
+that scan, host CPU PSI `some avg10` stayed above the 70% hard-critical limit
+on consecutive checks (78.87%, 78.70%), although host load was 0.7 and CPU
+`full` was 0%. I stopped only the P0 remainder service; it exited with zero
+restarts, and CPU PSI fell to 16.02% 30 seconds later. Keep the root gate open
+until it can be completed under the hard pressure guardrail. After stopping,
+2.7 GiB memory was available and `/` had 23 GiB free. The resumed report SHA-256
+is `bcd108fd24a780250f4d2b2ffef81711425604074cc43d46fa8361038b29e6a1`; its
+journal SHA-256 is
+`0508868c6343774abffbfc43fd76d049734ec67fd25bb1cc8b2b2b7bfe931368`.
+
+The exact `0b81fa8` candidate soak remains active with zero restarts at
+**6,845.6 seconds**, **154,585 mutations**, and **1,540 exactness samples**.
+Sampled maxima are 8,720 KiB RSS, 12 file descriptors, and a 4,293,072-byte
+WAL; p95 exact convergence is 491 ms and the maximum is 1,339 ms. Its final
+exactness, history, and SQLite integrity checks are pending. The latest soak
+progress SHA-256 is
+`d643dca6c1846ac30d0b7df0ba55cba917fda1d2451a5c93199fe204a87ce844`.
+
 **03:33 UTC runtime checkpoint:** the disk fault suite passed all three
 checks: low-disk pause/resume, preservation of the readable index when a scan
 ran against a full filesystem, and preservation during a read-only-filesystem
