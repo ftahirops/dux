@@ -7266,3 +7266,14 @@ systemd journal has no `fanotify event has no resolvable` warnings so far. This
 supports the targeted stale-event fix, but the soak is a small synthetic tree
 and does not prove that a full production-root reconciliation can finish with
 all event streams resolved.
+
+**Production WAL observation — 04:18 UTC:** retained daemon logs show a
+checkpoint with zero frames advanced at 04:11:15, then a WAL-budget guard at
+04:11:57 with a 269,707,592-byte WAL. A later checkpoint still advanced zero
+frames; at 04:12:30 the daemon reported checkpoint recovery and resumed event
+writes. At 04:18, read-only status reports a 134,217,728-byte WAL while the
+index remains dirty and 6,600.739 seconds behind. The service currently has the
+database open; no separate process had those files open at the 04:18 `fuser`
+sample, which cannot identify a reader that existed during the earlier stall.
+The transient write pause is real, but its reader/pinning cause is unproven.
+Root filesystem free space was 66 GiB, so this was not a disk-capacity guard.
