@@ -6940,3 +6940,18 @@ service qualification. Outputs are retained under
 tunnel security log SHA-256 values are respectively
 `8c6e82bae5c2f1e63e3e8114655e917c497425485249610b2c3d574f15a8414a` and
 `dd737c72bcab6acc59bc1d2f7c558658a9e014cba6e9e4820c1e2a28644b6b52`.
+
+**02:46 UTC runtime checkpoint:** the exact-source P0 crash suite passed
+**20/30** rounds. Its worker remains active with zero restarts and a 1.34 GiB
+memory peak. Host CPU PSI briefly reached 76.55% at 02:45:34, then fell to
+64.26% 16 seconds later; load1 was 0.84 and CPU `full` pressure stayed at 0%.
+The hard-critical PSI condition did not persist. At this checkpoint, the
+current-candidate soak had run **3,061.7 seconds** with **68,833 mutations and
+688 exactness checks**. Sampled maxima were 7,376 KiB RSS, 12 file descriptors,
+and a 4,251,872-byte WAL; p95 exact convergence was 490 ms and the maximum
+was 1,339 ms. The candidate and independent older soaks remained active with
+zero restarts; final soak integrity/history checks are still pending. The
+latest journal snapshot SHA-256 is
+`b54140929f698f515824b792879d6e9fd3039bd2f3cb0321e84cf6a82980f65f` and
+soak-progress snapshot SHA-256 is
+`f727a41bd6f9bd940bb91402956904273b802d24955ffacf08e1e77319823a06`.
