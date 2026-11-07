@@ -8184,3 +8184,67 @@ exactness, history, and SQLite integrity are still pending. The complete
 intermediate progress snapshot and digest are in
 `docs/qualification/soak-candidate-20261107/`; this checkpoint is not a soak
 pass or release qualification.
+
+### Consolidated failure and test catalog — 2026-11-07
+
+This section is the single index of failure classes seen during qualification,
+what each observed failure means, and what test evidence exists. It supplements
+the chronological records above; it does not turn an interrupted, partial, or
+historical run into a current pass. Detailed raw output remains in the linked
+evidence directories.
+
+#### Failure classes and disposition
+
+| Failure class | Observed symptom / evidence | Classification | Required closure evidence |
+|---|---|---|---|
+| Production watcher overflow and drift | Live daemon reports `dirty=true`, `caught_up=false`, fanotify queue overflow, 16 lifetime kernel overflows, failed reconciliation attempts, and a multi-hour backlog. Sampled production journal also had repeated `open_by_handle_at ... ESTALE` warnings. | **Open release blocker.** A running process is not proof of an exact index. | Candidate deployed only after review; prove overflow accounting and successful full reconciliation, then exact filesystem/index comparison, clean/caught-up status, and sustained monitoring. |
+| Stale/unresolvable file handles | Shared ext4 subtree probe encountered stale FID/lost-event behavior; the production log showed ESTALE warnings. Candidate has capability prequalification and narrowly scoped stale target-only `FAN_ATTRIB` handling with focused tests. | Shared subtree scenario failed closed. Candidate unit tests pass, but production causal fix is not established. | Reproduce and recover on supported filesystem configurations; show no false clean state, bounded diagnostics, and exact post-recovery index. |
+| Filesystem/index accounting mismatch | Historical root totals differed by 573 inodes / 15,171,584 bytes; zero-total allocated leaf shape was captured as a regression case. | Historical failure evidence; current production exactness remains unknown while dirty/behind. | Exact comparison after reconciliation, including roots, directory totals, allocated leaves, hardlinks, and replacement races. |
+| Concurrent churn test OOM | Consolidated P0 worker was OOM-killed during its second 100k-file baseline scan with a 768 MiB worker cap. | Harness/resource-limit failure before assertions; neither product pass nor proven product defect. | Rerun complete churn scenario under the admitted worker cap, preserve resource telemetry and final exactness comparison. |
+| 10-million-entry scale RSS overrun | Four-job profile reached 909,528 KiB against a 256 MiB RSS budget. A one-job diagnostic reached 170,348 KiB but omitted the complete combined gate. | Four-job profile failed its budget; one-job result is diagnostic only. | Run full 100k/1m/10m matrix at intended worker profile and meet RSS, time, correctness, and query budgets together. |
+| Test worker timeout / delayed recovery | Pressure suite initially used a 180-second recovery timeout; recovery succeeded after extending the bound to 600 seconds. | Initial timeout is a failed attempt; extended bounded scenario passed. | Keep the longer bound justified by measured recovery, and retain timeout diagnostics so genuine hangs remain distinguishable. |
+| Pressure-guard interruption | Initial Python suite invocation and two schema-v7 focused build attempts were stopped by host CPU pressure guards before valid completion. | Incomplete attempts; excluded from pass/fail counts. | Run only in an admitted low-pressure window; record guard inputs, command exit, and whether test execution began. |
+| Test environment setup failure | Python run used a configured `/dev/shm` TMPDIR that did not exist; 11 downstream assertions failed with `mktemp` errors. After creating the directory, full suite passed. | Harness setup failure; downstream errors are not product findings and are excluded from passing run. | Ensure temporary root exists and is writable before launch; report setup errors separately from test assertions. |
+| Readiness report misclassified incomplete coverage | Root scan with `coverage_complete=false` could be reported as `PASS`; console status also implied success. | Qualification-tool defect; fixed and regression-tested. | Keep regression tests for incomplete and complete root coverage and ensure aggregate gate cannot pass incomplete coverage. |
+| Cleanup leak in pressure run | Historical pressure-suite attempt left daemon/workspace cleanup incomplete. | Harness lifecycle defect; retain as historical failure evidence. | Verify teardown paths after success, timeout, cancellation, and worker kill; inspect remaining child processes and workspace state. |
+| Schema-v7 path graph scope gap | Private staged graph and incarnation attribution tests pass, but publication, event updates, query behavior, v6 migration, package upgrade, and rollback are not qualified end to end. | **Open design and qualification blocker.** | Complete coherent schema-v7 integration and test atomic publication, incremental events, query semantics, migration, crash recovery, package upgrade, and rollback before claiming v7 readiness. |
+| Package lifecycle incompleteness | DEB was extracted and a transient systemd unit exercised; dpkg install/upgrade/rollback, RPM activation, and production upgrade were not run. | Partial smoke evidence only. | Install and upgrade each supported package on isolated hosts; validate unit/capabilities, restart, rollback, database compatibility, and recovery. |
+| Platform coverage gap | Runtime evidence is primarily Ubuntu 24.04, kernel 6.8, systemd 255, ext4; one shared subtree probe failed closed. | Supported-platform matrix remains unqualified. | Define supported kernel/filesystem/package combinations and run watcher, migration, recovery, and exactness gates on each. |
+| Long-duration reliability unproven | VPS2 candidate soak checkpoint had 21,937.8 seconds elapsed, 483,886 reported mutations, 4,808 exact samples, and a successful 300-second held-reader/WAL reclamation phase. Controlled crashes and final exactness/history/integrity were still pending at that checkpoint. | Intermediate progress only; **not a completed soak**. 72-hour endurance and 24-hour canary have not passed. | Complete scheduled soak phases, verify terminal exactness/history/SQLite integrity, then complete a separately monitored 24-hour canary with no unresolved drift. |
+| Security evidence scope | Point-in-time Cargo.lock and installed-binary audits had no advisory findings; the audited installed executable was older than the VPS2 candidate. | No findings in audited artifacts; candidate binary and runtime configuration not thereby qualified. | Audit release candidate and provenance, review permissions/threat model, secrets handling, input boundaries, and operational response before release. |
+
+#### Test and check inventory
+
+| Test/check | Latest recorded result | What it establishes | What it does not establish |
+|---|---|---|---|
+| Rust default-feature unit suite | **268 passed, 0 failed** on current source test candidate. One test thread, 25% CPU quota, 2 GiB memory cap, no swap; 74.28 s test time. | Unit-level behavior represented by this suite, including the staged path-incarnation assertion. | Static release binary behavior, production exactness, end-to-end v7 lifecycle, or broad platform coverage. |
+| Python readiness/harness discovery | **299 passed, 0 failed** after report-status fix; 10% CPU quota, 1 GiB memory cap, no swap; 60.292 s. | Harness regression coverage, including incomplete/complete root status and coverage detection. | Complete qualification of every end-to-end harness workflow or production behavior. Machine-readable evidence for this post-fix run was not exported at the recorded checkpoint. |
+| Fanotify/FID focused regressions | **4 passed, 0 failed.** | Overflow accounting, stale-attrib handling on a probed filesystem, startup capability prequalification, and rate-limited unresolved-event diagnostics. | Resolution of live production overflow/drift or all kernel/filesystem variants. |
+| WAL reader/backlog stress | **Passed** with 158,500 files; held-reader snapshot preserved, backlog observed, recovery and exact catch-up passed, quiescent WAL returned to zero. | Bounded reader pinning and checkpoint/recovery behavior under that workload. | Multi-day endurance or all production churn patterns. |
+| Schema-v7 path-graph focused tests | **4 passed**, then full Rust suite passed with incarnation-attribution assertion included. | Alias paths, ancestor-cycle rejection, path-specific directory-total lifecycle, staged graph rows, and same-inode/different-birth incarnation distinction. | Atomic publication, event mutation pipeline, queries, v6 migration, package lifecycle, or rollback. |
+| Security audit | **Exit 0, no advisories/warnings** for 229 lockfile dependencies and no advisory findings for 202 auditable components in the installed binary. | Point-in-time dependency checks on recorded artifacts. | Candidate binary audit, exploit resistance, or security certification. |
+| Systemd/package smoke | Unit verification and isolated transient runtime passed startup, mutation, manual restart, and kill/restart; shared ext4 subtree probe failed closed. | Bounded runtime/unit behavior in the disposable environment. | dpkg installation, RPM lifecycle, package upgrade/rollback, production activation, or universal filesystem support. |
+| Production read-only observation | **Readiness gate failed:** active daemon but dirty, not caught up, schema v6, overflow/backlog observed. | Production's sampled status and binary identity at observation time. | Candidate behavior or a clean production index. |
+| 100k and 1m scale levels | Historical bounded runs passed. | Those specific fixture/profile combinations. | Current complete scale gate or 10m qualification. |
+| 10m scale profile | Four-job run **failed RSS budget**; one-job diagnostic met 256 MiB but was incomplete. | Identifies a measured resource overrun and a potentially useful diagnostic profile. | Complete performance qualification. |
+| Crash/restart and startup P0 scenarios | Historical 30/30 crash rounds and isolated SIGKILL/restart with exact recovery after 32 offline mutations passed. | Those bounded crash/restart scenarios. | Power loss, media corruption, every migration state, or long-duration recovery. |
+| Pressure recovery | Bounded pressure-recovery suite passed with a 600-second recovery deadline. | Recovery in the tested pressure scenario. | Churn OOM case or broad sustained resource qualification. |
+| Sustained soak/canary | Soak was **in progress** at last recorded checkpoint; 72-hour soak and 24-hour canary not complete. | Intermediate mutation/sample/resource telemetry only. | Release-grade endurance or canary sign-off. |
+| Formatting and diff checks | `git diff --check` passed for recorded report and later source/test updates. | Whitespace/conflict-marker hygiene for those diffs. | Functional correctness. |
+
+#### Qualification accounting rules
+
+1. Count only a completed run with preserved command, source/binary identity,
+   environment limits, exit status, and result artifact as a pass.
+2. Mark guard-stopped, OOM-killed, timed-out, setup-broken, or interrupted runs
+   as failed attempts or incomplete according to whether the test reached its
+   assertions. Never include them in pass totals.
+3. Keep historical failures and fixes visible. A fix plus a passing regression
+   test does not erase the original failure or prove a live incident is fixed.
+4. A unit or isolated-host pass cannot substitute for production exactness,
+   supported-platform coverage, package lifecycle, scale budget, or endurance.
+5. At this record's date, Dux is **not qualified as 100% production ready**.
+   The decisive open gates are live exact recovery, full intended scale within
+   budget, interrupted churn rerun, complete v7 lifecycle if v7 is required,
+   install/upgrade/rollback, supported-platform coverage, completed 72-hour
+   soak, and completed 24-hour canary.
