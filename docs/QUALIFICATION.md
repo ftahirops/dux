@@ -7749,3 +7749,19 @@ that leaving the old daemon alive would have repaired every row, because that
 run was stopped and its event queue is gone. Do not relabel the r89 result as a
 pass. The current candidate's exact periodic checks remain authoritative and
 must continue beyond 480,200 operations and through final validation.
+
+### Production blocker recheck — 2026-11-07 06:40 UTC
+
+The read-only status still shows the legacy service active but uncertain and
+schema v6, dirty since the existing overflow, with two failed reconciliation
+attempts and three lifetime overflow notifications. At 06:40:21 UTC, it had 87
+pending updates, an empty kernel queue, zero dropped updates, and **15,093,964
+ms behind**; no scan completion or new overflow was logged in the previous five
+minutes. In that window there were **171 unresolved FID warnings**; 135 matched
+the candidate's exact target-only stale-`FAN_ATTRIB` record shape on the already
+probed production FSID. Other records included unresolved move/close and
+create/delete shapes outside that narrow filter. Snapshot:
+`docs/qualification/live-prod-20261107/production-0640.json` (SHA-256
+`d7d6270bf5b21608dd3d36d57702e88bd6b651fd24a9df76cf6413eb13e13212`). No
+production changes were made; the growing absolute lag and lack of rescan
+completion keep exact recovery and canary gates open.
