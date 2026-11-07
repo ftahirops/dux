@@ -7721,3 +7721,17 @@ records could not be parsed into that summary. Capture:
 `6a22c5db7568cb74891ca6db42497be7559f42aa0052129a5e4e01755bade2fe`). The
 candidate's filter precondition passed in the earlier read-only probe, but this
 legacy daemon was not changed and no production recovery was attempted.
+
+### Candidate soak performance baseline — 2026-11-07 06:29 UTC
+
+The exact `952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287`
+binary remained active with zero restarts at **16,522.8 seconds** and
+**366,900 operations**. Across **3,649** periodic exactness checks, convergence
+p50/p95/p99/max was **374/771/993/1,500 ms**. Sampled daemon RSS
+p50/p95/max was **7,408/8,760/9,160 KiB**; descriptors peaked at 13, and WAL
+peaked at **12,710,232 bytes**. The last-hour sample window also had a 1,500 ms
+maximum convergence. These are healthy interim resource/convergence samples,
+not proof of the older 480,200-operation failure point, the held-reader or
+restart phases, or terminal exactness/history/integrity. Snapshot:
+`docs/qualification/all-features-20261107/soak-progress-0629.json` (SHA-256
+`feaf49082ee19f8dac609f2d7c210b65ce4166b9fa81d071b1e14091ad0a06b1`).
