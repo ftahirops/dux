@@ -7658,3 +7658,27 @@ replacement. No filter expansion was made from log correlation alone. A
 controlled, exact recovery test that injects these event classes and then
 compares the complete indexed tree with the filesystem remains necessary before
 any narrower policy is accepted.
+
+### VPS2 stale qualification workspace cleanup — 2026-11-07 06:18 UTC
+
+Rechecked VPS2 disk and temporary state while the current candidate soak was
+active. Before cleanup, `/` had 22 GiB free and `/dev/shm` used about 1.2 GiB.
+Removed only completed, unreferenced qualification fixtures and a stale Rust
+build target: the failed r89 soak tmpfs image, failed P0 remainder tmpfs image
+and scan temporary DB, two standalone musl smoke databases, empty prior-run
+scratch directories, `/var/tmp/dux-r89-soak72`, and the completed
+`/var/tmp/dux-test-build-0b81fa8` build cache. Exact r89 report/index/truth
+hashes matched the retained files under
+`target/readiness/vps2-qualification-20261106/old-soak-r89-failure/`; the P0
+remainder report hash matched its retained target artifact. No process or loop
+device referenced the removed images. The current soak's service, binary,
+harness, report, and `/dev/shm/dux-candidate-soak-0b81fa8` filesystem were
+preserved and verified active with zero restarts afterward.
+
+After cleanup, `/` had **23 GiB free (75% used)** and `/dev/shm` used **381 MiB
+of 2.9 GiB** (14%, 2.5 GiB free). `/var/tmp` still uses 2.8 GiB; that includes
+the active soak's harness/build/report paths and retained Cargo/Rust toolchains
+needed for continued candidate qualification. Failed WAL/P0 diagnostic
+artifacts were left intact pending evidence-by-evidence reconciliation. The
+soak remained running at **15,980 seconds**, **355,775 operations**, and four
+mutation bursts; reader, restart, and final checks were pending.
