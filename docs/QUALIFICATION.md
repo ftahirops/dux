@@ -7230,3 +7230,26 @@ contained 62 entries, all repeated unresolved fanotify FID warnings caused by
 624.5 MiB. This is observed alongside ongoing successful event commits, but a
 causal link to the dirty startup state is not established. Exact live
 accounting and the cause of the missing reconciliation scan remain unresolved.
+
+**Recovery-circuit diagnosis — 04:09 UTC:** a read-only SQLite query confirms
+`failed_reconciliation_attempts=2`. The current daemon journal explicitly says
+automatic reconciliation is paused at two failures. Retained logs from Nov 4–5
+show repeated incomplete full reconciliations with `scan_errors=0`,
+`coverage_incomplete=false`, `resolve_warned=false`, and `lost_events=true`; the
+circuit then pauses further automatic scans. Thus the absent scan is explained
+by the persisted safety circuit, not by the current low global pressure or the
+small userspace pending count. Earlier logs also record a filesystem mount
+topology change before the Nov 7 daemon restart.
+
+The installed package is `dux 0.6.3-66`, binary revision `e0cc915f8f37`, source
+tree SHA-256
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`. Its source
+predates the candidate's fixes for deleted, stale target-only fanotify
+`FAN_ATTRIB` events (`690507c` and `075f3f5`). The live journal repeatedly shows
+such ext4 FID events failing `open_by_handle_at` with `ESTALE`. This is a strong
+candidate explanation for some unresolved events, but the historical
+`lost_events=true` reconciliation failures do not prove that these events were
+their only cause. The exact candidate includes those fixes and has passed its
+source test suite; it has not yet passed the 72-hour soak. Do not clear the
+retry counter or force a live scan until the event-loss cause is understood and
+a controlled recovery plan is qualified.
