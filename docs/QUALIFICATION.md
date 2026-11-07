@@ -6740,3 +6740,64 @@ resolve `static.rust-lang.org`, so a current optimized release binary and the
 under unrelated Go build pressure, so no local build was started. Current
 optimized performance, full root recovery, current-candidate soak, and the
 other release gates listed above remain open.
+
+### VPS2 current-source release qualification — 2026-11-07
+
+The exact clean branch candidate at `0b81fa8a6eb2` was rebuilt on VPS2 from
+source SHA-256
+`39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3`.
+Both optimized GNU/Linux and static musl production-profile binaries were
+built. The static binary is stripped static PIE, reports `[production]`, and
+has SHA-256
+`952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287`.
+Its smoke test passed on a tmpfs fixture (4 files, 2 directories, 6 path
+instances, 12 KiB visible/8 KiB unique across 5 inodes, zero coverage issues);
+`status`, `du`, `top`, and `find` all returned successfully. These are binary
+and smoke qualifications, not package install/upgrade/rollback qualification.
+
+On this exact source, all **268 Rust tests** passed with all targets/features
+offline, all **293 Python harness tests** passed, formatting passed, and strict
+Clippy passed with warnings denied. The formal `root` recovery suite passed at
+75% CPU quota/4 GiB memory and the 100k, 1m, and 10m scale matrix passed. The
+10m run used ext4, two scan jobs, 100% CPU quota, and 4 GiB memory maximum. It
+completed in **867.58 seconds**, peaked at **161.4 MiB RSS**, and matched fixture
+truth of 9,919,542 inodes, 560,762,880 allocated bytes, and 10,019,542
+directory entries. All 50-sample query and TUI latency budgets passed. The
+100k and 1m scans completed in **4.99 seconds** and **67.90 seconds**, with
+peak RSS of **47.9 MiB** and **150.5 MiB**, respectively. ClickHouse was active
+on the VM during performance qualification, so those measurements include
+that host background load. The initial 10m attempt at a 3 GiB worker memory
+limit was killed by that cgroup limit; the 4 GiB retry passed. The failure and
+retry reports are retained; no host-wide OOM was observed and the independent
+soak remained up.
+
+The exact current static binary's **72-hour ext4 soak** started on VPS2 at
+2026-11-07 01:54:12 UTC. It runs in an isolated systemd unit with 25% CPU
+quota, 4 GiB memory ceiling, and private tmpfs workspace; its persisted report
+initially recorded `running`, with zero restarts at the first health poll. The
+independent 72-hour soak of the previous binary also remains active with zero
+restarts. Neither soak is complete yet. Runtime progress, exactness history,
+final integrity, and restart count must be checked after completion.
+
+`cargo audit` against the locally cached advisory database found zero lockfile
+vulnerabilities and no warnings; the database snapshot was from 2026-11-06.
+The VM cannot resolve external DNS, so a fresh online advisory database and
+the release script's strict non-null `database.last-commit` JSON requirement
+remain unmet. The binary audit also completed without reported findings, but
+the cached database provenance limitation applies. RPM tooling is absent on
+the VM. RPM/package generation, clean install/upgrade/rollback, multi-distro
+qualification, dedicated canary, multi-day reader-held WAL, power-loss and
+media-corruption tests remain open. No production service or installed index
+was modified; all candidate tests used isolated disposable workspaces.
+
+Structured evidence and logs for this run are retained under
+`target/readiness/vps2-qualification-20261106/`. The 100k/1m report SHA-256 is
+`f16597d9a78f2cf41bf41a88e57903e09888bac4fbece35aa6c2181d929c04fb`; the 10m
+report SHA-256 is
+`a011920aa2408465e8440a2a9cd6290e28ba2c1327295e14143ca57d2ff2cf6`; the Rust
+test log SHA-256 is
+`beb23361c6aa32034502970c0acb61db17c15df0396d553b2d546da6e53eb568`; the
+Python test log SHA-256 is
+`4cecdff6cc29a55cd59f970488e21aa66c1362d88b76ff1277dc539cfdad830d`. These
+results materially expand candidate qualification but do not justify a claim
+of universal or 100% production readiness while the stated gates remain open.
