@@ -1,0 +1,27 @@
+{
+  "repository_commit": "52542d9639a5da52e3703f521e4aff67e2d5e8a3",
+  "worktree_clean_at_start": true,
+  "started_at_utc": "2026-11-07T07:11:42Z",
+  "finished_at_utc": "2026-11-07T07:12:49Z",
+  "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py' -q",
+  "working_directory": "/home/dux",
+  "systemd_unit": "dux-python-full-20261107b.service",
+  "systemd_limits": {
+    "CPUQuota": "10%",
+    "MemoryMaxBytes": 1073741824,
+    "MemorySwapMaxBytes": 0,
+    "IOWeight": 10
+  },
+  "temporary_directory": "/dev/shm/dux-python-tests-20261107",
+  "result": "passed",
+  "tests_passed": 296,
+  "tests_failed": 0,
+  "test_elapsed_seconds": 65.008,
+  "service_runtime_seconds": 66.722,
+  "cpu_time_seconds": 6.545,
+  "memory_peak_bytes": 59873689,
+  "memory_swap_peak_bytes": 0,
+  "exit_status": 0,
+  "raw_stdout_retained": false,
+  "evidence_note": "The command session reported 'Ran 296 tests in 65.008s' and 'OK'; systemd journal confirms successful deactivation, 6.545s CPU, 57.1M peak memory, and zero swap. A separate initial run attempt was stopped by host-pressure guardrails and is not included in this pass."
+}

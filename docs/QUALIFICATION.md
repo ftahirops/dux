@@ -7922,3 +7922,27 @@ release-publication regressions from the current checkout using their actual
 module/class names; both passed (**2/2**, 2.313 s). The complete Python suite
 remains the separately recorded 296/296 result. No new production fault test
 or mutation was run.
+
+### Current-checkout Python harness run — 2026-11-07 07:11–07:12 UTC
+
+Ran the complete Python discovery suite from clean repository commit
+`52542d9639a5da52e3703f521e4aff67e2d5e8a3` under transient systemd unit
+`dux-python-full-20261107b.service`. Result: **296 passed, 0 failed** in
+65.008 seconds; the command exited 0 and the unit journal confirms successful
+deactivation. The unit was capped at **10% CPU**, **1 GiB memory**, **zero
+swap**, and IO weight 10. Test temporary files used `/dev/shm`, and Python
+bytecode writes were disabled. The unit consumed 6.545 CPU seconds and peaked
+at 57.1 MiB memory. Full command, source commit, limits, timing, and evidence
+provenance are recorded in
+`docs/qualification/python-suite-20261107/run-metadata.json` (SHA-256
+`3f67b1be432ae73e73263aa007d10cce83594a45882e328ac9341911f075c730`).
+The raw stdout was not retained; the test summary was captured from the command
+session and systemd's journal independently confirms exit status and resource
+usage.
+
+An earlier test-unit attempt was terminated after consecutive high-pressure
+samples and did not emit a test summary; it is incomplete and excluded from the
+pass. The successful run is separate. Immediately afterward the production
+daemon remained active, but read-only status still showed dirty state after 16
+kernel overflow notifications, schema v6, 11 pending updates, and no scan in
+progress; the suite ran on tmpfs and did not modify its database or service.
