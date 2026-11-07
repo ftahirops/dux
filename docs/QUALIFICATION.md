@@ -6527,6 +6527,7 @@ The concurrent isolated VPS2 run remained active with zero restarts. Its
 6-hour held-reader, 1-hour mutation-burst, and 12-hour controlled-restart
 milestones remain ahead; do not interpret their empty progress fields as passed.
 
+
 ### VPS2 endurance first mutation-burst milestone — 2026-11-06 22:26 UTC
 
 The hash-bound r89 72-hour run completed its first scheduled hourly mutation
@@ -7188,3 +7189,33 @@ matrix report,
 progress, and
 `4376857098059095240223cbcc95a0b266c3a0b231408caf018b18382e0840b4` for the
 P0 journal.
+
+### VPS2 endurance and production-service checkpoint — 2026-11-07 04:05 UTC
+
+The exact static candidate soak on `192.168.5.106` remains active under
+`dux-soak-candidate-0b81fa8.service`, with zero service restarts. Its static
+binary SHA-256 remains
+`952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287`, and the
+progress record reports `running`, 7,866.9 seconds, 177,800 mutations, and
+1,768 exactness samples. The cgroup `oom`, `oom_kill`, and `oom_group_kill`
+counters are all zero. Hourly mutation bursts are at 2; the first scheduled
+reader and controlled-restart phases have not yet occurred. Final exactness,
+history, and SQLite checks remain pending.
+
+A local, read-only checkpoint collector is active as
+`dux-soak-archive-vps2.service`. It captures the progress JSON, candidate hash,
+service state/restart count, and cgroup memory events every 60 seconds into
+`target/readiness/vps2-qualification-20261106/soak-archive/`. The first full
+checkpoint succeeded. This collector preserves evidence for this direct
+single-unit run; it does not claim the separate controller/VM-unit archive
+qualification used by the dedicated guest workflow. Continue verifying
+checkpoint freshness and gaps.
+
+The installed service on the staging/production host remains active but is not
+ready for a canary baseline: read-only `dux status --json` reports
+`dirty=true`, `dirty_reason="daemon startup requires reconciliation"`,
+`caught_up=false`, 5,777.856 seconds behind, 328 pending updates, no scan in
+progress, and no write error. Its systemd unit reports one restart. Do not use
+this state as an exact baseline or deploy the candidate against it. Recover
+and prove exact live-index accounting before reconsidering a production
+canary; no production service or database was changed during this checkpoint.
