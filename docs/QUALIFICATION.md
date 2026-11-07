@@ -6801,3 +6801,24 @@ Python test log SHA-256 is
 `4cecdff6cc29a55cd59f970488e21aa66c1362d88b76ff1277dc539cfdad830d`. These
 results materially expand candidate qualification but do not justify a claim
 of universal or 100% production readiness while the stated gates remain open.
+
+#### Fresh RustSec audit follow-up — 2026-11-07
+
+The earlier DNS limitation on VPS2 was bypassed by running the audit from the
+connected staging host. With the same 0b81fa8 source and static musl binary,
+the refreshed RustSec audit database at commit
+`309392b18f6b17022f82c701f300433126901068` (updated
+`2026-11-06T16:34:32+01:00`) scanned **229 locked dependencies** and found
+**zero vulnerabilities and zero warnings** under `--deny warnings`. The
+static binary scan succeeded with exit status 0 and found its embedded
+`cargo auditable` metadata for **202 dependencies**, with no vulnerability
+findings reported. Evidence is retained in
+`target/readiness/vps2-qualification-20261106/cargo-audit-lockfile-0b81fa8-fresh.json`
+(SHA-256
+`add804f57d2a2377a9c09b032392f5d9485995fe622e5fa5ee7a72d187b95a30`) and
+`cargo-audit-binary-musl-0b81fa8-fresh.log` (SHA-256
+`5d9ddbd085271108e55350dd58cb5879e11cbbcf7f8dc6d510690c5cbe78c659`). This
+supersedes the preceding offline-audit freshness limitation for this exact
+candidate. It remains a point-in-time advisory check; the remaining release,
+soak, install/rollback, canary, live-index exactness, and endurance gates above
+are still open.
