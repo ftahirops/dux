@@ -246,12 +246,15 @@ enum Cmd {
         /// with more lag. The daemon also runs at idle I/O priority.
         #[arg(long, default_value_t = 25, value_parser = clap::value_parser!(u32).range(1..=100))]
         max_cpu: u32,
-        /// Experimental reconciliation-first mode: fanotify is drained only as
-        /// a bounded dirty-state hint; a full observation runs every 15 minutes.
-        /// Complete scans merge changed rows into the existing v7 index; an
-        /// incomplete observation preserves the previously published rows.
-        /// Still requires production-shaped performance and endurance qualification.
-        #[arg(long)]
+        /// Compatibility mode: apply fanotify events directly to the index.
+        /// The default is reconciliation-first: scans define the last-observed
+        /// view and fanotify provides lossy hints. Keep this only for controlled
+        /// comparison or rollback while migrating existing deployments. The
+        /// reconciliation-first default still requires release qualification.
+        #[arg(long, conflicts_with = "reconcile_first")]
+        event_apply: bool,
+        /// Compatibility alias for the former opt-in reconciliation-first mode.
+        #[arg(long, hide = true, conflicts_with = "event_apply")]
         reconcile_first: bool,
     },
     /// Reverse-SSH tunnel management (reach this host behind NAT via a home
@@ -299,6 +302,10 @@ fn cli_command() -> clap::Command {
                 .help("Print help"),
         )
     })
+}
+
+fn daemon_uses_reconciliation_first(event_apply: bool, compatibility_alias: bool) -> bool {
+    compatibility_alias || !event_apply
 }
 
 fn real_main() -> Result<()> {
@@ -876,6 +883,7 @@ fn real_main() -> Result<()> {
             alert_debounce,
             growth_days,
             max_cpu,
+            event_apply,
             reconcile_first,
         }) => {
             if alert_exec_keep_capabilities && alert_exec.is_none() {
@@ -908,7 +916,7 @@ fn real_main() -> Result<()> {
                 alert,
                 growth_days,
                 max_cpu as f64 / 100.0,
-                reconcile_first,
+                daemon_uses_reconciliation_first(event_apply, reconcile_first),
             )?;
         }
         Some(Cmd::Tunnel { action }) => match action {
@@ -1763,6 +1771,50 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn daemon_defaults_to_reconciliation_first_with_event_apply_escape_hatch() {
+        let default = Cli::try_parse_from(["dux", "daemon"]).unwrap();
+        let Some(Cmd::Daemon {
+            event_apply,
+            reconcile_first,
+            ..
+        }) = default.cmd
+        else {
+            panic!("daemon command expected");
+        };
+        assert!(daemon_uses_reconciliation_first(
+            event_apply,
+            reconcile_first
+        ));
+
+        let legacy = Cli::try_parse_from(["dux", "daemon", "--event-apply"]).unwrap();
+        let Some(Cmd::Daemon {
+            event_apply,
+            reconcile_first,
+            ..
+        }) = legacy.cmd
+        else {
+            panic!("daemon command expected");
+        };
+        assert!(!daemon_uses_reconciliation_first(
+            event_apply,
+            reconcile_first
+        ));
+
+        let compat = Cli::try_parse_from(["dux", "daemon", "--reconcile-first"]).unwrap();
+        assert!(matches!(
+            compat.cmd,
+            Some(Cmd::Daemon {
+                reconcile_first: true,
+                ..
+            })
+        ));
+        assert!(daemon_uses_reconciliation_first(false, true));
+        assert!(
+            Cli::try_parse_from(["dux", "daemon", "--reconcile-first", "--event-apply"]).is_err()
+        );
     }
 
     #[test]

@@ -1,15 +1,16 @@
 # Dux architecture decision: reconciliation-first
 
-**Decision status:** selected target for the production-readiness work; an
-experimental `dux daemon --reconcile-first` path drains fanotify as hints,
+**Decision status:** selected source default for the production-readiness work;
+`dux daemon` drains fanotify as hints,
 schedules periodic scans, and merges complete observations into the existing
 v7 database with value-guarded changed-row writes. It is not qualified for
 production-scale performance or sustained churn. This supersedes the earlier event-journal-first
 redesign in this file and the corresponding draft in
 [`DEVELOPMENT_SPECIFICATION.md`](DEVELOPMENT_SPECIFICATION.md).
 
-The default daemon remains event-apply mode. The experimental mode is opt-in;
-it does not resolve per-event handles or apply path mutations. It performs an
+`--event-apply` retains the legacy mode for controlled comparison/rollback; the
+installed production service is unchanged until rollout gates pass. The new
+mode does not resolve per-event handles or apply path mutations. It performs an
 initial atomic baseline and then in-place observations every 15 minutes; overflow or
 malformed records request reconciliation, while events observed during a scan
 keep the view visibly stale and defer the next attempt to the fixed cadence.

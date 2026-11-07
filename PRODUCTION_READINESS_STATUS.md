@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 14:01 UTC
+**Updated:** 2026-11-07 14:34 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -100,18 +100,18 @@ guarantee. The architecture and development specification now describe scan
 semantics, bounded changed-row updates, overflow recovery, project-quota limits,
 and test gates.
 
-The default working-tree daemon still uses event-apply behavior with queue-aware
-CPU throttling, stale-parent classification, retry backoff, and telemetry. An
-opt-in experimental `dux daemon --reconcile-first` runtime path now drains and
-validates fanotify records as hints, without resolving per-file handles or
-applying per-event SQLite updates. It requests scans on overflow or malformed
-records and performs periodic scans every 15 minutes. After the initial atomic
-v7 baseline, complete observations reconcile the existing database in one
-publication transaction. Existing path IDs are reused by parent/name identity;
-new IDs are monotonic. Value-guarded SQL upserts skip unchanged rows. Incomplete
-walks preserve the previous indexed rows and record a failed attempt. The
-normal event-apply daemon remains the default and production service is
-unchanged.
+The working-tree daemon now defaults to reconciliation-first; `--event-apply`
+selects the legacy event-apply path for controlled comparison or rollback.
+`--reconcile-first` remains a hidden compatibility alias. The reconciliation
+path drains and validates fanotify records as hints, without resolving per-file
+handles or applying per-event SQLite updates. It requests scans on overflow or
+malformed records and performs periodic scans every 15 minutes. After the
+initial atomic v7 baseline, complete observations reconcile the existing
+database in one publication transaction. Existing path IDs are reused by
+parent/name identity; new IDs are monotonic. Value-guarded SQL upserts skip
+unchanged rows. Incomplete walks preserve the previous indexed rows and record
+a failed attempt. This source default has not been deployed; the installed
+production daemon remains unchanged.
 
 **Current implementation work (2026-11-07):** the reconciliation-first path
 must not inherit the legacy mode's permanent retry circuit: repeated scan or
@@ -120,12 +120,21 @@ its last-observed index. The candidate now keeps retrying this mode with
 persisted, bounded backoff, including after a corrupt retry counter; the
 legacy event-apply circuit remains unchanged. The hint parser also excludes
 notifications emitted by the Dux process itself so index/WAL/staging writes do
-not make its own scan look raced. The latest source passed 285 Rust tests (2
-ignored) and strict all-target/all-feature Clippy on 2026-11-07. These are
-source-level checks only: reconciliation-first remains opt-in, directory-level
-hint prioritization is not implemented, and no production-shaped endurance,
-overflow replay, package rollout, or canary evidence exists. Do not interpret
-this change as production readiness or as a production deployment.
+not make its own scan look raced. Reconciliation-first is now the source
+default; the `--event-apply` escape hatch and default-mode CLI behavior are
+covered by tests. The latest source passed 286 Rust tests (2 ignored), strict
+all-target/all-feature Clippy, formatting, and diff checks on 2026-11-07. A
+disposable tmpfs end-to-end run verified v6-to-v7 atomic upgrade followed by
+an in-place observation that indexed a newly created file. A fresh release
+executable also started a new daemon with no mode flag and reported
+`scan_first=true`, proving the new source default is wired through runtime
+dispatch. That tmpfs run also showed the current hint path treats unrelated
+activity on the same marked filesystem as a stale hint; there is no root-scope
+filter until hints carry resolvable scope. These checks are not production-scale
+qualification: directory-level hint prioritization is not implemented, and no
+production-shaped endurance, forced-overflow replay, package rollout, or canary
+evidence exists. Do not interpret this change as production readiness or as a
+production deployment.
 
 In-place reconciliation still walks every entry and builds a disk-backed scan
 staging database with graph and rollup projections. It reduces full database
