@@ -7617,3 +7617,20 @@ candidate binary has been exercised on production, resolve the observed
 compound unresolved events, clear the existing overflow/dirty state, or
 establish exact filesystem/index equivalence. Production recovery remains an
 open gate and requires an explicitly controlled deployment/recovery procedure.
+
+### Production follow-up after the successful FID probe — 2026-11-07 06:13 UTC
+
+A second read-only production capture found the legacy service still active but
+uncertain, with persisted dirty reason `fanotify queue overflow`, schema v6,
+and two failed reconciliation attempts. Status showed **435 pending** and
+**13,468,321 ms behind**; zero dropped updates and three lifetime overflow
+notifications. There was no new overflow, incomplete-reconciliation, or
+rescan-complete journal line in the sampled five-minute window. The journal did
+contain **199 unresolved FID events** on the same production FSID; **176** had
+the target-only `FAN_ATTRIB`/FID/`ESTALE` shape now known to pass the candidate
+capability precondition, while **23** had compound/other masks outside that
+narrow filter. The pending count is volatile and the persistent uncertain/dirty
+state remains the authoritative blocker. Capture:
+`docs/qualification/live-prod-20261107/production-0612.json` (SHA-256
+`1402687e4e698531b71c1262879e294ceeb51b47bdfdbfd26a26e88ad799febd`). No
+production mutation was performed.

@@ -1,0 +1,56 @@
+{
+  "captured_at_utc": "2026-11-07T06:13:16Z",
+  "window": "journal from preceding 5 minutes",
+  "service": {
+    "active_state": "MainPID=988284\nNRestarts=1\nActiveState=active"
+  },
+  "watch_status": {
+    "version": 4,
+    "updated_epoch": 1794031996,
+    "pid": 988284,
+    "pending": 435,
+    "kernel_queue_empty": 1,
+    "events_seen": 8809178,
+    "events_resolved": 6097494,
+    "updates_committed": 1932868,
+    "updates_dropped": 0,
+    "behind_ms": 13468321,
+    "max_pending": 500000,
+    "uncertain": 1,
+    "last_commit_epoch": 1794031994,
+    "kernel_overflow_notifications": 3
+  },
+  "index_meta": {
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since": "1794031420",
+    "failed_reconciliation_attempts": "2",
+    "schema_version": "6"
+  },
+  "journal_summary": {
+    "unresolved_fanotify_warnings": 199,
+    "target_only_stale_attrib_shape_count": 176,
+    "event_shapes": {
+      "0x4|0x2|116|24|52": 176,
+      "0x40000300|0x6|116|24|88": 7,
+      "0xa|0x6|116|24|88": 4,
+      "0x10a|0x6|116|24|88": 3,
+      "0x20a|0x6|116|24|92": 1,
+      "0x40000200|0x6|116|24|88": 1,
+      "0x20a|0x6|116|24|96": 1,
+      "0x40000200|0x6|116|24|84": 1,
+      "0xa|0x6|116|24|92": 1,
+      "0x30a|0x6|116|24|92": 1,
+      "0x200|0x6|116|24|88": 1,
+      "0x40000300|0x6|116|24|84": 1,
+      "0x20a|0x6|116|24|104": 1
+    },
+    "event_fsids": {
+      "-751860846, 210811603": 199
+    },
+    "queue_overflow_lines": 0,
+    "reconciliation_incomplete_lines": 0,
+    "rescan_complete_lines": 0
+  },
+  "read_only_probe_same_root_fsid_succeeded": true,
+  "mutations_performed": false
+}
