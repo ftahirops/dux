@@ -6822,3 +6822,37 @@ supersedes the preceding offline-audit freshness limitation for this exact
 candidate. It remains a point-in-time advisory check; the remaining release,
 soak, install/rollback, canary, live-index exactness, and endurance gates above
 are still open.
+
+### Exact-source static fault matrix and soak checkpoint — 2026-11-07 02:16 UTC
+
+An exact-source fault-injection binary was built on VPS2 from clean commit
+`0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5`, source SHA-256
+`39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3`.
+The fault binary SHA-256 is
+`cab7d8a4fd4e31957a439b40054a07a039b04361c8d68de509647ecf0a80993c`; its
+version identifies the same commit and source digest as the static production
+candidate. Build completed offline in 2m57s with a 25% CPU quota and 2 GiB
+memory ceiling; peak memory was 601.5 MiB.
+
+The consolidated 14-suite non-soak P0 matrix was started at 02:05:42 UTC with
+the static production binary and matching fault binary, 30 crash rounds, a
+100k-file production-shaped fixture, ext4, 25% CPU quota, and a 4 GiB memory
+ceiling. The initial launch was refused because shared `/dev/shm` had 61 MiB
+less free space than the harness requires; it did not start any suite. The
+retry uses a 3 GiB tmpfs mounted only in the test unit's private mount
+namespace, preserving workspace isolation while leaving host mounts intact.
+By 02:16 UTC, fixture creation and baseline scanning had passed, and **4/30
+crash rounds** had logged successful recovery. The matrix remains active and
+the crash suite is still running, so no overall matrix result is available.
+The worker has zero restarts and an observed 1.24 GiB memory peak. Live report
+and journal snapshots are retained under
+`target/readiness/vps2-qualification-20261106/`; the journal snapshot SHA-256
+is `e7385b7c606b50b3872a4e3387b4e276dd44679a141a9b524eec2d963f9856e2`.
+
+At 02:16 UTC, the current static binary's dedicated 72-hour soak remained
+active with zero restarts. Its latest persisted progress was **1,320.8 seconds,
+29,707 mutations, and 297 exactness checks**. Sampled daemon maxima were 6,112
+KiB RSS, 12 file descriptors, and a 4,251,872-byte WAL; this is interim
+telemetry, not a completed endurance/integrity result. The independent older
+72-hour soak also remained active with zero restarts. Both soak finalizers,
+including final exactness/history and SQLite integrity, remain pending.
