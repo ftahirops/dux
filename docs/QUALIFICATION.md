@@ -6925,3 +6925,18 @@ snapshot SHA-256 is
 `befa77558aeb6cbaba82eb8089d0bddc697334ed18fabbfb202e5f3147854f28` and the
 soak progress SHA-256 is
 `8e53d7f14b465dc92880e201b97ceaeadf78d5a5fea32e351076598a9b43c091`.
+
+**Candidate systemd unit security review:** `systemd-analyze` 255.4 parsed and
+verified both units with exit status 0. Offline security analysis reported
+overall exposure **3.3 / OK** for `dux.service` and **3.2 / OK** for
+`dux-tunnel.service`. The daemon bounds capabilities to `CAP_SYS_ADMIN` and
+`CAP_DAC_READ_SEARCH`, sets `NoNewPrivileges=yes`, and restricts address
+families to `AF_UNIX`. Filesystem protections that create a private mount
+namespace remain unsuitable for the daemon because fanotify marks must observe
+the host's mount namespace; the unit comments document this constraint. These
+are static unit checks, not a systemd-started package transition or live
+service qualification. Outputs are retained under
+`target/readiness/vps2-qualification-20261106/packages-r23/`; service and
+tunnel security log SHA-256 values are respectively
+`8c6e82bae5c2f1e63e3e8114655e917c497425485249610b2c3d574f15a8414a` and
+`dd737c72bcab6acc59bc1d2f7c558658a9e014cba6e9e4820c1e2a28644b6b52`.
