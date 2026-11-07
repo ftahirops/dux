@@ -3067,6 +3067,13 @@ mod tests {
             db: db.clone(),
             root: root.clone(),
         };
+        // This manual scale fixture may run on tmpfs in an isolated test
+        // environment. Explicitly include that pseudo filesystem so the walker
+        // measures the generated tree instead of pruning the entire fixture.
+        let opts = ScanOptions {
+            include_pseudo: true,
+            ..Default::default()
+        };
         rm_db(&db);
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -3079,12 +3086,12 @@ mod tests {
         }
 
         let started = Instant::now();
-        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        rebuild_atomic(&db, &root, &opts).unwrap();
         let baseline_seconds = started.elapsed().as_secs_f64();
         let baseline_bytes = fs::metadata(&db).unwrap().len();
         let mut store = Store::open_rw(&db).unwrap();
         let started = Instant::now();
-        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        reconcile_in_place(&mut store, &root, &opts).unwrap();
         let reconcile_seconds = started.elapsed().as_secs_f64();
         let rows: i64 = store
             .conn

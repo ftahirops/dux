@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 14:34 UTC
+**Updated:** 2026-11-07 14:36 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -135,6 +135,16 @@ qualification: directory-level hint prioritization is not implemented, and no
 production-shaped endurance, forced-overflow replay, package rollout, or canary
 evidence exists. Do not interpret this change as production readiness or as a
 production deployment.
+
+**Isolated scale sample (2026-11-07):** the existing manual reconciliation
+scale test passed with 100,000 files on tmpfs, pinned to one CPU core. Initial
+atomic scan took **10.118 s**; a subsequent unchanged in-place reconciliation
+took **11.064 s**; the DB remained **30,171,136 bytes**. This measures a
+one-core tmpfs fixture with no competing workload and does not establish ext4
+or VPS performance, peak staging bytes, overflow recovery, churn convergence,
+or 15-minute freshness. The harness initially failed because it excluded its
+tmpfs fixture as pseudo; it now explicitly enables pseudo traversal for this
+isolated test root.
 
 In-place reconciliation still walks every entry and builds a disk-backed scan
 staging database with graph and rollup projections. It reduces full database
