@@ -1,0 +1,31 @@
+{
+  "source_commit": "a62ac2d7e464d33f0fda6195d80bee6e98b6c0cb",
+  "candidate_binary_sha256": "952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287",
+  "cargo_lock_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3",
+  "cargo_audit_version": "0.22.2",
+  "advisory_database": {
+    "url": "https://github.com/RustSec/advisory-db.git",
+    "branch": "main",
+    "commit": "309392b18f6b17022f82c701f300433126901068",
+    "commit_time": "2026-11-06T16:34:32+01:00",
+    "fetched_from_origin_at_scan": true,
+    "newer_commit_available_on_fetch": false,
+    "advisory_count": 1422
+  },
+  "lockfile_scan": {
+    "command": "cargo audit --no-fetch --deny warnings --file Cargo.lock --format json",
+    "dependency_count": 229,
+    "vulnerabilities": 0,
+    "warnings": 0,
+    "exit_status": 0,
+    "report": "lockfile-audit.json",
+    "report_sha256": "284c75c7dedb7743abadd121cd0ed06567d5871ec17a8c3174bb959fd705cc0b"
+  },
+  "binary_scan": {
+    "command": "cargo audit --no-fetch bin <candidate-binary>",
+    "auditable_dependencies": 202,
+    "exit_status": 0,
+    "log": "binary-audit.log",
+    "log_sha256": "de4f8e5028bba8885a56c6743d70fb1a888b7ba850e5f498fd0072855daa0bee"
+  }
+}

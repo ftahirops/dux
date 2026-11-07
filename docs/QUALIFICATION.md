@@ -7342,3 +7342,47 @@ with 29 pending updates, a 2,073,255,936-byte index database, and a
 state are all zero/absent in this sample. This does not prove exact live
 accounting; the production recovery and fresh-baseline gates remain open. No
 production service or database was modified.
+
+### Pushed-commit Python regression and refreshed RustSec audit — 2026-11-07 05:04–05:09 UTC
+
+Ran the full Python test discovery from a real Git checkout of pushed commit
+`a62ac2d7e464d33f0fda6195d80bee6e98b6c0cb` on VPS2. Command:
+`PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py' -q`.
+All **296 tests passed** in **28.079 seconds**. The systemd worker had a 25%
+CPU quota, 2 GiB memory cap, 158.0 MiB observed peak, zero swap, and zero
+restarts. The retained log is
+`docs/qualification/python-suite-a62ac2d/test.log` (SHA-256
+`2b904fc8919b0d32d536cef8e4e786410a0346aaed7d44fc0e2ddc5c4b9467c7`), with
+execution details in the adjacent `run-metadata.json`. A preliminary attempt
+from a source archive without `.git` failed Git-dependent tests and was
+discarded; it is not included in the passing result.
+
+Refreshed the official RustSec advisory database from its `main` branch before
+scanning. Fetch resolved to commit
+`309392b18f6b17022f82c701f300433126901068` (2026-11-06 16:34:32 +01:00), with
+no newer commit available at fetch time and **1,422 advisories**. The lockfile
+scan (`cargo audit --no-fetch --deny warnings --file Cargo.lock --format json`)
+passed for **229 locked dependencies**, with **0 vulnerabilities and 0
+warnings**. The exact
+candidate binary
+`952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287` also
+passed `cargo audit --no-fetch bin`, which found auditable metadata for **202
+dependencies**. Product Rust sources and `Cargo.lock` are unchanged between
+candidate source commit `0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5` and the
+current pushed commit. Reports and hashes are in
+`docs/qualification/security-audit-a62ac2d/`. This dependency advisory scan
+does not replace distro-package, default-privilege, supply-chain, or runtime
+security review.
+
+At **05:09 UTC**, the 72-hour soak remained active with zero restarts after
+**11,710.6 seconds** and **263,400 operations** on the same candidate binary.
+It had completed three hourly mutation bursts, but no six-hour held-reader or
+12-hour controlled-restart phase; final exactness, history, and SQLite checks
+remain pending.
+
+The latest **05:09 UTC read-only** live-host sample remains dirty and not caught
+up, **9,670.487 seconds behind**, with 269 pending updates and no reconciliation
+scan in progress. The database is 2,080,583,680 bytes on disk with a
+134,217,728-byte WAL. The sample reports no dropped events, kernel overflow,
+write error, or pause. This pending count does not establish exact accounting;
+live recovery remains an open release blocker.
