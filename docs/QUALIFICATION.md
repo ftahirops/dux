@@ -7017,6 +7017,42 @@ progress and
 `f01848d5110d68842170b25ffdb6da55ad38583e5fff1ff2c343b1a51911a7bd` for the
 P0 journal.
 
+**03:35 UTC test guardrail and older-soak result:** host CPU PSI `some avg10`
+stayed above the qualification VM's 70% hard-critical limit across consecutive
+samples (74.79%, then 81.75%). I stopped only the disposable
+`dux-p0-static-0b81fa8.service`; it exited cleanly with zero restarts. Its
+last report still says `capability=running`, so capability is **incomplete**;
+the passed crash, overflow, CPU, churn, disk, and coverage evidence remains
+valid. The independent `dux-readiness-803796.service` had exited on its own
+with status 1 at 03:34:30. It ran the older `510f49d146a9` binary (SHA-256
+`babed51d6e004237b679fec16859b08de97698e12b7a049c7c615118615a1a3c`) for
+6h07m55s and failed an exactness check after operation 480,200: 41 pending
+items remained, with `dropped=0` and `uncertain=false`; the stored index also
+had `throttled_since` set. The preserved post-stop SQLite integrity check
+passed, but comparison against the test's saved authoritative filesystem-truth
+snapshot found **27 path mismatches and 18 inode mismatches**. This is a real
+stale-index failure for that older binary under a 180-second exactness
+deadline; it is not evidence against the current `0b81fa8` candidate, whose
+separate soak remained active. Preserve this as a regression signal and
+investigate before treating the newer soak as qualified. The old failure
+report, database, and truth snapshot are retained under the ignored
+`target/readiness/vps2-qualification-20261106/old-soak-r89-failure/` evidence
+directory, with respective report/index/truth SHA-256 values
+`1f37c5d31a7a0c64534fdfce6b23bed5af9f0fffdaa8c7515de1168a9b0edac8`,
+`46efbf695aa0b30e038709a128dd7c240b36842971b7fdff71b132e4488c818f`, and
+`c52691a0c179367568a4453b8507d3910726efcc9bd7d90d1cb8a65aeb1e84bc`.
+
+After stopping the matrix, CPU PSI fell to 4.39% avg10 (load1 1.39), memory
+available was 2.6 GiB, and `/` had 23 GiB free. The exact-candidate `0b81fa8`
+soak remained active with zero restarts at **6,245.3 seconds**, **140,951
+mutations**, and **1,404 exactness samples**; sampled maxima were 8,308 KiB
+RSS, 12 file descriptors, and a 4,293,072-byte WAL, with 493 ms p95 and
+1,339 ms maximum exact convergence. Endurance final checks remain pending.
+The live P0 report SHA-256 is
+`9a25344cb9314ff3091f9d05c4c583b20f9f4dae57b8fd1673637d768876f334`; soak
+progress SHA-256 is
+`d90fcce95fdcf16f9294ed78b01562efa0a6bfa94f5ca5b82160d0613da5d719`.
+
 **03:33 UTC runtime checkpoint:** the disk fault suite passed all three
 checks: low-disk pause/resume, preservation of the readable index when a scan
 ran against a full filesystem, and preservation during a read-only-filesystem
