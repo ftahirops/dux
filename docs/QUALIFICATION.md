@@ -7077,6 +7077,32 @@ exactness, history, and SQLite integrity checks are pending. The latest soak
 progress SHA-256 is
 `d643dca6c1846ac30d0b7df0ba55cba917fda1d2451a5c93199fe204a87ce844`.
 
+**03:55 UTC root-suite completion:** rerunning only the root scan at a 50% CPU
+quota completed in **267.926 seconds**, without crossing the 70% critical PSI
+guardrail. It indexed **880,542 files, 110,175 directories, and 1,029,045
+entries**; exact accounting and SQLite integrity passed. Coverage was
+explicitly marked incomplete because the live host root had **55 conflicting
+inode incarnations** during traversal (zero unreadable entries, repeated
+directory identities, conflicting inode-parent edges, or conflicting inode
+allocations). This is an honest incomplete-coverage result, not a clean full
+root snapshot. Combined with the matching-hash matrix and remainder reports,
+the candidate now has **14/14 P0 suites passed**. The derived rollup binds each
+suite to its original report and exact candidate/fault binary hashes; it is
+not a replacement for those source reports. Its SHA-256 is
+`ed1438bf0b357fd3412b2de1606e98831de180924e62dacf149f1e0cdf493a31`; the
+root-only source report SHA-256 is
+`739b519fb94ed346b241d570f690428d102997345d99bb07688151ef8850c4f3`.
+
+At this checkpoint, all P0 worker services were inactive with zero restarts;
+the candidate soak remained active with zero restarts. Host CPU PSI `some
+avg10` had fallen to 1.77%, load1 was 0.62, 3.0 GiB memory was available, and
+`/` had 23 GiB free. The soak had run **7,326.2 seconds**, recording **165,757
+mutations** and **1,647 exactness samples**; sampled maxima were 8,916 KiB
+RSS, 12 file descriptors, and a 5,471,392-byte WAL, with 493 ms p95 and
+1,339 ms maximum convergence. Final exactness, history, and SQLite integrity
+checks remain pending. The latest soak progress SHA-256 is
+`ad7cb76bc986e7a8c98e6bf11882d22e7b7749e7d3e234b1496c493ffb05a030`.
+
 **03:33 UTC runtime checkpoint:** the disk fault suite passed all three
 checks: low-disk pause/resume, preservation of the readable index when a scan
 ran against a full filesystem, and preservation during a read-only-filesystem
