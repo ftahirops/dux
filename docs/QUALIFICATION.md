@@ -8248,3 +8248,25 @@ evidence directories.
    budget, interrupted churn rerun, complete v7 lifecycle if v7 is required,
    install/upgrade/rollback, supported-platform coverage, completed 72-hour
    soak, and completed 24-hour canary.
+
+### Disk scratch cleanup and VPS2 soak refresh — 2026-11-07 08:11 UTC
+
+A read-only local scratch inventory found 3.7 GiB in `/dev/shm`, primarily
+stale Dux Cargo targets, old test databases, and temporary run directories dated
+Nov. 2–6. Process checks found no local cargo/rustc/test/VM worker using those
+paths. The active soak archive collector writes under `target/readiness`, and
+was left running; shared PostgreSQL temporary files were also preserved. Stale
+`dux-*`, `dux.*`, `tmp.*`, and `rust-walkdir` scratch entries were removed.
+`/dev/shm` usage fell to 1.1 MiB (13 GiB available); root filesystem usage was
+111 GiB of 185 GiB (66 GiB available, 63% used). Qualification artifacts under
+`target/readiness` and `docs/qualification` were not removed.
+
+The archived VPS2 checkpoint observed at 08:10:53 UTC reports the candidate
+binary SHA-256 `952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287`,
+22,539.4 seconds elapsed, 496,803 mutations, 4,938 exact samples, six mutation
+bursts, and one completed 300-second held-reader phase with successful WAL
+reclamation. The service was active with zero restarts; cgroup memory events
+showed zero OOMs. Controlled crashes, terminal exactness/history/integrity, and
+the remainder of the 72-hour soak are still pending. Raw compressed progress
+snapshot and digest are retained in
+`target/readiness/vps2-qualification-20261106/soak-archive/`.
