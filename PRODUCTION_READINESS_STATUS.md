@@ -113,6 +113,20 @@ walks preserve the previous indexed rows and record a failed attempt. The
 normal event-apply daemon remains the default and production service is
 unchanged.
 
+**Current implementation work (2026-11-07):** the reconciliation-first path
+must not inherit the legacy mode's permanent retry circuit: repeated scan or
+accounting failures would otherwise stop the only mechanism that can refresh
+its last-observed index. The candidate now keeps retrying this mode with
+persisted, bounded backoff, including after a corrupt retry counter; the
+legacy event-apply circuit remains unchanged. The hint parser also excludes
+notifications emitted by the Dux process itself so index/WAL/staging writes do
+not make its own scan look raced. The latest source passed 285 Rust tests (2
+ignored) and strict all-target/all-feature Clippy on 2026-11-07. These are
+source-level checks only: reconciliation-first remains opt-in, directory-level
+hint prioritization is not implemented, and no production-shaped endurance,
+overflow replay, package rollout, or canary evidence exists. Do not interpret
+this change as production readiness or as a production deployment.
+
 In-place reconciliation still walks every entry and builds a disk-backed scan
 staging database with graph and rollup projections. It reduces full database
 replacement and unchanged-row SQLite writes; it does not reduce traversal/stat

@@ -168,6 +168,14 @@ fn automatic_reconciliation_circuit_open(failed_attempts: u32) -> bool {
     failed_attempts > MAX_AUTOMATIC_RECONCILIATION_RETRIES
 }
 
+/// Reconciliation-first mode must keep retrying observations after bounded
+/// backoff: scans are its source of truth, so a permanent retry circuit would
+/// disable the only repair mechanism. Keep the legacy event-apply circuit until
+/// that mode is retired.
+fn reconciliation_retry_should_pause(reconcile_first: bool, failed_attempts: u32) -> bool {
+    !reconcile_first && automatic_reconciliation_circuit_open(failed_attempts)
+}
+
 fn parse_reconciliation_attempts(value: Option<&str>) -> (u32, bool) {
     match value {
         None => (0, false),
@@ -962,7 +970,13 @@ fn parse_fanotify_hints(mut buf: &[u8], max_events: usize) -> (u64, u64, usize, 
             overflows = overflows.saturating_add(1);
             lost = true;
         } else {
-            seen = seen.saturating_add(1);
+            // The scan/database writer runs in this daemon process. Its own
+            // SQLite, WAL, progress, and staging-file notifications are not
+            // user-tree changes (the scanner excludes those artifacts), so
+            // they must not make every observation appear raced.
+            if meta.pid != std::process::id() as i32 {
+                seen = seen.saturating_add(1);
+            }
             // FID-mode notifications normally use FAN_NOFD. Close defensively if
             // a kernel or future mark mode supplies an event descriptor.
             if meta.fd >= 0 {
@@ -1497,7 +1511,7 @@ pub fn run_daemon(
     // upgrades. The old baseline is read-only until the background install;
     // events are collected continuously instead of leaving a startup scan gap.
     let rebuilt = Store::needs_rebuild(db)? || !root_matches(db, &root_canon)?;
-    let read_only_source = rebuilt && Store::has_recoverable_database_state(db)?;
+    let mut read_only_source = rebuilt && Store::has_recoverable_database_state(db)?;
     let mut store = if read_only_source {
         Store::open_rebuild_source(db)
             .context("validating existing index before background upgrade")?
@@ -1508,6 +1522,13 @@ pub fn run_daemon(
     // no installed root generation. The first successful atomic reconciliation
     // makes the committed root available; queued events are replayed afterward.
     let mut baseline_ready = !rebuilt && committed_root_indexed(&store)?;
+    tracing::info!(
+        rebuilt,
+        read_only_source,
+        schema_version = store.schema_version,
+        baseline_ready,
+        "selected startup index source"
+    );
     if !rebuilt {
         store.conn.execute("DELETE FROM meta WHERE key IN ('paused_since','pause_reason','throttled_since','flush_error')", [])?;
     }
@@ -1640,7 +1661,7 @@ pub fn run_daemon(
         );
     }
     let coverage_incomplete = mark_failures > 0;
-    if coverage_incomplete {
+    if coverage_incomplete && !read_only_source {
         // partial coverage is a known-incomplete watch — surface it via dirty
         // state so status/TUI stop claiming the index is trustworthy.
         mark_index_dirty(&store, "watch coverage is incomplete")?;
@@ -1692,8 +1713,9 @@ pub fn run_daemon(
     let mut rescan_retry_after: Option<Instant> = None;
     let (mut failed_reconciliation_attempts, retry_state_corrupt) =
         parse_reconciliation_attempts(store.get_meta("failed_reconciliation_attempts")?.as_deref());
-    let mut reconciliation_retry_paused = retry_state_corrupt
-        || automatic_reconciliation_circuit_open(failed_reconciliation_attempts);
+    let mut reconciliation_retry_paused =
+        reconciliation_retry_should_pause(reconcile_first, failed_reconciliation_attempts)
+            || (retry_state_corrupt && !reconcile_first);
     let persisted_retry_deadline = store.get_meta(RECONCILIATION_RETRY_AFTER_META)?;
     if failed_reconciliation_attempts > 0
         || retry_state_corrupt
@@ -1708,10 +1730,12 @@ pub fn run_daemon(
         )?);
     }
     if retry_state_corrupt {
-        mark_index_dirty(
-            &store,
-            "reconciliation retry state is corrupt; automatic recovery uses maximum cooldown",
-        )?;
+        if !read_only_source {
+            mark_index_dirty(
+                &store,
+                "reconciliation retry state is corrupt; automatic recovery uses maximum cooldown",
+            )?;
+        }
         tracing::error!(
             "persisted reconciliation retry count is malformed; automatic recovery remains enabled with maximum cooldown"
         );
@@ -1876,7 +1900,10 @@ pub fn run_daemon(
                             &failed_reconciliation_attempts.to_string(),
                         )?;
                     }
-                    if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                    if reconciliation_retry_should_pause(
+                        reconcile_first,
+                        failed_reconciliation_attempts,
+                    ) {
                         reconciliation_retry_paused = true;
                         rescan_retry_after = Some(persist_reconciliation_retry_deadline(
                             &store,
@@ -1930,7 +1957,10 @@ pub fn run_daemon(
                             &failed_reconciliation_attempts.to_string(),
                         )?;
                     }
-                    if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                    if reconciliation_retry_should_pause(
+                        reconcile_first,
+                        failed_reconciliation_attempts,
+                    ) {
                         reconciliation_retry_paused = true;
                         rescan_retry_after = Some(persist_reconciliation_retry_deadline(
                             &store,
@@ -2243,7 +2273,10 @@ pub fn run_daemon(
                 } else {
                     failed_reconciliation_attempts =
                         failed_reconciliation_attempts.saturating_add(1);
-                    if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                    if reconciliation_retry_should_pause(
+                        reconcile_first,
+                        failed_reconciliation_attempts,
+                    ) {
                         reconciliation_retry_paused = true;
                         rescan_retry_after = Some(
                             Instant::now()
@@ -2280,6 +2313,7 @@ pub fn run_daemon(
                 // The scan atomically replaced the indexed graph; discard paths
                 // resolved against the previous generation and reopen it writable.
                 store = Store::open_rw(db).context("reopening index after reconciliation")?;
+                read_only_source = false;
                 indexed_parent_paths.clear();
                 match outcome {
                     Ok(stats) => {
@@ -2338,8 +2372,10 @@ pub fn run_daemon(
                                 "failed_reconciliation_attempts",
                                 &failed_reconciliation_attempts.to_string(),
                             )?;
-                            if automatic_reconciliation_circuit_open(failed_reconciliation_attempts)
-                            {
+                            if reconciliation_retry_should_pause(
+                                reconcile_first,
+                                failed_reconciliation_attempts,
+                            ) {
                                 reconciliation_retry_paused = true;
                                 rescan_retry_after = Some(persist_reconciliation_retry_deadline(
                                     &store,
@@ -2422,7 +2458,10 @@ pub fn run_daemon(
                             "failed_reconciliation_attempts",
                             &failed_reconciliation_attempts.to_string(),
                         )?;
-                        if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                        if reconciliation_retry_should_pause(
+                            reconcile_first,
+                            failed_reconciliation_attempts,
+                        ) {
                             reconciliation_retry_paused = true;
                             rescan_retry_after = Some(persist_reconciliation_retry_deadline(
                                 &store,
@@ -2591,6 +2630,12 @@ pub fn run_daemon(
                 let scan_root = root_canon.clone();
                 let use_in_place_observation =
                     scan_first_can_use_in_place(reconcile_first, baseline_ready, one_file_system);
+                tracing::info!(
+                    use_in_place_observation,
+                    baseline_ready,
+                    read_only_source,
+                    "selected reconciliation implementation"
+                );
                 let cancel = Arc::new(AtomicBool::new(false));
                 let opts =
                     background_reconciliation_scan_options(one_file_system, Arc::clone(&cancel));
@@ -2610,11 +2655,13 @@ pub fn run_daemon(
                 // competing metadata write during the publication transaction.
                 if reconcile_first {
                     index_uncertain = true;
-                    store.set_meta("dirty_since", &now_secs().to_string())?;
-                    store.set_meta(
-                        "dirty_reason",
-                        "periodic filesystem observation in progress",
-                    )?;
+                    if !read_only_source {
+                        store.set_meta("dirty_since", &now_secs().to_string())?;
+                        store.set_meta(
+                            "dirty_reason",
+                            "periodic filesystem observation in progress",
+                        )?;
+                    }
                 }
                 scan_job = Some(std::thread::spawn(move || {
                     if use_in_place_observation {
@@ -7028,6 +7075,15 @@ mod tests {
                 metadata_len: FAN_EVENT_METADATA_LEN as u16,
                 mask: FAN_MODIFY,
                 fd: -1,
+                pid: std::process::id() as i32,
+            },
+            FanotifyEventMetadata {
+                event_len: FAN_EVENT_METADATA_LEN as u32,
+                vers: FANOTIFY_METADATA_VERSION,
+                reserved: 0,
+                metadata_len: FAN_EVENT_METADATA_LEN as u16,
+                mask: FAN_MODIFY,
+                fd: -1,
                 pid: 123,
             },
             FanotifyEventMetadata {
@@ -7047,7 +7103,7 @@ mod tests {
             )
         };
         let (seen, overflows, consumed, lost) = parse_fanotify_hints(bytes, 8);
-        assert_eq!(seen, 1);
+        assert_eq!(seen, 1, "ignore Dux's own index and staging writes");
         assert_eq!(overflows, 1);
         assert_eq!(consumed, bytes.len());
         assert!(lost);
@@ -8469,6 +8525,8 @@ mod tests {
         assert_eq!(reconciliation_retry_delay(2), Duration::from_secs(120));
         assert!(!automatic_reconciliation_circuit_open(1));
         assert!(automatic_reconciliation_circuit_open(2));
+        assert!(!reconciliation_retry_should_pause(true, u32::MAX));
+        assert!(reconciliation_retry_should_pause(false, u32::MAX));
         assert!(!reconciliation_retry_circuit_blocks_request(false, false));
         assert!(reconciliation_retry_circuit_blocks_request(true, false));
         assert!(!reconciliation_retry_circuit_blocks_request(true, true));
