@@ -1,0 +1,32 @@
+{
+  "started_at_utc": "2026-11-07T07:20:40Z",
+  "finished_at_utc": "2026-11-07T07:22:01Z",
+  "repository_head_at_run": "941798744fbe4e9e263d47b5bab754a88613485f",
+  "candidate_source_commit": "0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5",
+  "candidate_source_tree_sha256": "39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3",
+  "source_equivalence_check": "git diff --quiet candidate -- src Cargo.toml Cargo.lock build.rs exited 0",
+  "test_executable": "target/debug/deps/dux-f830783577e924f2",
+  "test_executable_sha256": "2cd1f79b3bb278dd13ea7582a8b0c8fb8f6cbaefcbdbd9254452d3cdba9b079b",
+  "test_executable_mtime_utc": "2026-11-06T22:48:47Z",
+  "binary_scope": "local debug Rust test executable; not the static release executable",
+  "command": "target/debug/deps/dux-f830783577e924f2 --test-threads=1",
+  "result": "passed",
+  "tests_passed": 268,
+  "tests_failed": 0,
+  "test_elapsed_seconds": 81.14,
+  "systemd_unit": "dux-rust-full-20261107.service",
+  "systemd_limits": {
+    "CPUQuota": "25%",
+    "MemoryMaxBytes": 2147483648,
+    "MemorySwapMaxBytes": 0,
+    "IOWeight": 10
+  },
+  "temporary_directory": "/dev/shm/dux-rust-full-tests-20261107",
+  "service_runtime_seconds": 81.147,
+  "cpu_time_seconds": 14.781,
+  "memory_peak_bytes": 412509798,
+  "memory_swap_peak_bytes": 0,
+  "exit_status": 0,
+  "test_log": "docs/qualification/rust-suite-20261107/test.log",
+  "test_log_sha256": "17cd39c8670922269fb2d38d39dc8a06edb8a25c02b40b91f3ebcb3ad0f17eb7"
+}

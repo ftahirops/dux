@@ -7973,3 +7973,23 @@ service remained active but dirty after 16 lifetime kernel overflows, schema
 v6, with 13 pending updates, about 4h50m behind, and no scan in progress. Root
 disk had **65 GiB free / 64% used**. The new tests changed neither the
 production service nor its database.
+
+### Current-source Rust regression suite recheck — 2026-11-07 07:20–07:22 UTC
+
+Re-ran the complete **268-test Rust suite** in the local debug test executable
+from candidate-equivalent Rust sources. Every test passed, including scan,
+query, watcher, fault, and pressure-guard coverage. Before launch, three
+consecutive host samples passed the admission limits. The transient systemd
+unit used a **25% CPU quota**, **2 GiB memory maximum**, zero swap, IO weight 10,
+and a `/dev/shm` temp directory. It completed in **81.147 seconds**, consumed
+14.781 CPU seconds, and peaked at **393.4 MiB** with zero swap. The binary is a
+debug test artifact, not the static release executable; the exact static
+candidate's all-target/all-feature 268/268 result remains separately recorded
+from VPS2. Full output and hashes are retained in
+`docs/qualification/rust-suite-20261107/`.
+
+At 07:22 UTC, production remained dirty after 16 fanotify overflows, schema v6,
+with three pending updates and no rescan in progress; near-empty pending does
+not establish exact recovery. Root had 65 GiB free. VPS2's dedicated candidate
+soak remained active with zero restarts at **19,650.3 seconds / 433,764
+operations**; its reader, restart, and final checks were still pending.
