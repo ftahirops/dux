@@ -1,0 +1,19 @@
+{
+  "captured_at_utc": "2026-11-07T07:42:20.755983+00:00",
+  "repository_head": "90df37065f7f9aaee7df8a681a89bbc56c2dcda0",
+  "candidate_source_commit": "0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5",
+  "candidate_source_equivalence_for_rust_inputs": true,
+  "test_executable": "target/debug/deps/dux-f830783577e924f2",
+  "test_executable_sha256": "2cd1f79b3bb278dd13ea7582a8b0c8fb8f6cbaefcbdbd9254452d3cdba9b079b",
+  "command": "systemd-run --wait --pipe --collect --unit=dux-v7-pathgraph-20261107b ... dux-f830783577e924f2 path_graph --test-threads=1",
+  "tests_passed": 4,
+  "tests_failed": 0,
+  "resource_limits": {
+    "cpu_quota_percent": 10,
+    "memory_max_mib": 1024,
+    "swap_mib": 0
+  },
+  "log": "test.log",
+  "log_sha256": "d7b8a7e0abfaf44bc7530b66ec398503d3a78de8e5aa456415a9871165293653",
+  "scope_limit": "Tests exercise the staged path graph and helper invariants only; live v7 publication, event processing, v6 migration, recursive queries, package upgrade, and rollback remain untested."
+}

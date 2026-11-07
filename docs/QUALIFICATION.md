@@ -8132,3 +8132,17 @@ overlapping inspection ranges and was not a product or harness defect. The
 measured throughput below the configured pacing value is explained by the
 synchronous exactness checks taking wall time; it is retained as a measured
 workload limit and no claim is made that the requested 25/s was sustained.
+
+### Schema-v7 staging graph test recheck — 2026-11-07 07:42 UTC
+
+Re-ran the four Rust tests whose names contain `path_graph` against the
+candidate-equivalent debug test executable under a 10% CPU / 1 GiB / no-swap
+systemd scope. All **4/4 passed**: alias paths to one directory inode,
+ancestor-cycle rejection, path-specific directory-total lifecycle, and staged
+v7 alias/cycle-row construction. Exact executable/source-equivalence checks,
+log hash, and output are in
+`docs/qualification/schema-v7-pathgraph-20261107/`. These tests only qualify
+the private staging graph and helper invariants; they do not test publication,
+event updates, v6 migration, query behavior, package upgrade, or rollback. No
+product code changed in this test recheck. Schema-v7 live publication remains
+an open production blocker.
