@@ -7765,3 +7765,28 @@ create/delete shapes outside that narrow filter. Snapshot:
 `d7d6270bf5b21608dd3d36d57702e88bd6b651fd24a9df76cf6413eb13e13212`). No
 production changes were made; the growing absolute lag and lack of rescan
 completion keep exact recovery and canary gates open.
+
+### Root coverage blocker source trace — 2026-11-07
+
+Reviewed the exact code path behind the 55 conflicting inode incarnations in
+the VPS2 root-scan report. `scan_nodes` stages one row per path instance with
+`path_id`, `parent_path_id`, `mount_id`, and `(dev,inode,birth_ns)`. The scan
+validates that graph and computes visible/unique totals over
+`(dev,inode,birth_ns)`. Publication then still executes
+`V6_SCAN_PROJECTION_SQL` and inserts into live `inodes`/`dirents`, whose inode
+primary key is only `(dev_id,inode)`; it groups the staged rows by `dev,inode`.
+The resulting incarnation conflict is consequently recorded as incomplete
+coverage instead of being silently merged. This behavior preserves honesty and
+prevents a false exactness claim, but means a busy live root cannot receive a
+complete snapshot when inode numbers are reused during traversal.
+
+Closing this gate requires publishing the path-instance model atomically and
+carrying it through live event updates, mount-alias resolution, recursive
+queries, migrations/upgrades, rollback, and exactness tests. Removing the
+conflict counter or selecting one incarnation in the v6 projection would lose
+identity information and is not an acceptable fix. The source trace is in
+`src/scan.rs` (`scan_nodes`, `count_conflicting_inode_incarnations`, and
+`V6_SCAN_PROJECTION_SQL`) and `src/store.rs` (`SCHEMA_VERSION=6`, live
+`inodes`/`dirents`, and test/staging-only `PATH_GRAPH_TABLES_SQL`). No product
+code was changed in this review; schema-v7 publication remains a major open
+release gate.
