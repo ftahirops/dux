@@ -608,11 +608,17 @@ fn scan_first_can_use_in_place(
 fn scan_first_event_race_only(
     reconcile_first: bool,
     lost_events: bool,
+    forced_reconciliation: bool,
     coverage_incomplete: bool,
     resolve_warned: bool,
     scan_errors: u64,
 ) -> bool {
-    reconcile_first && lost_events && !coverage_incomplete && !resolve_warned && scan_errors == 0
+    reconcile_first
+        && lost_events
+        && !forced_reconciliation
+        && !coverage_incomplete
+        && !resolve_warned
+        && scan_errors == 0
 }
 
 fn scan_first_forced_followup(
@@ -627,6 +633,10 @@ fn scan_first_forced_followup(
         && !coverage_incomplete
         && !resolve_warned
         && scan_errors == 0
+}
+
+fn scan_first_preserve_manual_followup(event_race_only: bool, manual_rescan_pending: bool) -> bool {
+    event_race_only && manual_rescan_pending
 }
 
 fn scan_first_hint_invalidates_observation(
@@ -2299,6 +2309,10 @@ pub fn run_daemon(
     // following pass rather than changing the active traversal.
     let mut pending_scan_hints = Vec::<PathBuf>::new();
     let mut lost_events = false;
+    // Keep an operator request latched until a scan actually starts. If SIGHUP
+    // arrives during an active scan, that scan may be invalidated by concurrent
+    // changes; a normal race must not discard the requested follow-up.
+    let mut manual_rescan_pending = false;
     // Distinguish normal changes observed during a walk from known hint loss.
     // A normal race may wait for cadence; an overflow or lost scope needs a
     // follow-up observation immediately after the current walk completes.
@@ -2819,6 +2833,7 @@ pub fn run_daemon(
             return Ok(());
         }
         if MANUAL_RESCAN.swap(false, Ordering::SeqCst) {
+            manual_rescan_pending = true;
             failed_reconciliation_attempts = 0;
             reconciliation_retry_paused = false;
             rescan_retry_after = None;
@@ -2931,6 +2946,7 @@ pub fn run_daemon(
                         let event_race_only = scan_first_event_race_only(
                             reconcile_first,
                             lost_events,
+                            forced_reconciliation_after_scan,
                             coverage_incomplete,
                             resolve_warned,
                             stats.errors,
@@ -2968,11 +2984,23 @@ pub fn run_daemon(
                             // Keep the cadence anchored to observation start.
                             // Resetting here would add the full scan duration to
                             // the configured maximum interval on every raced scan.
-                            RESCAN.store(false, Ordering::SeqCst);
+                            if scan_first_preserve_manual_followup(
+                                event_race_only,
+                                manual_rescan_pending,
+                            ) {
+                                RESCAN.store(true, Ordering::SeqCst);
+                                tracing::info!(
+                                    "explicit reconciliation request raced with the active observation; preserving its follow-up"
+                                );
+                            } else {
+                                RESCAN.store(false, Ordering::SeqCst);
+                            }
                             lost_events = false;
-                            tracing::info!(
-                                "filesystem changed during scan-first observation; next full observation is scheduled"
-                            );
+                            if !manual_rescan_pending {
+                                tracing::info!(
+                                    "filesystem changed during scan-first observation; next full observation is scheduled"
+                                );
+                            }
                         } else if forced_followup {
                             RESCAN.store(true, Ordering::SeqCst);
                             lost_events = false;
@@ -3240,6 +3268,7 @@ pub fn run_daemon(
                 reconciliation_deferred = false;
                 rescan_retry_after = None;
                 last_reconcile = Instant::now();
+                manual_rescan_pending = false;
                 born.clear();
                 lost_events = false;
                 forced_reconciliation_after_scan = false;
@@ -8003,12 +8032,33 @@ mod tests {
     }
 
     #[test]
+    fn scan_first_does_not_drop_manual_followup_when_observation_races() {
+        assert!(scan_first_preserve_manual_followup(true, true));
+        assert!(!scan_first_preserve_manual_followup(true, false));
+        assert!(!scan_first_preserve_manual_followup(false, true));
+        assert!(!scan_first_preserve_manual_followup(false, false));
+    }
+
+    #[test]
     fn scan_first_accepts_a_complete_last_observation_after_hint_loss() {
-        assert!(scan_first_event_race_only(true, true, false, false, 0));
-        assert!(!scan_first_event_race_only(true, true, true, false, 0));
-        assert!(!scan_first_event_race_only(true, true, false, true, 0));
-        assert!(!scan_first_event_race_only(true, true, false, false, 1));
-        assert!(!scan_first_event_race_only(false, true, false, false, 0));
+        assert!(scan_first_event_race_only(
+            true, true, false, false, false, 0
+        ));
+        assert!(!scan_first_event_race_only(
+            true, true, true, false, false, 0
+        ));
+        assert!(!scan_first_event_race_only(
+            true, true, false, true, false, 0
+        ));
+        assert!(!scan_first_event_race_only(
+            true, true, false, false, true, 0
+        ));
+        assert!(!scan_first_event_race_only(
+            true, true, false, false, false, 1
+        ));
+        assert!(!scan_first_event_race_only(
+            false, true, false, false, false, 0
+        ));
         assert!(scan_first_forced_followup(true, true, false, false, 0));
         assert!(!scan_first_forced_followup(true, true, true, false, 0));
         assert!(!scan_first_forced_followup(false, true, false, false, 0));
