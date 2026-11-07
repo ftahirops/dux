@@ -7253,3 +7253,13 @@ their only cause. The exact candidate includes those fixes and has passed its
 source test suite; it has not yet passed the 72-hour soak. Do not clear the
 retry counter or force a live scan until the event-loss cause is understood and
 a controlled recovery plan is qualified.
+
+The exact-source VM `cargo-test.log` contains a passing
+`stale_target_attrib_is_ignored_only_for_a_known_handle_capable_filesystem`
+test; the full recorded result is 268 passed, 0 failed. The VM's ext4 root has
+the same filesystem ID seen in the live daemon's stale-FID diagnostics, and a
+read-only kernel handle probe on ext4 succeeded. The current candidate soak's
+systemd journal has no `fanotify event has no resolvable` warnings so far. This
+supports the targeted stale-event fix, but the soak is a small synthetic tree
+and does not prove that a full production-root reconciliation can finish with
+all event streams resolved.
