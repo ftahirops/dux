@@ -6723,11 +6723,18 @@ in `target/readiness/vps2-qualification-20261106/root-direct-status.log`
 This is a direct scan result; it does not establish daemon/watch exactness or
 production-root catch-up.
 
-The separate formal `root` fault/recovery suite was stopped after its CPU
-pressure admission threshold was exceeded, so it remains **incomplete**, not a
-pass or a product failure. The isolated 72-hour soak remains active on the
-older `510f49d146a9` binary with zero restarts at 00:31 UTC; it is not evidence
-for the current candidate. The VM has no Rust toolchain and its DNS could not
+The first formal `root` suite attempt was stopped after its CPU pressure
+admission threshold was exceeded. A retry completed successfully from
+00:34:42–00:39:12 UTC at 75% CPU quota and 4 GiB memory maximum. It scanned
+**807,116 files, 97,924 directories, and 943,222 entries**, with complete
+coverage (`dirty_reason=null`), one-filesystem traversal, and the database
+excluded from the scan. The report is
+`target/readiness/vps2-qualification-20261106/p0-root-retry.json` (SHA-256
+`9842b50faad945b515b24f14138b12ac73c683a5e088f4c80efc6245bb93b29c`). This is
+a root scan and integrity pass; it does not test root fault recovery. The
+isolated 72-hour soak remains active on the older `510f49d146a9` binary with
+zero restarts at 00:39 UTC; it is not evidence for the current candidate. The
+VM has no Rust toolchain and its DNS could not
 resolve `static.rust-lang.org`, so a current optimized release binary and the
 100k/1m/10m performance matrix were not produced. The staging host also remains
 under unrelated Go build pressure, so no local build was started. Current
