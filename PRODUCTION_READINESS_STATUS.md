@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 14:41 UTC
+**Updated:** 2026-11-07 14:46 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -135,6 +135,13 @@ qualification: directory-level hint prioritization is not implemented, and no
 production-shaped endurance, forced-overflow replay, package rollout, or canary
 evidence exists. Do not interpret this change as production readiness or as a
 production deployment.
+
+**Status correctness fix (2026-11-07):** human and JSON status now consult the
+live watch mode before interpreting persisted retry counters. A legacy counter
+above the retry limit no longer falsely says that reconciliation-first scans
+are paused; event-apply mode continues to report its actual retry circuit. The
+regression test covers both modes and corrupt/over-limit counters. Full Rust
+suite: 286 passed, 2 ignored; strict Clippy, formatting, and diff checks pass.
 
 **Isolated scale sample (2026-11-07):** the existing manual reconciliation
 scale test passed with 100,000 files on tmpfs, pinned to one CPU core. Initial

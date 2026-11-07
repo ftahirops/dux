@@ -1015,8 +1015,15 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     }
     let retry_state = store.get_meta("failed_reconciliation_attempts")?;
     let retry_deadline = store.get_meta("reconciliation_retry_after_unix")?;
-    let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
+    let scan_first_live = crate::util::daemon_live_for(db)
+        && crate::util::read_watch_status(db).is_some_and(|watch| watch.scan_first);
+    let (failed_reconciliation_attempts, retry_circuit_open) =
         crate::watch::reconciliation_retry_status(retry_state.as_deref());
+    let automatic_reconciliation_paused = if scan_first_live {
+        Some(false)
+    } else {
+        retry_circuit_open
+    };
     if automatic_reconciliation_paused == Some(true) {
         if let Some(attempts) = failed_reconciliation_attempts {
             let interval =
@@ -1071,10 +1078,18 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
     let write_error = store.get_meta("flush_error")?;
     let pause_reason = store.get_meta("pause_reason")?;
     let dirty_reason = store.get_meta("dirty_reason")?;
+    let daemon_live = crate::util::daemon_live_for(db);
+    let watch = crate::util::read_watch_status(db);
+    let scan_first_live = daemon_live && watch.as_ref().is_some_and(|status| status.scan_first);
     let retry_state = store.get_meta("failed_reconciliation_attempts")?;
     let retry_deadline = store.get_meta("reconciliation_retry_after_unix")?;
-    let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
+    let (failed_reconciliation_attempts, retry_circuit_open) =
         crate::watch::reconciliation_retry_status(retry_state.as_deref());
+    let automatic_reconciliation_paused = if scan_first_live {
+        Some(false)
+    } else {
+        retry_circuit_open
+    };
     let reconciliation_retry_backoff_seconds =
         crate::watch::reconciliation_retry_backoff_seconds(retry_state.as_deref());
     let reconciliation_retry_remaining_seconds =
@@ -1082,8 +1097,6 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
             retry_deadline.as_deref(),
             crate::util::now_secs(),
         );
-    let daemon_live = crate::util::daemon_live_for(db);
-    let watch = crate::util::read_watch_status(db);
     let scan_progress = crate::util::read_scan_progress_for(db);
     let scan_in_progress = scan_progress.is_some();
     let scan_progress = scan_progress.map(|progress| {
@@ -1597,7 +1610,7 @@ mod tests {
             .unwrap();
         let circuit_open = status_json(&store, &db).unwrap();
         assert_eq!(circuit_open["failed_reconciliation_attempts"], 2);
-        assert_eq!(circuit_open["automatic_reconciliation_paused"], true);
+        assert_eq!(circuit_open["automatic_reconciliation_paused"], false);
         assert_eq!(circuit_open["reconciliation_retry_state_corrupt"], false);
         assert_eq!(circuit_open["reconciliation_retry_backoff_seconds"], 120);
         assert!(
@@ -1606,12 +1619,34 @@ mod tests {
         );
         assert_eq!(circuit_open["reconciliation_retry_due"], false);
         let human_circuit_status = status(&store, &db).unwrap();
-        assert!(
-            human_circuit_status.contains("automatic scans in backoff after 2 failed full scans")
+        assert!(!human_circuit_status.contains("automatic scans in backoff"));
+
+        // The same persisted attempt count means a real pause in the legacy
+        // event-apply mode, so verify the status switch follows the live mode.
+        crate::util::write_watch_status_with_mode(
+            &db,
+            0,
+            true,
+            12,
+            0,
+            1,
+            crate::util::now_secs(),
+            0,
+            0,
+            500_000,
+            0,
+            false,
+            false,
         );
-        assert!(human_circuit_status.contains("120s interval"));
-        assert!(human_circuit_status.contains("next retry in"));
-        assert!(human_circuit_status.contains("dux scan <root>"));
+        let legacy_circuit = status_json(&store, &db).unwrap();
+        assert_eq!(legacy_circuit["automatic_reconciliation_paused"], true);
+        let legacy_human_status = status(&store, &db).unwrap();
+        assert!(
+            legacy_human_status.contains("automatic scans in backoff after 2 failed full scans")
+        );
+        assert!(legacy_human_status.contains("120s interval"));
+        assert!(legacy_human_status.contains("next retry in"));
+        assert!(legacy_human_status.contains("dux scan <root>"));
 
         store
             .set_meta(
