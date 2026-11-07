@@ -7,9 +7,10 @@
 ## New source change after the exact-commit qualification
 
 Resolved in-root fanotify parent hints now feed a bounded (256-path) priority
-set into the next full-root scan. jwalk moves child directory branches
-containing those hints to the front of the scheduling batch; the scan still visits
-the complete root and only a completed, verified observation can establish
+set into the next full-root scan. It matches child names at hinted ancestor
+directories without constructing candidate full paths; jwalk moves matching
+branches to the front of the scheduling batch. The scan still visits the
+complete root, and only a completed, verified observation can establish
 freshness. Hints received during a scan are retained for the following scan.
 The full local suite passes (297 passed, 2 ignored); strict Clippy, formatting,
 and diff checks also pass. A same-fixture test confirms the complete indexed

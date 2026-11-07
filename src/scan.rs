@@ -38,24 +38,27 @@ pub struct ScanOptions {
     pub priority_paths: Vec<PathBuf>,
 }
 
-fn priority_directory_set(root: &Path, hints: &[PathBuf]) -> std::collections::HashSet<PathBuf> {
-    let mut prioritized = std::collections::HashSet::new();
+fn priority_child_names(
+    root: &Path,
+    hints: &[PathBuf],
+) -> std::collections::HashMap<PathBuf, std::collections::HashSet<std::ffi::OsString>> {
+    let mut prioritized = std::collections::HashMap::new();
     for hint in hints.iter().take(256) {
         if !hint.starts_with(root) {
             continue;
         }
         let mut current = hint.as_path();
-        loop {
-            if !current.starts_with(root) {
-                break;
-            }
-            prioritized.insert(current.to_path_buf());
-            if current == root {
-                break;
-            }
-            let Some(parent) = current.parent() else {
+        while current != root {
+            let (Some(parent), Some(name)) = (current.parent(), current.file_name()) else {
                 break;
             };
+            if !parent.starts_with(root) {
+                break;
+            }
+            prioritized
+                .entry(parent.to_path_buf())
+                .or_insert_with(std::collections::HashSet::new)
+                .insert(name.to_os_string());
             current = parent;
         }
     }
@@ -1892,8 +1895,8 @@ fn parallel_stage(
     let next_path_id = Arc::new(AtomicI64::new(2));
     let path_ids = Arc::clone(&next_path_id);
     let scan_root = root.to_path_buf();
-    let priority_dirs = Arc::new(priority_directory_set(root, &opts.priority_paths));
-    let callback_priority_dirs = Arc::clone(&priority_dirs);
+    let priority_children = Arc::new(priority_child_names(root, &opts.priority_paths));
+    let callback_priority_children = Arc::clone(&priority_children);
 
     std::thread::scope(|scope| -> Result<()> {
         let producer = scope.spawn(move || {
@@ -1923,14 +1926,11 @@ fn parallel_stage(
                         // jwalk's callback runs before it schedules child
                         // directories. Put branches containing recent hints at
                         // the front; all entries are still visited this pass.
-                        if callback_priority_dirs.contains(dir_path) {
+                        if let Some(priority_names) = callback_priority_children.get(dir_path) {
                             promote_priority(children, |child| {
-                                child
-                                    .as_ref()
-                                    .ok()
-                                    .is_some_and(|entry| {
-                                        callback_priority_dirs.contains(&entry.path())
-                                    })
+                                child.as_ref().ok().is_some_and(|entry| {
+                                    priority_names.contains(entry.file_name())
+                                })
                             });
                         }
                         // Stat the directory once to learn the parent (dev,inode); all of
@@ -2253,30 +2253,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scan_priority_hints_include_only_their_rooted_ancestors() {
+    fn scan_priority_hints_map_only_rooted_child_names() {
         let root = Path::new("/tree");
         let hints = vec![PathBuf::from("/tree/a/b"), PathBuf::from("/outside/x")];
-        let prioritized = priority_directory_set(root, &hints);
-        assert!(prioritized.contains(Path::new("/tree")));
-        assert!(prioritized.contains(Path::new("/tree/a")));
-        assert!(prioritized.contains(Path::new("/tree/a/b")));
-        assert!(!prioritized.contains(Path::new("/outside")));
+        let prioritized = priority_child_names(root, &hints);
+        assert!(prioritized[Path::new("/tree")].contains(std::ffi::OsStr::new("a")));
+        assert!(prioritized[Path::new("/tree/a")].contains(std::ffi::OsStr::new("b")));
+        assert!(!prioritized.contains_key(Path::new("/outside")));
     }
 
     #[test]
     fn scan_priority_moves_hint_branches_forward_without_dropping_siblings() {
         let prioritized =
-            priority_directory_set(Path::new("/tree"), &[PathBuf::from("/tree/changed/deep")]);
+            priority_child_names(Path::new("/tree"), &[PathBuf::from("/tree/changed/deep")]);
         let mut children = vec![
-            PathBuf::from("/tree/unrelated"),
-            PathBuf::from("/tree/changed"),
-            PathBuf::from("/tree/other"),
+            std::ffi::OsString::from("unrelated"),
+            std::ffi::OsString::from("changed"),
+            std::ffi::OsString::from("other"),
         ];
-        promote_priority(&mut children, |child| prioritized.contains(child));
-        assert_eq!(children[0], Path::new("/tree/changed"));
+        promote_priority(&mut children, |child| {
+            prioritized[Path::new("/tree")].contains(child.as_os_str())
+        });
+        assert_eq!(children[0], std::ffi::OsString::from("changed"));
         assert_eq!(children.len(), 3);
-        assert!(children.contains(&PathBuf::from("/tree/unrelated")));
-        assert!(children.contains(&PathBuf::from("/tree/other")));
+        assert!(children.contains(&std::ffi::OsString::from("unrelated")));
+        assert!(children.contains(&std::ffi::OsString::from("other")));
     }
 
     #[test]
