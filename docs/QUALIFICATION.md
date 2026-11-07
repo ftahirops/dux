@@ -7893,6 +7893,25 @@ this sample does not point to disk-capacity exhaustion. It does show ongoing
 high event backlog and slow writes, and it still does not prove exactness or
 recovery. The daemon was not changed, restarted, or forced to scan.
 
+**07:01 UTC follow-up:** a second status read and read-only SQLite `meta`
+query confirmed the event backlog fell to **33 pending updates**, but the
+index remains `dirty=true`, `caught_up=false`, and schema v6 with
+`failed_reconciliation_attempts=2`; there was still no scan in progress and
+the last scan was **151,920 seconds old**. The WAL remained at 128 MiB. I/O PSI
+was lower (`some/full avg10 4.03%/3.99%`), and root disk had **66.1 GiB free / 63%
+used**. This separates queue drainage from exact recovery: near-zero pending
+does not clear the persisted uncertainty or establish the missing paths have
+been reconciled. Machine-readable snapshot:
+`docs/qualification/live-prod-20261107/production-0701.json` (SHA-256
+`205b8cf23c18596ca35926f99989b8a4f9fe1d5403c8a859925c2ef03a39dfef`).
+
+The soak's next archived checkpoint at 07:00 UTC recorded **18,387.8 seconds**,
+**406,390 operations**, and **4,038 periodic exactness samples**, still with
+zero controlled crashes and no held readers; its terminal checks remain
+pending. Snapshot:
+`docs/qualification/all-features-20261107/soak-progress-0700.json` (SHA-256
+`f1fede4985a9a457cd204eb9a6903543b58e49568d1243091d46a1fddaeb59a8`).
+
 The VM also retained several failed transient test units from earlier
 qualification attempts. Inspection showed the focused Python reruns failed on
 incorrect module paths/class names, the isolated WAL retry first hit tmpfs
