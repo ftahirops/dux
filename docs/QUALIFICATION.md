@@ -8146,3 +8146,16 @@ the private staging graph and helper invariants; they do not test publication,
 event updates, v6 migration, query behavior, package upgrade, or rollback. No
 product code changed in this test recheck. Schema-v7 live publication remains
 an open production blocker.
+
+### Host-pressure-stopped schema-v7 test build — 2026-11-07 07:58 UTC
+
+An attempt to rebuild the focused staged-v7 test in a fresh `/dev/shm` Cargo
+target was stopped before the test binary ran. The first 10% CPU attempt was
+stopped after unrelated host compile activity pushed CPU PSI above the
+qualification guard; a resumed attempt was stopped when host CPU PSI reached
+36% avg10 and the test cgroup itself reached 42% CPU PSI. Both attempts used a
+2 GiB memory cap, no swap, and a tmpfs target. They are **incomplete runs**, not
+test failures and not passes. The temporary Rust assertion was removed because
+it never ran; the existing candidate-equivalent `staged_v7_path_graph...` test
+remains the only pass evidence for that fixture. `git diff --check` passed and
+the source worktree has no unverified test edit.
