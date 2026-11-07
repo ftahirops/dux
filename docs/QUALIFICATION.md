@@ -8096,3 +8096,18 @@ used**; `target/readiness` occupied **7.1 GiB**, while durable
 preserved failed indexes, test binaries, logs, and scale/failure fixtures; this
 pass only inventoried the contents and deleted nothing, to avoid destroying
 failure evidence needed for diagnosis.
+
+### Current lockfile and installed-binary security audit — 2026-11-07 07:35 UTC
+
+Re-ran `cargo audit` on the current `Cargo.lock` and the installed production
+binary. Both exited 0: the lockfile contains 229 dependencies with zero
+vulnerabilities and zero warnings, and the binary exposes auditable metadata
+for 202 dependencies with no advisory findings. Audit version was 0.22.2; the
+local RustSec database was at commit
+`309392b18f6b17022f82c701f300433126901068` (updated 2026-11-06 15:34 UTC).
+The lockfile SHA-256 is
+`fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`. Logs,
+binary hash/version, command exit statuses, and provenance are in
+`docs/qualification/security-audit-20261107/`. The audited binary is the
+installed older `e0cc915` production build, not the newer VPS2 candidate; this
+audit therefore does not qualify the candidate or prove runtime security.
