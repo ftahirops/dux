@@ -3607,6 +3607,74 @@ mod tests {
     }
 
     #[test]
+    fn priority_hinted_scan_indexes_same_complete_graph_as_unhinted_scan() {
+        let root = tmp("priority-scan-tree");
+        let _ = fs::remove_dir_all(&root);
+        write_file(&root.join("alpha/unchanged.bin"), 2);
+        write_file(&root.join("omega/nested/changed.bin"), 3);
+
+        let plain_db = tmp("priority-scan-plain-db");
+        let hinted_db = tmp("priority-scan-hinted-db");
+        rm_db(&plain_db);
+        rm_db(&hinted_db);
+        let common = ScanOptions {
+            include_pseudo: true,
+            ..Default::default()
+        };
+        rebuild_atomic(&plain_db, &root, &common).unwrap();
+        let hinted = ScanOptions {
+            priority_paths: vec![root.join("omega/nested")],
+            ..common
+        };
+        rebuild_atomic(&hinted_db, &root, &hinted).unwrap();
+
+        type DirentRows = Vec<(i64, i64, Vec<u8>, i64, i64, i64)>;
+        type InodeRows = Vec<(i64, i64, String, i64, i64)>;
+        fn indexed_rows(db: &Path) -> (DirentRows, InodeRows) {
+            let store = Store::open_ro(db).unwrap();
+            let dirents = store
+                .conn
+                .prepare("SELECT parent_dev,parent_inode,name,dev_id,inode,prime FROM dirents ORDER BY parent_dev,parent_inode,name")
+                .unwrap()
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let inodes = store
+                .conn
+                .prepare("SELECT dev_id,inode,kind,blocks,recursive_bytes FROM inodes ORDER BY dev_id,inode")
+                .unwrap()
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (dirents, inodes)
+        }
+
+        assert_eq!(indexed_rows(&plain_db), indexed_rows(&hinted_db));
+        rm_db(&plain_db);
+        rm_db(&hinted_db);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn rebuild_preserves_existing_reader_snapshot() {
         let dir = std::env::temp_dir().join(format!("dux-reader-{}", std::process::id()));
         let db = dir.with_extension("db");

@@ -11,9 +11,11 @@ set into the next full-root scan. jwalk moves child directory branches
 containing those hints to the front of the scheduling batch; the scan still visits
 the complete root and only a completed, verified observation can establish
 freshness. Hints received during a scan are retained for the following scan.
-The full local suite passes (296 passed, 2 ignored); strict Clippy, formatting,
-and diff checks also pass. No throughput or hinted-path latency improvement
-has yet been measured; the prior VPS2 report predates this source change.
+The full local suite passes (297 passed, 2 ignored); strict Clippy, formatting,
+and diff checks also pass. A same-fixture test confirms the complete indexed
+inode and dirent rows match with and without hints. No throughput or hinted-path
+latency improvement has yet been measured; the prior VPS2 report predates this
+source change.
 
 ## Latest 100k reconciliation-first qualification (18:17 UTC)
 
