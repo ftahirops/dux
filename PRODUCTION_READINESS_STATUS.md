@@ -1,10 +1,26 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 13:39 UTC
+**Updated:** 2026-11-07 13:49 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
 ## Live production evidence
+
+Latest read-only sample at **13:44 UTC**: the same daemon remains active, but
+the index is still dirty from fanotify overflow, about **11 h 15 min behind**,
+with the last full scan about **48 h 55 min ago**. Counters now show **118
+overflows**, **505,945 userspace updates dropped**, and **12 pending updates**;
+the index has 1,385,212 nodes. The DB remains 2,345,058,304 bytes, the WAL is
+128 MiB, and the root has **60 GiB available**. Journal records show one more
+overflow at 13:41 after the scale run; its exact causal relationship to the
+run is not provable from the log. The daemon is still making event commits but
+has not established a clean baseline.
+
+At **13:49 UTC**, it remains dirty and not caught up, with **118 overflows**,
+**505,945 dropped userspace updates**, and **7 pending updates**; it had
+committed further events since the previous sample. The overflow count has
+not increased since 13:41. Index freshness continues to age despite event
+commits.
 
 Read-only sample after the local scale run at **13:38 UTC**:
 
@@ -189,6 +205,16 @@ Rust tests now cover this behavior.
   running legacy watcher saw the generated churn, logged stale-handle events,
   and its overflow count increased during the run. Current post-run disk
   availability returned to 62 GiB.
+- An initial full Rust-suite attempt placed Cargo output and fixtures in
+  `/dev/shm`; it ran **282 passed, 1 failed, 2 ignored** because the
+  reconciliation test fixture was pruned as a pseudo filesystem. Updated that
+  test alone to pass `include_pseudo: true` for its explicit tmpfs root, then
+  reran the full suite with Cargo output and fixtures in tmpfs at low CPU
+  priority: **283 passed, 0 failed, 2 ignored**. Strict all-target/all-feature
+  Clippy with `-D warnings`, formatting, and diff checks passed. This keeps
+  build/test writes off the watched ext4 but does not test ext4-specific
+  fanotify or handle behavior. The tmpfs build and fixtures were removed after
+  the run; the earlier ext4-backed suite also passed 283 tests.
 - The independent VPS2 soak remains active at the latest archived sample
   (**13:11 UTC**): 40,564 s elapsed, 862,300 operations, 11 mutation bursts, no
   controlled crash rounds, and one 300-second held-reader phase with WAL

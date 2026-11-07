@@ -2776,11 +2776,19 @@ mod tests {
     fn in_place_reconciliation_is_noop_when_unchanged_and_tracks_add_delete() {
         let db = tmp("reconcile-db");
         let root = tmp("reconcile-root");
+        // The test root may live on tmpfs when `TMPDIR` isolates tests from the
+        // watched production filesystem. Include that explicitly pseudo
+        // filesystem so this test exercises reconciliation instead of pruning
+        // its own fixture tree.
+        let opts = ScanOptions {
+            include_pseudo: true,
+            ..ScanOptions::default()
+        };
         rm_db(&db);
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("existing")).unwrap();
         fs::write(root.join("existing/keep"), b"stable-data").unwrap();
-        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        rebuild_atomic(&db, &root, &opts).unwrap();
 
         let mut store = Store::open_rw(&db).unwrap();
         let stable_id = crate::store::path_graph_lookup(&store.conn, &root.join("existing/keep"))
@@ -2802,7 +2810,7 @@ mod tests {
              CREATE TRIGGER count_dirents_u AFTER UPDATE ON dirents BEGIN UPDATE reconcile_write_count SET n=n+1; END;
              CREATE TRIGGER count_dirents_d AFTER DELETE ON dirents BEGIN UPDATE reconcile_write_count SET n=n+1; END;",
         ).unwrap();
-        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        reconcile_in_place(&mut store, &root, &opts).unwrap();
         assert_eq!(
             store
                 .get_meta("last_reconcile_attempt_result")
@@ -2825,7 +2833,7 @@ mod tests {
         );
 
         fs::write(root.join("aaa-new"), b"new-value").unwrap();
-        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        reconcile_in_place(&mut store, &root, &opts).unwrap();
         assert!(
             crate::store::indexed_path(&store.conn, &root.join("aaa-new"))
                 .unwrap()
@@ -2838,17 +2846,17 @@ mod tests {
         );
 
         fs::remove_file(root.join("aaa-new")).unwrap();
-        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        reconcile_in_place(&mut store, &root, &opts).unwrap();
         assert!(
             crate::store::indexed_path(&store.conn, &root.join("aaa-new"))
                 .unwrap()
                 .is_none()
         );
         fs::hard_link(root.join("existing/keep"), root.join("hardlink")).unwrap();
-        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        reconcile_in_place(&mut store, &root, &opts).unwrap();
         let oracle_db = tmp("reconcile-oracle-db");
         rm_db(&oracle_db);
-        rebuild_atomic(&oracle_db, &root, &ScanOptions::default()).unwrap();
+        rebuild_atomic(&oracle_db, &root, &opts).unwrap();
         let oracle = Store::open_ro(&oracle_db).unwrap();
         for table in ["inodes", "dirents"] {
             let sql = format!("SELECT * FROM {table} ORDER BY 1,2,3");
