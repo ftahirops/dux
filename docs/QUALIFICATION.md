@@ -6955,3 +6955,15 @@ latest journal snapshot SHA-256 is
 `b54140929f698f515824b792879d6e9fd3039bd2f3cb0321e84cf6a82980f65f` and
 soak-progress snapshot SHA-256 is
 `f727a41bd6f9bd940bb91402956904273b802d24955ffacf08e1e77319823a06`.
+
+**02:49 UTC runtime checkpoint:** the crash-recovery suite advanced to
+**22/30** successful rounds, including the latest random-timing crash. The
+matrix and both soak services remain active with zero restarts. Matrix peak
+memory is 1.34 GiB. Host CPU PSI `some avg10` was 56.38%, load1 3.08, and CPU
+`full` pressure 0%. The current-candidate soak's latest checkpoint was
+**3,241.8 seconds, 72,889 mutations, and 728 exactness checks**, with sampled
+maxima of 7,548 KiB RSS, 12 file descriptors, and a 4,251,872-byte WAL. The
+latest journal snapshot SHA-256 is
+`6040a37f2c895ea35b6ce46083ad35253a8c72c0ee6babe7c39e2912fac34d72`; the soak
+progress snapshot SHA-256 is
+`a7f60c00fcaff45a016e325550e60be7b1684a855c16803a27cc7d86ab67c158`.
