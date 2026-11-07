@@ -7790,3 +7790,75 @@ identity information and is not an acceptable fix. The source trace is in
 `inodes`/`dirents`, and test/staging-only `PATH_GRAPH_TABLES_SQL`). No product
 code was changed in this review; schema-v7 publication remains a major open
 release gate.
+
+## Consolidated test coverage, failures, and open gates — 2026-11-07
+
+This appendix consolidates the test types, observed failures, incomplete runs,
+and unresolved production gates recorded above. Status applies only to the
+named build, workload, filesystem, and point-in-time evidence. A passing suite
+means its assertions passed; it does not override a separate coverage warning,
+an untested environment, or an open release gate. Interrupted work is recorded
+as incomplete, not silently counted as either a pass or a product failure.
+
+### Candidate identity and completed evidence
+
+The current candidate is source commit
+`0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5` (source-tree SHA-256
+`39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3`) with
+static executable SHA-256
+`952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287`.
+Unless stated otherwise, candidate-bound results below refer to this exact
+binary on VPS2's Ubuntu 24.04 / ext4 environment.
+
+| Test type | Result and evidence | Limits / interpretation |
+| --- | --- | --- |
+| Rust tests, all targets/features | **268/268 passed**; pinned Rust 1.99.1; log `docs/qualification/all-features-20261107/cargo-test.log`. | Unit/integration test suite only; does not qualify live-root recovery, packaging transitions, or endurance. |
+| Python harness regression | **296/296 passed** on pushed commit `a62ac2d7e464d33f0fda6195d80bee6e98b6c0cb`; log `docs/qualification/python-suite-a62ac2d/test.log`. | Harness regression is not a substitute for each end-to-end suite. |
+| Formatting and static lint | `rustfmt --check` and strict all-target/all-feature Clippy with `-D warnings` passed; evidence in `docs/qualification/all-features-20261107/lint-and-format.log`. | Static checks do not prove runtime safety or correctness. |
+| Dependency and binary security audit | Refreshed RustSec scan: **229 locked dependencies, zero known vulnerabilities, zero warnings**; candidate binary scan: **202 dependencies, zero findings**. Evidence is recorded in the Nov. 7 RustSec section and `docs/qualification/security-audit-a62ac2d/`. | Snapshot-based advisory scans; not a general source audit, penetration test, or proof of no vulnerabilities. |
+| P0 crash/overflow/CPU/churn/disk/coverage/capability/OOM/pressure/mount/WAL/startup/retry/root matrix | Derived rollup reports **14/14 suite statuses passed**, tied to candidate and fault binary hashes in `target/readiness/vps2-qualification-20261106/p0-rollup-static-0b81fa8.json`. Crash suite exercised 30 recovery rounds; bounded disk, overflow, churn, pressure, mount, startup, retry, and related cases are individually reported in the referenced source reports. | The root suite's scan result is explicitly **incomplete coverage** because of 55 inode-incarnation conflicts. Thus 14/14 assertion statuses do not mean complete root coverage or a release pass. These are bounded fault scenarios, not every fault ordering. |
+| Root filesystem scan | Indexed 880,542 files, 110,175 directories, and 1,029,045 entries; accounting and SQLite integrity assertions passed. | **Coverage incomplete:** 55 conflicting inode incarnations under schema-v6 `(dev,inode)` publication. Do not call this a clean exact root snapshot. |
+| 100k / 1m / 10m scale and performance | Exact candidate passed all three calibrated ext4 sizes. The 10m run completed in **867.58 s**, peak RSS **161.4 MiB**, with fixture truth of 9,919,542 inodes, 560,762,880 allocated bytes, and 10,019,542 dirents. | Specific VPS2 host, ext4, two scan jobs and stated cgroup profile; host background load was present. Not a universal hardware/filesystem performance guarantee. |
+| High-volume held-reader WAL guard | Exact candidate crossed the 256 MiB guard at 268,541,632 bytes; index remained stable while 965 events queued. On reader release, it resumed, converged exactly, passed history/integrity, and truncated WAL to zero in **236.693 s** with no drops or kernel overflows. | One Ubuntu 24.04 / kernel 6.8 / ext4 run on a disposable loop image. Does not prove power-loss behavior or every reader/workload duration. |
+| Package contents and file lifecycle | Revision-23 DEB/RPM artifact manifests and checksums verified; file upgrade, rollback, removal/state preservation, and clean-install tests passed in Debian 12 and Rocky 9 containers. | Does not prove installed-unit activation, package hooks under all supported distros, RPM runtime activation, or live daemon upgrade. |
+| Packaged service policy/runtime smoke | Extracted revision-23 DEB binary ran in a transient systemd unit with packaged security/resource policy; `systemd-analyze verify` passed for `dux.service` and `dux-tunnel.service`. Isolated baseline, create/rename/delete/replace/hardlink, manual restart, intentional SIGKILL/restart recovery, final exactness, and SQLite integrity passed. | Not an installed package activation or production upgrade. A first shared-filesystem attempt was correctly marked dirty after an unrelated ClickHouse compound stale-FID event; isolated loop-filesystem rerun passed. |
+| Candidate 72-hour soak | Active service `dux-soak-candidate-0b81fa8.service` was observed active with zero restarts at 06:51 UTC. Last persisted full progress snapshot in the evidence set (05:38 UTC) showed 13,392.6 s, 300,100 operations, and 2,986 periodic exactness samples. | **In progress, not passed.** At that snapshot there were no held readers or controlled crashes; 72 hours, scheduled phases, final exactness, history, and SQLite integrity are still required. Confirm and archive a fresh progress/final report before crediting later elapsed time. |
+
+### Failure and incomplete-run catalog
+
+| Failure class | Observed evidence | Current disposition |
+| --- | --- | --- |
+| Live root identity/coverage conflict | 55 inode incarnations collide when the staged path-instance graph is projected into schema-v6 `(dev,inode)` tables. The scan returns explicit incomplete coverage. | Open product/schema blocker. Publish path-instance identity atomically through schema-v7, events, aliases, recursive queries, migration/rollback, and exactness tests. Do not hide the conflict or select one incarnation. |
+| Production event-stream loss and stale index | Read-only production sample at 06:40 UTC: old v0.6.3 rev66, schema v6, dirty after fanotify overflow, uncertain, two failed reconciliation attempts, about 4h12m behind, and no recent rescan completion. Other unresolved FID event shapes remain outside the candidate's narrow stale target-only `FAN_ATTRIB` filter. | **Production recovery remains unproven.** No production mutation was performed. Need a controlled, exact recovery path and stable exact baseline before canary consideration. |
+| Older r89 soak exactness timeout | At 480,200 operations / 6h07m55s, the 180-second pipeline wait ended with 41 pending updates. Post-stop comparison found 27 path and 18 inode mismatches; all differed in the final 64 workload operations. | Count as a **failed qualification run**, not a pass. Tail correlation is consistent with unfinished work but does not prove it would self-heal. Current candidate must pass beyond that operation count and terminal checks. |
+| Resource-constrained scale attempt | Initial 10m run with a 3 GiB worker cap was killed by the cgroup memory limit; rerun with 4 GiB completed. Historical four-job 10m profile peaked at 909,528 KiB and failed the 256 MiB RSS budget; later calibrated candidate profile passed at 161.4 MiB. | Failed configurations remain recorded. Passing result applies only to the later exact candidate and calibrated profile; avoid carrying old profile claims forward. |
+| Host-pressure stops / interrupted builds or tests | Multiple historical qualification attempts were stopped at documented CPU-PSI/load guardrails; some produced no terminal test result. One old shared-root systemd smoke saw an unrelated ClickHouse stale compound FID, correctly marked dirty, before the isolated rerun. | **Incomplete environment-limited attempts**, not product passes. Do not treat them as candidate defects unless a reproducible candidate assertion fails under admitted conditions. Isolated runtime smoke later passed. |
+| WAL test scope gap | Original P0 WAL test peaked at only 1,615,072 bytes, far below the production 128 MiB guard and observed ~269.7 MB checkpoint stall. | The separate exact-candidate 256 MiB held-reader test now covers this bounded gap; production's historical reader/pinning cause remains unproven. |
+
+### Open tests and production gates
+
+1. Finish and archive the exact-binary 72-hour soak, including the six-hour
+   held-reader phase, controlled restart/crash phases, periodic exactness,
+   terminal filesystem/index equality, event-history verification, and SQLite
+   integrity. Preserve the run's binary and harness hashes.
+2. Implement and qualify schema-v7 path-instance publication. Include live
+   event application, mount aliases, recursive queries, v6 migration, upgrade,
+   rollback, interrupted migration, and exactness under inode reuse.
+3. Resolve production's persisted uncertainty and prove exact recovery on the
+   actual production filesystem instance. The VPS2 ext4 handle probe used a
+   different filesystem instance; it does not qualify production FID behavior.
+4. Complete installed-package service activation and upgrade/rollback tests in
+   disposable systemd-enabled Debian/Ubuntu and Rocky environments. VPS2 has no
+   `/dev/kvm`, so the standard guest lifecycle gate could not run there.
+5. Rebuild and rerun all release gates against the final source/package hashes
+   after schema and production fixes; repeat security/dependency review and
+   confirm signatures and artifact provenance.
+6. Only after those gates pass, run the monitored 24-hour production canary
+   with a stable exact baseline, tested rollback, and explicit release-owner
+   acceptance.
+
+As of this appendix, the candidate has strong unit, harness, static-analysis,
+bounded fault, scale, WAL, and transient-systemd evidence, but is **not
+qualified as production-ready**. The incomplete root coverage, dirty production
+index, open schema-v7 work, unfinished soak, and remaining installed-package
+and canary gates prevent a 100% production-readiness claim.
