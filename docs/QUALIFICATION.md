@@ -7419,3 +7419,44 @@ ext4 instance, not on this production device. Do not clear the persisted retry
 circuit or force a production scan based on this evidence; the candidate must
 be exercised through a controlled, exact recovery path before claiming a clean
 live baseline.
+
+### Exact-candidate lint and all-features Rust regression — 2026-11-07 05:24–05:38 UTC
+
+On VPS2, ran `rustfmt --check --edition 2021 src/*.rs` and strict Clippy with
+`cargo clippy --locked --all-targets --all-features -- -D warnings`; both
+passed. Then ran
+`cargo test --locked --all-targets --all-features`; all **268 tests passed**
+with **0 failures** in **129.11 seconds**. The build and tests used candidate
+source commit `0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5`, the pinned Rust
+1.99.1 toolchain, and the same musl release binary SHA-256
+`952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287` used by
+the soak and qualification suites. `Cargo.lock` SHA-256 was
+`fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`.
+
+The all-features test worker was limited to 25% CPU and 2 GiB memory; observed
+peak was 1.0 GiB with no swap. Clippy's bounded worker also passed without
+warnings. Logs are retained in
+`docs/qualification/all-features-20261107/cargo-test.log`
+(SHA-256
+`e83f9fc80750690cd20e4e599332cc5a39d4cb1b3cf0b0df777572809d57c6ba`) and
+`docs/qualification/all-features-20261107/lint-and-format.log`
+(SHA-256
+`0e9a4d2d96c0ec7d9af8053088af0fea719a06b9115da35f8959f922d3059c4c`).
+
+At **05:38 UTC**, the dedicated 72-hour soak remained active with zero
+restarts after **13,392.6 seconds** and **300,100 filesystem operations**. It
+had completed three mutation bursts; the next held-reader phase is scheduled
+at six hours and the first controlled restart at twelve hours. There were no
+reader or restart phases yet, and final exactness, history, and SQLite
+integrity remain pending. The run had 2,986 periodic exactness samples; the
+maximum observed convergence was 1.5 seconds, daemon RSS 8,916 KiB, and WAL
+10,584,312 bytes. A point-in-time progress snapshot is retained at
+`docs/qualification/all-features-20261107/soak-progress-0538.json`
+(SHA-256
+`77d894700bea9532140ab92cb1decf6cca82e24a08bd743320a2591082dcb8da`). This
+is an interim checkpoint, not a soak pass.
+
+These checks add no production-host validation. The exact live recovery and
+complete root coverage gates remain open, as do v7 path-instance publication,
+production canary, package lifecycle for this exact candidate, and the
+remaining phases and final checks of the 72-hour soak.
