@@ -1,20 +1,22 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 18:00 UTC
+**Updated:** 2026-11-07 18:20 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Latest 100k reconciliation-first qualification (17:58 UTC)
+## Latest 100k reconciliation-first qualification (18:17 UTC)
 
-The updated candidate passed the production-shaped churn suite on VPS2 using
-an isolated disposable ext4 loop filesystem: **100,000 seeded files, 20,000
+The clean optimized build from pushed commit `ab8735c` passed the
+production-shaped churn suite on VPS2 using an isolated disposable ext4 loop
+filesystem: **100,000 seeded files, 20,000
 mutations in ten 2,000-operation batches, and a full reconciliation forced
 during concurrent writes at the midpoint**. Every batch matched the
 independent filesystem oracle for paths, inode allocations, and all rollups;
 history continuity passed; the harness recorded zero dropped indexed events
-and no uncertain status at checkpoints. Runtime was **953 seconds** wall / **217
-seconds** worker CPU at a 25% one-core quota, with a 4 GiB cgroup memory limit
-and 1.2 GiB measured peak. Maximum batch convergence was **153 seconds**.
+and no uncertain status at checkpoints. The qualification unit ran for **874
+seconds** wall / **201 seconds** CPU at a 25% one-core quota, with a 4 GiB
+cgroup memory limit and 1.2 GiB measured peak. Maximum batch convergence was
+**118 seconds**.
 
 The midpoint scan observed transient coverage errors while files were changing;
 Dux retained uncertainty, retried after bounded backoff and pressure admission,
@@ -26,12 +28,14 @@ the daemon log; this run proves recovery from those losses in this fixture, not
 that ring loss is eliminated.
 
 The passing candidate binary SHA-256 is
-`a908849a5d793cf76c15af8e3e1c68000f9fe899ef8badcd39d67777fc375ae2`, with
+`2b618673cddd859e08999cffd2af289f5d15d37b8d133f16e616ddfddd2fbba0`, with
 embedded source SHA-256
-`34836e74490006c084089ec6a677d67719cfd517de115baf6c8484463c48e76e`.
+`9d472c81664a1e709f60c280d27a5f2b4a3637811239aa97869f495bbf94373b`.
 Harness SHA-256 is
 `fd669c3691da97b2fe899b441724ccd01a2839d10105ddc0a8ec4ea47123f2f2`.
-Machine-readable result: [100k churn report](docs/qualification/scan-first-churn-20261107/report-fixed.json).
+Machine-readable result: [exact-commit 100k churn report](docs/qualification/scan-first-churn-20261107/report-ab8735c.json).
+An earlier same-code run also passed before the clean-commit repeat:
+[first passing report](docs/qualification/scan-first-churn-20261107/report-fixed.json).
 
 This followed a failed 100k startup attempt on the previous candidate. That
 run stopped before mutations because repeated hint-ring loss kept status
