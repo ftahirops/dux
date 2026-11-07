@@ -7256,7 +7256,10 @@ a controlled recovery plan is qualified.
 
 The exact-source VM `cargo-test.log` contains a passing
 `stale_target_attrib_is_ignored_only_for_a_known_handle_capable_filesystem`
-test; the full recorded result is 268 passed, 0 failed. The VM's ext4 root has
+test and a passing `startup_handle_probe_prequalifies_stale_attrib_filter`
+test; the latter obtains a real filesystem handle, unlinks its target, and
+checks the resulting stale-FID path before ordinary event handles are seen.
+The full recorded result is 268 passed, 0 failed. The VM's ext4 root has
 the same filesystem ID seen in the live daemon's stale-FID diagnostics, and a
 read-only kernel handle probe on ext4 succeeded. The current candidate soak's
 systemd journal has no `fanotify event has no resolvable` warnings so far. This
