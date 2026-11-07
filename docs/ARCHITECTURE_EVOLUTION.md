@@ -1,9 +1,11 @@
 # Dux architecture decision: reconciliation-first
 
 **Decision status:** selected source default for the production-readiness work;
-`dux daemon` drains fanotify as hints,
-schedules periodic scans, and merges complete observations into the existing
-v7 database with value-guarded changed-row writes. It is not qualified for
+`dux daemon` drains fanotify as lossy invalidation hints,
+schedules periodic full-root scans, and merges complete observations into the existing
+v7 database with value-guarded changed-row writes. The current implementation
+does **not** prioritize hinted directories or run scoped scans; resolved hints
+only affect freshness and whether an observation needs a follow-up. It is not qualified for
 production-scale performance or sustained churn. This supersedes the earlier event-journal-first
 redesign in this file and the corresponding draft in
 [`DEVELOPMENT_SPECIFICATION.md`](DEVELOPMENT_SPECIFICATION.md).
@@ -57,9 +59,9 @@ long-run cadence remain unqualified.
 
 ```mermaid
 flowchart LR
-  FS[Filesystem state] --> S[Periodic reconciliation scan]
-  H[Fanotify hints] --> D[Bounded dirty-directory set]
-  D --> S
+  FS[Filesystem state] --> S[Periodic full-root reconciliation scan]
+  H[Fanotify hints] --> D[Bounded hint pipeline]
+  D -->|invalidate freshness or request follow-up on loss| S
   S -->|changed rows + observations| DB[(SQLite observed-state index)]
   S -->|overflow/error/age| F[Freshness and coverage status]
   DB --> Q[Queries]
@@ -70,8 +72,10 @@ flowchart LR
 ### Scan and update
 
 - A full walk of each configured filesystem runs on a cadence chosen from the
-  measured freshness SLO. Hinted directories receive priority; the full walk
-  remains the backstop for missed hints, restarts, and overflow.
+  measured freshness SLO. The current candidate does not use hints to reorder
+  traversal or select subtrees; the full walk is the only reconciliation path.
+  Hinted-scope prioritization remains unimplemented and must not be represented
+  as shipped behavior.
 - Scanning compares the current stat tuple with the existing row and writes
   only changed metadata. Traversal is still O(number of entries); unchanged
   rows reduce SQLite writes, not directory enumeration or stat work.
@@ -161,7 +165,7 @@ root requires an offline maintenance operation in the documented procedure
 | 0. Restore automatic recovery and diagnose throttling | Qualify bounded automatic retry for the existing reconciliation circuit, then compare CPU targets on a controlled trace while holding event rate, queue size, cgroup quota, and workload constant. | Repeated runs show retry convergence or a clear terminal cause, and report event rates, overflows, CPU/I/O pressure, and scan recovery. No production setting changes without a qualified rollback. | Scan-first retries no longer use the legacy permanent circuit. One CPU target comparison remains open. |
 | 1. Establish schema-v7 path identity | Persist distinct path instances and mount identity; migrate and verify aliases, hardlinks, non-UTF8 names, inode reuse, and history while preserving rollback. | Independent path/object/rollup oracle agrees before the incremental reconciler is built on this schema. | Implemented in candidate source and covered by migration/invariant tests. Production remains on schema v6; rollout and rollback are unqualified. |
 | 2. Implement periodic full reconciliation with changed-row writes | Add last-observed timestamps, per-scope generation/progress, automatic periodic scans, and changed-row writes. Failed scopes preserve prior rows and remain visibly incomplete. A scan may publish last-observed data without waiting for event replay; queued events remain hints for follow-up work. | Under quiescent fixtures, paths, allocations, and rollups exactly match an independent oracle. Under concurrent churn, no false “current/exact” state appears; after churn stops, the next complete scan converges. | Default source mode performs 15-minute full-root observations and value-guarded changed-row writes. A 1.37M static scan sample exists; concurrent churn and the 15-minute freshness SLO remain unqualified. |
-| 3. Add bounded event hints | Reduce the reader to coalescing directory/filesystem hints. Overflow widens repair scope and schedules scans; it does not stop the scan scheduler. | Forced kernel overflow and userspace hint-capacity saturation both converge without manual circuit reset. Memory stays within budget; unresolved scopes remain visible. | Implemented with bounded reader/resolver queues. One ext4 fixture passed with a real kernel overflow and userspace ring loss; recovery/accounting/exact state completed in 13.063 s. Broader rates, sustained churn, and other filesystems remain open. Evidence: [VPS2 overflow run](qualification/scan-first-overflow-20261107/report.json). |
+| 3. Add bounded event hints | Reduce the reader to bounded directory/filesystem hints. Overflow widens repair scope and schedules scans; it does not stop the scan scheduler. | Forced kernel overflow and userspace hint-capacity saturation both converge without manual circuit reset. Memory stays within budget; unresolved scopes remain visible. | Bounded reader/resolver and overflow-triggered full-root recovery are implemented. One ext4 fixture passed with a real kernel overflow and userspace ring loss; recovery/accounting/exact state completed in 13.063 s. Hints do not yet prioritize directories or cause scoped scans. Broader rates, concurrent churn, and other filesystems remain open. Evidence: [VPS2 overflow run](qualification/scan-first-overflow-20261107/report.json). |
 | 4. Measure the 15-minute target | Run the 1.37M-entry production-shaped fixture and then representative production workload. Measure full-cycle time, per-scope maximum observation age, read/stat rate, CPU, I/O, memory, SQLite writes, and missed cycles. | Every monitored scope meets the agreed age SLO for 72 hours under the target workload, or the product exposes a revised SLO with evidence. If the scan takes 2.3 minutes, schedule and measure the remaining interval so worst-case path age—not just scan start interval—meets the 15-minute target. | Not qualified. A 72-hour VPS2 soak is running on an earlier candidate; the production daemon is still more than 52 hours since its last scan. |
 | 5. Add build-tree quota/volume adapters | On disposable ext4 and XFS fixtures, compare project quota block/inode counters against independent tree totals, including creation, deletion, rename, hardlinks, and project-boundary operations. | Exact documented counters under supported operations; clear behavior for unsupported filesystems and paths. No production filesystem feature or mount change is part of this stage. | Deferred; no quota adapter is implemented. |
 | 6. Integrate and qualify release | Preserve package/security gates, disk limits, service rollback, and the existing fault/scale matrix. Run the exact release artifact. | P0, 100k/1m/10m, overflow/recovery, low-disk, security/package lifecycle, 72-hour endurance, and 24-hour canary pass with source/binary/config/fixture identities recorded. | Not release-qualified. This overflow run used a GNU release build, not the packaged static-musl artifact. Scale matrix, 72-hour soak, package rollback, and production canary remain open. |
