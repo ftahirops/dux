@@ -8159,3 +8159,17 @@ test failures and not passes. The temporary Rust assertion was removed because
 it never ran; the existing candidate-equivalent `staged_v7_path_graph...` test
 remains the only pass evidence for that fixture. `git diff --check` passed and
 the source worktree has no unverified test edit.
+
+### VPS2 soak first held-reader phase — 2026-11-07 07:59 UTC
+
+The candidate soak remains active with zero worker restarts. At this checkpoint
+it had run for 21,937.8 seconds and completed 483,886 reported mutations,
+4,808 exact samples, and six hourly bursts. Its first reader held a 2,499-inode
+snapshot for 300 seconds; after release, WAL reclamation passed. Peak sampled
+WAL was 265,336,272 bytes (below the 268,435,456-byte guard target), peak RSS
+9,872 KiB, and peak descriptors 13. Sample convergence was 413 ms median,
+847 ms p95, and 2,483 ms maximum. No controlled crash phase has run yet; final
+exactness, history, and SQLite integrity are still pending. The complete
+intermediate progress snapshot and digest are in
+`docs/qualification/soak-candidate-20261107/`; this checkpoint is not a soak
+pass or release qualification.
