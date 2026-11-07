@@ -197,6 +197,11 @@ Rust tests now cover this behavior.
   scan-first test binary. Final exactness/history checks are pending; 14
   qualification suites remain unrun. This is not a completed soak or a
   qualification of the new architecture.
+- A read-only SSH check at **13:39 UTC** confirmed that exact soak worker and
+  daemon are still running on VPS2 (11 h 45 min elapsed), with the recorded
+  binary hash unchanged. VPS2 had **20 GiB disk available** and **2.6 GiB
+  memory available**. It remains reserved for the active run and was not used
+  for additional testing.
 - No controlled queue-ioctl calibration, representative event replay, overflow
   comparison, 24-hour canary, or live rollout has been completed. The VPS2
   72-hour soak remains active; its report still lists 14 other qualification
