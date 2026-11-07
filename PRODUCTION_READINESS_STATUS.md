@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 18:20 UTC
+**Updated:** 2026-11-07 20:46 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -15,8 +15,48 @@ freshness. Hints received during a scan are retained for the following scan.
 The full local suite passes (297 passed, 2 ignored); strict Clippy, formatting,
 and diff checks also pass. A same-fixture test confirms the complete indexed
 inode and dirent rows match with and without hints. No throughput or hinted-path
-latency improvement has yet been measured; the prior VPS2 report predates this
-source change.
+latency improvement has yet been measured. Exact-commit churn qualification
+for this source change is recorded below and is currently inconclusive.
+
+## Exact-commit c323aee churn qualification (19:01–19:59 UTC)
+
+The optimized `c323aee` candidate was exercised on VPS2 with a 100,000-file
+ext4 loop image, 20,000 seeded mutations, a 25% one-core CPU quota, and a 4
+GiB memory cap. This is the commit that adds best-effort traversal ordering
+from resolved directory hints. Its result is **inconclusive and blocks
+release**:
+
+- The first run failed after 6,000 mutations. The independent filesystem
+  oracle found 276 path/identity mismatches that remained through 180 seconds
+  of watcher cycles, while daemon status reported no dirty reason, uncertainty,
+  dropped hints, or kernel overflow. This is a false-clean correctness
+  failure, regardless of whether the ordering change caused it.
+- Five reruns of the exact same candidate and fixture passed all 20,000
+  mutations, with maximum batch convergence of 148.9 s, 134.0 s, 126.9 s,
+  125.2 s, and 118.0 s.
+- An older `ab8735c` binary passed the same diagnostic-harness fixture, with
+  maximum batch convergence of 114.9 s. This is not enough to establish a
+  performance or reliability regression: each is a single run with variable
+  concurrent load.
+
+All five passing runs, as well as the failed run, recorded zero dropped events
+and zero kernel overflow notifications. Because the failure was not retained
+with the newer row-level diagnostics and was not reproduced, its cause remains
+unknown.
+The added harness diagnostics now report actual missing, extra, and
+wrong-identity dirents, with a unit test for those cases. Further exact-commit
+reproduction is needed before this candidate can be called correct or better.
+Reports, run identities, and the failed-run metadata are in
+[`docs/qualification/scan-first-churn-c323aee-20261107/`](docs/qualification/scan-first-churn-c323aee-20261107/).
+The latest two reruns used the same optimized binary SHA-256
+`c8c3e619fad2a3e28a32dff986ff3d81ec414168f45fabeaee75bd91193b2aed`; its
+diagnostic harness SHA-256 is `d4ac45bfc97f4ed762ec36805f3c8361a5435782ddc65d3834754a707b682649`.
+The last two took 805.7 and 850.0 seconds wall, used 168.9 and 194.2 seconds
+CPU, and peaked at 1.1G and 1.2G memory respectively, with no swap peak.
+VPS2 `/` had 19 GiB free after the runs; `/dev/shm` was restored to 3 GiB
+with the separate soak still active. The failure remains a release blocker
+until its cause and false-clean status behavior are explained. Production
+remains untouched.
 
 ## Latest 100k reconciliation-first qualification (18:17 UTC)
 
@@ -112,8 +152,8 @@ run, not production-scale or endurance qualification. The packaged static-musl
 build, 100k/1m/10m budgets, additional filesystems/kernels, 72-hour soak, and
 production canary remain open. No production service or settings were changed.
 
-The current source test set passed **294 tests** (2 ignored); the readiness
-Python harness passed **36 tests**; strict all-target/all-feature Clippy,
+The prior source test set passed **294 tests** (2 ignored); the readiness
+Python harness now has **37 tests**; strict all-target/all-feature Clippy,
 formatting, and diff checks passed. The soak process on VPS2 remains separate
 and was not restarted or modified by this work.
 

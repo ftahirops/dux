@@ -32,6 +32,32 @@ class ReadinessHarnessTests(unittest.TestCase):
             "incomplete",
         )
 
+    def test_path_mismatch_diagnostics_identify_wrong_and_extra_rows(self):
+        import sqlite3
+
+        conn = sqlite3.connect(":memory:")
+        conn.execute("ATTACH DATABASE ':memory:' AS truth")
+        conn.execute(
+            "CREATE TABLE truth.entries(parent_dev INTEGER,parent_inode INTEGER,name BLOB,dev INTEGER,inode INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE main.dirents(parent_dev INTEGER,parent_inode INTEGER,name BLOB,dev_id INTEGER,inode INTEGER)"
+        )
+        conn.executemany(
+            "INSERT INTO truth.entries VALUES(?,?,?,?,?)",
+            [(1, 2, b"wrong", 3, 4), (1, 2, b"missing", 3, 5)],
+        )
+        conn.executemany(
+            "INSERT INTO main.dirents VALUES(?,?,?,?,?)",
+            [(1, 2, b"wrong", 3, 99), (1, 2, b"extra", 3, 6)],
+        )
+
+        samples = READINESS.path_mismatch_samples(conn)
+        self.assertEqual([row[0] for row in samples], ["extra", "missing_or_wrong", "missing_or_wrong"])
+        self.assertIn(("missing_or_wrong", 1, 2, b"wrong", 3, 4, 3, 99), samples)
+        self.assertIn(("missing_or_wrong", 1, 2, b"missing", 3, 5, None, None), samples)
+        conn.close()
+
     def test_complete_root_coverage_passes(self):
         self.assertEqual(
             READINESS.suite_result_status("root", {"coverage_complete": True}),

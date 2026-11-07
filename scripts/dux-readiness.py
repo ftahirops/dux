@@ -86,6 +86,28 @@ def snapshot(db, immutable=False, attachments=()):
     return connection
 
 
+def path_mismatch_samples(conn, limit=16):
+    """Return concrete missing, extra, and wrong-identity dirent rows."""
+    return conn.execute(
+        """SELECT issue,parent_dev,parent_inode,name,expected_dev,expected_inode,actual_dev,actual_inode
+           FROM (
+             SELECT 'missing_or_wrong' AS issue,e.parent_dev,e.parent_inode,e.name,
+                    e.dev AS expected_dev,e.inode AS expected_inode,
+                    d.dev_id AS actual_dev,d.inode AS actual_inode
+             FROM truth.entries e LEFT JOIN main.dirents d
+               ON d.parent_dev=e.parent_dev AND d.parent_inode=e.parent_inode AND d.name=e.name
+             WHERE d.name IS NULL OR d.dev_id!=e.dev OR d.inode!=e.inode
+             UNION ALL
+             SELECT 'extra' AS issue,d.parent_dev,d.parent_inode,d.name,
+                    NULL AS expected_dev,NULL AS expected_inode,d.dev_id,d.inode
+             FROM main.dirents d LEFT JOIN truth.entries e
+               ON e.parent_dev=d.parent_dev AND e.parent_inode=d.parent_inode AND e.name=d.name
+             WHERE NOT(d.parent_dev=d.dev_id AND d.parent_inode=d.inode) AND e.name IS NULL
+           ) ORDER BY issue,parent_dev,parent_inode,name LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+
 def filesystem_snapshot(tree, output_dir):
     """Materialize filesystem truth on disk so large exact checks stay bounded."""
     descriptor, filename = tempfile.mkstemp(prefix="dux-truth-", suffix=".sqlite", dir=output_dir)
@@ -157,9 +179,11 @@ def check_index(db, tree=None, immutable=False):
                     ON e.parent_dev=d.parent_dev AND e.parent_inode=d.parent_inode AND e.name=d.name
                     WHERE NOT(d.parent_dev=d.dev_id AND d.parent_inode=d.inode) AND e.name IS NULL)""").fetchone()[0]
             if path_mismatch:
-                actual = conn.execute("SELECT parent_dev,parent_inode,name,dev_id,inode FROM dirents WHERE NOT(parent_dev=dev_id AND parent_inode=inode) ORDER BY parent_dev,parent_inode,name LIMIT 8").fetchall()
-                expected = conn.execute("SELECT parent_dev,parent_inode,name,dev,inode FROM truth.entries ORDER BY parent_dev,parent_inode,name LIMIT 8").fetchall()
-                raise AssertionError(f"path/identity mismatch count={path_mismatch}; indexed_sample={actual!r}; filesystem_sample={expected!r}")
+                samples = path_mismatch_samples(conn)
+                raise AssertionError(
+                    f"path/identity mismatch count={path_mismatch}; "
+                    f"mismatch_samples={samples!r}"
+                )
             inode_mismatch = conn.execute("""SELECT COUNT(*) FROM (
                     SELECT i.dev_id,i.inode FROM main.inodes i LEFT JOIN truth.inodes f ON f.dev=i.dev_id AND f.inode=i.inode
                     WHERE f.inode IS NULL OR f.blocks!=i.blocks

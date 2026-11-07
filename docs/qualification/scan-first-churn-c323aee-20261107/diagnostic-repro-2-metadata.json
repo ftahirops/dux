@@ -1,0 +1,35 @@
+{
+  "candidate_commit": "c323aee",
+  "source_sha256": "c61580976ecf6911f21aed2e4144feea520eac21b281b4bd0f883e2b0d4194d5",
+  "binary_sha256": "c8c3e619fad2a3e28a32dff986ff3d81ec414168f45fabeaee75bd91193b2aed",
+  "harness_sha256": "d4ac45bfc97f4ed762ec36805f3c8361a5435782ddc65d3834754a707b682649",
+  "kernel": "6.8.0-147-generic",
+  "started_at": "2026-11-07T20:04:15Z",
+  "finished_at": "2026-11-07T20:17:40Z",
+  "status": "passed",
+  "fixture": {
+    "filesystem": "ext4 disposable loop image",
+    "seed_files": 100000,
+    "image_mib": 2048,
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096,
+    "seed": 20261022,
+    "mutations": 20000,
+    "batch_size": 2000,
+    "exact_batches": 10
+  },
+  "result": {
+    "all_paths_inodes_allocations_and_rollups_exact": true,
+    "history_continuity": true,
+    "kernel_events_seen": 55047,
+    "updates_committed": 0,
+    "dropped_events": 0,
+    "kernel_overflow_notifications": 0,
+    "maximum_batch_convergence_ms": 118010,
+    "wall_seconds": 805.7,
+    "cpu_seconds": 168.874,
+    "peak_memory_reported": "1.1G",
+    "peak_swap_mib": 0
+  },
+  "report": "diagnostic-repro-2-report.json"
+}

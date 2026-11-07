@@ -1,0 +1,21 @@
+{
+  "candidate_commit": "c323aee",
+  "source_sha256": "c61580976ecf6911f21aed2e4144feea520eac21b281b4bd0f883e2b0d4194d5",
+  "binary_sha256": "c8c3e619fad2a3e28a32dff986ff3d81ec414168f45fabeaee75bd91193b2aed",
+  "harness_sha256": "fd669c3691da97b2fe899b441724ccd01a2839d10105ddc0a8ec4ea47123f2f2",
+  "kernel": "6.8.0-147-generic",
+  "started_at": "2026-11-07T19:01:17Z",
+  "finished_at": "2026-11-07T19:08:53Z",
+  "status": "failed",
+  "fixture": {
+    "filesystem": "ext4 loop image",
+    "seed_files": 100000,
+    "image_mib": 2048,
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096,
+    "seed": 20261022,
+    "mutations_before_failure": 6000
+  },
+  "failure": "276 filesystem/index path-identity mismatches remained through 180 seconds of fresh watcher cycles; watcher status reported uncertain=false, dropped=0, kernel_overflow_notifications=0, dirty_reason=null.",
+  "report_sha256": "4ed2e77fc4dc77bbc7f2d7c7cf62f503f4f06bbe36c284aeff1e771db0a3a19b"
+}
