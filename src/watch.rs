@@ -249,6 +249,10 @@ fn reconciliation_scan_ready(
     requested && retry_backoff_elapsed && (queues_drained || behind >= RECONCILE_BACKLOG_GRACE)
 }
 
+fn scan_first_observation_due(last_started: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(last_started) >= SCAN_FIRST_INTERVAL
+}
+
 fn automatic_reconciliation_request_allowed(
     retry_paused: bool,
     scan_active: bool,
@@ -2311,7 +2315,9 @@ pub fn run_daemon(
                             // baseline. Keep it visibly stale and let the fixed
                             // cadence retry without turning ordinary churn into
                             // a failed-scan circuit-breaker attempt.
-                            last_reconcile = Instant::now();
+                            // Keep the cadence anchored to observation start.
+                            // Resetting here would add the full scan duration to
+                            // the configured maximum interval on every raced scan.
                             RESCAN.store(false, Ordering::SeqCst);
                             lost_events = false;
                             tracing::info!(
@@ -2491,7 +2497,7 @@ pub fn run_daemon(
                 }
             }
         }
-        if reconcile_first && last_reconcile.elapsed() >= SCAN_FIRST_INTERVAL {
+        if reconcile_first && scan_first_observation_due(last_reconcile, Instant::now()) {
             RESCAN.store(true, Ordering::SeqCst);
         }
         let rescan_requested = RESCAN.load(Ordering::SeqCst);
@@ -7035,6 +7041,21 @@ mod tests {
         assert_eq!(overflows, 1);
         assert_eq!(consumed, bytes.len());
         assert!(lost);
+    }
+
+    #[test]
+    fn scan_first_cadence_is_anchored_to_observation_start() {
+        let started = Instant::now();
+        let finished = started + Duration::from_secs(120);
+        let just_before_due = finished + SCAN_FIRST_INTERVAL - Duration::from_secs(121);
+        let due = finished + SCAN_FIRST_INTERVAL - Duration::from_secs(120);
+
+        assert!(!scan_first_observation_due(started, just_before_due));
+        assert!(scan_first_observation_due(started, due));
+        assert!(
+            due.duration_since(finished) < SCAN_FIRST_INTERVAL,
+            "a raced scan must not add its duration to the next observation interval"
+        );
     }
 
     #[test]

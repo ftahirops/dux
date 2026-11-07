@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 13:49 UTC
+**Updated:** 2026-11-07 13:55 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -21,6 +21,10 @@ At **13:49 UTC**, it remains dirty and not caught up, with **118 overflows**,
 committed further events since the previous sample. The overflow count has
 not increased since 13:41. Index freshness continues to age despite event
 commits.
+
+At **13:55 UTC**, overflow and dropped-update totals were unchanged, while
+pending updates had risen to **747**. This remains a fluctuating backlog; the
+daemon has not rebuilt a trusted baseline.
 
 Read-only sample after the local scale run at **13:38 UTC**:
 
@@ -215,6 +219,15 @@ Rust tests now cover this behavior.
   build/test writes off the watched ext4 but does not test ext4-specific
   fanotify or handle behavior. The tmpfs build and fixtures were removed after
   the run; the earlier ext4-backed suite also passed 283 tests.
+- Found and fixed a freshness-cadence bug: after a scan-first observation raced
+  with normal events, the scheduler reset its 15-minute timer at scan
+  completion. This made the interval between observations equal to the
+  configured interval plus scan duration. The timer now stays anchored to scan
+  start; a regression test verifies the next cycle is due at 15 minutes from
+  start. Current-source full Rust tests pass **284 passed, 0 failed, 2
+  ignored**; strict all-target/all-feature Clippy, formatting, and diff checks
+  pass. These checks used tmpfs fixtures/build output; ext4-specific and
+  live-daemon cadence behavior still need an isolated ext4 qualification host.
 - The independent VPS2 soak remains active at the latest archived sample
   (**13:11 UTC**): 40,564 s elapsed, 862,300 operations, 11 mutation bursts, no
   controlled crash rounds, and one 300-second held-reader phase with WAL
