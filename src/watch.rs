@@ -1642,7 +1642,8 @@ pub fn run_daemon(
     if reconcile_first {
         tracing::warn!(
             scan_interval_seconds = SCAN_FIRST_INTERVAL.as_secs(),
-            "experimental reconciliation-first mode: fanotify events are hints only; scheduled scans currently use full atomic rebuilds"
+            in_place_full_root_reconciliation = !one_file_system,
+            "experimental reconciliation-first mode: fanotify events are hints only; complete full-root observations merge in place after the initial baseline"
         );
     }
     if let Some(a) = &alert {
@@ -2581,9 +2582,11 @@ pub fn run_daemon(
                     "starting background reconciliation of {}; event ingestion remains active",
                     root_canon.display()
                 );
-                crate::util::systemd_notify(
-                    "RELOADING=1\nSTATUS=Rebuilding index; collecting concurrent changes",
-                );
+                crate::util::systemd_notify(if reconcile_first {
+                    "RELOADING=1\nSTATUS=Observing filesystem; collecting concurrent change hints"
+                } else {
+                    "RELOADING=1\nSTATUS=Rebuilding index; collecting concurrent changes"
+                });
                 scan_cancel = Some(cancel);
                 // Scan-first mode treats events as hints and does not mutate the
                 // live index while observing. Mark the index uncertain before

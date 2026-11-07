@@ -567,6 +567,13 @@ fn scan_with_progress_policy_mode(
     retain_progress_for_publication: bool,
     incremental: bool,
 ) -> Result<ScanStats> {
+    let attempt_id = incremental.then(|| {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        format!("{}-{nonce}", std::process::id())
+    });
     if let Some(cancel) = opts.cancel.as_ref() {
         let cancel = Arc::clone(cancel);
         store
@@ -581,13 +588,35 @@ fn scan_with_progress_policy_mode(
         incremental,
     );
     let cleanup = store.conn.progress_handler(0, None::<fn() -> bool>);
-    if cancellation_requested(&opts.cancel) {
+    let outcome = if cancellation_requested(&opts.cancel) {
         Err(ScanCancelled.into())
     } else {
-        let stats = result?;
-        cleanup?;
-        Ok(stats)
+        match result {
+            Ok(stats) => cleanup.map(|()| stats).map_err(anyhow::Error::from),
+            Err(error) => Err(error),
+        }
+    };
+    if let Some(attempt_id) = attempt_id {
+        let result = match &outcome {
+            Ok(stats) if stats.errors == 0 => "complete",
+            Ok(_) => "incomplete",
+            Err(error) if error.downcast_ref::<ScanCancelled>().is_some() => "cancelled",
+            Err(_) => "failed",
+        };
+        let tx = store.conn.transaction()?;
+        for (key, value) in [
+            ("last_reconcile_attempt_id", attempt_id),
+            ("last_reconcile_attempt_result", result.to_owned()),
+        ] {
+            tx.execute(
+                "INSERT INTO meta(key,value) VALUES(?1,?2)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                rusqlite::params![key, value],
+            )?;
+        }
+        tx.commit()?;
     }
+    outcome
 }
 
 fn scan_inner(
@@ -2774,6 +2803,13 @@ mod tests {
              CREATE TRIGGER count_dirents_d AFTER DELETE ON dirents BEGIN UPDATE reconcile_write_count SET n=n+1; END;",
         ).unwrap();
         reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        assert_eq!(
+            store
+                .get_meta("last_reconcile_attempt_result")
+                .unwrap()
+                .as_deref(),
+            Some("complete")
+        );
         let writes: i64 = store
             .conn
             .query_row("SELECT n FROM reconcile_write_count", [], |r| r.get(0))
@@ -2955,6 +2991,13 @@ mod tests {
              WHEN new.name=X'6e6577' BEGIN SELECT RAISE(ABORT,'injected publication failure'); END;",
         ).unwrap();
         assert!(reconcile_in_place(&mut store, &root, &ScanOptions::default()).is_err());
+        assert_eq!(
+            store
+                .get_meta("last_reconcile_attempt_result")
+                .unwrap()
+                .as_deref(),
+            Some("failed")
+        );
         let after: (i64, i64, i64, i64) = store
             .conn
             .query_row(
@@ -2978,6 +3021,13 @@ mod tests {
             .execute_batch("DROP TRIGGER fail_reconcile_insert;")
             .unwrap();
         reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        assert_eq!(
+            store
+                .get_meta("last_reconcile_attempt_result")
+                .unwrap()
+                .as_deref(),
+            Some("complete")
+        );
         assert!(crate::store::indexed_path(&store.conn, &root.join("new"))
             .unwrap()
             .is_some());

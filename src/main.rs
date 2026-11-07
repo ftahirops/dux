@@ -327,10 +327,9 @@ fn real_main() -> Result<()> {
                         .unwrap_or_else(|_| "warn".into()),
                 )
                 .init();
-            // If the daemon is live for THIS db, it holds the exclusive lock and
-            // is the only writer — so instead of making the user stop/scan/start
-            // by hand, ask the daemon to rebuild its own index in place (atomic,
-            // no downtime). This also reconciles any drift/downtime gap.
+            // If the daemon is live for THIS db, it is the only writer. Ask it
+            // to perform the configured observation instead of starting a
+            // competing writer. This also reconciles drift and downtime gaps.
             let scanned_db = db.canonicalize().unwrap_or_else(|_| db.clone());
             let hb = util::read_heartbeat_for(&db);
             let daemon_live = match &hb {
@@ -965,6 +964,14 @@ fn daemon_rescan_is_complete(
             .is_some_and(|status| status.kernel_empty && status.pending == 0 && !status.uncertain)
 }
 
+fn daemon_scan_first_observation_finished(
+    attempt_advanced: bool,
+    generation_advanced: bool,
+    scan_active: bool,
+) -> bool {
+    !scan_active && (attempt_advanced || generation_advanced)
+}
+
 const DAEMON_RESCAN_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn daemon_rescan_start_timed_out(
@@ -985,9 +992,8 @@ fn canonical_scan_root(requested: &std::path::Path) -> Result<PathBuf> {
     Ok(root)
 }
 
-/// Ask the running daemon to rebuild its index in place (SIGHUP), then wait for
-/// it to finish. Keeps the user out of the stop/scan/start dance and avoids the
-/// two-writer corruption the lock would otherwise reject.
+/// Ask the running daemon to rescan (SIGHUP), then wait for its configured
+/// reconciliation to finish. This avoids starting a competing writer.
 fn request_daemon_rescan(
     db: &std::path::Path,
     requested: &std::path::Path,
@@ -1018,7 +1024,9 @@ fn request_daemon_rescan(
     }
 
     let mut poll_store = Store::open_ro(db)?;
+    let scan_first = util::read_watch_status(db).is_some_and(|status| status.scan_first);
     let previous_generation = read_scan_generation(&poll_store)?;
+    let previous_attempt_id = poll_store.get_meta("last_reconcile_attempt_id")?;
     // SIGHUP = "rescan now"; the daemon picks it up at the top of its loop.
     let rc = unsafe { libc::kill(pid, libc::SIGHUP) };
     if rc != 0 {
@@ -1028,7 +1036,7 @@ fn request_daemon_rescan(
              Stop it, scan, and start it manually if this persists."
         );
     }
-    eprintln!("dux: daemon is live — triggering an in-place atomic rescan (no downtime)…");
+    eprintln!("dux: daemon is live — requesting a rescan (no downtime)…");
 
     // A new generation marks baseline installation, not successful completion:
     // wait for queued event replay and independent accounting verification too.
@@ -1047,8 +1055,11 @@ fn request_daemon_rescan(
         let generation = read_scan_generation(&poll_store)?;
         generation_advanced |=
             scan_generation_advanced(previous_generation.as_deref(), generation.as_deref());
+        let attempt_id = poll_store.get_meta("last_reconcile_attempt_id")?;
+        let attempt_advanced =
+            scan_generation_advanced(previous_attempt_id.as_deref(), attempt_id.as_deref());
         let scan_active = util::read_scan_progress_for(db).is_some();
-        scan_started |= scan_active || generation_advanced;
+        scan_started |= scan_active || generation_advanced || attempt_advanced;
         if daemon_rescan_start_timed_out(scan_started, generation_advanced, start.elapsed()) {
             anyhow::bail!(
                 "daemon did not report starting the requested rescan within {}s; the request may still be queued. Check `dux status` and daemon logs before requesting another scan",
@@ -1067,8 +1078,47 @@ fn request_daemon_rescan(
                 scan_active,
                 watch.as_ref(),
             ) {
+                if scan_first {
+                    eprintln!(
+                        "dux: filesystem observation completed and accounting verified in {:.0}s; scan-first status reports last-observed freshness, not real-time caught-up state.",
+                        start.elapsed().as_secs_f64()
+                    );
+                } else {
+                    eprintln!(
+                        "dux: rescan reconciled, queue drained, and accounting verified in {:.0}s.",
+                        start.elapsed().as_secs_f64()
+                    );
+                }
+                return Ok(());
+            }
+        }
+        if scan_first
+            && daemon_scan_first_observation_finished(
+                attempt_advanced,
+                generation_advanced,
+                scan_active,
+            )
+        {
+            if attempt_advanced {
+                let attempt_result = poll_store.get_meta("last_reconcile_attempt_result")?;
+                if attempt_result.as_deref() == Some("incomplete") {
+                    anyhow::bail!(
+                        "daemon observation completed with incomplete coverage; the previous indexed rows were preserved. Check `dux status` and daemon logs."
+                    );
+                }
+                if matches!(attempt_result.as_deref(), Some("failed" | "cancelled")) {
+                    anyhow::bail!(
+                        "daemon observation did not complete successfully; check `dux status` and daemon logs"
+                    );
+                }
+            }
+            let dirty_reason = poll_store.get_meta("dirty_reason")?;
+            if dirty_reason.as_deref() == Some("reconciliation accounting verification pending") {
+                // The scan has published; let the independent verifier own
+                // the transition to a clean status.
+            } else {
                 eprintln!(
-                    "dux: rescan reconciled, queue drained, and accounting verified in {:.0}s.",
+                    "dux: observation completed in {:.0}s, but the index remains stale or uncertain due to concurrent changes; see `dux status`.",
                     start.elapsed().as_secs_f64()
                 );
                 return Ok(());
@@ -1552,6 +1602,14 @@ mod tests {
             false,
             Some(&uncertain)
         ));
+    }
+
+    #[test]
+    fn scan_first_manual_rescan_completes_on_last_observation_without_claiming_caught_up() {
+        assert!(daemon_scan_first_observation_finished(true, false, false));
+        assert!(daemon_scan_first_observation_finished(false, true, false));
+        assert!(!daemon_scan_first_observation_finished(true, false, true));
+        assert!(!daemon_scan_first_observation_finished(false, false, false));
     }
 
     fn tmp(tag: &str) -> PathBuf {

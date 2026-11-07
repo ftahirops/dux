@@ -105,7 +105,7 @@ Rust tests now cover this behavior.
   reason `fanotify queue overflow`. The installed binary logged at startup that
   automatic reconciliation was paused after two failures. The bounded-retry
   changes are now tested on an isolated checkout but are not deployed.
-- Latest local all-features/all-targets Rust run: **282 passed, 0 failed,
+- Latest local Rust run: **283 passed, 0 failed,
   2 ignored**. The ignored tests require a dedicated ext4 profile and manual
   scale invocation. The new 100k-entry scale smoke passed separately. Strict
   all-features/all-targets Clippy passed with `-D warnings`; formatting and diff
@@ -113,9 +113,14 @@ Rust tests now cover this behavior.
   writes on an unchanged scan and equality against a fresh full-scan oracle for
   inode, dirent, path, and directory-total projections; an injected SQLite
   publication failure also rolled back all four projections and a later retry
-  converged. The earlier disposable
-  runtime smoke verified hint-only event handling and SIGHUP-triggered scanning,
-  but did not exercise the new 15-minute in-place daemon branch end to end.
+  converged. A current optimized-daemon fixture check exercised the in-place
+  runtime path end to end: starting with 1,000 files, a file created after
+  daemon startup was indexed by a SIGHUP-requested observation, the manual
+  `dux scan` returned successfully, and the SQLite database inode stayed
+  unchanged. The daemon reported that concurrent changes leave freshness
+  uncertain. This small, quiet fixture verifies control flow and row
+  publication only; it does not test overflow, sustained churn, scale, or
+  recovery while the tree mutates continuously.
   Python discovery passed **306/306**.
   `cargo audit --no-fetch` exited 0 after loading the local 1,422-advisory DB
   and scanning 229 locked dependencies; this was a source-lockfile scan, not an
