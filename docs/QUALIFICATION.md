@@ -7259,13 +7259,13 @@ The exact-source VM `cargo-test.log` contains a passing
 test and a passing `startup_handle_probe_prequalifies_stale_attrib_filter`
 test; the latter obtains a real filesystem handle, unlinks its target, and
 checks the resulting stale-FID path before ordinary event handles are seen.
-The full recorded result is 268 passed, 0 failed. The VM's ext4 root has
-the same filesystem ID seen in the live daemon's stale-FID diagnostics, and a
-read-only kernel handle probe on ext4 succeeded. The current candidate soak's
-systemd journal has no `fanotify event has no resolvable` warnings so far. This
-supports the targeted stale-event fix, but the soak is a small synthetic tree
-and does not prove that a full production-root reconciliation can finish with
-all event streams resolved.
+The full recorded result is 268 passed, 0 failed. The ext4 handle probe and
+stale-FID test support the targeted event fix, but do not by themselves prove
+that a full production-root reconciliation can finish with all event streams
+resolved. A later direct filesystem-ID comparison found that VPS2's ext4 root
+and the live production root are different filesystem instances; see the
+05:12 UTC diagnosis below. The current candidate soak's systemd journal has no
+`fanotify event has no resolvable` warnings so far.
 
 **Production WAL observation — 04:18 UTC:** retained daemon logs show a
 checkpoint with zero frames advanced at 04:11:15, then a WAL-budget guard at
@@ -7386,3 +7386,36 @@ scan in progress. The database is 2,080,583,680 bytes on disk with a
 134,217,728-byte WAL. The sample reports no dropped events, kernel overflow,
 write error, or pause. This pending count does not establish exact accounting;
 live recovery remains an open release blocker.
+
+### Production stale-FID and reconciliation-circuit diagnosis — 2026-11-07 04:57–05:12 UTC
+
+A read-only 15-minute journal review found **294** unresolved fanotify events
+with `mask=0x4` (`FAN_ATTRIB`), `info_type_mask=0x2` (FID), and
+`open_by_handle_at(...)=ESTALE`. The first and last sampled events were at
+04:57:04 and 05:11:59 UTC. They all identify FSID
+`d32f83920c90bad3`, which matches the production root's `stat -f` FSID; `/`
+is mounted as ext4. The installed service remains the older
+`dux 0.6.3-66` binary (revision `e0cc915f8f37`, SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`), whose
+source predates the candidate's stale target-only FID `FAN_ATTRIB` filter.
+
+The current candidate only suppresses this event when the mask is exactly
+`FAN_ATTRIB`, there is no resolvable entry, the record contains one complete
+FID, and that event FSID has already passed a successful file-handle probe.
+Its source tests cover both the real unlink/ESTALE sequence and the requirement
+to prequalify handle capability. The production database's read-only `meta`
+query still shows `schema_version=6`,
+`failed_reconciliation_attempts=2`, and dirty reason
+`daemon startup requires reconciliation`; current status shows no scan in
+progress. This makes the event class a strong, directly observed candidate
+contributor to the unresolved coverage problem, but does not prove it was the
+sole cause of the historical `lost_events=true` reconciliation failures.
+
+The current filesystem-instance comparison supersedes the earlier same-FSID
+statement: production root FSID is `d32f83920c90bad3`, while VPS2's ext4 root
+FSID is `c9dafcdf8035d75a`. Both are ext4, but they are different instances.
+The VM's successful handle probe therefore demonstrates behavior on its own
+ext4 instance, not on this production device. Do not clear the persisted retry
+circuit or force a production scan based on this evidence; the candidate must
+be exercised through a controlled, exact recovery path before claiming a clean
+live baseline.
