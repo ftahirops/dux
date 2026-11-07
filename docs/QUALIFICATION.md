@@ -7554,3 +7554,41 @@ mutation bursts; its six-hour reader and twelve-hour restart phases and final
 exactness/history/integrity checks were still pending. The checkpoint is
 `docs/qualification/all-features-20261107/soak-progress-0558.json` (SHA-256
 `60d636b651a3141c50eb27cd39b6a8bbaf8f02219a1aaf1b60098a6c6cb02a93`).
+
+### Continued VPS2 soak and fresh production checkpoint — 2026-11-07 06:07–06:09 UTC
+
+At **06:09 UTC**, the candidate 72-hour soak remained active on VPS2 with
+`NRestarts=0`. Its progress file recorded **15,317.4 seconds** elapsed,
+**341,827 operations**, four mutation bursts, 3,398 periodic exactness samples,
+maximum observed daemon RSS 6,900 KiB, and last sampled WAL size 12,710,232
+bytes. No held-reader or controlled-crash phase had started. Final exactness,
+history, and SQLite integrity checks remain pending; this is an interim
+checkpoint, not a pass. The exact progress file is
+`docs/qualification/all-features-20261107/soak-progress-0609.json` (SHA-256
+`8cb35068437afddecec0d47d2cf93f14ac719aba45a82c8a5eefab91b691e81a`).
+
+A separate **read-only** production-host capture at 06:07:35 UTC found the
+installed legacy daemon active but uncertain and dirty after three fanotify
+queue overflows: 14,940 pending updates, 13,127,372 ms behind, zero reported
+dropped updates, schema v6, and two failed reconciliation attempts. In the
+preceding 15 minutes, 599 unresolved FID warnings were logged; 466 matched the
+candidate's narrowly filtered target-only `FAN_ATTRIB`/FID/`ESTALE` event
+shape. Applying the filter's behavior on production remains conditional on a
+successful handle-capability probe against that exact production filesystem;
+that probe was not performed. Compound unresolved events were also observed.
+The capture is
+`docs/qualification/live-prod-20261107/production-0606.json` (SHA-256
+`6c355888304a2986623f1102cd10d0219e8d71727b73479c510597dc81e5ffb0`). No
+production mutation was performed. The root FSID is recorded separately from
+the generic ext2/ext3 statfs magic; prior mount inspection identified the root
+mount as ext4.
+
+The qualification VPS is reachable over root SSH and has 22 GiB free, but does
+not expose `/dev/kvm`; therefore it cannot run the disposable KVM guest needed
+to qualify an actual installed-package systemd activation and live package
+upgrade. The transient-unit runtime smoke and Debian/Rocky container lifecycle
+results remain limited to their stated scope. Continue the soak through its
+six-hour held-reader and twelve-hour controlled-restart phases, then require
+its terminal exactness/history/integrity checks. Exact production recovery,
+complete root coverage, path-instance/schema-v7 publication, installed-package
+activation, and a production canary remain open release gates.
