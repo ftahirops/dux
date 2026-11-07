@@ -7735,3 +7735,17 @@ not proof of the older 480,200-operation failure point, the held-reader or
 restart phases, or terminal exactness/history/integrity. Snapshot:
 `docs/qualification/all-features-20261107/soak-progress-0629.json` (SHA-256
 `feaf49082ee19f8dac609f2d7c210b65ce4166b9fa81d071b1e14091ad0a06b1`).
+
+### Correlating r89 mismatches with its uncommitted workload tail — 2026-11-07
+
+A path-level reconstruction of the archived r89 index and post-stop truth
+snapshot shows that **all 27 differing relative paths** were named as a source or
+target by the harness's final **64 operations**. The **18 differing inode
+identities** were all referenced by those operations as well (47 distinct
+inode identities resolved across the trace). This strongly localizes the
+post-stop mismatch to the workload tail that was still being processed when
+the 180-second pipeline wait expired with 41 pending updates; it does not prove
+that leaving the old daemon alive would have repaired every row, because that
+run was stopped and its event queue is gone. Do not relabel the r89 result as a
+pass. The current candidate's exact periodic checks remain authoritative and
+must continue beyond 480,200 operations and through final validation.
