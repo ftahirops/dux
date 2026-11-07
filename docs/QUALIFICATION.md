@@ -6910,3 +6910,18 @@ worker restarts and a 1.28 GiB observed memory peak. The exact static candidate
 soak and independent older soak also remained active with zero restarts. The
 candidate soak's latest persisted checkpoint was 2,461.2 seconds, 55,325
 mutations, and 553 exactness checks; final endurance checks remain pending.
+
+**02:40 UTC runtime checkpoint:** the P0 crash suite advanced to **17/30**
+successful rounds; the matrix remains active with zero restarts and a 1.32 GiB
+memory peak. A single host CPU PSI `some avg10` sample reached 73.21% at
+02:39:46 (load1 1.55, CPU `full` 0%). Ten seconds later it had fallen to
+61.26%, with load1 1.55 and CPU `full` 0%; the critical pressure did not
+persist, so the capped matrix continued. The current static candidate soak's
+latest persisted checkpoint was **2,701.3 seconds, 60,713 mutations, and 607
+exactness checks**, with sampled maxima of 7,096 KiB RSS, 12 file descriptors,
+and a 4,251,872-byte WAL. Both 72-hour soaks were active with zero restarts.
+Latest local snapshots are in the readiness evidence directory; the journal
+snapshot SHA-256 is
+`befa77558aeb6cbaba82eb8089d0bddc697334ed18fabbfb202e5f3147854f28` and the
+soak progress SHA-256 is
+`8e53d7f14b465dc92880e201b97ceaeadf78d5a5fea32e351076598a9b43c091`.
