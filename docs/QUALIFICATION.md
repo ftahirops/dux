@@ -7017,6 +7017,28 @@ progress and
 `f01848d5110d68842170b25ffdb6da55ad38583e5fff1ff2c343b1a51911a7bd` for the
 P0 journal.
 
+**03:33 UTC runtime checkpoint:** the disk fault suite passed all three
+checks: low-disk pause/resume, preservation of the readable index when a scan
+ran against a full filesystem, and preservation during a read-only-filesystem
+scan failure. It reserved 1,594,683,392 bytes inside the disposable test image;
+the host filesystem remained at 23 GiB free. `crash`, `overflow`, `cpu`,
+`churn`, and `disk` are passed; unprivileged coverage testing is running, with
+capability, OOM, pressure, mount, WAL, startup, retry, and root suites still
+pending. The matrix, candidate soak, and independent older soak remained
+active with zero restarts; matrix memory peak remained 1.34 GiB. Host CPU PSI
+`some avg10` was 67.23%, CPU and memory `full` pressure were 0%, and 1.9 GiB
+memory was available. The exact-candidate soak had run **5,944.8 seconds**,
+recording **134,167 mutations** and **1,336 exactness samples**. Sampled
+maxima were 8,096 KiB RSS, 12 file descriptors, and a 4,293,072-byte WAL;
+p95 exact convergence was 495 ms and maximum was 1,339 ms. Final soak
+exactness, history, and integrity checks remain pending. Snapshot SHA-256
+values are `a95657c0afbf7b02f39f9fa6de732a75ddeee3431e94b506d4e85fadc84fd40e`
+for the matrix report,
+`a3566942a7a9b68f45c9a5cbe7301e12f589790489f19e6946693a821b169b41` for soak
+progress, and
+`a2eebf58611a21d1dc9a27cf1f23213b7d49907cde4ae89d8f17a9f5a01c6ae3` for the
+P0 journal.
+
 **03:30 UTC runtime checkpoint:** the exact-source churn suite passed all
 **20,000 operations over a 100,000-file baseline** in 10 exact-validated
 batches, with a forced concurrent rebuild and continuous history checks. It
