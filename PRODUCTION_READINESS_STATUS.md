@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 15:03 UTC
+**Updated:** 2026-11-07 15:27 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -122,7 +122,7 @@ legacy event-apply circuit remains unchanged. The hint parser also excludes
 notifications emitted by the Dux process itself so index/WAL/staging writes do
 not make its own scan look raced. Reconciliation-first is now the source
 default; the `--event-apply` escape hatch and default-mode CLI behavior are
-covered by tests. The latest source passed 287 Rust tests (2 ignored), strict
+covered by tests. The latest source passed 289 Rust tests (2 ignored), strict
 all-target/all-feature Clippy, formatting, and diff checks on 2026-11-07. A
 disposable tmpfs end-to-end run verified v6-to-v7 atomic upgrade followed by
 an in-place observation that indexed a newly created file. A fresh release
@@ -133,10 +133,38 @@ activity on the same marked filesystem as a stale hint; the current candidate
 now filters resolved hints by indexed-root scope. Each batch validates
 DFID_NAME parent handles, coalesces equal handles, and resolves at most 32
 distinct parents. Malformed, stale, overflowed, or saturated hints widen to a
-full observation. Resolution currently runs on the watcher thread, so this
-reduces work for repeated events in the same directory but does not yet meet the
-dedicated nonblocking-reader design. Hints do not prioritize or reconcile
-subtrees; scans remain full-root observations.
+full observation. The dedicated reader now separates kernel draining from
+parsing and resolution, but both of those coordinator tasks still run on the
+watcher thread. Hints do not prioritize or reconcile subtrees; scans remain
+full-root observations.
+
+**Dedicated fanotify intake (2026-11-07):** reconciliation-first now has a
+separate reader thread that continuously drains the nonblocking fanotify fd into
+a bounded synchronous channel of 128 chunks (32 KiB each, about 4 MiB maximum
+payload). The reader does not wait for queue capacity: a full/disconnected ring
+sets an explicit loss flag, and the coordinator requests a full observation.
+The channel still has a short internal synchronization cost and allocates one
+buffer per read; its throughput and CPU cost need load measurement.
+The CPU governor still applies to the coordinator, not the intake thread. The
+coordinator parses chunks and resolves coalesced parent handles, so that work
+can still fill the ring under enough pressure. Shutdown stops and joins the
+reader and persists a startup-observation requirement instead of racing a
+second consumer against it.
+
+On VPS2, the current candidate passed 289 Rust tests (2 ignored), strict
+all-target/all-feature Clippy, and the two focused reader tests. An ext4 tmpfs-
+separate-database E2E run started in default scan-first mode, observed a file
+created under the watched root (`events_seen=2`), and later indexed it
+(`index_nodes=27`). The daemon remained dirty and repeated observations while
+other filesystem activity was present on VPS2; this is runtime evidence for
+reader delivery, not a clean steady-state or overflow qualification. A graceful
+stop persisted `shutdown requires a fresh reconciliation observation`. The
+reader initially failed because its duplicated fd guard was dropped too early;
+the E2E exposed that defect, which is now fixed. No production daemon was
+changed. The VPS2 E2E debug binary SHA-256 was
+`926da2ff3924cd6de9475390d0e24d54ef9f5183d9bf47b8281bdecb4c11b828`; the
+tested `src/watch.rs` SHA-256 was
+`d28fa00bb36b75f0c5cfc6d424dd656b7a3b4784ccb91bea94b1eaf2a9deb5d4`.
 
 A real-fanotify tmpfs E2E test created 25 files outside the indexed root on the
 same filesystem: status remained clean with zero in-scope events. A file
@@ -148,7 +176,7 @@ source SHA-256 was
 `88e0ae444bf7e171196d77503a20ee8f703ef0c2bf7d1c40b2bdc7dacdef30bc`.
 
 These checks are not production-scale qualification: directory-level hint
-prioritization, nonblocking hint resolution, forced-overflow replay, and
+prioritization, off-thread hint resolution, forced-overflow replay, and
 concurrent-churn recovery remain open. There is no production-shaped endurance,
 package rollout, or canary evidence. Do not interpret this change as production
 readiness or as a production deployment.
@@ -158,7 +186,7 @@ live watch mode before interpreting persisted retry counters. A legacy counter
 above the retry limit no longer falsely says that reconciliation-first scans
 are paused; event-apply mode continues to report its actual retry circuit. The
 regression test covers both modes and corrupt/over-limit counters. Full Rust
-suite: 287 passed, 2 ignored; strict Clippy, formatting, and diff checks pass.
+suite: 289 passed, 2 ignored; strict Clippy, formatting, and diff checks pass.
 
 **Isolated scale sample (2026-11-07):** the existing manual reconciliation
 scale test passed with 100,000 files on tmpfs, pinned to one CPU core. Initial

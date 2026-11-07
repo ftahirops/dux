@@ -92,19 +92,20 @@ flowchart LR
 
 ### Event hints and overflow
 
-- Fanotify is an optimization for choosing what to scan sooner. The target
-  reader validates records, coalesces dirty parent scopes, and inserts bounded
-  hints without blocking on filesystem handle resolution or SQLite. The current
-  source coalesces DFID_NAME parent handles (up to 32 distinct handles per
-  parser slice), then resolves them synchronously on the watcher thread to
-  filter events outside the indexed root. This is transitional: root filtering
-  is useful, but synchronous `open_by_handle_at` work does not meet the target
-  reader design. A saturated or unresolved batch widens recovery to a full
-  observation.
+- Fanotify is an optimization for choosing what to scan sooner. The current
+  scan-first reader drains raw record chunks on a dedicated thread into a
+  bounded 128-chunk channel (32 KiB per chunk). It never waits for queue
+  capacity, handle resolution, or database work. A full channel discards that
+  chunk, records explicit loss, and requests a full observation. The coordinator
+  validates DFID_NAME records, coalesces at most 32 distinct parent handles per parse
+  slice, then resolves those parents on the watcher thread to filter events
+  outside the indexed root. This separates kernel draining from slower work,
+  but the coordinator can still backlog and force a full observation.
 - Repeated hints coalesce by filesystem and directory identity. If a parent
   cannot be resolved safely, widen to a known ancestor or the whole filesystem.
   The current implementation widens to a full-root observation; subtree
-  prioritization has not been implemented.
+  prioritization has not been implemented. On shutdown the reader is stopped
+  and joined before exit, and the next startup is required to observe the tree.
 - A kernel queue overflow schedules a full scan of the affected filesystem as
   soon as resource guards allow it. It can make the view stale until that scan
   completes, but cannot permanently prevent later scans from repairing it.

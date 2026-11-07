@@ -7,6 +7,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,191 @@ struct RawFdGuard(RawFd);
 impl Drop for RawFdGuard {
     fn drop(&mut self) {
         unsafe { libc::close(self.0) };
+    }
+}
+
+/// Fanotify's kernel queue is drained by a dedicated thread in scan-first
+/// mode. The bounded channel is the userspace ring: if its capacity is
+/// exhausted, the reader keeps draining and records explicit loss so the
+/// coordinator schedules a full observation. `try_send` never waits for queue
+/// capacity; the std channel's short internal lock is still a small reader cost.
+struct FanotifyHintReader {
+    rx: Receiver<Vec<u8>>,
+    notify: RawFdGuard,
+    kernel_empty: Arc<AtomicBool>,
+    queued_chunks: Arc<std::sync::atomic::AtomicUsize>,
+    dropped: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+const HINT_READER_CHANNEL_CAPACITY: usize = 128;
+const HINT_READER_POLL_MS: libc::c_int = 100;
+
+impl FanotifyHintReader {
+    fn start(fan: RawFd) -> Result<Self> {
+        let reader_fan = unsafe { libc::fcntl(fan, libc::F_DUPFD_CLOEXEC, 0) };
+        if reader_fan < 0 {
+            return Err(std::io::Error::last_os_error()).context("duplicating fanotify fd");
+        }
+        let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        if notify_fd < 0 {
+            unsafe { libc::close(reader_fan) };
+            return Err(std::io::Error::last_os_error()).context("creating hint-reader eventfd");
+        }
+        let notify_guard = RawFdGuard(notify_fd);
+        let (tx, rx) = mpsc::sync_channel(HINT_READER_CHANNEL_CAPACITY);
+        let kernel_empty = Arc::new(AtomicBool::new(true));
+        let queued_chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let reader_fan_guard = RawFdGuard(reader_fan);
+        let thread_empty = Arc::clone(&kernel_empty);
+        let thread_queued = Arc::clone(&queued_chunks);
+        let thread_dropped = Arc::clone(&dropped);
+        let thread_stop = Arc::clone(&stop);
+        let join = std::thread::Builder::new()
+            .name("dux-fanotify-reader".into())
+            .spawn(move || {
+                let reader_fd = reader_fan_guard.0;
+                fanotify_reader_loop(
+                    reader_fd,
+                    notify_fd,
+                    tx,
+                    thread_empty,
+                    thread_queued,
+                    thread_dropped,
+                    thread_stop,
+                );
+                drop(reader_fan_guard);
+            })
+            .context("starting fanotify hint reader")?;
+        Ok(Self {
+            rx,
+            notify: notify_guard,
+            kernel_empty,
+            queued_chunks,
+            dropped,
+            stop,
+            join: Some(join),
+        })
+    }
+
+    fn acknowledge(&self) {
+        let mut count = 0u64;
+        unsafe {
+            libc::read(
+                self.notify.0,
+                (&mut count as *mut u64).cast::<libc::c_void>(),
+                std::mem::size_of::<u64>(),
+            );
+        }
+    }
+
+    fn stop_and_join(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for FanotifyHintReader {
+    fn drop(&mut self) {
+        self.stop_and_join();
+    }
+}
+
+fn notify_hint_reader(fd: RawFd) {
+    let count = 1u64;
+    unsafe {
+        libc::write(
+            fd,
+            (&count as *const u64).cast::<libc::c_void>(),
+            std::mem::size_of::<u64>(),
+        );
+    }
+}
+
+fn queue_hint_chunk(
+    tx: &SyncSender<Vec<u8>>,
+    bytes: Vec<u8>,
+    queued_chunks: &std::sync::atomic::AtomicUsize,
+    dropped: &AtomicBool,
+) {
+    queued_chunks.fetch_add(1, Ordering::AcqRel);
+    if tx.try_send(bytes).is_err() {
+        queued_chunks.fetch_sub(1, Ordering::AcqRel);
+        dropped.store(true, Ordering::Release);
+    }
+}
+
+fn fanotify_reader_loop(
+    fan: RawFd,
+    notify: RawFd,
+    tx: SyncSender<Vec<u8>>,
+    kernel_empty: Arc<AtomicBool>,
+    queued_chunks: Arc<std::sync::atomic::AtomicUsize>,
+    dropped: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+) {
+    let mut buf = [0u8; 1 << 15];
+    let mut pfd = libc::pollfd {
+        fd: fan,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    while !stop.load(Ordering::Acquire) {
+        pfd.revents = 0;
+        let polled = unsafe { libc::poll(&mut pfd, 1, HINT_READER_POLL_MS) };
+        if polled == 0 {
+            continue;
+        }
+        if polled < 0 {
+            let error = std::io::Error::last_os_error();
+            match error.raw_os_error() {
+                Some(libc::EINTR) | Some(libc::EAGAIN) => continue,
+                _ => {
+                    tracing::error!(%error, "fanotify hint reader poll failed");
+                    dropped.store(true, Ordering::Release);
+                    notify_hint_reader(notify);
+                    break;
+                }
+            }
+        }
+        loop {
+            let n = unsafe { libc::read(fan, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
+            if n > 0 {
+                kernel_empty.store(false, Ordering::Release);
+                let bytes = buf[..n as usize].to_vec();
+                // Full and disconnected are both unrecoverable hint loss;
+                // keep draining the kernel and force a full observation.
+                queue_hint_chunk(&tx, bytes, &queued_chunks, &dropped);
+                notify_hint_reader(notify);
+                continue;
+            }
+            if n == 0 {
+                kernel_empty.store(true, Ordering::Release);
+                notify_hint_reader(notify);
+                break;
+            }
+            match std::io::Error::last_os_error().raw_os_error() {
+                Some(libc::EINTR) => continue,
+                Some(libc::EAGAIN) => {
+                    kernel_empty.store(true, Ordering::Release);
+                    notify_hint_reader(notify);
+                    break;
+                }
+                _ => {
+                    let error = std::io::Error::last_os_error();
+                    tracing::error!(%error, "fanotify hint reader read failed");
+                    dropped.store(true, Ordering::Release);
+                    kernel_empty.store(false, Ordering::Release);
+                    notify_hint_reader(notify);
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -1785,6 +1971,11 @@ pub fn run_daemon(
             "experimental reconciliation-first mode: fanotify events are hints only; complete full-root observations merge in place after the initial baseline"
         );
     }
+    let mut hint_reader = if reconcile_first {
+        Some(FanotifyHintReader::start(fan)?)
+    } else {
+        None
+    };
     if let Some(a) = &alert {
         tracing::info!(
             "alerts: >{} growth in {}s{}",
@@ -2110,139 +2301,159 @@ pub fn run_daemon(
         if SHUTDOWN.load(Ordering::SeqCst) {
             crate::util::systemd_notify("STOPPING=1\nSTATUS=Draining filesystem events");
             let shutdown_deadline = Instant::now() + Duration::from_secs(10);
-            // Final best-effort DRAIN of the kernel queue first, so events that
-            // landed in the brief window before SIGTERM (a file created right as
-            // `systemctl stop` ran) aren't lost — then flush everything once.
-            while buf_len > 0 && Instant::now() < shutdown_deadline {
-                let parse_deadline = (Instant::now() + EVENT_PARSE_SLICE).min(shutdown_deadline);
-                let (_, _, overflows, consumed) = parse_events_bounded(
-                    &buf[..buf_len],
-                    &fsfds,
-                    &mut handle_capable_fsids,
-                    &root_canon,
-                    db,
-                    &mut pending,
-                    &mut born,
-                    &mut target_refreshes,
-                    &mut indexed_parent_paths,
-                    &mut store,
-                    scan_job.is_none(),
-                    &mut lost_events,
-                    MAX_EVENTS_PER_PARSE,
-                    parse_deadline,
-                );
-                if consumed == 0 {
-                    break;
+            if reconcile_first {
+                if let Some(reader) = hint_reader.as_mut() {
+                    reader.stop_and_join();
                 }
-                buf.copy_within(consumed..buf_len, 0);
-                buf_len -= consumed;
-                kernel_overflow_notifications =
-                    kernel_overflow_notifications.saturating_add(overflows);
-            }
-            if buf_len > 0 {
-                // Do not silently discard a buffered suffix when the shutdown
-                // drain deadline expires; the final index must remain uncertain.
-                lost_events = true;
-                persist_dirty_marker_best_effort(
+                // Events may remain in the bounded ring or kernel queue when
+                // the reader stops. Startup always performs a complete
+                // observation, so persist that recovery requirement instead of
+                // racing the reader with a second consumer during shutdown.
+                if let Err(error) = mark_index_dirty(
                     &store,
-                    "shutdown left buffered fanotify records unapplied",
-                );
-                tracing::warn!(
-                    buffered_bytes = buf_len,
-                    "shutdown deadline left buffered fanotify records unapplied"
-                );
-                buf_len = 0;
-            }
-            let mut shutdown_reads = 0u32;
-            let mut shutdown_queue_drained = false;
-            loop {
-                if buf_len == 0 {
-                    if shutdown_reads >= MAX_READS_PER_TICK || Instant::now() >= shutdown_deadline {
+                    "shutdown requires a fresh reconciliation observation",
+                ) {
+                    tracing::error!(%error, "could not persist shutdown observation requirement");
+                }
+            } else {
+                // Final best-effort DRAIN of the kernel queue first, so events that
+                // landed in the brief window before SIGTERM (a file created right as
+                // `systemctl stop` ran) aren't lost — then flush everything once.
+                while buf_len > 0 && Instant::now() < shutdown_deadline {
+                    let parse_deadline =
+                        (Instant::now() + EVENT_PARSE_SLICE).min(shutdown_deadline);
+                    let (_, _, overflows, consumed) = parse_events_bounded(
+                        &buf[..buf_len],
+                        &fsfds,
+                        &mut handle_capable_fsids,
+                        &root_canon,
+                        db,
+                        &mut pending,
+                        &mut born,
+                        &mut target_refreshes,
+                        &mut indexed_parent_paths,
+                        &mut store,
+                        scan_job.is_none(),
+                        &mut lost_events,
+                        MAX_EVENTS_PER_PARSE,
+                        parse_deadline,
+                    );
+                    if consumed == 0 {
                         break;
                     }
-                    let m = unsafe {
-                        libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
-                    };
-                    if m > 0 {
-                        buf_len = m as usize;
-                        shutdown_reads += 1;
-                    } else if m < 0 {
-                        match std::io::Error::last_os_error().raw_os_error() {
-                            Some(libc::EINTR) => continue,
-                            Some(libc::EAGAIN) => {
-                                shutdown_queue_drained = true;
-                                break;
-                            }
-                            _ => {
-                                lost_events = true;
-                                tracing::warn!(
-                                    error = %std::io::Error::last_os_error(),
-                                    "fanotify read failed during shutdown drain"
-                                );
-                                break;
-                            }
-                        }
-                    } else {
-                        shutdown_queue_drained = true;
-                        break;
-                    }
+                    buf.copy_within(consumed..buf_len, 0);
+                    buf_len -= consumed;
+                    kernel_overflow_notifications =
+                        kernel_overflow_notifications.saturating_add(overflows);
                 }
-
-                let parse_deadline = (Instant::now() + EVENT_PARSE_SLICE).min(shutdown_deadline);
-                let (_, _, overflows, consumed) = parse_events_bounded(
-                    &buf[..buf_len],
-                    &fsfds,
-                    &mut handle_capable_fsids,
-                    &root_canon,
-                    db,
-                    &mut pending,
-                    &mut born,
-                    &mut target_refreshes,
-                    &mut indexed_parent_paths,
-                    &mut store,
-                    scan_job.is_none(),
-                    &mut lost_events,
-                    MAX_EVENTS_PER_PARSE,
-                    parse_deadline,
-                );
-                if consumed == 0 {
-                    break;
-                }
-                buf.copy_within(consumed..buf_len, 0);
-                buf_len -= consumed;
-                kernel_overflow_notifications =
-                    kernel_overflow_notifications.saturating_add(overflows);
-                // A buffered suffix is always processed before another read so
-                // event ordering remains intact across shutdown slices.
-                if buf_len > 0 && Instant::now() >= shutdown_deadline {
-                    break;
-                }
-            }
-            if shutdown_drain_incomplete(shutdown_queue_drained, buf_len) {
-                // Hitting the read/time cap is not evidence that the kernel
-                // queue is empty. Restart reconciliation must close this gap.
-                lost_events = true;
                 if buf_len > 0 {
+                    // Do not silently discard a buffered suffix when the shutdown
+                    // drain deadline expires; the final index must remain uncertain.
+                    lost_events = true;
+                    persist_dirty_marker_best_effort(
+                        &store,
+                        "shutdown left buffered fanotify records unapplied",
+                    );
                     tracing::warn!(
                         buffered_bytes = buf_len,
                         "shutdown deadline left buffered fanotify records unapplied"
                     );
+                    buf_len = 0;
                 }
-                if !shutdown_queue_drained {
-                    tracing::warn!(
-                        reads = shutdown_reads,
-                        "shutdown drain ended without observing an empty fanotify queue"
+                let mut shutdown_reads = 0u32;
+                let mut shutdown_queue_drained = false;
+                loop {
+                    if buf_len == 0 {
+                        if shutdown_reads >= MAX_READS_PER_TICK
+                            || Instant::now() >= shutdown_deadline
+                        {
+                            break;
+                        }
+                        let m = unsafe {
+                            libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+                        };
+                        if m > 0 {
+                            buf_len = m as usize;
+                            shutdown_reads += 1;
+                        } else if m < 0 {
+                            match std::io::Error::last_os_error().raw_os_error() {
+                                Some(libc::EINTR) => continue,
+                                Some(libc::EAGAIN) => {
+                                    shutdown_queue_drained = true;
+                                    break;
+                                }
+                                _ => {
+                                    lost_events = true;
+                                    tracing::warn!(
+                                        error = %std::io::Error::last_os_error(),
+                                        "fanotify read failed during shutdown drain"
+                                    );
+                                    break;
+                                }
+                            }
+                        } else {
+                            shutdown_queue_drained = true;
+                            break;
+                        }
+                    }
+
+                    let parse_deadline =
+                        (Instant::now() + EVENT_PARSE_SLICE).min(shutdown_deadline);
+                    let (_, _, overflows, consumed) = parse_events_bounded(
+                        &buf[..buf_len],
+                        &fsfds,
+                        &mut handle_capable_fsids,
+                        &root_canon,
+                        db,
+                        &mut pending,
+                        &mut born,
+                        &mut target_refreshes,
+                        &mut indexed_parent_paths,
+                        &mut store,
+                        scan_job.is_none(),
+                        &mut lost_events,
+                        MAX_EVENTS_PER_PARSE,
+                        parse_deadline,
                     );
+                    if consumed == 0 {
+                        break;
+                    }
+                    buf.copy_within(consumed..buf_len, 0);
+                    buf_len -= consumed;
+                    kernel_overflow_notifications =
+                        kernel_overflow_notifications.saturating_add(overflows);
+                    // A buffered suffix is always processed before another read so
+                    // event ordering remains intact across shutdown slices.
+                    if buf_len > 0 && Instant::now() >= shutdown_deadline {
+                        break;
+                    }
                 }
-            }
-            if lost_events {
-                // The daemon exits immediately after this path, so persist any
-                // shutdown-time loss before its in-memory uncertainty latch goes
-                // away. Startup reconciliation can then repair the gap.
-                if let Err(error) =
-                    mark_index_dirty(&store, "shutdown could not prove event continuity")
-                {
-                    tracing::error!(%error, "could not persist shutdown event-loss marker");
+                if shutdown_drain_incomplete(shutdown_queue_drained, buf_len) {
+                    // Hitting the read/time cap is not evidence that the kernel
+                    // queue is empty. Restart reconciliation must close this gap.
+                    lost_events = true;
+                    if buf_len > 0 {
+                        tracing::warn!(
+                            buffered_bytes = buf_len,
+                            "shutdown deadline left buffered fanotify records unapplied"
+                        );
+                    }
+                    if !shutdown_queue_drained {
+                        tracing::warn!(
+                            reads = shutdown_reads,
+                            "shutdown drain ended without observing an empty fanotify queue"
+                        );
+                    }
+                }
+                if lost_events {
+                    // The daemon exits immediately after this path, so persist any
+                    // shutdown-time loss before its in-memory uncertainty latch goes
+                    // away. Startup reconciliation can then repair the gap.
+                    if let Err(error) =
+                        mark_index_dirty(&store, "shutdown could not prove event continuity")
+                    {
+                        tracing::error!(%error, "could not persist shutdown event-loss marker");
+                    }
                 }
             }
             let shutdown_work_pending =
@@ -2798,7 +3009,7 @@ pub fn run_daemon(
             scan_job.is_some(),
         );
         let mut pfd = libc::pollfd {
-            fd: fan,
+            fd: hint_reader.as_ref().map_or(fan, |reader| reader.notify.0),
             events: libc::POLLIN,
             revents: 0,
         };
@@ -2809,6 +3020,11 @@ pub fn run_daemon(
         } else {
             unsafe { libc::poll(&mut pfd, 1, wait_ms.max(0)) }
         };
+        if pr > 0 {
+            if let Some(reader) = hint_reader.as_ref() {
+                reader.acknowledge();
+            }
+        }
         if pr < 0 {
             // EINTR (a signal) is expected — loop and the flags above handle it.
             // Any OTHER poll error must not turn into a silent busy-spin; log it
@@ -2827,12 +3043,55 @@ pub fn run_daemon(
             let drain_deadline = Instant::now() + Duration::from_millis(100);
             loop {
                 if buf_len == 0 {
-                    let n = unsafe {
-                        libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+                    let n = if let Some(reader) = hint_reader.as_ref() {
+                        match reader.rx.try_recv() {
+                            Ok(bytes) => {
+                                debug_assert!(bytes.len() <= buf.len());
+                                buf[..bytes.len()].copy_from_slice(&bytes);
+                                reader.queued_chunks.fetch_sub(1, Ordering::AcqRel);
+                                reads += 1;
+                                bytes.len() as isize
+                            }
+                            Err(TryRecvError::Empty) => {
+                                kernel_empty = reader.kernel_empty.load(Ordering::Acquire)
+                                    && reader.queued_chunks.load(Ordering::Acquire) == 0;
+                                if reader.dropped.swap(false, Ordering::AcqRel) {
+                                    lost_events = true;
+                                    index_uncertain = true;
+                                    persist_dirty_marker_best_effort(
+                                        &store,
+                                        "fanotify hint ring capacity was exceeded",
+                                    );
+                                    RESCAN.store(true, Ordering::SeqCst);
+                                    tracing::warn!(
+                                        "fanotify hint ring overflowed; discarded hints require a full observation"
+                                    );
+                                }
+                                break;
+                            }
+                            Err(TryRecvError::Disconnected) => {
+                                kernel_empty = false;
+                                lost_events = true;
+                                index_uncertain = true;
+                                RESCAN.store(true, Ordering::SeqCst);
+                                tracing::error!(
+                                    "fanotify hint reader stopped unexpectedly; requesting full observation"
+                                );
+                                break;
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            libc::read(fan, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len())
+                        }
                     };
                     if n > 0 {
-                        buf_len = n as usize;
-                        reads += 1;
+                        if hint_reader.is_none() {
+                            buf_len = n as usize;
+                            reads += 1;
+                        } else {
+                            buf_len = n as usize;
+                        }
                     } else {
                         if n < 0 {
                             let err = std::io::Error::last_os_error();
@@ -2926,6 +3185,12 @@ pub fn run_daemon(
                 }
                 if reads >= MAX_READS_PER_TICK || Instant::now() >= drain_deadline {
                     kernel_empty = false; // hit the cap; more work may remain in kernel
+                    if let Some(reader) = hint_reader.as_ref() {
+                        // The bounded userspace ring may still have chunks even
+                        // though the kernel queue is empty. Re-wake the
+                        // coordinator so it continues draining that ring.
+                        notify_hint_reader(reader.notify.0);
+                    }
                     break;
                 }
             }
@@ -6553,6 +6818,83 @@ fn check_alerts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hint_reader_ring_is_bounded_and_reports_user_space_loss() {
+        let (tx, rx) = mpsc::sync_channel(2);
+        let dropped = AtomicBool::new(false);
+        let queued = std::sync::atomic::AtomicUsize::new(0);
+        queue_hint_chunk(&tx, vec![1], &queued, &dropped);
+        queue_hint_chunk(&tx, vec![2], &queued, &dropped);
+        queue_hint_chunk(&tx, vec![3], &queued, &dropped);
+
+        assert!(dropped.load(Ordering::Acquire));
+        assert_eq!(queued.load(Ordering::Acquire), 2);
+        assert_eq!(rx.try_recv().unwrap(), vec![1]);
+        assert_eq!(rx.try_recv().unwrap(), vec![2]);
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dedicated_hint_reader_drains_fd_into_bounded_channel() {
+        let mut pipe = [-1; 2];
+        assert_eq!(
+            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) },
+            0
+        );
+        let read_guard = RawFdGuard(pipe[0]);
+        let write_guard = RawFdGuard(pipe[1]);
+        let notify = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        assert!(notify >= 0);
+        let notify_guard = RawFdGuard(notify);
+        let (tx, rx) = mpsc::sync_channel(2);
+        let kernel_empty = Arc::new(AtomicBool::new(true));
+        let queued_chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_empty = Arc::clone(&kernel_empty);
+        let thread_queued = Arc::clone(&queued_chunks);
+        let thread_dropped = Arc::clone(&dropped);
+        let thread_stop = Arc::clone(&stop);
+        let join = std::thread::spawn(move || {
+            let read_fd = read_guard.0;
+            fanotify_reader_loop(
+                read_fd,
+                notify,
+                tx,
+                thread_empty,
+                thread_queued,
+                thread_dropped,
+                thread_stop,
+            );
+            drop(read_guard);
+        });
+
+        let payload = b"synthetic fanotify bytes";
+        assert_eq!(
+            unsafe {
+                libc::write(
+                    write_guard.0,
+                    payload.as_ptr().cast::<libc::c_void>(),
+                    payload.len(),
+                )
+            },
+            payload.len() as isize
+        );
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), payload);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !kernel_empty.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(kernel_empty.load(Ordering::Acquire));
+        assert_eq!(queued_chunks.load(Ordering::Acquire), 1);
+        assert!(!dropped.load(Ordering::Acquire));
+
+        stop.store(true, Ordering::Release);
+        join.join().unwrap();
+        drop(notify_guard);
+    }
 
     #[test]
     fn alert_shell_is_resolved_by_absolute_path() {
