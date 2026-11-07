@@ -7219,3 +7219,14 @@ progress, and no write error. Its systemd unit reports one restart. Do not use
 this state as an exact baseline or deploy the candidate against it. Recover
 and prove exact live-index accounting before reconsidering a production
 canary; no production service or database was changed during this checkpoint.
+
+**04:07 UTC follow-up:** the live status still reports `dirty=true` with the
+same startup-reconciliation reason, `caught_up=false`, 5,914.683 seconds behind,
+4 pending userspace updates, no active scan, no reported dropped events or
+kernel overflow, and no write error. The index database is 2,048,475,136 bytes
+on disk with a 17,427,632-byte WAL. The last two minutes of the Dux journal
+contained 62 entries, all repeated unresolved fanotify FID warnings caused by
+`open_by_handle_at` returning `ESTALE`; the global system journal occupies
+624.5 MiB. This is observed alongside ongoing successful event commits, but a
+causal link to the dirty startup state is not established. Exact live
+accounting and the cause of the missing reconciliation scan remain unresolved.
