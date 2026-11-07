@@ -66,6 +66,7 @@ struct HintResolutionJob {
 struct HintResolutionResult {
     seen: u64,
     lost: bool,
+    priority_paths: Vec<PathBuf>,
 }
 
 fn queue_hint_resolution_result(
@@ -121,7 +122,7 @@ impl FanotifyHintResolver {
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     };
-                    let (seen, scope_lost) = resolve_fanotify_hint_scope(
+                    let (seen, scope_lost, priority_paths) = resolve_fanotify_hint_scope(
                         job.handles,
                         &fsfds,
                         &mut handle_capable_fsids,
@@ -131,6 +132,7 @@ impl FanotifyHintResolver {
                     let result = HintResolutionResult {
                         seen,
                         lost: scope_lost,
+                        priority_paths,
                     };
                     queue_hint_resolution_result(
                         &tx_results,
@@ -1441,9 +1443,10 @@ fn resolve_fanotify_hint_scope(
     handle_capable_fsids: &mut HashSet<(i32, i32)>,
     ambiguous_fsids: &HashSet<(i32, i32)>,
     root: &Path,
-) -> (u64, bool) {
+) -> (u64, bool, Vec<PathBuf>) {
     let mut in_scope = 0u64;
     let mut lost = false;
+    let mut priority_paths = Vec::new();
     for (handle, count) in handles {
         if payload_fsid(&handle).is_some_and(|fsid| ambiguous_fsids.contains(&fsid)) {
             // One physical filesystem can have multiple visible mount paths.
@@ -1456,12 +1459,15 @@ fn resolve_fanotify_hint_scope(
         match resolve_handle(&handle, fsfds, handle_capable_fsids) {
             EntryResolution::Resolved(parent, _) if parent.starts_with(root) => {
                 in_scope = in_scope.saturating_add(count);
+                if priority_paths.len() < 256 && !priority_paths.contains(&parent) {
+                    priority_paths.push(parent);
+                }
             }
             EntryResolution::Resolved(_, _) => {}
             EntryResolution::Stale(_) | EntryResolution::Unresolved => lost = true,
         }
     }
-    (in_scope, lost)
+    (in_scope, lost, priority_paths)
 }
 
 #[repr(C)]
@@ -2288,6 +2294,10 @@ pub fn run_daemon(
     let mut accounting_check: Option<AccountingCheck> = None;
     let mut pending_reconciliation_check: Option<bool> = None;
     let mut scan_cancel: Option<Arc<AtomicBool>> = None;
+    // Keep only a bounded set of resolved directory hints for the next full
+    // reconciliation. New hints arriving during a scan are retained for the
+    // following pass rather than changing the active traversal.
+    let mut pending_scan_hints = Vec::<PathBuf>::new();
     let mut lost_events = false;
     // Distinguish normal changes observed during a walk from known hint loss.
     // A normal race may wait for cadence; an overflow or lost scope needs a
@@ -2321,6 +2331,11 @@ pub fn run_daemon(
             while let Ok(result) = resolver.rx.try_recv() {
                 reader.queued_chunks.fetch_sub(1, Ordering::AcqRel);
                 ev_seen = ev_seen.saturating_add(result.seen);
+                for path in result.priority_paths {
+                    if pending_scan_hints.len() < 256 && !pending_scan_hints.contains(&path) {
+                        pending_scan_hints.push(path);
+                    }
+                }
                 let observation_invalidated = scan_first_hint_invalidates_observation(
                     scan_job.is_some(),
                     result.seen > 0,
@@ -3239,8 +3254,13 @@ pub fn run_daemon(
                     "selected reconciliation implementation"
                 );
                 let cancel = Arc::new(AtomicBool::new(false));
-                let opts =
+                let mut opts =
                     background_reconciliation_scan_options(one_file_system, Arc::clone(&cancel));
+                opts.priority_paths = std::mem::take(&mut pending_scan_hints);
+                tracing::debug!(
+                    priority_directory_count = opts.priority_paths.len(),
+                    "starting full reconciliation with resolved directory hints"
+                );
                 tracing::info!(
                     "starting background reconciliation of {}; event ingestion remains active",
                     root_canon.display()
@@ -7292,6 +7312,7 @@ mod tests {
         let result = HintResolutionResult {
             seen: 1,
             lost: false,
+            priority_paths: Vec::new(),
         };
 
         queue_hint_resolution_result(&tx, result, &queued, &dropped, notify_fd);
@@ -7300,6 +7321,7 @@ mod tests {
             HintResolutionResult {
                 seen: 2,
                 lost: false,
+                priority_paths: Vec::new(),
             },
             &queued,
             &dropped,
@@ -8052,7 +8074,7 @@ mod tests {
         assert_eq!(overflows, 0);
         assert!(!lost);
         assert_eq!(consumed, encoded.len());
-        let (seen, unresolved) = resolve_fanotify_hint_scope(
+        let (seen, unresolved, priority_paths) = resolve_fanotify_hint_scope(
             handles,
             &HashMap::new(),
             &mut HashSet::new(),
@@ -8061,9 +8083,10 @@ mod tests {
         );
         assert_eq!(seen, 0);
         assert!(unresolved, "unresolvable scope must widen to a full scan");
+        assert!(priority_paths.is_empty());
 
         let (_, _, _, ambiguous_hints) = parse_fanotify_hints(&encoded, 8);
-        let (seen, unresolved) = resolve_fanotify_hint_scope(
+        let (seen, unresolved, priority_paths) = resolve_fanotify_hint_scope(
             ambiguous_hints,
             &HashMap::new(),
             &mut HashSet::new(),
@@ -8071,6 +8094,10 @@ mod tests {
             Path::new("/indexed-root"),
         );
         assert_eq!(seen, 1);
+        assert!(
+            priority_paths.is_empty(),
+            "ambiguous aliases cannot safely prioritize a visible path"
+        );
         assert!(
             !unresolved,
             "ambiguous mount aliases must conservatively count as in scope"

@@ -4,6 +4,17 @@
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
+## New source change after the exact-commit qualification
+
+Resolved in-root fanotify parent hints now feed a bounded (256-path) priority
+set into the next full-root scan. jwalk moves child directory branches
+containing those hints to the front of the scheduling batch; the scan still visits
+the complete root and only a completed, verified observation can establish
+freshness. Hints received during a scan are retained for the following scan.
+The full local suite passes (296 passed, 2 ignored); strict Clippy, formatting,
+and diff checks also pass. No throughput or hinted-path latency improvement
+has yet been measured; the prior VPS2 report predates this source change.
+
 ## Latest 100k reconciliation-first qualification (18:17 UTC)
 
 The clean optimized build from pushed commit `ab8735c` passed the

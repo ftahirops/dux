@@ -33,6 +33,43 @@ pub struct ScanOptions {
     /// Cooperative cancellation for background rebuilds when the host enters
     /// critical pressure. The old live index remains installed on cancellation.
     pub cancel: Option<Arc<AtomicBool>>,
+    /// Directories observed as changed. The full walk remains authoritative;
+    /// these paths only bias jwalk's directory queue toward affected branches.
+    pub priority_paths: Vec<PathBuf>,
+}
+
+fn priority_directory_set(root: &Path, hints: &[PathBuf]) -> std::collections::HashSet<PathBuf> {
+    let mut prioritized = std::collections::HashSet::new();
+    for hint in hints.iter().take(256) {
+        if !hint.starts_with(root) {
+            continue;
+        }
+        let mut current = hint.as_path();
+        loop {
+            if !current.starts_with(root) {
+                break;
+            }
+            prioritized.insert(current.to_path_buf());
+            if current == root {
+                break;
+            }
+            let Some(parent) = current.parent() else {
+                break;
+            };
+            current = parent;
+        }
+    }
+    prioritized
+}
+
+fn promote_priority<T>(items: &mut [T], mut is_priority: impl FnMut(&T) -> bool) {
+    let mut next_priority = 0;
+    for index in 0..items.len() {
+        if is_priority(&items[index]) {
+            items.swap(next_priority, index);
+            next_priority += 1;
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1855,6 +1892,8 @@ fn parallel_stage(
     let next_path_id = Arc::new(AtomicI64::new(2));
     let path_ids = Arc::clone(&next_path_id);
     let scan_root = root.to_path_buf();
+    let priority_dirs = Arc::new(priority_directory_set(root, &opts.priority_paths));
+    let callback_priority_dirs = Arc::clone(&priority_dirs);
 
     std::thread::scope(|scope| -> Result<()> {
         let producer = scope.spawn(move || {
@@ -1880,6 +1919,19 @@ fn parallel_stage(
                         // already handled by the normal iteration below.
                         if depth.is_none() {
                             return;
+                        }
+                        // jwalk's callback runs before it schedules child
+                        // directories. Put branches containing recent hints at
+                        // the front; all entries are still visited this pass.
+                        if callback_priority_dirs.contains(dir_path) {
+                            promote_priority(children, |child| {
+                                child
+                                    .as_ref()
+                                    .ok()
+                                    .is_some_and(|entry| {
+                                        callback_priority_dirs.contains(&entry.path())
+                                    })
+                            });
                         }
                         // Stat the directory once to learn the parent (dev,inode); all of
                         // these children share it. The parent path ID is per occurrence,
@@ -2199,6 +2251,33 @@ fn set_low_priority() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_priority_hints_include_only_their_rooted_ancestors() {
+        let root = Path::new("/tree");
+        let hints = vec![PathBuf::from("/tree/a/b"), PathBuf::from("/outside/x")];
+        let prioritized = priority_directory_set(root, &hints);
+        assert!(prioritized.contains(Path::new("/tree")));
+        assert!(prioritized.contains(Path::new("/tree/a")));
+        assert!(prioritized.contains(Path::new("/tree/a/b")));
+        assert!(!prioritized.contains(Path::new("/outside")));
+    }
+
+    #[test]
+    fn scan_priority_moves_hint_branches_forward_without_dropping_siblings() {
+        let prioritized =
+            priority_directory_set(Path::new("/tree"), &[PathBuf::from("/tree/changed/deep")]);
+        let mut children = vec![
+            PathBuf::from("/tree/unrelated"),
+            PathBuf::from("/tree/changed"),
+            PathBuf::from("/tree/other"),
+        ];
+        promote_priority(&mut children, |child| prioritized.contains(child));
+        assert_eq!(children[0], Path::new("/tree/changed"));
+        assert_eq!(children.len(), 3);
+        assert!(children.contains(&PathBuf::from("/tree/unrelated")));
+        assert!(children.contains(&PathBuf::from("/tree/other")));
+    }
 
     #[test]
     fn vanished_scan_entries_do_not_count_as_coverage_errors() {

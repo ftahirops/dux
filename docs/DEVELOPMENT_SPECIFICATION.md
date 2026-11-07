@@ -115,7 +115,8 @@ specified and qualified.
 - Fanotify validates enough event structure to identify a filesystem and
   candidate parent scope, then adds a bounded/coalesced hint. The reader does
   no per-file handle resolution, SQLite writes, or recursive traversal.
-- Hints prioritize scans; they never define file size or correctness. An
+- Resolved directory hints bias branch order in full-root scans; they never
+  define file size, narrow required coverage, or establish correctness. An
   unresolved parent widens the hint to a resolvable ancestor or the filesystem.
 - Kernel overflow schedules a full filesystem scan. If events continue to
   exceed drain capacity, freshness degrades visibly while scans remain

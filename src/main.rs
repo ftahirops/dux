@@ -374,6 +374,7 @@ fn real_main() -> Result<()> {
                 progress: !quiet,
                 jobs,
                 cancel: None,
+                priority_paths: Vec::new(),
             };
             // Atomic rebuild: scan into a sibling file, then rename over the live
             // index — fragmentation-free, never a half-built or empty index.
