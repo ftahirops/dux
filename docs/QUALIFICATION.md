@@ -7017,6 +7017,26 @@ progress and
 `f01848d5110d68842170b25ffdb6da55ad38583e5fff1ff2c343b1a51911a7bd` for the
 P0 journal.
 
+**03:15 UTC runtime checkpoint:** the CPU event-burst suite passed with
+12,118 events observed from 12,000 created entries, 21.804-second catch-up,
+26.994-second exact validation, and 0.101 CPU cores measured against a
+0.10-core target with the harness's 20% tolerance. `crash`, `overflow`, and
+`cpu` are now passed; the production-shaped churn suite is running. The matrix,
+candidate soak, and independent older soak remained active with zero restarts;
+matrix memory peak remained 1.34 GiB. Host CPU PSI `some avg10` briefly
+reached 75.19%, then fell to 68.42% after 15 seconds; CPU `full` remained 0%.
+At recheck, 2.2 GiB memory was available and `/` had 23 GiB free. The exact
+candidate soak had run **4,863.6 seconds**, recording **109,738 mutations** and
+**1,092 exactness samples**. Sampled maxima were 7,792 KiB RSS, 12 file
+descriptors, and a 4,293,072-byte WAL; p95 exact convergence was 497 ms and
+maximum was 1,339 ms. Final soak checks remain pending. Snapshot SHA-256 values
+are `5bff39f8d726183238dea79112641ce402ae202e98e49a5756547085aaee038b` for
+the matrix report,
+`2e8d926bb48a0cfe8b60aae482b6113433a373e228120a0ef70e705a7f51e546` for soak
+progress, and
+`eac2732026ea504a9eba7fea2f42162582da89bf374344060aad87c9bf0e993d` for the
+P0 journal.
+
 **03:10 UTC runtime checkpoint:** the candidate overflow suite passed in
 476.277 seconds. The kernel queue capacity was 16,384; the test created 18,432
 entries, forced the dirty-metadata write to fail, observed explicit
