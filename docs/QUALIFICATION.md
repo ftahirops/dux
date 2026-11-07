@@ -7703,3 +7703,21 @@ soak isolated from competing VM workloads, and require it to pass exactness
 through and beyond that count plus terminal history and integrity checks. A
 repeat failure with drained backlog or mismatches after a stable caught-up
 window would be a candidate defect, not a timing-only failure.
+
+### Production dirty-state persistence check — 2026-11-07 06:27 UTC
+
+A new read-only sample again found production service PID 988284 active with
+one lifetime restart, schema v6, `dirty_reason=fanotify queue overflow`, two
+failed reconciliation attempts, and `uncertain=true`. At the 06:27:58 status
+read, pending was 36, the kernel queue was empty, dropped updates were zero,
+and lag was **14,350,505 ms**; the pending value changed from 2,396 in a sample
+28 seconds earlier, so it is not a stable recovery measure. No rescan-complete
+or new overflow line appeared in the preceding five-minute journal window.
+That window contained **218 unresolved FID warnings** on the production root
+FSID; **164** exactly matched the candidate's target-only stale `FAN_ATTRIB`
+record shape, while 49 parsed records had other masks/info shapes and five
+records could not be parsed into that summary. Capture:
+`docs/qualification/live-prod-20261107/production-0627.json` (SHA-256
+`6a22c5db7568cb74891ca6db42497be7559f42aa0052129a5e4e01755bade2fe`). The
+candidate's filter precondition passed in the earlier read-only probe, but this
+legacy daemon was not changed and no production recovery was attempted.
