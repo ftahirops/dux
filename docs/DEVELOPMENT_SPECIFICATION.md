@@ -253,14 +253,18 @@ passing old candidate or small unit test does not close an integrated release ga
 
 ### Prototype state (2026-11-07)
 
-The opt-in `dux daemon --reconcile-first` path implements the first runtime
-slice of S2/S3: bounded fanotify metadata draining without path resolution,
-overflow-to-reconciliation requests, 15-minute full-scan scheduling, and
-last-observed status labeling. It currently uses full atomic index rebuilds;
-changed-row writes, per-directory generations/freshness, incomplete-scope row
-preservation, and production-scale cost measurements are still unimplemented.
-The default daemon remains event-apply mode. Treat this prototype as
-qualification-only until S2-S4 exit evidence is met.
+The opt-in `dux daemon --reconcile-first` path implements a partial runtime
+slice of S2/S3: bounded fanotify record validation without per-file path
+resolution, overflow-to-reconciliation requests, periodic full-root scans,
+changed-row writes after the initial atomic v7 baseline, preservation of the
+previous index after incomplete observations, and last-observed status
+labeling. The periodic interval is anchored to scan start; a scan taking longer
+than the interval can miss the freshness target. `--one-file-system` still
+uses the atomic rebuild path. Fanotify records are not yet coalesced into
+directory-scoped hints, per-directory generations/freshness are not stored,
+and concurrent-churn, forced-overflow recovery, and sustained resource costs
+remain unqualified. The default daemon remains event-apply mode. Treat this
+prototype as qualification-only until S2-S4 exit evidence is met.
 
 ## 5. Performance and reliability contract
 
