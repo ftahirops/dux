@@ -1,0 +1,196 @@
+# Production readiness status
+
+**Updated:** 2026-11-07 13:12 UTC
+**Goal:** production reliability, security, performance, and correctness review
+**State:** active; not production-ready sign-off
+
+## Live production evidence
+
+Read-only sample from `/` on the production host at **13:09 UTC**:
+
+- Installed daemon is active (PID 988284), with one lifetime restart. systemd
+  enforces a 100% one-core CPU quota and a 4 GiB memory limit.
+- The index is **dirty and not caught up**: dirty reason `fanotify queue
+  overflow`, 83 kernel overflows, about 10 h 41 min behind, and about 48 h
+  20 min since the last scan. It reports 1,412,175 indexed nodes, 83 pending
+  updates, no active scan, and no write error.
+- Lifetime watcher counters are 36,877,707 events seen and 22,662,116 resolved;
+  userspace drops remain zero. The SQLite file is 2,301,034,496 bytes and the
+  WAL is 128 MiB.
+- `/proc/sys/fs/fanotify/max_queued_events` is 65,536. The root filesystem is
+  ext4 with about 60 GiB available. The installed service has not been changed
+  by this work.
+
+These observations show a real coverage gap. They do not prove that CPU
+throttling alone caused the overflows or that build churn is the only producer.
+The last recorded event commit was current at sample time, while the index
+remained 9.88 hours behind and its last full scan was 47.54 hours old. The event
+path is still making commits without repairing the existing uncertainty: event
+progress is not equivalent to reconciliation or a trustworthy baseline. The
+overflow count rose from 65 at 11:50 to 80 at 12:11 UTC and stayed at 80 through
+12:21, then rose to 83 by 13:09. Pending updates fell from 52,258 at 12:11 to 5
+at 12:18, then rose to 83 by 13:09. This is an uncontrolled observation, not a
+CPU-throttle A/B test. The
+service journal contained 252
+unresolvable stale-handle (`ESTALE`) event warnings from 10:20 through 10:26;
+this verifies recurring stale-handle cases on the live event path, but not
+whether they account for all unresolved events or the original overflow.
+
+## Selected architecture and implementation state
+
+The selected target is now **reconciliation-first**: scans define the
+last-observed index, and fanotify is only a bounded prioritization hint. The
+15-minute maximum observation age is a target to measure, not a current
+guarantee. The architecture and development specification now describe scan
+semantics, bounded changed-row updates, overflow recovery, project-quota limits,
+and test gates.
+
+The default working-tree daemon still uses event-apply behavior with queue-aware
+CPU throttling, stale-parent classification, retry backoff, and telemetry. An
+opt-in experimental `dux daemon --reconcile-first` runtime path now drains and
+validates fanotify records as hints, without resolving per-file handles or
+applying per-event SQLite updates. It requests scans on overflow or malformed
+records and performs periodic scans every 15 minutes. After the initial atomic
+v7 baseline, complete observations reconcile the existing database in one
+publication transaction. Existing path IDs are reused by parent/name identity;
+new IDs are monotonic. Value-guarded SQL upserts skip unchanged rows. Incomplete
+walks preserve the previous indexed rows and record a failed attempt. The
+normal event-apply daemon remains the default and production service is
+unchanged.
+
+In-place reconciliation still walks every entry and builds a disk-backed scan
+staging database with graph and rollup projections. It reduces full database
+replacement and unchanged-row SQLite writes; it does not reduce traversal/stat
+work, eliminate staging-disk use, or provide per-directory salvage after a
+partial scan. The 1.37M run observed about 414 MiB of staging data during the
+in-place pass, but did not continuously capture its peak or count changed rows.
+The mode is not ready for a production canary.
+
+The v7 schema step is now partly implemented: full scans persist the path graph
+that was previously staging-only, while retaining v6 inode/dirent tables for
+the current watcher and queries. Event updates do not update the v7 graph, so
+it represents the last full scan only. The schema bump means a v6 production
+index requires an atomic full rebuild on upgrade. Added-path storage and rebuild
+space/time overhead have not been measured; this is not ready to deploy.
+
+The current source also fails closed when a v7 database is missing required
+path-graph tables, columns, or correctly defined indexes. Normal opens require that schema;
+`needs_rebuild` reports damaged v7 graphs, and the rebuild-source reader can
+still read the v6-compatible projection without silently recreating an empty
+graph. Regression coverage includes a required index name recreated on the
+wrong column.
+
+The same working tree contains the stale-parent classification and retry
+backoff changes under review. Those are not yet release-qualified. The concise
+architecture plan orders work by production impact; detailed historical test
+evidence remains in [`PRODUCTION_READINESS_AUDIT.md`](PRODUCTION_READINESS_AUDIT.md)
+and [`docs/QUALIFICATION.md`](docs/QUALIFICATION.md).
+
+During review, found and fixed a migration edge case in the retry change: legacy
+indexes with an attempt count but no deadline now receive the 60-second base
+cooldown instead of the exponential maximum (up to 8.5 hours). Current-source
+Rust tests now cover this behavior.
+
+## Verification and open gates
+
+- `cargo fmt --check` and `git diff --check` pass.
+- Human-readable status now labels the kernel queue separately from pending
+  userspace updates; this avoids saying “pipeline: drained” when the kernel
+  queue is empty but work remains pending. The current-source regression passed.
+- Retry status now exposes both the retry interval and remaining seconds, plus
+  whether retry is due. Current-source tests cover missing, future, expired,
+  malformed, and bounded retry-deadline cases.
+- Read-only SQLite inspection of the live index at 10:30 UTC found
+  `failed_reconciliation_attempts=2`, no persisted retry deadline, and dirty
+  reason `fanotify queue overflow`. The installed binary logged at startup that
+  automatic reconciliation was paused after two failures. The bounded-retry
+  changes are now tested on an isolated checkout but are not deployed.
+- Latest local all-features/all-targets Rust run: **282 passed, 0 failed,
+  2 ignored**. The ignored tests require a dedicated ext4 profile and manual
+  scale invocation. The new 100k-entry scale smoke passed separately. Strict
+  all-features/all-targets Clippy passed with `-D warnings`; formatting and diff
+  checks pass. Focused reconciliation tests passed, including zero indexed-row
+  writes on an unchanged scan and equality against a fresh full-scan oracle for
+  inode, dirent, path, and directory-total projections; an injected SQLite
+  publication failure also rolled back all four projections and a later retry
+  converged. The earlier disposable
+  runtime smoke verified hint-only event handling and SIGHUP-triggered scanning,
+  but did not exercise the new 15-minute in-place daemon branch end to end.
+  Python discovery passed **306/306**.
+  `cargo audit --no-fetch` exited 0 after loading the local 1,422-advisory DB
+  and scanning 229 locked dependencies; this was a source-lockfile scan, not an
+  OS-package or application security audit. VPS2 access works on explicit SSH
+  port 22 with the authorized root key; the host SSH config's port 2222 caused
+  the initial failed attempt.
+- The four changed Python suites passed **65/65** (backup, canary, schema
+  preflight, and live observer). Formatting and diff checks pass. Exact commands,
+  cgroup resource use, production sample, and soak state are recorded in
+  [`PRODUCTION_READINESS_AUDIT.md`](PRODUCTION_READINESS_AUDIT.md).
+- The earlier broader Python run had **301/304 passed** because three package
+  build tests timed out under a 5% CPU quota. The latest unrestricted local
+  discovery passed **306/306**; that removes the observed test-timeout blocker
+  but does not qualify package installation on all supported target systems.
+- RustSec `cargo audit` passed for the 229-dependency source lockfile and for
+  the exact running production binary (202 embedded Rust dependencies; binary
+  SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`):
+  zero known advisories in the database snapshot dated 2026-11-06 15:34 UTC.
+  This does not cover OS packages or application logic, and advisories newer
+  than that database snapshot are outside the check.
+- Release-profile 1.37M-entry scan-first measurement on VPS2 used the exact
+  optimized test-harness binary SHA-256
+  `5d222e9b06f4748c3aae10c5db4fa017e8d57d73b2576071da8ae53061086a09`. On a
+  1.37M-file, 5.66-GB-allocated static ext4 fixture, baseline scan took
+  **154.331 s** and the following unchanged in-place scan took **128.755 s**;
+  both databases measured **440,315,904 bytes**. This is a Rust test executable
+  invoking the in-place function, not the production daemon. The second scan was cache-warm,
+  so this is not a controlled A/B performance win. A debug-profile repeat took
+  **275.050 s** and **297.325 s**, respectively, with a 440,307,712-byte index.
+  Both runs passed. The release run took 5 min 36 sec total, used 4 min 45 sec
+  CPU, peaked at the test's 1-GiB memory limit (98.5 MiB swap), and recorded no
+  cgroup OOM kills. The unit had a one-core CPU quota, low I/O weight, and low
+  priority while the existing soak ran. The temporary fixture was removed and
+  free space returned to **20 GiB**. This supports feasibility for a static
+  1.37M-entry observation on VPS2; it does not establish mutation correctness
+  under concurrent churn, peak disk use across hosts, or a production SLO.
+- The independent VPS2 soak remains active at the latest archived sample
+  (**13:11 UTC**): 40,564 s elapsed, 862,300 operations, 11 mutation bursts, no
+  controlled crash rounds, and one 300-second held-reader phase with WAL
+  reclaimed. It uses candidate SHA-256
+  `952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287`, not the
+  scan-first test binary. Final exactness/history checks are pending; 14
+  qualification suites remain unrun. This is not a completed soak or a
+  qualification of the new architecture.
+- No controlled queue-ioctl calibration, representative event replay, overflow
+  comparison, 24-hour canary, or live rollout has been completed. The VPS2
+  72-hour soak remains active; its report still lists 14 other qualification
+  suites as not run.
+- Implemented in working tree: complete scan-first observations merge changed
+  rows in place and incomplete observations preserve prior rows. Next: compare
+  all indexed projections to an independent filesystem oracle; add generation/
+  freshness per directory; force overflow and churn during scans; benchmark
+  scan, write, WAL, CPU, memory, and disk overhead on production-sized fixtures
+  before considering a source-matched canary.
+  Do not infer deployability from passing unit tests.
+- Broader release gates remain open: full current-source test/security/package
+  matrix, exact recovery of the live index, schema-v7 path identity, scale and
+  sustained-load endurance, supported-kernel/filesystem coverage, and a
+  source-matched production canary with tested rollback.
+
+No claim of 100% production readiness is made until those gates have direct,
+current evidence and all remaining limits are documented.
+
+## Disk and active temporary data
+
+Read-only sample at 13:12 UTC: root was **185 GiB total / 116 GiB used / 62 GiB
+available**. Dux `target` used **9.7 GiB**. `/tmp` used **11 GiB**, largely Go
+build caches and XTOP RCA replay/cache artifacts; no Go or XTOP process was
+visible in the process sample, but those directories were not deleted because
+their contents may be retained test evidence. The failed local scale-test
+fixtures and the VPS2 benchmark fixture were removed after confirming no test
+process was using them. No broader caches or readiness artifacts were deleted.
+Disk usage is significant but not at an immediate capacity limit.
+The broader read-only inventory measured `/var` at **38 GiB**, `/home` at
+**29 GiB**, and `/root` at **29 GiB**; `/var/lib` accounts for **30 GiB**,
+`/var/backups` **3.3 GiB**, and `/var/log` **2.1 GiB**. These totals are not
+proof that the contents are disposable. No broader inventory files were removed. The detailed
+inventory and cleanup rationale are in the audit.

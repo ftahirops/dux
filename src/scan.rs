@@ -1,7 +1,7 @@
 use crate::store::Store;
 use crate::util::now_secs;
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
@@ -533,6 +533,22 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
     scan_with_progress_policy(store, root, opts, false)
 }
 
+/// Reconcile a complete filesystem observation into an existing v7 index.
+/// Only rows whose values changed are written to the compatibility projection;
+/// path-instance IDs are reused by parent/name identity. An incomplete walk
+/// leaves the previous index rows untouched and records the failure.
+pub fn reconcile_in_place(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+    anyhow::ensure!(
+        store.schema_version == crate::store::SCHEMA_VERSION,
+        "incremental reconciliation requires the current schema"
+    );
+    anyhow::ensure!(
+        !opts.one_file_system && opts.exclude.is_empty(),
+        "incremental reconciliation requires an unfiltered full-root observation"
+    );
+    scan_with_progress_policy_mode(store, root, opts, false, true)
+}
+
 /// Keep the final progress snapshot visible while an atomic caller fsyncs and
 /// publishes the staging database. `rebuild_atomic` owns marker cleanup.
 fn scan_with_progress_policy(
@@ -541,13 +557,29 @@ fn scan_with_progress_policy(
     opts: &ScanOptions,
     retain_progress_for_publication: bool,
 ) -> Result<ScanStats> {
+    scan_with_progress_policy_mode(store, root, opts, retain_progress_for_publication, false)
+}
+
+fn scan_with_progress_policy_mode(
+    store: &mut Store,
+    root: &Path,
+    opts: &ScanOptions,
+    retain_progress_for_publication: bool,
+    incremental: bool,
+) -> Result<ScanStats> {
     if let Some(cancel) = opts.cancel.as_ref() {
         let cancel = Arc::clone(cancel);
         store
             .conn
             .progress_handler(10_000, Some(move || cancel.load(Ordering::Relaxed)))?;
     }
-    let result = scan_inner(store, root, opts, retain_progress_for_publication);
+    let result = scan_inner(
+        store,
+        root,
+        opts,
+        retain_progress_for_publication,
+        incremental,
+    );
     let cleanup = store.conn.progress_handler(0, None::<fn() -> bool>);
     if cancellation_requested(&opts.cancel) {
         Err(ScanCancelled.into())
@@ -563,6 +595,7 @@ fn scan_inner(
     root: &Path,
     opts: &ScanOptions,
     retain_progress_for_publication: bool,
+    incremental: bool,
 ) -> Result<ScanStats> {
     ensure_not_cancelled(&opts.cancel)?;
     if opts.low_priority {
@@ -747,6 +780,9 @@ fn scan_inner(
            UNIQUE(parent_path_id,name)
          );",
     )?;
+    if incremental {
+        stage.execute("ATTACH DATABASE ?1 AS existing", params![main_db])?;
+    }
     stage.execute_batch(crate::store::PATH_GRAPH_TABLES_SQL)?;
     parallel_stage(
         &mut stage,
@@ -781,6 +817,9 @@ fn scan_inner(
     // on worker scheduling. Compute a deterministic disk-backed order before
     // using it as a tie-breaker for prime-path allocation or the v6 projection.
     assign_stable_scan_path_order(&mut stage)?;
+    if incremental {
+        assign_persistent_scan_path_ids(&mut stage)?;
+    }
 
     stage.execute_batch(
         "CREATE INDEX scan_nodes_target ON scan_nodes(dev,inode,parent_dev,parent_inode,name);",
@@ -844,6 +883,25 @@ fn scan_inner(
     )?;
     let build_result: Result<i64> = (|| {
         store.conn.execute_batch(V6_SCAN_PROJECTION_SQL)?;
+        if incremental {
+            return reconcile_staged_projection(
+                &mut store.conn,
+                root_dev,
+                root_inode,
+                now,
+                nonce,
+                &root,
+                &opts.cancel,
+                n_errors.load(Ordering::Relaxed) == 0
+                    && repeated_directory_identities == 0
+                    && conflicting_inode_edges == 0
+                    && conflicting_inode_allocations == 0
+                    && conflicting_inode_incarnations == 0
+                    && unknown_repeated_inode_identities == 0
+                    && !opts.one_file_system
+                    && opts.exclude.is_empty(),
+            );
+        }
         store.conn.execute_batch(
             "BEGIN IMMEDIATE;
              INSERT INTO inodes
@@ -857,6 +915,16 @@ fn scan_inner(
                       PARTITION BY dev,inode ORDER BY parent_dev,parent_inode,name
                     )=1 THEN 1 ELSE 0 END
              FROM scan_v6_nodes;
+
+             INSERT INTO paths
+               (path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle)
+             SELECT path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle
+             FROM scan.paths;
+
+             INSERT INTO dir_totals
+               (path_id,visible_bytes,visible_entries,unique_bytes,unique_inodes)
+             SELECT path_id,visible_bytes,visible_entries,unique_bytes,unique_inodes
+             FROM scan.dir_totals;
 
              CREATE TEMP TABLE rollup (
                dev INTEGER NOT NULL, inode INTEGER NOT NULL,
@@ -910,14 +978,19 @@ fn scan_inner(
     let _ = store.conn.execute_batch(
         "DROP TABLE IF EXISTS temp.rollup;
          DROP TABLE IF EXISTS temp.scan_v6_nodes;
+         DROP TABLE IF EXISTS temp.scan_dirents;
+         DROP TABLE IF EXISTS temp.scan_inodes;
+         DROP TABLE IF EXISTS temp.scan_rollup;
          DETACH DATABASE scan;",
     );
     let root_total = build_result?;
     drop(stage_guard);
 
-    // ---- phase 3: build query indexes once (no per-row trigger overhead) ----
-    // Build the FTS index in one pass and install the sync triggers + indexes.
-    store.finalize_bulk()?;
+    // Existing indexes and FTS triggers are maintained incrementally; a fresh
+    // atomic candidate still builds them once after its bulk load.
+    if !incremental {
+        store.finalize_bulk()?;
+    }
     // Restore the query-optimized connection default. In the atomic rebuild path
     // this connection is about to close, but direct scan tests may reuse it.
     store.conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
@@ -959,18 +1032,20 @@ fn scan_inner(
         store.set_meta("dirty_since", &now_secs().to_string())?;
         store.set_meta("dirty_reason", &incomplete_scan_reason(&stats))?;
     }
-    store.set_meta("last_scan_ts", &now.to_string())?;
-    store.set_meta(
-        "scan_generation",
-        &format!("{}-{nonce}", std::process::id()),
-    )?;
-    store.set_meta("last_scan_root", &root.to_string_lossy())?;
-    store.set_meta(
-        "last_scan_root_bytes",
-        &crate::store::encode_path_bytes(&root),
-    )?;
-    store.set_meta("root_dev", &root_dev.to_string())?;
-    store.set_meta("root_inode", &root_inode.to_string())?;
+    if !incremental || stats.errors == 0 {
+        store.set_meta("last_scan_ts", &now.to_string())?;
+        store.set_meta(
+            "scan_generation",
+            &format!("{}-{nonce}", std::process::id()),
+        )?;
+        store.set_meta("last_scan_root", &root.to_string_lossy())?;
+        store.set_meta(
+            "last_scan_root_bytes",
+            &crate::store::encode_path_bytes(&root),
+        )?;
+        store.set_meta("root_dev", &root_dev.to_string())?;
+        store.set_meta("root_inode", &root_inode.to_string())?;
+    }
     Ok(stats)
 }
 
@@ -1097,6 +1172,140 @@ fn assign_stable_scan_path_order(stage: &mut Connection) -> Result<()> {
          DROP INDEX scan_nodes_stable_order;",
     )?;
     tx.commit()?;
+    Ok(())
+}
+
+/// Reuse committed v7 path IDs by `(parent_path_id, name)` and allocate IDs
+/// monotonically for new paths. This prevents one insertion near the front of
+/// a tree from renumbering every later path in a parallel scan.
+fn assign_persistent_scan_path_ids(stage: &mut Connection) -> Result<()> {
+    let root: (i64, i64, i64, i64, i64) = stage.query_row(
+        "SELECT p.path_id,p.dev_id,p.inode,s.dev,s.inode
+         FROM existing.paths p, scan_nodes s
+         WHERE p.parent_path_id=-1 AND s.parent_path_id=-1",
+        [],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        },
+    )?;
+    anyhow::ensure!(
+        root.0 == 1 && root.1 == root.3 && root.2 == root.4,
+        "incremental scan root identity differs from the installed v7 graph"
+    );
+    let stored_next: Option<String> = stage
+        .query_row(
+            "SELECT value FROM existing.meta WHERE key='path_id_next'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let stored_next = stored_next
+        .map(|value| value.parse::<i64>())
+        .transpose()
+        .context("reading persistent next path ID")?
+        .unwrap_or(1);
+    let existing_max: i64 = stage.query_row(
+        "SELECT COALESCE(MAX(path_id),0) FROM existing.paths",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut next_id = stored_next.max(existing_max.saturating_add(1)).max(2);
+    stage.execute_batch(
+        "CREATE TEMP TABLE persistent_path_ids(
+           old_id INTEGER PRIMARY KEY,
+           new_id INTEGER NOT NULL UNIQUE
+         );
+         INSERT INTO persistent_path_ids(old_id,new_id)
+         SELECT path_id,1 FROM scan_nodes WHERE parent_path_id=-1;",
+    )?;
+    let max_depth: i64 =
+        stage.query_row("SELECT COALESCE(MAX(depth),0) FROM scan_nodes", [], |row| {
+            row.get(0)
+        })?;
+    for depth in 1..=max_depth {
+        let rows: Vec<(i64, Option<i64>)> = stage
+            .prepare(
+                "SELECT child.path_id,existing.path_id
+                 FROM scan_nodes child
+                 JOIN persistent_path_ids parent ON parent.old_id=child.parent_path_id
+                 LEFT JOIN existing.paths existing
+                   ON existing.parent_path_id=parent.new_id AND existing.name=child.name
+                 WHERE child.depth=?1
+                 ORDER BY parent.new_id,child.name",
+            )?
+            .query_map([depth], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut additions = Vec::new();
+        for (old_id, existing_id) in rows {
+            let new_id = if let Some(existing_id) = existing_id {
+                existing_id
+            } else {
+                anyhow::ensure!(next_id < i64::MAX, "persistent path-ID space exhausted");
+                let allocated = next_id;
+                next_id += 1;
+                allocated
+            };
+            additions.push((old_id, new_id));
+        }
+        let tx = stage.transaction()?;
+        {
+            let mut insert =
+                tx.prepare("INSERT INTO persistent_path_ids(old_id,new_id) VALUES(?1,?2)")?;
+            for (old_id, new_id) in additions {
+                insert.execute(params![old_id, new_id])?;
+            }
+        }
+        tx.commit()?;
+    }
+    let (rows, mapped): (i64, i64) = stage.query_row(
+        "SELECT (SELECT COUNT(*) FROM scan_nodes),
+                (SELECT COUNT(*) FROM persistent_path_ids)",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    anyhow::ensure!(
+        rows == mapped,
+        "persistent path-ID mapping covered {mapped} of {rows} scan nodes"
+    );
+    stage.execute(
+        "CREATE TABLE scan_path_allocator(next_id INTEGER NOT NULL CHECK(next_id>0));",
+        [],
+    )?;
+    stage.execute(
+        "INSERT INTO scan_path_allocator(next_id) VALUES(?1)",
+        [next_id],
+    )?;
+    stage.execute_batch(
+        "CREATE TABLE scan_nodes_remapped (
+           path_id INTEGER PRIMARY KEY CHECK(path_id>0), stable_order INTEGER NOT NULL DEFAULT 0,
+           parent_path_id INTEGER NOT NULL, mount_id INTEGER,
+           dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+           parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL,
+           depth INTEGER NOT NULL, kind TEXT NOT NULL, blocks INTEGER NOT NULL,
+           uid INTEGER NOT NULL, mtime INTEGER NOT NULL, name BLOB NOT NULL,
+           birth_ns INTEGER NOT NULL, cycle INTEGER NOT NULL DEFAULT 0,
+           UNIQUE(parent_path_id,name)
+         );
+         INSERT INTO scan_nodes_remapped
+           (path_id,stable_order,parent_path_id,mount_id,dev,inode,parent_dev,
+            parent_inode,depth,kind,blocks,uid,mtime,name,birth_ns,cycle)
+         SELECT child_id.new_id,child.stable_order,
+                COALESCE(parent_id.new_id,-1),child.mount_id,child.dev,child.inode,
+                child.parent_dev,child.parent_inode,child.depth,child.kind,child.blocks,
+                child.uid,child.mtime,child.name,child.birth_ns,child.cycle
+         FROM scan_nodes child
+         JOIN persistent_path_ids child_id ON child_id.old_id=child.path_id
+         LEFT JOIN persistent_path_ids parent_id ON parent_id.old_id=child.parent_path_id;
+         DROP TABLE scan_nodes;
+         ALTER TABLE scan_nodes_remapped RENAME TO scan_nodes;
+         DROP TABLE persistent_path_ids;",
+    )?;
     Ok(())
 }
 
@@ -1410,6 +1619,137 @@ WHERE cycle=0 AND path_id IN (
 );
 CREATE INDEX temp.scan_v6_nodes_depth ON scan_v6_nodes(depth);
 "#;
+
+/// Build the compatibility projection in the attached scan database, then
+/// publish a complete observation with value-guarded UPSERTs. Failed or
+/// ambiguous walks are observations only: they never delete or overwrite live
+/// rows, so a transient permission/race error cannot make the index worse.
+#[allow(clippy::too_many_arguments)]
+fn reconcile_staged_projection(
+    conn: &mut Connection,
+    root_dev: i64,
+    root_inode: i64,
+    scan_time: i64,
+    nonce: u128,
+    root: &Path,
+    cancel: &Option<Arc<AtomicBool>>,
+    complete: bool,
+) -> Result<i64> {
+    conn.execute_batch(
+        "CREATE TEMP TABLE scan_dirents AS
+         SELECT parent_dev,parent_inode,name,dev,inode,
+                CASE WHEN ROW_NUMBER() OVER (
+                  PARTITION BY dev,inode ORDER BY parent_dev,parent_inode,name
+                )=1 THEN 1 ELSE 0 END AS prime
+         FROM scan_v6_nodes;
+         CREATE UNIQUE INDEX temp.scan_dirents_edge ON scan_dirents(parent_dev,parent_inode,name);
+         CREATE TEMP TABLE scan_inodes AS
+         SELECT dev AS dev_id,inode,MAX(kind) AS kind,MAX(blocks) AS blocks,
+                MAX(blocks) AS recursive_bytes,1 AS recursive_inodes,
+                MAX(uid) AS uid,MAX(mtime) AS mtime,MAX(birth_ns) AS birth_ns
+         FROM scan_v6_nodes GROUP BY dev,inode;
+         CREATE UNIQUE INDEX temp.scan_inodes_id ON scan_inodes(dev_id,inode);
+         CREATE TEMP TABLE scan_rollup(
+           dev INTEGER NOT NULL,inode INTEGER NOT NULL,bytes INTEGER NOT NULL,items INTEGER NOT NULL,
+           PRIMARY KEY(dev,inode)
+         ) WITHOUT ROWID;"
+    )?;
+    let max_depth: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(depth),0) FROM scan_v6_nodes",
+        [],
+        |r| r.get(0),
+    )?;
+    for depth in (1..=max_depth).rev() {
+        ensure_not_cancelled(cancel)?;
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM scan_rollup", [])?;
+        tx.execute(
+            "INSERT INTO scan_rollup(dev,inode,bytes,items)
+             SELECT n.parent_dev,n.parent_inode,
+                    COALESCE(SUM(CASE WHEN d.prime=1 THEN i.recursive_bytes ELSE 0 END),0),
+                    COALESCE(SUM(CASE WHEN d.prime=1 THEN i.recursive_inodes ELSE 0 END),0)
+             FROM scan_v6_nodes n
+             JOIN scan_dirents d ON d.parent_dev=n.parent_dev AND d.parent_inode=n.parent_inode AND d.name=n.name
+             JOIN scan_inodes i ON i.dev_id=n.dev AND i.inode=n.inode
+             WHERE n.depth=?1 AND NOT(n.dev=n.parent_dev AND n.inode=n.parent_inode)
+             GROUP BY n.parent_dev,n.parent_inode", [depth],
+        )?;
+        tx.execute(
+            "UPDATE scan_inodes SET
+               recursive_bytes=blocks+COALESCE((SELECT bytes FROM scan_rollup r WHERE r.dev=dev_id AND r.inode=scan_inodes.inode),0),
+               recursive_inodes=1+COALESCE((SELECT items FROM scan_rollup r WHERE r.dev=dev_id AND r.inode=scan_inodes.inode),0)
+             WHERE EXISTS(SELECT 1 FROM scan_rollup r WHERE r.dev=dev_id AND r.inode=scan_inodes.inode)", [],
+        )?;
+        tx.commit()?;
+    }
+    if complete {
+        let tx = conn.transaction()?;
+        // Remove vanished keys first to free unique path/prime constraints.
+        tx.execute("DELETE FROM dir_totals WHERE NOT EXISTS(SELECT 1 FROM scan.dir_totals s WHERE s.path_id=dir_totals.path_id)", [])?;
+        tx.execute("DELETE FROM paths WHERE NOT EXISTS(SELECT 1 FROM scan.paths s WHERE s.path_id=paths.path_id)", [])?;
+        tx.execute("UPDATE paths SET prime=0 WHERE prime=1 AND EXISTS(
+             SELECT 1 FROM scan.paths s WHERE s.dev_id=paths.dev_id AND s.inode=paths.inode AND s.birth_ns=paths.birth_ns AND s.prime=1 AND s.path_id<>paths.path_id)", [])?;
+        tx.execute_batch(
+            "INSERT INTO paths(path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle)
+             SELECT path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle FROM scan.paths
+             WHERE 1 ON CONFLICT(path_id) DO UPDATE SET parent_path_id=excluded.parent_path_id,
+               name=excluded.name,dev_id=excluded.dev_id,inode=excluded.inode,birth_ns=excluded.birth_ns,
+               kind=excluded.kind,mount_id=excluded.mount_id,prime=excluded.prime,cycle=excluded.cycle
+             WHERE paths.parent_path_id IS NOT excluded.parent_path_id OR paths.name IS NOT excluded.name
+                OR paths.dev_id IS NOT excluded.dev_id OR paths.inode IS NOT excluded.inode
+                OR paths.birth_ns IS NOT excluded.birth_ns OR paths.kind IS NOT excluded.kind
+                OR paths.mount_id IS NOT excluded.mount_id OR paths.prime IS NOT excluded.prime OR paths.cycle IS NOT excluded.cycle;
+             INSERT INTO dir_totals(path_id,visible_bytes,visible_entries,unique_bytes,unique_inodes)
+             SELECT path_id,visible_bytes,visible_entries,unique_bytes,unique_inodes FROM scan.dir_totals
+             WHERE 1 ON CONFLICT(path_id) DO UPDATE SET visible_bytes=excluded.visible_bytes,
+               visible_entries=excluded.visible_entries,unique_bytes=excluded.unique_bytes,unique_inodes=excluded.unique_inodes
+             WHERE dir_totals.visible_bytes IS NOT excluded.visible_bytes OR dir_totals.visible_entries IS NOT excluded.visible_entries
+                OR dir_totals.unique_bytes IS NOT excluded.unique_bytes OR dir_totals.unique_inodes IS NOT excluded.unique_inodes;
+             INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns)
+             SELECT dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns FROM scan_inodes
+             WHERE 1 ON CONFLICT(dev_id,inode) DO UPDATE SET kind=excluded.kind,blocks=excluded.blocks,
+               recursive_bytes=excluded.recursive_bytes,recursive_inodes=excluded.recursive_inodes,
+               uid=excluded.uid,mtime=excluded.mtime,birth_ns=excluded.birth_ns
+             WHERE inodes.kind IS NOT excluded.kind OR inodes.blocks IS NOT excluded.blocks
+                OR inodes.recursive_bytes IS NOT excluded.recursive_bytes OR inodes.recursive_inodes IS NOT excluded.recursive_inodes
+                OR inodes.uid IS NOT excluded.uid OR inodes.mtime IS NOT excluded.mtime OR inodes.birth_ns IS NOT excluded.birth_ns;
+             INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
+             SELECT parent_dev,parent_inode,name,dev,inode,prime FROM scan_dirents
+             WHERE 1 ON CONFLICT(parent_dev,parent_inode,name) DO UPDATE SET dev_id=excluded.dev_id,inode=excluded.inode,prime=excluded.prime
+             WHERE dirents.dev_id IS NOT excluded.dev_id OR dirents.inode IS NOT excluded.inode OR dirents.prime IS NOT excluded.prime;
+             DELETE FROM dirents WHERE NOT EXISTS(SELECT 1 FROM scan_dirents s
+               WHERE s.parent_dev=dirents.parent_dev AND s.parent_inode=dirents.parent_inode AND s.name=dirents.name);
+             DELETE FROM inodes WHERE NOT EXISTS(SELECT 1 FROM scan_inodes s WHERE s.dev_id=inodes.dev_id AND s.inode=inodes.inode);
+             INSERT INTO meta(key,value) SELECT 'path_id_next',CAST(next_id AS TEXT) FROM scan.scan_path_allocator WHERE 1
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+        )?;
+        for (key, value) in [
+            ("last_scan_ts", scan_time.to_string()),
+            ("scan_generation", format!("{}-{nonce}", std::process::id())),
+            ("last_scan_root", root.to_string_lossy().into_owned()),
+            (
+                "last_scan_root_bytes",
+                crate::store::encode_path_bytes(root),
+            ),
+            ("root_dev", root_dev.to_string()),
+            ("root_inode", root_inode.to_string()),
+        ] {
+            tx.execute(
+                "INSERT INTO meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                rusqlite::params![key, value],
+            )?;
+        }
+        tx.commit()?;
+    } else {
+        conn.execute("INSERT INTO meta(key,value) VALUES('last_scan_attempt_ts',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [scan_time.to_string()])?;
+    }
+    let total: i64 = conn.query_row(
+        "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+        [root_dev, root_inode],
+        |r| r.get(0),
+    )?;
+    Ok(total)
+}
 
 /// Parallel directory walk (jwalk). All per-entry stat work happens on worker
 /// threads; nodes stream back over a channel. Pseudo-fs, excludes, and (with
@@ -2404,6 +2744,303 @@ mod tests {
     }
 
     #[test]
+    fn in_place_reconciliation_is_noop_when_unchanged_and_tracks_add_delete() {
+        let db = tmp("reconcile-db");
+        let root = tmp("reconcile-root");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("existing")).unwrap();
+        fs::write(root.join("existing/keep"), b"stable-data").unwrap();
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+
+        let mut store = Store::open_rw(&db).unwrap();
+        let stable_id = crate::store::path_graph_lookup(&store.conn, &root.join("existing/keep"))
+            .unwrap()
+            .unwrap();
+        store.conn.execute_batch(
+            "CREATE TABLE reconcile_write_count(n INTEGER NOT NULL);
+             INSERT INTO reconcile_write_count VALUES(0);
+             CREATE TRIGGER count_paths_i AFTER INSERT ON paths BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_paths_u AFTER UPDATE ON paths BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_paths_d AFTER DELETE ON paths BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_totals_i AFTER INSERT ON dir_totals BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_totals_u AFTER UPDATE ON dir_totals BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_totals_d AFTER DELETE ON dir_totals BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_inodes_i AFTER INSERT ON inodes BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_inodes_u AFTER UPDATE ON inodes BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_inodes_d AFTER DELETE ON inodes BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_dirents_i AFTER INSERT ON dirents BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_dirents_u AFTER UPDATE ON dirents BEGIN UPDATE reconcile_write_count SET n=n+1; END;
+             CREATE TRIGGER count_dirents_d AFTER DELETE ON dirents BEGIN UPDATE reconcile_write_count SET n=n+1; END;",
+        ).unwrap();
+        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        let writes: i64 = store
+            .conn
+            .query_row("SELECT n FROM reconcile_write_count", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            writes, 0,
+            "identical observations must not rewrite indexed rows"
+        );
+        assert_eq!(
+            crate::store::path_graph_lookup(&store.conn, &root.join("existing/keep")).unwrap(),
+            Some(stable_id),
+            "path-instance identity must persist across observations",
+        );
+
+        fs::write(root.join("aaa-new"), b"new-value").unwrap();
+        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        assert!(
+            crate::store::indexed_path(&store.conn, &root.join("aaa-new"))
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            crate::store::path_graph_lookup(&store.conn, &root.join("existing/keep")).unwrap(),
+            Some(stable_id),
+            "inserting an earlier sibling must not renumber existing paths",
+        );
+
+        fs::remove_file(root.join("aaa-new")).unwrap();
+        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        assert!(
+            crate::store::indexed_path(&store.conn, &root.join("aaa-new"))
+                .unwrap()
+                .is_none()
+        );
+        fs::hard_link(root.join("existing/keep"), root.join("hardlink")).unwrap();
+        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        let oracle_db = tmp("reconcile-oracle-db");
+        rm_db(&oracle_db);
+        rebuild_atomic(&oracle_db, &root, &ScanOptions::default()).unwrap();
+        let oracle = Store::open_ro(&oracle_db).unwrap();
+        for table in ["inodes", "dirents"] {
+            let sql = format!("SELECT * FROM {table} ORDER BY 1,2,3");
+            let left: Vec<String> = store
+                .conn
+                .prepare(&sql)
+                .unwrap()
+                .query_map([], |r| {
+                    Ok((0..r.as_ref().column_count())
+                        .map(|i| format!("{:?}", r.get_ref(i).unwrap()))
+                        .collect::<Vec<_>>()
+                        .join("|"))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let right: Vec<String> = oracle
+                .conn
+                .prepare(&sql)
+                .unwrap()
+                .query_map([], |r| {
+                    Ok((0..r.as_ref().column_count())
+                        .map(|i| format!("{:?}", r.get_ref(i).unwrap()))
+                        .collect::<Vec<_>>()
+                        .join("|"))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert_eq!(
+                left, right,
+                "in-place {table} projection must match a fresh full scan"
+            );
+        }
+        type GraphRow = (
+            String,
+            i64,
+            i64,
+            i64,
+            String,
+            i64,
+            i64,
+            Option<(i64, i64, i64, i64)>,
+        );
+        let graph = |conn: &Connection| {
+            let rows: Vec<(i64, i64, i64, i64, String, i64, i64)> = conn
+                .prepare("SELECT path_id,dev_id,inode,birth_ns,kind,mount_id,prime FROM paths")
+                .unwrap()
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let mut values: Vec<GraphRow> = rows.into_iter().map(|(id,dev,ino,birth,kind,mount,prime)| {
+                let path=crate::store::path_graph_resolve(conn,id).unwrap().unwrap().to_string_lossy().into_owned();
+                let total=conn.query_row("SELECT visible_bytes,visible_entries,unique_bytes,unique_inodes FROM dir_totals WHERE path_id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().unwrap();
+                (path,dev,ino,birth,kind,mount,prime,total)
+            }).collect();
+            values.sort();
+            values
+        };
+        assert_eq!(
+            graph(&store.conn),
+            graph(&oracle.conn),
+            "v7 graph and totals must match the atomic scan by resolved path"
+        );
+        drop(oracle);
+        rm_db(&oracle_db);
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn in_place_reconciliation_refuses_filtered_observations() {
+        let db = tmp("reconcile-filtered-db");
+        let root = tmp("reconcile-filtered-root");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("preserved"), b"baseline").unwrap();
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let mut store = Store::open_rw(&db).unwrap();
+        let before: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM paths", [], |r| r.get(0))
+            .unwrap();
+        let opts = ScanOptions {
+            exclude: vec![root.join("preserved")],
+            ..Default::default()
+        };
+        assert!(reconcile_in_place(&mut store, &root, &opts).is_err());
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let cancel_opts = ScanOptions {
+            cancel: Some(cancelled),
+            ..Default::default()
+        };
+        assert!(reconcile_in_place(&mut store, &root, &cancel_opts).is_err());
+        let after: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM paths", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, after);
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn in_place_publication_sql_failure_rolls_back_every_projection() {
+        let db = tmp("reconcile-rollback-db");
+        let root = tmp("reconcile-rollback-root");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("keep"), b"baseline").unwrap();
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let mut store = Store::open_rw(&db).unwrap();
+        let before: (i64, i64, i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM paths),(SELECT COUNT(*) FROM dir_totals),
+                    (SELECT COUNT(*) FROM inodes),(SELECT COUNT(*) FROM dirents)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        fs::write(root.join("new"), b"must roll back").unwrap();
+        store.conn.execute_batch(
+            "CREATE TRIGGER fail_reconcile_insert BEFORE INSERT ON dirents
+             WHEN new.name=X'6e6577' BEGIN SELECT RAISE(ABORT,'injected publication failure'); END;",
+        ).unwrap();
+        assert!(reconcile_in_place(&mut store, &root, &ScanOptions::default()).is_err());
+        let after: (i64, i64, i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM paths),(SELECT COUNT(*) FROM dir_totals),
+                    (SELECT COUNT(*) FROM inodes),(SELECT COUNT(*) FROM dirents)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "failed publication must roll back all four indexed projections"
+        );
+        assert!(
+            crate::store::path_graph_lookup(&store.conn, &root.join("new"))
+                .unwrap()
+                .is_none()
+        );
+        store
+            .conn
+            .execute_batch("DROP TRIGGER fail_reconcile_insert;")
+            .unwrap();
+        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        assert!(crate::store::indexed_path(&store.conn, &root.join("new"))
+            .unwrap()
+            .is_some());
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[ignore = "manual production-shaped scan-first scale measurement; run explicitly"]
+    fn reconciliation_scale_smoke_reports_scan_cost() {
+        struct Cleanup {
+            db: PathBuf,
+            root: PathBuf,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                rm_db(&self.db);
+                let _ = fs::remove_dir_all(&self.root);
+            }
+        }
+        let count = std::env::var("DUX_RECONCILE_SCALE_ENTRIES")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(100_000);
+        let db = tmp("reconcile-scale-db");
+        let root = tmp("reconcile-scale-root");
+        let _cleanup = Cleanup {
+            db: db.clone(),
+            root: root.clone(),
+        };
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        for i in 0..count {
+            let parent = root.join(format!("d{:04}", i / 1_000));
+            if i % 1_000 == 0 {
+                fs::create_dir_all(&parent).unwrap();
+            }
+            fs::write(parent.join(format!("f{i:09}")), [0x5au8; 64]).unwrap();
+        }
+
+        let started = Instant::now();
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let baseline_seconds = started.elapsed().as_secs_f64();
+        let baseline_bytes = fs::metadata(&db).unwrap().len();
+        let mut store = Store::open_rw(&db).unwrap();
+        let started = Instant::now();
+        reconcile_in_place(&mut store, &root, &ScanOptions::default()).unwrap();
+        let reconcile_seconds = started.elapsed().as_secs_f64();
+        let rows: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM dirents", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows as u64, count + count.div_ceil(1_000) + 1);
+        eprintln!(
+            "reconciliation scale evidence: entries={count}, baseline_s={baseline_seconds:.3}, unchanged_reconcile_s={reconcile_seconds:.3}, baseline_db_bytes={baseline_bytes}, final_db_bytes={}",
+            fs::metadata(&db).unwrap().len(),
+        );
+        drop(store);
+    }
+
+    #[test]
     fn zero_byte_index_is_rebuilt_atomically_as_an_empty_initial_source() {
         let db = tmp("zero-byte-index");
         let root = tmp("zero-byte-root");
@@ -2414,13 +3051,95 @@ mod tests {
         fs::File::create(&db).unwrap();
 
         assert!(Store::needs_rebuild(&db).unwrap());
-        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let stats = rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
         let store = Store::open_ro(&db).unwrap();
         assert!(
             crate::store::indexed_path(&store.conn, &root.join("payload"))
                 .unwrap()
                 .is_some()
         );
+        let path_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM paths", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(path_count as u64, stats.staged_path_instances);
+        let payload_path_id: i64 = store
+            .conn
+            .query_row(
+                "SELECT path_id FROM paths WHERE parent_path_id=1 AND name=?1",
+                [b"payload".as_slice()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            crate::store::path_graph_resolve(&store.conn, payload_path_id).unwrap(),
+            Some(root.join("payload"))
+        );
+        let root_totals: (i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT visible_bytes,visible_entries FROM dir_totals WHERE path_id=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(root_totals.1 as u64, stats.staged_path_instances);
+        drop(store);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn v6_upgrade_persists_v7_path_graph_and_preserves_growth_history() {
+        let db = tmp("v6-to-v7-index");
+        let root = tmp("v6-to-v7-root");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("payload"), b"v6 migration fixture").unwrap();
+        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+
+        // Model a real v6 database: the v7 path graph does not exist, but the
+        // compatibility inode/dirent and incarnation-aware growth tables do.
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "DROP INDEX paths_single_root;
+                 DROP INDEX paths_target;
+                 DROP INDEX paths_parent;
+                 DROP INDEX paths_prime;
+                 DROP INDEX paths_one_prime;
+                 DROP TABLE dir_totals;
+                 DROP TABLE paths;
+                 UPDATE meta SET value='6' WHERE key='schema_version';
+                 INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta)
+                   VALUES(123,1,42,0,8192);",
+            )
+            .unwrap();
+        }
+        assert!(Store::needs_rebuild(&db).unwrap());
+
+        let stats = rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let store = Store::open_ro(&db).unwrap();
+        assert_eq!(store.schema_version, 7);
+        let path_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM paths", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(path_count as u64, stats.staged_path_instances);
+        assert_eq!(
+            crate::store::path_graph_resolve(&store.conn, 1).unwrap(),
+            Some(root.clone())
+        );
+        let retained_history: i64 = store
+            .conn
+            .query_row(
+                "SELECT delta FROM growth WHERE bucket=123 AND dev_id=1 AND inode=42 AND birth_ns=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained_history, 8192);
         drop(store);
         rm_db(&db);
         let _ = fs::remove_dir_all(&root);
@@ -2580,6 +3299,7 @@ mod tests {
         let db = tmp("cancel-db");
         rm_db(&db);
         let old = Store::create_fresh(&db).unwrap();
+        old.finalize_bulk().unwrap();
         old.set_meta("cancellation_fixture", "old-index-preserved")
             .unwrap();
         drop(old);
@@ -3076,14 +3796,14 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             0,
-            "legacy ambiguous growth is hidden until v6 migration"
+            "legacy ambiguous growth is hidden until v7 migration"
         );
         drop(legacy);
         rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
         let upgraded = Store::open_ro(&db).unwrap();
         assert_eq!(
             upgraded.get_meta("schema_version").unwrap().as_deref(),
-            Some("6")
+            Some("7")
         );
         let history: i64 = upgraded
             .conn

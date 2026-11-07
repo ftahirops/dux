@@ -246,6 +246,13 @@ enum Cmd {
         /// with more lag. The daemon also runs at idle I/O priority.
         #[arg(long, default_value_t = 25, value_parser = clap::value_parser!(u32).range(1..=100))]
         max_cpu: u32,
+        /// Experimental reconciliation-first mode: fanotify is drained only as
+        /// a bounded dirty-state hint; a full observation runs every 15 minutes.
+        /// Complete scans merge changed rows into the existing v7 index; an
+        /// incomplete observation preserves the previously published rows.
+        /// Still requires production-shaped performance and endurance qualification.
+        #[arg(long)]
+        reconcile_first: bool,
     },
     /// Reverse-SSH tunnel management (reach this host behind NAT via a home
     /// endpoint). Run it separately with the optional dux-tunnel.service;
@@ -870,6 +877,7 @@ fn real_main() -> Result<()> {
             alert_debounce,
             growth_days,
             max_cpu,
+            reconcile_first,
         }) => {
             if alert_exec_keep_capabilities && alert_exec.is_none() {
                 anyhow::bail!("--alert-exec-keep-capabilities requires --alert-exec");
@@ -901,6 +909,7 @@ fn real_main() -> Result<()> {
                 alert,
                 growth_days,
                 max_cpu as f64 / 100.0,
+                reconcile_first,
             )?;
         }
         Some(Cmd::Tunnel { action }) => match action {

@@ -20,12 +20,22 @@ class LiveTestSchemaTests(unittest.TestCase):
             if include_growth_view:
                 conn.execute("CREATE TABLE growth(dev_id INTEGER, inode INTEGER, delta INTEGER)")
                 conn.execute("CREATE VIEW growth_current AS SELECT * FROM growth")
+            if schema_version >= 7:
+                conn.execute(
+                    "CREATE TABLE paths(path_id INTEGER,parent_path_id INTEGER,name BLOB,"
+                    "dev_id INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT,"
+                    "mount_id INTEGER,prime INTEGER,cycle INTEGER)"
+                )
+                conn.execute(
+                    "CREATE TABLE dir_totals(path_id INTEGER,visible_bytes INTEGER,"
+                    "visible_entries INTEGER,unique_bytes INTEGER,unique_inodes INTEGER)"
+                )
 
     def test_accepts_required_growth_and_incarnation_schema(self):
         with tempfile.TemporaryDirectory(prefix="dux-live-schema-ok-") as temp:
             db = Path(temp) / "index.db"
-            self.create_db(db, 6, include_growth_view=True)
-            self.assertEqual(require_live_test_schema(db), 6)
+            self.create_db(db, 7, include_growth_view=True)
+            self.assertEqual(require_live_test_schema(db), 7)
 
     def test_rejects_old_schema_before_running_fanotify_workload(self):
         with tempfile.TemporaryDirectory(prefix="dux-live-schema-old-") as temp:
@@ -33,17 +43,27 @@ class LiveTestSchemaTests(unittest.TestCase):
             self.create_db(db, 5, include_growth_view=False)
             with self.assertRaisesRegex(
                 UnsupportedLiveTestSchema,
-                r"schema_version=5, missing: growth_current view",
+                r"schema_version=5.*schema version 7.*growth_current view",
             ):
                 require_live_test_schema(db)
 
     def test_preflight_is_read_only(self):
         with tempfile.TemporaryDirectory(prefix="dux-live-schema-readonly-") as temp:
             db = Path(temp) / "index.db"
-            self.create_db(db, 6, include_growth_view=True)
+            self.create_db(db, 7, include_growth_view=True)
             before = db.read_bytes()
             require_live_test_schema(db)
             self.assertEqual(db.read_bytes(), before)
+
+    def test_rejects_v6_before_current_schema_live_workload(self):
+        with tempfile.TemporaryDirectory(prefix="dux-live-schema-v6-") as temp:
+            db = Path(temp) / "index.db"
+            self.create_db(db, 6, include_growth_view=True)
+            with self.assertRaisesRegex(
+                UnsupportedLiveTestSchema,
+                r"schema_version=6, missing: schema version 7",
+            ):
+                require_live_test_schema(db)
 
 
 if __name__ == "__main__":

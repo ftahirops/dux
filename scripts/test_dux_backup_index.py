@@ -42,6 +42,16 @@ class DuxBackupIndexTests(unittest.TestCase):
             "dev_id INTEGER,inode INTEGER)"
         )
         conn.execute(f"CREATE TABLE growth({growth_columns})")
+        if schema_version >= 7:
+            conn.execute(
+                "CREATE TABLE paths(path_id INTEGER,parent_path_id INTEGER,name BLOB,"
+                "dev_id INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT,"
+                "mount_id INTEGER,prime INTEGER,cycle INTEGER)"
+            )
+            conn.execute(
+                "CREATE TABLE dir_totals(path_id INTEGER,visible_bytes INTEGER,"
+                "visible_entries INTEGER,unique_bytes INTEGER,unique_inodes INTEGER)"
+            )
 
     def make_index(self, path: Path) -> sqlite3.Connection:
         conn = sqlite3.connect(path)
@@ -52,8 +62,8 @@ class DuxBackupIndexTests(unittest.TestCase):
         conn.commit()
         return conn
 
-    def test_accepts_supported_v4_v5_v6_schema_shapes(self):
-        for schema_version in (4, 5, 6):
+    def test_accepts_supported_v4_v5_v6_v7_schema_shapes(self):
+        for schema_version in (4, 5, 6, 7):
             with self.subTest(schema_version=schema_version):
                 conn = sqlite3.connect(":memory:")
                 try:
@@ -61,6 +71,15 @@ class DuxBackupIndexTests(unittest.TestCase):
                     BACKUP._validate_dux_schema(conn, schema_version)
                 finally:
                     conn.close()
+
+    def test_v7_backup_requires_persisted_path_graph(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            self.create_index_schema(conn, 6)
+            with self.assertRaisesRegex(ValueError, "dir_totals, paths"):
+                BACKUP._validate_dux_schema(conn, 7)
+        finally:
+            conn.close()
 
     def test_live_wal_backup_is_verified_private_and_hash_bound(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -283,11 +302,11 @@ class DuxBackupIndexTests(unittest.TestCase):
             root = Path(directory)
             database = root / "dux.db"
             conn = self.make_index(database)
-            conn.execute("UPDATE meta SET value='7' WHERE key='schema_version'")
+            conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
             conn.commit()
             conn.close()
 
-            with self.assertRaisesRegex(ValueError, "unsupported Dux index schema v7"):
+            with self.assertRaisesRegex(ValueError, "unsupported Dux index schema v8"):
                 BACKUP.create_backup(database, root / "backup.sqlite")
 
     def test_reserves_free_space_before_creating_backup_artifacts(self):

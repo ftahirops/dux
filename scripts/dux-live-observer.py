@@ -368,6 +368,45 @@ def exact_filesystem(root, conn, progress_callback=None):
             pass
 
 
+def path_graph_snapshot(conn):
+    """Validate persisted v7 path-instance structure without touching the tree."""
+    path_count = conn.execute('SELECT COUNT(*) FROM paths').fetchone()[0]
+    root_count = conn.execute(
+        'SELECT COUNT(*) FROM paths WHERE path_id=1 AND parent_path_id=-1'
+    ).fetchone()[0]
+    bad_parent_count = conn.execute('''SELECT COUNT(*) FROM paths child
+        LEFT JOIN paths parent ON parent.path_id=child.parent_path_id
+        WHERE child.parent_path_id!=-1
+          AND (parent.path_id IS NULL OR parent.kind!='d')''').fetchone()[0]
+    bad_prime_groups = conn.execute('''SELECT COUNT(*) FROM (
+        SELECT dev_id,inode,birth_ns FROM paths
+        GROUP BY dev_id,inode,birth_ns HAVING SUM(prime)!=1)''').fetchone()[0]
+    missing_directory_totals = conn.execute('''SELECT COUNT(*) FROM paths p
+        LEFT JOIN dir_totals t USING(path_id)
+        WHERE p.kind='d' AND t.path_id IS NULL''').fetchone()[0]
+    unexpected_directory_totals = conn.execute('''SELECT COUNT(*) FROM dir_totals t
+        LEFT JOIN paths p USING(path_id)
+        WHERE p.path_id IS NULL OR p.kind!='d' ''').fetchone()[0]
+    root_entries = conn.execute('''SELECT visible_entries FROM dir_totals
+        WHERE path_id=1''').fetchone()
+    root_entries_match = root_entries is not None and root_entries[0] == path_count
+    result = {
+        'path_count': path_count,
+        'root_count': root_count,
+        'bad_parent_count': bad_parent_count,
+        'bad_prime_groups': bad_prime_groups,
+        'missing_directory_totals': missing_directory_totals,
+        'unexpected_directory_totals': unexpected_directory_totals,
+        'root_visible_entries_match': root_entries_match,
+    }
+    result['passed'] = (
+        path_count > 0 and root_count == 1 and bad_parent_count == 0
+        and bad_prime_groups == 0 and missing_directory_totals == 0
+        and unexpected_directory_totals == 0 and root_entries_match
+    )
+    return result
+
+
 def snapshot(check_filesystem=False, progress_callback=None):
     uri = f'file:{DB}?mode=ro'
     with sqlite3.connect(uri, uri=True, timeout=5) as conn:
@@ -451,12 +490,16 @@ def snapshot(check_filesystem=False, progress_callback=None):
                                'direct_prime_child_filesystem_audit': filesystem_audit})
         orphan = conn.execute('SELECT COUNT(*) FROM dirents d LEFT JOIN inodes p ON p.dev_id=d.parent_dev AND p.inode=d.parent_inode WHERE p.inode IS NULL').fetchone()[0]
         primes = conn.execute('SELECT COUNT(*) FROM (SELECT i.dev_id,i.inode FROM inodes i LEFT JOIN dirents d ON d.dev_id=i.dev_id AND d.inode=i.inode GROUP BY i.dev_id,i.inode HAVING COALESCE(SUM(d.prime),0)!=1)').fetchone()[0]
+        path_graph = None
+        if int(meta.get('schema_version', '0')) >= 7:
+            path_graph = path_graph_snapshot(conn)
         quick = conn.execute('PRAGMA quick_check').fetchall()
         result = {'schema_version': meta.get('schema_version'), 'scan_generation': meta.get('scan_generation'),
                 'root': root, 'inode_totals': totals, 'root_totals': root_totals,
                 'root_matches_inode_aggregate': root_totals == totals,
                 'sampled_rollup_mismatches': mismatches, 'orphan_dirents': orphan,
-                'invalid_prime_attribution': primes, 'quick_check': quick}
+                'invalid_prime_attribution': primes, 'path_graph': path_graph,
+                'quick_check': quick}
         if check_filesystem:
             result['exact_filesystem'] = exact_filesystem(index_root, conn, progress_callback)
         return result
@@ -515,10 +558,12 @@ def current_status():
         events_seen, events_resolved, updates_committed, updates_dropped, behind_ms, max_pending = map(int, fields[5:11])
         uncertain = fields[11] == '1' if version >= 2 and len(fields) >= 12 else False
         last_commit_at = int(fields[12]) if version >= 3 and len(fields) >= 13 else None
+        kernel_overflows = int(fields[13]) if version >= 4 and len(fields) >= 14 else None
+        scan_first = fields[14] == '1' if version >= 5 and len(fields) >= 15 else False
         canonical_db = str(Path(DB).resolve())
         os.kill(pid, 0)
         watch_fresh = 0 <= time.time() - updated_at <= 5
-        watch_valid = (version in (1, 2, 3) and watch_fresh
+        watch_valid = (version in (1, 2, 3, 4, 5) and watch_fresh
                        and status_db.strip() == canonical_db)
     except (OSError, ValueError, IndexError):
         return result['stdout']
@@ -546,13 +591,15 @@ def current_status():
     paused = 'paused_since' in meta
     caught_up = (pending == 0 and kernel_empty and behind_ms == 0
                  and updates_dropped == 0 and not uncertain and not dirty
-                 and not paused and not scan_in_progress)
+                 and not paused and not scan_in_progress and not scan_first)
     return {
         'status_source': f'legacy_watch_status_v{version}',
         'watch_status_available': True, 'caught_up': caught_up,
         'scan_in_progress': scan_in_progress, 'dirty': dirty, 'paused': paused,
         'pending_updates': pending, 'events_dropped': updates_dropped,
         'events_seen': events_seen, 'events_resolved': events_resolved,
+        'kernel_overflow_notifications': kernel_overflows,
+        'scan_first': scan_first,
         'updates_committed': updates_committed,
         'last_event_commit_timestamp_seconds': last_commit_at,
         'last_scan_timestamp_seconds': int(meta.get('last_scan_ts', '0')),
@@ -574,10 +621,15 @@ def service_diagnostics(unit):
 def invariant_passed(observed):
     quick_check = observed["quick_check"]
     exact = observed.get('exact_filesystem', {'passed': True})
+    path_graph = observed.get('path_graph')
+    schema_version = int(observed.get('schema_version') or 0)
+    path_graph_ok = (schema_version < 7
+                     or (isinstance(path_graph, dict) and path_graph.get('passed') is True))
     return (observed["root_matches_inode_aggregate"]
             and not observed["sampled_rollup_mismatches"]
             and observed["orphan_dirents"] == 0
             and observed["invalid_prime_attribution"] == 0
+            and path_graph_ok
             and exact.get('passed') is True
             and len(quick_check) == 1
             and tuple(quick_check[0]) == ("ok",))

@@ -1,216 +1,173 @@
-# Dux architecture evolution
+# Dux architecture decision: reconciliation-first
 
-Implementation requirements and acceptance gates are consolidated in
-[`DEVELOPMENT_SPECIFICATION.md`](DEVELOPMENT_SPECIFICATION.md). Read its journal,
-snapshot, overflow-scoping and size-semantics limits alongside this design.
+**Decision status:** selected target for the production-readiness work; an
+experimental `dux daemon --reconcile-first` path drains fanotify as hints,
+schedules periodic scans, and merges complete observations into the existing
+v7 database with value-guarded changed-row writes. It is not qualified for
+production-scale performance or sustained churn. This supersedes the earlier event-journal-first
+redesign in this file and the corresponding draft in
+[`DEVELOPMENT_SPECIFICATION.md`](DEVELOPMENT_SPECIFICATION.md).
 
-## Goal
+The default daemon remains event-apply mode. The experimental mode is opt-in;
+it does not resolve per-event handles or apply path mutations. It performs an
+initial atomic baseline and then in-place observations every 15 minutes; overflow or
+malformed records request reconciliation, while events observed during a scan
+keep the view visibly stale and defer the next attempt to the fixed cadence.
+This remains experimental. Changed-row reconciliation is implemented, but
+the production-shaped 1.37M-entry run has only one static VPS2 sample; quota
+behavior, concurrent-churn recovery, and sustained performance remain
+unqualified. See the current measurements in
+[`PRODUCTION_READINESS_STATUS.md`](../PRODUCTION_READINESS_STATUS.md).
 
-Keep the index as fresh as the available filesystem change evidence permits, bound the cost of recovering from gaps, and make storage growth visible and manageable without surprising deletion. The design must remain correct under event loss, daemon restart, rename races, hard links, and disk pressure. It must not label an uncertain or provisional view as exact.
+## Product contract
 
-## Current pressure points
+Dux will index the **last observed filesystem state**, not promise an exact,
+linearizable view of a busy filesystem at the current instant. Every displayed
+index value must carry usable freshness information: last observed time, scan
+generation, scan progress, and any coverage errors. A successful live walk is
+not an atomic snapshot; even fields from one Linux `stat()` result can represent
+different moments during concurrent changes ([`stat(2)`](https://man7.org/linux/man-pages/man2/stat.2.html)).
 
-The previous event parser resolved an indexed name with a SQLite lookup for each unclassified create. That probe has been removed from the current candidate (`src/watch.rs::parse_events`); its event-storm throughput effect still needs a calibrated comparison. The loop still resolves handles, collects path operations for a single writer, and flushes bounded batches (`FLUSH_BATCH = 128`). The in-memory backlog is capped (`MAX_PENDING = 500_000`); exceeding the cap drops work and marks the index dirty. Root reconciliation is selected on every daemon start, and reconciliation builds a replacement database while live events continue to be collected and replayed. Expensive resolution, queueing, writing, and reconciliation still share pressure on the event path. The installed-service incident record shows that the production daemon can remain stale while consuming CPU and encountering fanotify overflow; current evidence does not attribute all prior-boot I/O to Dux alone.
+The initial freshness target is a full observation of every supported local
+filesystem at least every **15 minutes**, subject to measurement. That is an
+SLO, not a guarantee under arbitrary overload. If scan time, pressure guards,
+mount failures, or permissions prevent the target, Dux reports the age and the
+missed target. It must not call stale data current. A truly point-in-time view
+requires a filesystem snapshot or an equivalent filesystem-specific primitive.
 
-Qualification has exposed a separate schema limitation: v5 identifies a directory
-parent by `(device,inode)`, so two visible mount paths to the same directory
-collapse into one child-edge set. Rocky 9 mounts its EFI filesystem at both
-`/boot/efi` and `/efi`; the current scanner preserves uncertainty rather than
-claiming exact path coverage. This cannot be fixed safely by ignoring the
-duplicate-inode warning. It needs per-path directory identities while keeping
-inode allocation deduplicated. The proposed schema and migration gates are in
-[`PATH_IDENTITY_V6.md`](PATH_IDENTITY_V6.md).
+## Why this is the selected design
 
-## Target architecture
+The installed production index has remained dirty for hours after fanotify
+overflows. Event delivery is useful for low-latency hints, but it is not a
+durable source of truth. A periodic scan makes event loss recoverable without
+requiring event replay to prove every path update. Dux continues to bound its
+resources and report when it cannot meet freshness.
 
-### Reference model: a freshness pipeline with explicit budgets
+Earlier runs measured a 10M-inode scan at **1,004.445 s** and **868 s**;
+linear extrapolation to 1.37M entries suggested **2.0–2.3 minutes**. A current
+release-profile scan-first run on VPS2 observed **154 s** for the initial scan
+and **129 s** for the following unchanged in-place scan, consistent with that
+estimate. The second pass was cache-warm, so the difference is not an A/B
+performance result. This was a static synthetic ext4 tree under a one-core
+quota, not a production guarantee; mount mix, concurrent churn, disk peak, and
+long-run cadence remain unqualified.
 
-Treat Dux as four cooperating subsystems with separate queues and resource
-budgets: **capture**, **apply**, **reconcile**, and **analytics/UI**. The current
-SQLite index remains the committed query source. Each subsystem reports its own
-lag and resource use, so a scan or history query cannot hide a stalled watcher.
+## Architecture
 
 ```mermaid
 flowchart LR
-  FS[Filesystem] -->|fanotify| C[Capture: bounded journal]
-  C -->|sequence + gap markers| J[(Append-only event journal)]
-  J --> A[Apply: ordered, idempotent batches]
-  A -->|one writer| DB[(Committed SQLite index)]
-  J --> P[Provisional change overlay]
-  DB --> Q[Read snapshots + indexed queries]
-  P --> Q
-  J --> R[Scoped reconciliation scheduler]
-  FS -->|bounded subtree walk| R
-  R -->|verified generation| DB
-  DB --> H[Bounded growth history]
-  H --> U[Heatmap, timeline, large-file explorer]
-  DB --> U
+  FS[Filesystem state] --> S[Periodic reconciliation scan]
+  H[Fanotify hints] --> D[Bounded dirty-directory set]
+  D --> S
+  S -->|changed rows + observations| DB[(SQLite observed-state index)]
+  S -->|overflow/error/age| F[Freshness and coverage status]
+  DB --> Q[Queries]
+  F --> Q
+  P[Project quota or dedicated volume, when configured] --> Q
 ```
 
-The committed graph must distinguish a physical inode from each visible path
-instance. Directory rollups need both visible subtree totals (which may overlap
-through mount aliases) and unique physical allocation totals. The filesystem
-root total remains unique; alias-expanded file views must identify overlap.
+### Scan and update
 
-The core invariant is that the committed index is always a complete committed
-generation, while any newer journal-derived values are visibly provisional.
-Queries must never silently mix generations or claim exactness while a relevant
-scope has an unclosed sequence gap. This makes “fresh” a per-scope state with a
-measured lag, rather than a single boolean that can be stale for hours without
-showing why.
+- A full walk of each configured filesystem runs on a cadence chosen from the
+  measured freshness SLO. Hinted directories receive priority; the full walk
+  remains the backstop for missed hints, restarts, and overflow.
+- Scanning compares the current stat tuple with the existing row and writes
+  only changed metadata. Traversal is still O(number of entries); unchanged
+  rows reduce SQLite writes, not directory enumeration or stat work.
+- A directory's old child rows may be removed only after that directory was
+  completely and successfully enumerated. A failed, unreadable, or interrupted
+  directory scan preserves its prior rows and records incomplete coverage.
+- Updates carry per-directory scan generation and observation time. The live
+  root view may combine observations from different moments; Dux labels it
+  last-observed and never presents it as a single atomic snapshot.
+- During the v7 transition, atomic scans persist both the v7 path graph and the
+  v6 compatibility projection. The watcher still updates only v6 tables, so
+  `paths` and `dir_totals` describe the last completed scan and can lag event
+  updates. No query or event path may treat them as current until v7 event
+  maintenance and freshness reporting are implemented.
+- The scheduler may defer work under critical pressure, but deferral cannot
+  become a permanent circuit breaker. Retry is automatic with bounded backoff;
+  freshness age continues increasing while work is deferred.
 
-### Out-of-box efficiency improvements
+### Event hints and overflow
 
-1. **Coalesce before expensive resolution.** Capture raw event identity and
-   order cheaply. The apply worker collapses safe repeated writes to one final
-   stat per inode/path per batch, resolves shared ancestors once, and commits
-   set-based updates. Never coalesce across create/delete, rename, hard-link,
-   inode-generation, or gap boundaries unless the reducer proves equivalence.
-2. **Use a durable change journal as a write-ahead layer.** Segment records by
-   mount identity and sequence. Group-commit within a documented durability
-   window, checksum segments, and checkpoint only after the corresponding index
-   transaction commits. Recovery scans the journal first and reconciles only
-   intervals that have no complete journal coverage. Journal caps reserve disk
-   for SQLite recovery; reaching the cap creates a durable, scoped gap marker.
-3. **Avoid rebuilding the entire query database for local drift.** Maintain
-   dirty generations by mount/subtree and queue work by age, user-visible impact,
-   and estimated cost. Reconcile a subtree into a private generation, replay
-   events newer than its start sequence, verify child rollups, then atomically
-   publish it. If a rename crosses scope boundaries or coverage is ambiguous,
-   widen the scope; do not guess. Keep a throttled full audit as the backstop.
-4. **Make overload self-stabilizing.** Use queue age and device latency as
-   feedback, not just CPU percentage. Keep event capture and journal commits
-   moving; reduce apply batch size only when commit latency rises; pause broad
-   scans, compaction, and history aggregation first. Add hysteresis and minimum
-   progress guarantees so throttling does not oscillate or permanently starve
-   recovery. Every pause must expose the limiting resource and next retry time.
-5. **Separate exact state from analytical history.** Keep current inode/path
-   state and bounded growth history in separate logical tables/files or
-   partitioned stores. Retain high-resolution buckets for a short window, then
-   roll them into hourly and daily aggregates with explicit error bounds. Apply
-   a configurable byte budget to Dux-owned history and logs, preserving the
-   newest summaries and recovery reserve. This controls Dux's own disk growth
-   automatically without deleting scanned user files.
-6. **Add a disk-space safety controller.** Continuously estimate free bytes,
-   free inodes, index/WAL/journal/history size, write rate, and time-to-threshold.
-   At warning thresholds, surface the largest contributors and projected
-   exhaustion; at critical thresholds, stop nonessential retention and
-   compaction, checkpoint only if safe, and preserve event/recovery reserve. An
-   optional cleanup executor may act only on user-authored allowlists, with a
-   dry-run diff, no symlink or mount escape, an audit log, and a reversible
-   quarantine where possible. There is no default deletion policy.
-7. **Serve large-file analysis as a real product view.** Add a paginated,
-   filterable all-files query (size, path, owner, age, filesystem, growth) and a
-   treemap whose visible area is proportional to allocated bytes. Make the
-   layout virtualized so millions of files do not become millions of UI nodes;
-   aggregate small files into directory tiles, then drill down. A time control
-   compares retained growth snapshots and shows size at each available
-   resolution, first/last observed time, and growth rate. Label stale or
-   estimated values per subtree; do not imply that a five-minute history bucket
-   is a precise write timestamp.
-8. **Use storage-aware query plans.** Add covering indexes for the interactive
-   filters, keyset pagination for large result sets, pre-aggregated directory
-   history where measured useful, and query deadlines/cancellation. Keep a
-   dedicated read snapshot for the UI so it never blocks the single writer.
-   Query telemetry should include p50/p95, rows visited, temp bytes, and snapshot
-   age; avoid caching results across an index-generation change.
+- Fanotify is an optimization for choosing what to scan sooner. The reader
+  validates enough record structure to identify a filesystem and dirty parent
+  scope, then inserts a bounded hint. It does not open file handles for every
+  change, update SQLite, or decide the indexed size from the event stream.
+- Repeated hints coalesce by filesystem and directory identity. If a parent
+  cannot be resolved safely, widen to a known ancestor or the whole filesystem.
+- A kernel queue overflow schedules a full scan of the affected filesystem as
+  soon as resource guards allow it. It can make the view stale until that scan
+  completes, but cannot permanently prevent later scans from repairing it.
+- Hints cannot reduce the number of kernel notifications produced by a
+  filesystem mark. On a build filesystem that still floods the queue, Dux must
+  stop per-file watching there or place that workload on a separate mount.
+- Do not add a durable event journal to the default mode. Reconsider one only
+  for a separately specified low-latency profile whose measured restart-loss
+  requirement justifies another storage and recovery subsystem.
 
-### Correctness and publication protocol
+### Identity and query semantics
 
-For every scope `S`, persist `capture_seq`, `applied_seq`, `verified_seq`,
-`dirty_generation`, and coverage state. A scope can be labeled **verified** only
-when the scan boundary is known, every journal record through that boundary is
-applied, no gap intersects the scope, and exact structural checks pass. A scan
-starting at sequence `N` builds a private candidate; events after `N` remain in
-the journal and are replayed against that candidate before publication. If the
-queue grows beyond its bounded replay budget, abort publication and reschedule
-the scope with a larger budget rather than installing a known-stale tree.
+- Preserve distinct visible paths and physical inode allocation identities.
+  Schema v7 path instances are a prerequisite for a generally correct
+  incremental reconciler: v6's `(dev,inode)` parent keys cannot preserve
+  distinct visible paths through mount aliases. A v6-only prototype may be
+  useful for a constrained single-filesystem benchmark, but cannot qualify the
+  all-supported-mount correctness contract.
+- Keep hardlink allocation deduplication, non-UTF8 path identity, inode reuse
+  protection, and explicit partial-coverage results.
+- Report freshness per filesystem and directory scope. A pending hint is not
+  itself proof of loss; a completed scan observation is not proof of a
+  point-in-time snapshot. Only a snapshot-backed result may claim snapshot
+  consistency.
+- Keep the existing “dirty”/uncertain state for actual traversal failures,
+  missing mounts, unsupported filesystem coverage, or accounting errors. For
+  ordinary event loss, report stale age and scheduled reconciliation instead
+  of a permanently dirty index.
 
-Publication is atomic at a scope-generation boundary. Readers pin one committed
-generation for a query. The provisional overlay is applied only for affected
-keys and carries its upper sequence. A query response includes the generation,
-scope freshness, latest captured/applied sequence, and whether any returned
-value is estimated. This supports both a responsive UI and an honest freshness
-contract while the database is catching up.
+## Managed build trees
 
-### Disk policy and user control
+Project quotas are an optional accelerator for explicitly managed trees. Linux
+`quotactl` supports project quota accounting ([`quotactl(2)`](https://man7.org/linux/man-pages/man2/quotactl_fd.2.html)). XFS can assign project IDs recursively to an existing directory tree and inherit them for new files ([`xfs_quota(8)`](https://man7.org/linux/man-pages/man8/xfs_quota.8.html)); ext4 project IDs and inheritance have filesystem feature and directory-flag requirements ([`ext4(5)`](https://man7.org/linux/man-pages/man5/ext4.5.html), [`chattr(1)`](https://man7.org/linux/man-pages/man1/chattr.1.html)).
 
-Disk management has three distinct policies:
+Quota totals provide block and inode usage, not per-file paths or large-file
+results. They do not suppress fanotify notifications by themselves. Dux only
+removes the event/index cost if it excludes the managed mount/tree from
+per-file tracking and serves its quota total instead. A dedicated filesystem
+is easiest to account for with `statfs` only when it contains just the managed
+workload; `statfs` reports the filesystem, not an arbitrary subtree.
 
-- **Observe (default):** forecast exhaustion and rank Dux-owned storage and
-  user-file cleanup candidates; change nothing.
-- **Manage Dux data (safe automation):** enforce budgets on Dux-owned growth
-  history, temporary staging generations, and logs. Preserve a recovery reserve
-  and never remove the active committed index or uncheckpointed journal.
-- **Manage selected user paths (explicit opt-in):** run only rules the user has
-  authored and previewed. Require durable audit records and safeguards against
-  mount changes, symlinks, races, and deleting a path whose identity changed
-  after preview.
+The inspected production root is ext4 on LVM and does **not** currently have
+the ext4 `project` or `quota` features. Enabling ext4 quota features on that
+root requires an offline maintenance operation in the documented procedure
+([RHEL ext4 quota setup](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/managing_file_systems/limiting-storage-space-usage-on-ext4-with-quotas)). Do not modify the production root for this redesign. First check available LVM extents and qualify a separate disposable filesystem; whether a dedicated production LV is feasible remains unverified.
 
-When a filesystem is nearly full, Dux should prefer bounded progress and clear
-uncertainty over a destructive “cleanup to become healthy” action. If it cannot
-reserve enough space to safely journal or publish, it stops nonessential writes,
-records the uncertainty if possible, keeps the previous committed view readable,
-and explains the operator action needed.
+## Ordered implementation and gates
 
-### Rollout strategy
+| Stage | Work | Exit evidence |
+| --- | --- | --- |
+| 0. Restore automatic recovery and diagnose throttling | Qualify bounded automatic retry for the existing reconciliation circuit, then compare CPU targets on a controlled trace while holding event rate, queue size, cgroup quota, and workload constant. | Repeated runs show retry convergence or a clear terminal cause, and report event rates, overflows, CPU/I/O pressure, and scan recovery. No production setting changes without a qualified rollback. |
+| 1. Establish schema-v7 path identity | Persist distinct path instances and mount identity; migrate and verify aliases, hardlinks, non-UTF8 names, inode reuse, and history while preserving rollback. | Independent path/object/rollup oracle agrees before the incremental reconciler is built on this schema. |
+| 2. Implement periodic full reconciliation with changed-row writes | Add last-observed timestamps, per-scope generation/progress, automatic periodic scans, and changed-row writes. Failed scopes preserve prior rows and remain visibly incomplete. A scan may publish last-observed data without waiting for event replay; queued events remain hints for follow-up work. | Under quiescent fixtures, paths, allocations, and rollups exactly match an independent oracle. Under concurrent churn, no false “current/exact” state appears; after churn stops, the next complete scan converges. |
+| 3. Add bounded event hints | Reduce the reader to coalescing directory/filesystem hints. Overflow widens repair scope and schedules scans; it does not stop the scan scheduler. | Forced kernel overflow and userspace hint-capacity saturation both converge without manual circuit reset. Memory stays within budget; unresolved scopes remain visible. |
+| 4. Measure the 15-minute target | Run the 1.37M-entry production-shaped fixture and then representative production workload. Measure full-cycle time, per-scope maximum observation age, read/stat rate, CPU, I/O, memory, SQLite writes, and missed cycles. | Every monitored scope meets the agreed age SLO for 72 hours under the target workload, or the product exposes a revised SLO with evidence. If the scan takes 2.3 minutes, schedule and measure the remaining interval so worst-case path age—not just scan start interval—meets the 15-minute target. |
+| 5. Add build-tree quota/volume adapters | On disposable ext4 and XFS fixtures, compare project quota block/inode counters against independent tree totals, including creation, deletion, rename, hardlinks, and project-boundary operations. | Exact documented counters under supported operations; clear behavior for unsupported filesystems and paths. No production filesystem feature or mount change is part of this stage. |
+| 6. Integrate and qualify release | Preserve package/security gates, disk limits, service rollback, and the existing fault/scale matrix. Run the exact release artifact. | P0, 100k/1m/10m, overflow/recovery, low-disk, security/package lifecycle, 72-hour endurance, and 24-hour canary pass with source/binary/config/fixture identities recorded. |
 
-Implement behind a versioned schema and feature flags. First ship stage
-telemetry and benchmark the existing reducer. Next add journal write/replay
-without changing query behavior, and run old/new reducers against identical
-event traces. Then enable scoped reconciliation for a small allowlisted subtree
-in qualification. Only after exact differential results across crash, overflow,
-rename, hard-link, mount, permission, and low-space tests should it become the
-default. The old full-root rebuild stays available as a kill-switch until the
-new path completes endurance and canary gates. Every artifact binds source,
-binary, schema, configuration, and fixture hashes.
+## Explicitly deferred
 
-### 1. Capture and apply are separate stages
+The default scan-first design does not include a durable event journal, a
+provisional event overlay, a custom kernel module, mandatory eBPF, or a claim of
+lossless real-time updates. A separate snapshot-backed profile can be designed
+if a use case requires point-in-time exactness. Treemap/UI changes, history
+tiering, cleanup execution, and query-plan work remain product work unless
+measurements show they block the freshness or recovery contract.
 
-The capture stage drains fanotify promptly, validates records, assigns a monotonically increasing sequence, and appends a compact event record to a bounded local journal. It performs no SQLite queries, recursive scans, or user-visible query work. Records retain filesystem identity, event mask, parent/name or handle identity, and enough ordering data to handle rename pairs. Journal segments are group-committed; the durability contract states the maximum uncommitted interval. A bounded journal has an explicit high-watermark: when it cannot accept records, persist a gap marker and mark the affected mount/subtree uncertain rather than silently pretending the sequence is complete.
-
-The apply stage replays journal records in sequence, coalesces only operations whose ordering is safe, resolves each unique handle/inode once per batch where possible, and applies a larger SQLite transaction. Rename/delete boundaries and inode-generation identity must prevent incorrect coalescing. One SQLite writer remains the serialization point; readers use committed snapshots. Crash recovery replays from the last committed sequence and is idempotent.
-
-### 2. Reconciliation is scoped and prioritized
-
-Persist dirty generations by mount and subtree. Overflow or a bounded journal gap dirties the narrowest region the event format can establish. A restart replays durable journal state first, then reconciles only the uncovered downtime interval/regions when possible. Missing watch coverage, unbounded gaps, failed invariants, or a scheduled integrity audit can require a full-root scan. Subtree work is prioritized by age and user impact, with a low-priority full audit retained as a correctness backstop. Filesystem-native change logs/snapshots can be optional accelerators; generic traversal remains the portable fallback.
-
-Each reconciliation records its source generation, start/end sequence, errors, and verification result. A new event arriving during a scan invalidates only the affected subtree generation. The system must not install a snapshot as exact if it cannot prove all changes through the scan boundary were replayed.
-
-### 3. Freshness is an explicit data model
-
-Track per-mount and per-subtree `observed_sequence`, `applied_sequence`, `observed_at`, `committed_at`, coverage state, and last verification result. The UI can render committed database values plus a clearly labeled provisional overlay derived from journaled events. Pending values must be marked estimated; uncertain values must never masquerade as exact. A delayed subtree should not make unrelated, verified subtrees globally stale. Status should report queue age, replay lag, journal capacity, unresolved records, and the scope/reason for uncertainty.
-
-No generic watcher can guarantee exact state while events are lost or the machine is down unless a durable filesystem change source covers that interval. The contract is therefore “fresh with a measurable lag when capture is healthy; explicitly uncertain with bounded recovery when continuity is lost.”
-
-### 4. Storage growth has budgets, tiers, and policy
-
-Observe filesystem bytes and inode headroom, index/WAL/journal size, growth rate, and estimated time to configured thresholds. Keep the current exact index separate from analytical history. Retain high-resolution growth buckets briefly, then aggregate into hourly/daily tiers under a configurable retention budget. Checkpoint and compact the database only under measured idle/pressure conditions; reserve space for journal and recovery metadata so low disk does not destroy the ability to become consistent again.
-
-Disk policy defaults to reporting: threshold alerts, growth attribution, projected exhaustion time, and ranked cleanup candidates. Optional automated cleanup is limited to user-selected directories and explicit age/size rules, with a dry-run preview, path/mount/symlink safeguards, audit record, and reversible quarantine where feasible. Never delete arbitrary user data. Emergency behavior may stop nonessential history retention or pause optional maintenance, but destructive cleanup requires an explicit policy.
-
-### 5. Backpressure is adaptive and observable
-
-Export per-stage counters and histograms: events read/resolved, coalescing ratio, handle-resolution latency, SQLite lookup count, transaction size/latency, journal bytes/fsync latency, replay lag, scan bytes and duration, per-device I/O, and UI query latency. Tune batch size and reconciliation concurrency against measured queue age, CPU pressure, storage latency, and available memory. Capture/replay gets reserved progress; broad reconciliation and history compaction yield under pressure. Use hysteresis to avoid oscillation and expose every throttling reason in status.
-
-## Delivery plan and gates
-
-1. Add low-overhead stage telemetry and establish baseline on the existing 100k/1m/10m qualification fixtures and a representative event storm.
-2. Specify and implement versioned journal records, group commit, sequence metadata, replay/idempotency, gap handling, and crash tests. Preserve the existing database as the sole committed truth until replay invariants pass.
-3. Split capture from apply behind a feature flag; compare exact paths, allocations, directory rollups, and growth history against the current implementation under create/write/rename/delete/hardlink churn and injected crashes/overflow.
-4. Add per-subtree freshness/dirty generations and scoped reconciliation; prove that a local gap does not trigger a full-root walk and that broad gaps still recover exactly.
-5. Add bounded history rollups, storage forecasts, and opt-in cleanup policy. Verify behavior with low-space and inode-exhaustion fixtures; default mode must remain non-destructive.
-6. Re-run release budgets, package/security checks, restart/rollback, then the required 72-hour endurance and 24-hour canary with resource and rollback artifacts.
-
-Do not combine this redesign with a production rollout until the exact candidate passes the existing P0 and scale matrices in the isolated 2–4 GiB qualification environment. Keep the installed service/database untouched during qualification.
-
-## Acceptance criteria to calibrate
-
-- No silent sequence gaps: every gap is durably represented and scoped or escalated to full reconciliation.
-- Crash/restart replay is idempotent and returns exact paths, inode allocations, directory rollups, and growth history.
-- Event capture remains within a bounded memory/disk budget and continues while apply or reconciliation is throttled.
-- Freshness reports a measurable age/sequence lag; provisional UI values are distinguishable from committed values.
-- A local dirty subtree is reconciled without walking unrelated subtrees; full scans remain available when required for correctness.
-- Database, WAL, journal, and history retention stay within configured budgets, with recovery reserve preserved.
-- Cleanup has no effect unless a user-authored allowlist policy enables it; every action is previewable and auditable.
-- Performance and I/O budgets are measured on the actual packaged candidate, not inferred from unit tests.
+The queue-aware CPU governor, stale-parent handling, retry backoff, and status
+telemetry in the current working tree belong to the legacy event-apply path.
+They are not deployed and are not the selected long-term architecture. Current
+source tests and strict default-feature Clippy passed on VPS2; the ext4 stale-
+parent integration case passed there separately. The broader Python sweep had
+three package-build timeouts under a 5% CPU cap. These checks are regression
+evidence for the current code, not scan-first qualification or release evidence.

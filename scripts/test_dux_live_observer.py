@@ -103,6 +103,30 @@ class ObserverUtilityTests(unittest.TestCase):
             self.assertEqual(status['index_nodes'], 1)
             self.assertEqual(status['index_bytes'], 4096)
 
+    def test_scan_first_watch_sidecar_never_claims_real_time_caught_up(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / 'index.db'
+            with sqlite3.connect(db) as connection:
+                connection.executescript('''
+                    CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
+                    CREATE TABLE inodes(dev_id INTEGER,inode INTEGER,recursive_bytes INTEGER,
+                        recursive_inodes INTEGER,PRIMARY KEY(dev_id,inode));
+                    INSERT INTO meta VALUES('root_dev','1'),('root_inode','1'),
+                        ('last_scan_ts','123');
+                    INSERT INTO inodes VALUES(1,1,4096,1);
+                ''')
+            Path(f'{db}.watch.status').write_text(
+                f'5 {int(__import__("time").time())} {os.getpid()} 0 1 '
+                '10 0 4 0 0 100 0 123 0 1\n' + str(db.resolve()))
+            with patch.object(observer, 'DB', db), \
+                    patch.object(observer, 'run', return_value={
+                        'returncode': 0, 'stdout': 'pipeline: drained\n', 'stderr': ''
+                    }):
+                status = observer.current_status()
+            self.assertTrue(status['scan_first'])
+            self.assertFalse(status['caught_up'])
+            self.assertEqual(status['kernel_overflow_notifications'], 0)
+
     def test_exact_audit_wait_requires_an_unchanged_caught_up_window(self):
         class FakeClock:
             value = 0
@@ -428,6 +452,44 @@ class SnapshotClassificationTests(unittest.TestCase):
         self.assertFalse(result['passed'])
         self.assertEqual(result['audit_result'], 'SNAPSHOT_UNSTABLE')
         self.assertEqual(result['snapshot_structure_changed_fields'], ['index_nodes'])
+
+
+class V7PathGraphTests(unittest.TestCase):
+    def make_graph(self):
+        conn = sqlite3.connect(':memory:')
+        conn.executescript('''
+            CREATE TABLE paths(
+                path_id INTEGER, parent_path_id INTEGER, name BLOB,
+                dev_id INTEGER, inode INTEGER, birth_ns INTEGER, kind TEXT,
+                mount_id INTEGER, prime INTEGER, cycle INTEGER);
+            CREATE TABLE dir_totals(
+                path_id INTEGER, visible_bytes INTEGER, visible_entries INTEGER,
+                unique_bytes INTEGER, unique_inodes INTEGER);
+            INSERT INTO paths VALUES(1,-1,x'2f',1,1,0,'d',1,1,0);
+            INSERT INTO paths VALUES(2,1,x'66696c65',1,2,0,'f',1,1,0);
+            INSERT INTO dir_totals VALUES(1,8192,2,8192,2);
+        ''')
+        return conn
+
+    def test_valid_path_graph_passes_structural_checks(self):
+        conn = self.make_graph()
+        try:
+            result = observer.path_graph_snapshot(conn)
+            self.assertTrue(result['passed'])
+            self.assertEqual(result['path_count'], 2)
+            self.assertTrue(result['root_visible_entries_match'])
+        finally:
+            conn.close()
+
+    def test_missing_parent_fails_structural_checks(self):
+        conn = self.make_graph()
+        try:
+            conn.execute('UPDATE paths SET parent_path_id=99 WHERE path_id=2')
+            result = observer.path_graph_snapshot(conn)
+            self.assertFalse(result['passed'])
+            self.assertEqual(result['bad_parent_count'], 1)
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

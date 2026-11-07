@@ -924,35 +924,53 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     ));
     // daemon liveness — only "live" if the heartbeat belongs to THIS db
     if crate::util::daemon_live_for(db) {
-        out.push_str("daemon:     live (tracks create/delete/rename/growth)");
-        if let Some(w) = crate::util::read_watch_status(db) {
-            if w.uncertain && store.get_meta("dirty_since")?.is_none() {
-                out.push_str("\nstate:      DIRTY — event loss or incomplete reconciliation; volatile health remains uncertain");
+        let watch = crate::util::read_watch_status(db);
+        if watch.as_ref().is_some_and(|status| status.scan_first) {
+            out.push_str("daemon:     live (scan-first observations; fanotify hints)");
+            if watch.as_ref().is_some_and(|status| status.uncertain)
+                || store.get_meta("dirty_since")?.is_some()
+            {
+                out.push_str(
+                    "\nstate:      last-observed view is stale; reconciliation is scheduled",
+                );
             }
-            let resolve_pct = if w.events_seen == 0 {
-                100.0
-            } else {
-                w.events_resolved as f64 * 100.0 / w.events_seen as f64
-            };
-            let queue_state = if w.kernel_empty {
-                "drained"
-            } else {
-                "receiving"
-            };
-            let last_commit = if w.last_commit_at == 0 {
-                "never".to_string()
-            } else {
-                format!("{} ago", crate::util::ago(w.last_commit_at))
-            };
-            let overflow_note = match w.kernel_overflow_notifications {
-                Some(overflows) if overflows > 0 => {
-                    format!("; {} kernel queue overflow notifications", overflows)
+            if let Some(w) = watch {
+                out.push_str(&format!(
+                    "\nhints:      {} events; {} kernel overflows; latest view is not real-time",
+                    w.events_seen,
+                    w.kernel_overflow_notifications.unwrap_or(0),
+                ));
+            }
+        } else {
+            out.push_str("daemon:     live (tracks create/delete/rename/growth)");
+            if let Some(w) = watch {
+                if w.uncertain && store.get_meta("dirty_since")?.is_none() {
+                    out.push_str("\nstate:      DIRTY — event loss or incomplete reconciliation; volatile health remains uncertain");
                 }
-                None => "; kernel overflow count unavailable for legacy watcher status".into(),
-                _ => String::new(),
-            };
-            out.push_str(&format!(
-                "\npipeline:   {queue_state}; {} pending / {} cap; {} events ({resolve_pct:.1}% resolved); \
+                let resolve_pct = if w.events_seen == 0 {
+                    100.0
+                } else {
+                    w.events_resolved as f64 * 100.0 / w.events_seen as f64
+                };
+                let queue_state = if w.kernel_empty {
+                    "kernel queue empty"
+                } else {
+                    "kernel queue has events"
+                };
+                let last_commit = if w.last_commit_at == 0 {
+                    "never".to_string()
+                } else {
+                    format!("{} ago", crate::util::ago(w.last_commit_at))
+                };
+                let overflow_note = match w.kernel_overflow_notifications {
+                    Some(overflows) if overflows > 0 => {
+                        format!("; {} kernel queue overflow notifications", overflows)
+                    }
+                    None => "; kernel overflow count unavailable for legacy watcher status".into(),
+                    _ => String::new(),
+                };
+                out.push_str(&format!(
+                "\nevents:     {queue_state}; {} pending updates / {} cap; {} seen ({resolve_pct:.1}% resolved); \
                  {} updates committed; {} userspace updates dropped; last commit {last_commit}; {}ms since caught up{}",
                 w.pending,
                 w.max_pending,
@@ -962,6 +980,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
                 w.behind_ms,
                 overflow_note,
             ));
+            }
         }
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
@@ -994,18 +1013,32 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
             crate::util::ago(since)
         ));
     }
+    let retry_state = store.get_meta("failed_reconciliation_attempts")?;
+    let retry_deadline = store.get_meta("reconciliation_retry_after_unix")?;
     let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
-        crate::watch::reconciliation_retry_status(
-            store.get_meta("failed_reconciliation_attempts")?.as_deref(),
-        );
+        crate::watch::reconciliation_retry_status(retry_state.as_deref());
     if automatic_reconciliation_paused == Some(true) {
         if let Some(attempts) = failed_reconciliation_attempts {
+            let interval =
+                crate::watch::reconciliation_retry_backoff_seconds(retry_state.as_deref())
+                    .unwrap_or_default();
+            let remaining = crate::watch::reconciliation_retry_remaining_seconds(
+                retry_deadline.as_deref(),
+                crate::util::now_secs(),
+            );
+            let wait_state = match remaining {
+                Some(seconds) if seconds > 0 => format!("next retry in {seconds}s"),
+                Some(_) => "retry is due; waiting for host/queue gates".to_string(),
+                None => {
+                    "retry deadline unavailable; bounded automatic retry is scheduled".to_string()
+                }
+            };
             out.push_str(&format!(
-                "\nreconciliation: automatic scans PAUSED after {attempts} failed full scans; after resolving the cause, request one scan with `dux scan <root>`"
+                "\nreconciliation: automatic scans in backoff after {attempts} failed full scans ({interval}s interval); {wait_state}; use `dux scan <root>` to request sooner"
             ));
         } else {
             out.push_str(
-                "\nreconciliation: automatic scans PAUSED because retry metadata is corrupt; inspect the index before requesting a scan",
+                "\nreconciliation: retry metadata is corrupt; automatic recovery uses maximum backoff; inspect the cause and use `dux scan <root>` to request sooner",
             );
         }
     }
@@ -1038,9 +1071,16 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
     let write_error = store.get_meta("flush_error")?;
     let pause_reason = store.get_meta("pause_reason")?;
     let dirty_reason = store.get_meta("dirty_reason")?;
+    let retry_state = store.get_meta("failed_reconciliation_attempts")?;
+    let retry_deadline = store.get_meta("reconciliation_retry_after_unix")?;
     let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
-        crate::watch::reconciliation_retry_status(
-            store.get_meta("failed_reconciliation_attempts")?.as_deref(),
+        crate::watch::reconciliation_retry_status(retry_state.as_deref());
+    let reconciliation_retry_backoff_seconds =
+        crate::watch::reconciliation_retry_backoff_seconds(retry_state.as_deref());
+    let reconciliation_retry_remaining_seconds =
+        crate::watch::reconciliation_retry_remaining_seconds(
+            retry_deadline.as_deref(),
+            crate::util::now_secs(),
         );
     let daemon_live = crate::util::daemon_live_for(db);
     let watch = crate::util::read_watch_status(db);
@@ -1060,7 +1100,7 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
     let caught_up = daemon_live
         && watch
             .as_ref()
-            .is_some_and(|w| w.kernel_empty && w.pending == 0 && !w.uncertain)
+            .is_some_and(|w| w.kernel_empty && w.pending == 0 && !w.uncertain && !w.scan_first)
         && !dirty
         && !paused
         && !scan_in_progress;
@@ -1079,6 +1119,7 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
         "wal_bytes": wal_bytes,
         "daemon_live": daemon_live,
         "watch_status_available": watch.is_some(),
+        "scan_first": watch.as_ref().is_some_and(|w| w.scan_first),
         "watch_status_updated_at_seconds": watch.as_ref().map(|w| w.updated_at),
         "last_event_commit_timestamp_seconds": watch.as_ref().map(|w| w.last_commit_at),
         "pending_updates": watch.as_ref().map(|w| w.pending),
@@ -1100,6 +1141,11 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
         "pause_reason": pause_reason,
         "automatic_reconciliation_paused": automatic_reconciliation_paused,
         "failed_reconciliation_attempts": failed_reconciliation_attempts,
+        "reconciliation_retry_backoff_seconds": reconciliation_retry_backoff_seconds,
+        "reconciliation_retry_remaining_seconds": reconciliation_retry_remaining_seconds,
+        "reconciliation_retry_due": automatic_reconciliation_paused == Some(true)
+            && failed_reconciliation_attempts.is_some()
+            && reconciliation_retry_remaining_seconds == Some(0),
         "max_automatic_reconciliation_retries": crate::watch::MAX_AUTOMATIC_RECONCILIATION_RETRIES,
         "reconciliation_retry_state_corrupt": automatic_reconciliation_paused == Some(true)
             && failed_reconciliation_attempts.is_none(),
@@ -1490,23 +1536,95 @@ mod tests {
                 > 0
         );
 
+        // An empty kernel queue only describes fanotify delivery. It does not
+        // mean the userspace pending set has been applied to SQLite.
+        crate::util::write_watch_status_with_overflows(
+            &db,
+            3,
+            true,
+            10,
+            10,
+            1,
+            crate::util::now_secs(),
+            0,
+            0,
+            500_000,
+            2,
+            false,
+        );
+        let human_status = status(&store, &db).unwrap();
+        assert!(human_status.contains("events:     kernel queue empty; 3 pending updates"));
+        assert!(!human_status.contains("pipeline:   drained"));
+
+        crate::util::write_watch_status_with_mode(
+            &db,
+            0,
+            true,
+            12,
+            0,
+            1,
+            crate::util::now_secs(),
+            0,
+            0,
+            500_000,
+            0,
+            false,
+            true,
+        );
+        let scan_first_json = status_json(&store, &db).unwrap();
+        assert_eq!(scan_first_json["scan_first"], true);
+        assert_eq!(scan_first_json["caught_up"], false);
+        let scan_first_status = status(&store, &db).unwrap();
+        assert!(scan_first_status.contains("fanotify hints"));
+        assert!(scan_first_status.contains("latest view is not real-time"));
+
         store
             .set_meta("failed_reconciliation_attempts", "1")
             .unwrap();
         let retry_available = status_json(&store, &db).unwrap();
         assert_eq!(retry_available["failed_reconciliation_attempts"], 1);
         assert_eq!(retry_available["automatic_reconciliation_paused"], false);
+        assert_eq!(retry_available["reconciliation_retry_backoff_seconds"], 60);
 
         store
             .set_meta("failed_reconciliation_attempts", "2")
+            .unwrap();
+        store
+            .set_meta(
+                "reconciliation_retry_after_unix",
+                &(crate::util::now_secs() + 90).to_string(),
+            )
             .unwrap();
         let circuit_open = status_json(&store, &db).unwrap();
         assert_eq!(circuit_open["failed_reconciliation_attempts"], 2);
         assert_eq!(circuit_open["automatic_reconciliation_paused"], true);
         assert_eq!(circuit_open["reconciliation_retry_state_corrupt"], false);
+        assert_eq!(circuit_open["reconciliation_retry_backoff_seconds"], 120);
+        assert!(
+            circuit_open["reconciliation_retry_remaining_seconds"] == 89
+                || circuit_open["reconciliation_retry_remaining_seconds"] == 90
+        );
+        assert_eq!(circuit_open["reconciliation_retry_due"], false);
         let human_circuit_status = status(&store, &db).unwrap();
-        assert!(human_circuit_status.contains("automatic scans PAUSED after 2 failed full scans"));
+        assert!(
+            human_circuit_status.contains("automatic scans in backoff after 2 failed full scans")
+        );
+        assert!(human_circuit_status.contains("120s interval"));
+        assert!(human_circuit_status.contains("next retry in"));
         assert!(human_circuit_status.contains("dux scan <root>"));
+
+        store
+            .set_meta(
+                "reconciliation_retry_after_unix",
+                &(crate::util::now_secs() - 1).to_string(),
+            )
+            .unwrap();
+        let retry_due = status_json(&store, &db).unwrap();
+        assert_eq!(retry_due["reconciliation_retry_remaining_seconds"], 0);
+        assert_eq!(retry_due["reconciliation_retry_due"], true);
+        assert!(status(&store, &db)
+            .unwrap()
+            .contains("retry is due; waiting for host/queue gates"));
 
         store
             .set_meta("failed_reconciliation_attempts", "invalid")
@@ -1520,6 +1638,10 @@ mod tests {
         assert_eq!(
             corrupt_retry_state["reconciliation_retry_state_corrupt"],
             true
+        );
+        assert_eq!(
+            corrupt_retry_state["reconciliation_retry_backoff_seconds"],
+            30_720
         );
         store
             .conn

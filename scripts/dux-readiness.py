@@ -237,15 +237,17 @@ class Daemon:
                                   capture_output=True, text=True).stdout[-3000:]
             raise AssertionError(f'{error}; unit={details}; pid={pid}; cmd={commandline}; log={tail}') from error
         version = fields[0]
-        assert version in {"1", "2", "3", "4"}, fields
+        assert version in {"1", "2", "3", "4", "5"}, fields
         assert int(fields[2]) == self.process.pid, "runtime record belongs to another process"
-        overflow_notifications = int(fields[13]) if version == "4" else 0
+        overflow_notifications = int(fields[13]) if version in {"4", "5"} else 0
+        scan_first = fields[14] == "1" if version == "5" else False
         return {"updated_at": int(fields[1]), "status_mtime_ns": status.stat().st_mtime_ns,
                 "pending": int(fields[3]), "drained": fields[4] == "1",
                 "seen": int(fields[5]), "resolved": int(fields[6]), "committed": int(fields[7]),
                 "dropped": int(fields[8]),
-                "uncertain": version in {"2", "3", "4"} and fields[11] == "1",
-                "kernel_overflow_notifications": overflow_notifications}
+                "uncertain": version in {"2", "3", "4", "5"} and fields[11] == "1",
+                "kernel_overflow_notifications": overflow_notifications,
+                "scan_first": scan_first}
 
     def wait(self, predicate, description, timeout=60, interval=0.05):
         end, last = time.monotonic() + timeout, "not ready"
@@ -1646,7 +1648,7 @@ def startup_test(case, args, evidence):
     # A failed upgrade scan must leave the legacy generation readable and the
     # daemon alive; it must not try to reopen that old schema as writable and
     # turn one scan error into a restart loop. Clear the fault trigger and let
-    # the bounded automatic retry install v6, replaying events collected while
+    # the bounded automatic retry install v7, replaying events collected while
     # the old generation remained read-only.
     with contextlib.closing(sqlite3.connect(fresh.db)) as conn, conn:
         conn.execute("UPDATE meta SET value='4' WHERE key='schema_version'")
@@ -1684,13 +1686,13 @@ def startup_test(case, args, evidence):
             upgraded_version = conn.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
             ).fetchone()[0]
-        assert upgraded_version == '6', f'bounded retry did not install v6: {upgraded_version}'
+        assert upgraded_version == '7', f'bounded retry did not install v7: {upgraded_version}'
         assert retry_event.exists(), 'retry fixture event disappeared'
         evidence.update(
             failed_upgrade_scan_kept_legacy_index=True,
             daemon_survived_legacy_upgrade_failure=True,
             queued_events_replayed_after_automatic_retry=True,
-            automatic_retry_installed_v6=True,
+            automatic_retry_installed_v7=True,
         )
     finally:
         fail_scan_file.unlink(missing_ok=True)
@@ -1762,7 +1764,7 @@ def startup_test(case, args, evidence):
             (case.tree/f'during-upgrade-{i}').write_bytes(b'upgrade window event')
         daemon.process.send_signal(signal.SIGCONT)
         daemon.exact()
-        assert check_index(case.db)[0]['schema_version']=='6'
+        assert check_index(case.db)[0]['schema_version']=='7'
         with contextlib.closing(snapshot(case.db)) as conn:
             assert conn.execute('SELECT 1 FROM inodes WHERE inode=?', (stale_ino,)).fetchone() is None, 'upgrade retained dead inode subtree'
             assert conn.execute('SELECT kind FROM inodes WHERE dev_id=? AND inode=?', (dev,ino)).fetchone() == ('f',), 'reused inode was not restored as a file'

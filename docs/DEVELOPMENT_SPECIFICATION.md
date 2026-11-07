@@ -17,6 +17,17 @@ v6 growth-history migration. Where those documents imply that
 journal sequences alone establish an exact filesystem snapshot or that every
 overflow can be scoped narrowly, the explicit limits in this specification apply.
 
+### Architecture decision amendment — 2026-11-07
+
+The accepted default is now **reconciliation-first**: scans define the
+last-observed index; fanotify provides bounded dirty-directory hints. This
+supersedes the journal-first target and delivery order below. Journal design,
+sequence replay, and provisional event overlays are deferred to an optional
+low-latency profile. Requirements for path identity, exact accounting against
+quiescent filesystem truth, bounded storage/resources, truthful coverage,
+security, packaging, scale, and endurance remain in force. Freshness is an
+observed-age SLO, not a claim that a live scan is an atomic snapshot.
+
 Preserve existing user work and exact source/binary evidence. Qualification VMs
 must use 2–4 GiB RAM, pass host admission/pressure guards, and retain explicit
 worker budgets. Tests operate on disposable fixtures. A new candidate does not
@@ -79,45 +90,41 @@ Upstream constraints:
 
 ```mermaid
 flowchart LR
-  FS[Filesystem notifications] --> C[Fast capture]
-  C --> J[(Bounded durable event journal)]
-  J --> A[Resolve and apply]
-  J --> R[Scoped reconciliation scheduler]
-  R --> A
-  A --> DB[(Committed SQLite state)]
+  FS[Filesystem state] --> R[Periodic reconciliation scan]
+  N[Fanotify hints] --> H[Bounded dirty-scope set]
+  H --> R
+  R --> A[Compare and apply changed rows]
+  A --> DB[(Last-observed SQLite state)]
+  QP[Project quota / dedicated volume] --> DB
   DB --> Q[Queries and bounded analytics]
   Q --> UI[Tree, hierarchical treemap, timeline]
-  C --> H[Pipeline health]
-  A --> H
-  R --> H
-  H --> UI
+  R --> M[Freshness and coverage]
+  M --> UI
 ```
 
-Retain Rust, SQLite's single committed writer, bounded scan handoff, atomic
-publication, background UI work and explicit fault injection. Start with
-separate workers in one process; introduce a privileged collector helper only
-after its capability and file-descriptor protocol is specified and qualified.
+Retain Rust, SQLite's single writer, bounded scan handoff, background UI work,
+and explicit fault injection. Scans update only changed rows and record
+per-scope observation generations. A live scan is not an atomic filesystem
+snapshot; expose mixed observation ages instead of claiming a globally exact
+publication instant. Start with separate workers in one process; introduce a
+privileged helper only after its capability and file-descriptor protocol is
+specified and qualified.
 
-### 3.1 Capture and journal
+### 3.1 Event hints and scan scheduling
 
-- Capture validates records, assigns stream/epoch/sequence identities and
-  appends compact records. No SQL, recursive traversal or UI work belongs here.
-- Version and checksum journal records/segments. Record mount/coverage epochs,
-  raw names/handles, masks, sequence, and gaps. Specify segment recovery after
-  torn writes and compatibility across upgrades.
-- Group commits have an explicit maximum durability window and byte bound.
-  Publish captured versus durable sequence separately. Reserve capture progress
-  within the whole-service resource limit; no unbounded memory or disk queues.
-- Persist the applied cursor in the same index transaction as its state changes.
-  Reclaim segments only after committed application and all required recovery
-  consumers release them. Replay is idempotent and handles duplicate records.
-- Journal exhaustion and kernel overflow invalidate coverage. If the origin
-  cannot be narrowed, dirty all affected marks/filesystems, not a guessed subtree.
-  Reserve metadata capacity for gaps; if gap persistence fails, next startup
-  treats the stream as unclean and performs conservative recovery.
-- A journal cannot cover capture downtime or guarantee that a deleted object's
-  handle still resolves. Missing identity is explicit uncertainty requiring
-  reconciliation. Do not advertise uninterrupted exactness from local replay.
+- Fanotify validates enough event structure to identify a filesystem and
+  candidate parent scope, then adds a bounded/coalesced hint. The reader does
+  no per-file handle resolution, SQLite writes, or recursive traversal.
+- Hints prioritize scans; they never define file size or correctness. An
+  unresolved parent widens the hint to a resolvable ancestor or the filesystem.
+- Kernel overflow schedules a full filesystem scan. If events continue to
+  exceed drain capacity, freshness degrades visibly while scans remain
+  automatically scheduled; overflow must not open a permanent retry circuit.
+- A timer schedules full scans independently of event activity and daemon
+  uptime. Critical pressure may defer work with bounded backoff, but the status
+  reports missed freshness targets and the next retry.
+- A durable journal is not part of the default architecture. Reintroduce it
+  only for a separate profile with a measured downtime-loss requirement.
 
 ### 3.2 Identity, paths and historical attribution
 
@@ -141,34 +148,38 @@ after its capability and file-descriptor protocol is specified and qualified.
 
 ### 3.3 Apply and accounting
 
-- Coalesce only where operation equivalence is proven. Preserve ordering across
-  rename, deletion, hardlink, incarnation and gap boundaries.
-- Resolve shared ancestors once within a validated transaction scope. Use lazy
-  fallback, prepared statements and set-based staging where measurements justify
-  them. Bound caches and invalidate them on relevant graph changes.
+- Compare observed stat tuples to existing rows and batch only changed rows.
+  Keep filesystem traversal separate from SQLite commit work so one slow writer
+  does not halt the next scheduled scan.
+- Give visible path instances and physical inode incarnations distinct
+  identities. Preserve hardlink allocation deduplication, non-UTF8 names,
+  inode reuse protection, and explicit ambiguity when identity is insufficient.
 - Compute old/new edge contributions transactionally; combine ancestor deltas
-  and write each total once. Ordinary changes must not scan unrelated siblings.
-- Expensive exact rollup repair is scoped and budgeted. Keep the existing exact
-  checks until replacement accounting passes differential churn/replay tests.
-- Record phase duration, operation count, rows visited, commit/fsync cost,
-  retries, queue age and dropped/uncertain work. Include failed phases, and rate
-  limit diagnostics. Batch limits adapt within measured latency/memory bounds.
+  and write each total once. A changed file may update its ancestor chain, but
+  ordinary updates must not rescan unrelated siblings.
+- Directory removals require a complete enumeration of that parent. On
+  traversal or SQL failure, keep the previous rows and mark that scope incomplete.
+- Record scan duration, stat calls, rows visited/changed, commit/fsync cost,
+  observation age, missed cadence, and resource pressure. Include failed phases
+  and rate-limit diagnostics. Batch limits adapt within measured latency/memory
+  bounds.
 
 ### 3.4 Reconciliation and publication
 
-- Persist dirty scope, reason, generation, coverage epoch and retry state.
-  Local trustworthy evidence permits local repair; ambiguous cross-scope moves
-  and broad gaps widen the repair domain.
-- Prioritize age, user impact and estimated work. Reserve minimum recovery
-  progress; broad audits, compaction and optional analytics yield first.
-- A scan uses a private generation and known capture boundaries. Replay and
-  verify before publication. Scan order plus sequence numbers does not establish
-  an atomic filesystem snapshot: use native snapshots when available, otherwise
-  specify convergence/quiescence checks and expose their verification interval.
-- Readers pin one committed generation. Freshness describes scope coverage,
-  durable/applied/verified sequence, lag, cause and next retry. A heartbeat alone
-  never proves correctness. Provisional overlays are optional and clearly
-  distinguished from committed values; implement only after replay is sound.
+- Persist per-filesystem and per-directory scan generation, observation time,
+  progress, and coverage errors. Prioritize hinted scopes and the oldest
+  observation, with a periodic full traversal as the missed-hint backstop.
+- Compare stat tuples and update changed rows. Remove stale rows only after
+  their parent directory has been completely and successfully enumerated.
+  Interrupted or unreadable scopes preserve the previous rows and report
+  incomplete coverage.
+- Concurrent mutation can make the index a set of last observations from
+  different times. Do not publish a global `exact` or `caught_up` claim from a
+  successful walk alone. Filesystem snapshots may provide a stronger
+  point-in-time profile when available.
+- Automatic retries continue after bounded backoff; no attempt-count circuit
+  permanently disables scans. Readers receive freshness age, scan progress,
+  coverage status, and any missed SLO. A heartbeat alone never proves coverage.
 
 ### 3.5 Queries, history and UI
 
@@ -212,8 +223,9 @@ after its capability and file-descriptor protocol is specified and qualified.
 
 ### 3.7 Modules, privileges and deployment
 
-- Separate capture, journal, reducer, accounting, reconciliation, publication,
-  health, queries and presentation behind narrow typed interfaces.
+- Separate event hints, scan scheduling/walking, comparison/writes, health,
+  queries and presentation behind narrow typed interfaces. Do not add a journal
+  to the default profile.
 - Keep the independent reference model and replay traces simpler than production
   logic. Avoid replacing SQLite or introducing distributed infrastructure without
   a measured requirement.
@@ -227,28 +239,46 @@ after its capability and file-descriptor protocol is specified and qualified.
 
 | Stage | Work | Required evidence before completion |
 | --- | --- | --- |
-| S0 | Baseline telemetry, patched SQLite, lazy lookup, explicit SQL errors | Actual engine version recorded; native/musl compile and relevant database/reducer regressions pass; independent before/after throughput evidence |
-| S1 | Object incarnation/history and path-instance schema | Reuse, hardlinks, aliases, non-UTF8 names, moves/deletions, migration and rollback all exact against independent truth |
-| S2 | Journal and separate capture/apply | Replay equivalence, duplicate/torn records, crash boundaries, capacity/gaps, slow writer and unresolvable handles qualified |
-| S3 | Scoped recovery and incremental accounting | Local repair avoids unrelated traversal; ambiguous loss escalates; concurrent mutations recover; exact rollups/history and bounded progress under pressure |
-| S4 | UI, query cancellation, tiered history and owned-storage budgets | Whole-scope treemap reconciles with selected totals; pagination/filter correctness; history coverage; query/reader/WAL/storage limits measured |
-| S5 | Modules, package/security and operations | Native/musl packages; supported-platform lifecycle; default privileges; monitoring/runbooks; matching rollback bundle |
-| S6 | Integrated release qualification | Final-candidate P0 plus all scale budgets, 72-hour dedicated endurance and 24-hour canary actually pass |
+| S0 | Qualify bounded automatic retry for the existing reconciliation circuit and diagnose CPU-throttle/overflow correlation under a matched trace | Repeated runs show automatic recovery or a clear terminal cause; compare event rates, overflow count, CPU/I/O, and scan recovery. No production setting change without rollback evidence. |
+| S1 | Establish schema-v7 path identity before implementing general incremental reconciliation | Aliases, hardlinks, inode reuse, non-UTF8 names, history, and rollups agree with independent truth; migration preserves a matching rollback pair. |
+| S2 | Specify last-observed freshness and implement periodic full reconciliation with changed-row writes | Under quiescence, exact path/allocation/rollup agreement with independent truth; under churn, stale values are labeled and each completed directory observation has a generation/time. |
+| S3 | Add bounded, coalesced fanotify hints and overflow-to-scan scheduling | Forced kernel overflow and hint-capacity saturation both recover automatically; no event is required to clear a permanent retry circuit; unresolved coverage remains visible. |
+| S4 | Measure cadence and resource use on 1.37M-entry production-shaped fixtures and representative load | Per-scope observation age, full-walk time, CPU, I/O, memory, changed-row writes, and missed cycles satisfy the measured freshness/resource SLO. |
+| S5 | Qualify optional ext4/XFS project quota or dedicated-volume reporting for managed build trees | Independent block/inode accounting agrees for supported operations; project setup and hardlink/rename boundary semantics are tested on disposable filesystems. |
+| S6 | Package, security, operations, and integrated release qualification | Exact candidate passes P0, scale, overflow/reconciliation, low-disk, 72-hour endurance, and 24-hour canary gates with rollback artifacts; UI labels last-observed age accurately. |
 
 Stages may overlap only when dependencies and exact build identity remain clear.
 Each change records implemented, verified, incomplete and failed outcomes. A
 passing old candidate or small unit test does not close an integrated release gate.
+
+### Prototype state (2026-11-07)
+
+The opt-in `dux daemon --reconcile-first` path implements the first runtime
+slice of S2/S3: bounded fanotify metadata draining without path resolution,
+overflow-to-reconciliation requests, 15-minute full-scan scheduling, and
+last-observed status labeling. It currently uses full atomic index rebuilds;
+changed-row writes, per-directory generations/freshness, incomplete-scope row
+preservation, and production-scale cost measurements are still unimplemented.
+The default daemon remains event-apply mode. Treat this prototype as
+qualification-only until S2-S4 exit evidence is met.
 
 ## 5. Performance and reliability contract
 
 Retain existing calibrated 100k/1m/10m release budgets, including actual process
 RSS, scan/query/TUI latency, exact truth and worker/VM limits. Inspect the current
 scale harness and audit before asserting numeric pass limits. Add measured
-capture-to-durable, durable-to-applied and scope-to-verified p50/p95/p99 latency,
-sustained mutation throughput, maximum backlog age, write amplification, disk
-headroom, rows visited and reader duration. Calibration records workload seed,
+per-scope observation age, full-scan duration, dirty-hint-to-scan delay, changed
+rows written, rows/stat calls visited, sustained mutation rate, missed cadence,
+disk headroom and reader duration. Calibration records workload seed,
 filesystem/kernel, guest and worker quotas, cache state, background load and
 source/binary/configuration identities. Quota changes do not count as speedups.
+
+The initial freshness target is a maximum **15-minute observation age** for
+supported local filesystems under the named production workload. Scan cadence
+must account for traversal duration and path order; a 15-minute start-to-start
+timer alone does not establish a 15-minute maximum age. If the measured scan
+rate cannot meet both freshness and resource budgets, the target must be
+reported as missed or renegotiated from evidence, not silently weakened.
 
 Current `scripts/dux-scale.py` gates use strict upper bounds:
 
@@ -265,11 +295,13 @@ replay, hierarchical UI and storage measurements need calibrated limits before
 their respective stages can close. Reference-profile changes require recorded
 justification; they cannot silently relax a failing gate.
 
-Fault acceptance includes actual overflow; crashes at journal/index/publication
-boundaries; permission/capability loss; cgroup OOM/restart; mount topology;
-ENOSPC/read-only storage; held readers; interrupted upgrades; and recovery after
-pressure. Exactness covers paths, incarnations, allocations, directory totals,
-history and explicit uncertainty, rather than only SQLite structural integrity.
+Fault acceptance includes actual fanotify overflow, interrupted scans, concurrent
+create/write/rename/delete, permission/capability loss, cgroup OOM/restart, mount
+topology changes, ENOSPC/read-only storage, held readers, interrupted upgrades,
+and recovery after pressure. After quiescence, exactness covers paths,
+incarnations, allocations, directory totals, and history. During concurrent
+mutation, freshness and coverage claims must match the per-scope observation data,
+not only SQLite structural integrity.
 
 The production-readiness goal is complete only after every original gate and
 this specification's applicable requirements have authoritative pass evidence.

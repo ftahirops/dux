@@ -112,7 +112,7 @@ impl<'a> PathResolver<'a> {
     }
 }
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// Width of a growth history bucket, in seconds (5 minutes).
 pub const GROWTH_BUCKET_SECS: i64 = 300;
@@ -149,8 +149,8 @@ pub fn indexed_inode_path(
     anyhow::bail!("indexed ancestor chain exceeds depth limit")
 }
 
-/// Steady-state schema (v6). Inode metadata and path/directory-entry records are
-/// SEPARATE: `inodes` holds one row per (dev,inode) with allocated blocks and (for
+/// Compatibility schema for v7. Inode metadata and path/directory-entry records
+/// are SEPARATE: `inodes` holds one row per (dev,inode) with allocated blocks and (for
 /// directories) recursive totals; `dirents` holds one row per name/path and points
 /// at an inode. A hardlinked file therefore has ONE `inodes` row and SEVERAL
 /// `dirents` rows — every valid path is represented, and the inode's blocks are
@@ -226,10 +226,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS names_fts USING fts5(
 );
 "#;
 
-/// Path-instance graph tables for v7 staging. The live schema remains v6 until
-/// scanning, event updates, queries, and atomic publication all use this model.
+/// Persisted path-instance graph tables for v7. Event updates and queries still
+/// use the v6 compatibility projection until their migration stages complete.
 pub const PATH_GRAPH_TABLES_SQL: &str = r#"
-CREATE TABLE paths (
+CREATE TABLE IF NOT EXISTS paths (
     path_id INTEGER PRIMARY KEY,
     parent_path_id INTEGER NOT NULL,
     name BLOB NOT NULL,
@@ -246,7 +246,7 @@ CREATE TABLE paths (
     CHECK (cycle IN (0,1)),
     UNIQUE(parent_path_id, name)
 );
-CREATE TABLE dir_totals (
+CREATE TABLE IF NOT EXISTS dir_totals (
     path_id INTEGER PRIMARY KEY REFERENCES paths(path_id) ON DELETE CASCADE,
     visible_bytes INTEGER NOT NULL,
     visible_entries INTEGER NOT NULL,
@@ -256,12 +256,12 @@ CREATE TABLE dir_totals (
 "#;
 
 pub const PATH_GRAPH_INDEXES_SQL: &str = r#"
-CREATE UNIQUE INDEX paths_single_root ON paths(parent_path_id)
+CREATE UNIQUE INDEX IF NOT EXISTS paths_single_root ON paths(parent_path_id)
     WHERE parent_path_id = -1;
-CREATE INDEX paths_target ON paths(dev_id,inode,birth_ns);
-CREATE INDEX paths_parent ON paths(parent_path_id);
-CREATE INDEX paths_prime ON paths(dev_id,inode,birth_ns,prime);
-CREATE UNIQUE INDEX paths_one_prime ON paths(dev_id,inode,birth_ns) WHERE prime=1;
+CREATE INDEX IF NOT EXISTS paths_target ON paths(dev_id,inode,birth_ns);
+CREATE INDEX IF NOT EXISTS paths_parent ON paths(parent_path_id);
+CREATE INDEX IF NOT EXISTS paths_prime ON paths(dev_id,inode,birth_ns,prime);
+CREATE UNIQUE INDEX IF NOT EXISTS paths_one_prime ON paths(dev_id,inode,birth_ns) WHERE prime=1;
 "#;
 
 /// Resolve one v7 path graph row to its exact byte-preserving absolute path.
@@ -376,8 +376,8 @@ CREATE INDEX IF NOT EXISTS idx_growth_inode_bucket_delta ON growth(dev_id,inode,
 
 pub struct Store {
     pub conn: Connection,
-    /// Schema version validated on open; v4/v5 snapshots remain readable while
-    /// an atomic v6 baseline is built.
+    /// Schema version validated on open; v4-v6 snapshots remain readable while
+    /// an atomic v7 baseline is built.
     pub schema_version: i64,
 }
 
@@ -578,15 +578,19 @@ impl Store {
     }
 
     /// Open a known compatible schema read-only. Legacy snapshots remain
-    /// navigable while the daemon builds its v6 baseline; ambiguous growth is
+    /// navigable while the daemon builds its v7 baseline; ambiguous growth is
     /// suppressed by the connection-local `growth_current` view.
     pub fn open_ro(path: &Path) -> Result<Self> {
-        Self::open_ro_versioned(path, true)
+        Self::open_ro_versioned(path, true, true)
     }
 
-    /// Known v4/v5 sources can be read while an atomic v6 baseline is built.
+    /// Known v4-v6 sources can be read while an atomic v7 baseline is built.
     pub fn open_rebuild_source(path: &Path) -> Result<Self> {
-        Self::open_ro_versioned(path, true)
+        // A damaged v7 path graph must be rebuildable from its still-readable
+        // compatibility projection and growth history. Normal readers reject
+        // that graph below; this narrowly scoped source reader deliberately does
+        // not use it.
+        Self::open_ro_versioned(path, true, false)
     }
 
     /// Whether a main index or one of its SQLite sidecars exists, including an
@@ -620,7 +624,7 @@ impl Store {
         Ok(false)
     }
 
-    fn open_ro_versioned(path: &Path, allow_v4: bool) -> Result<Self> {
+    fn open_ro_versioned(path: &Path, allow_v4: bool, require_v7_path_graph: bool) -> Result<Self> {
         if !Self::has_index_artifacts(path)? {
             // If the FIRST scan is building the index right now, say so (with live
             // progress) rather than "no index" — the user just needs to wait.
@@ -659,9 +663,15 @@ impl Store {
                 SCHEMA_VERSION
             );
         }
+        if require_v7_path_graph && ver == SCHEMA_VERSION && !v7_path_graph_schema_complete(&conn)?
+        {
+            anyhow::bail!(
+                "index schema v{SCHEMA_VERSION} has an incomplete path graph; rebuild it with `dux scan <root>` before querying"
+            );
+        }
         // Legacy growth rows have no incarnation key and cannot be safely
         // assigned to the inode currently occupying the same number. Expose an
-        // empty source for those snapshots until their atomic v6 rebuild. On v6,
+        // empty source for those snapshots until their atomic v7 rebuild. On v6+,
         // only known birth times matching the current inode incarnation surface.
         if ver >= 6 {
             conn.execute_batch(
@@ -717,8 +727,15 @@ impl Store {
                 SCHEMA_VERSION
             );
         }
+        if has_inodes && ver == SCHEMA_VERSION && !v7_path_graph_schema_complete(&self.conn)? {
+            anyhow::bail!(
+                "index schema v{SCHEMA_VERSION} has an incomplete path graph; refusing to recreate missing tables over existing data. Rebuild it with `dux scan <root>`; the existing index was left untouched."
+            );
+        }
         self.conn.execute_batch(SCHEMA_SQL)?;
+        self.conn.execute_batch(PATH_GRAPH_TABLES_SQL)?;
         self.conn.execute_batch(INDEXES_SQL)?;
+        self.conn.execute_batch(PATH_GRAPH_INDEXES_SQL)?;
         self.conn.execute_batch(FTS_TRIGGERS_SQL)?;
         self.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
         Ok(())
@@ -753,7 +770,11 @@ impl Store {
             }
             return Ok(true);
         }
-        Ok(read_schema_version(&conn)? != SCHEMA_VERSION)
+        let version = read_schema_version(&conn)?;
+        if version != SCHEMA_VERSION {
+            return Ok(true);
+        }
+        Ok(!v7_path_graph_schema_complete(&conn)?)
     }
 
     /// Create a fresh, empty index with ONLY the table + FTS vtable (no triggers,
@@ -765,6 +786,7 @@ impl Store {
         let conn = Connection::open(path).with_context(|| format!("create {}", path.display()))?;
         Self::pragmas(&conn)?;
         conn.execute_batch(SCHEMA_SQL)?;
+        conn.execute_batch(PATH_GRAPH_TABLES_SQL)?;
         let s = Store {
             conn,
             schema_version: SCHEMA_VERSION,
@@ -781,6 +803,7 @@ impl Store {
             .execute_batch("INSERT INTO names_fts(names_fts) VALUES('rebuild');")?;
         self.conn.execute_batch(FTS_TRIGGERS_SQL)?;
         self.conn.execute_batch(INDEXES_SQL)?;
+        self.conn.execute_batch(PATH_GRAPH_INDEXES_SQL)?;
         Ok(())
     }
 
@@ -860,6 +883,130 @@ fn sqlite_table_exists(conn: &Connection, name: &str) -> Result<bool> {
     .optional()
     .map(|found| found.is_some())
     .context("checking SQLite table metadata")
+}
+
+/// V7 is only safe to open as a current index when its persisted path-instance
+/// tables and lookup indexes exist. `CREATE TABLE IF NOT EXISTS` must not turn a
+/// missing graph into an apparently valid empty one during a normal RW open.
+fn v7_path_graph_schema_complete(conn: &Connection) -> Result<bool> {
+    const REQUIRED: &[(&str, &[&str])] = &[
+        (
+            "paths",
+            &[
+                "path_id",
+                "parent_path_id",
+                "name",
+                "dev_id",
+                "inode",
+                "birth_ns",
+                "kind",
+                "mount_id",
+                "prime",
+                "cycle",
+            ],
+        ),
+        (
+            "dir_totals",
+            &[
+                "path_id",
+                "visible_bytes",
+                "visible_entries",
+                "unique_bytes",
+                "unique_inodes",
+            ],
+        ),
+    ];
+    for (table, columns) in REQUIRED {
+        let mut statement = conn.prepare_cached("SELECT name FROM pragma_table_info(?1)")?;
+        let existing: std::collections::HashSet<String> = statement
+            .query_map([table], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        if !columns.iter().all(|column| existing.contains(*column)) {
+            return Ok(false);
+        }
+    }
+    type RequiredIndex<'a> = (&'a str, bool, bool, &'a [&'a str], Option<&'a str>);
+    const REQUIRED_INDEXES: &[RequiredIndex<'_>] = &[
+        (
+            "paths_single_root",
+            true,
+            true,
+            &["parent_path_id"],
+            Some("whereparent_path_id=-1"),
+        ),
+        (
+            "paths_target",
+            false,
+            false,
+            &["dev_id", "inode", "birth_ns"],
+            None,
+        ),
+        ("paths_parent", false, false, &["parent_path_id"], None),
+        (
+            "paths_prime",
+            false,
+            false,
+            &["dev_id", "inode", "birth_ns", "prime"],
+            None,
+        ),
+        (
+            "paths_one_prime",
+            true,
+            true,
+            &["dev_id", "inode", "birth_ns"],
+            Some("whereprime=1"),
+        ),
+    ];
+    for (name, expected_unique, expected_partial, expected_columns, expected_predicate) in
+        REQUIRED_INDEXES
+    {
+        let definition: Option<(i64, i64)> = conn
+            .query_row(
+                "SELECT \"unique\", partial
+                 FROM pragma_index_list('paths') WHERE name=?1",
+                [name],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((unique, partial)) = definition else {
+            return Ok(false);
+        };
+        if (unique != 0) != *expected_unique || (partial != 0) != *expected_partial {
+            return Ok(false);
+        }
+        let mut statement = conn.prepare_cached("SELECT name FROM pragma_index_info(?1)")?;
+        let actual_columns: Vec<String> = statement
+            .query_map([name], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        if actual_columns
+            .iter()
+            .map(String::as_str)
+            .ne(expected_columns.iter().copied())
+        {
+            return Ok(false);
+        }
+        if let Some(predicate) = expected_predicate {
+            let sql: Option<String> = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='index' AND name=?1",
+                    [name],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(sql) = sql else {
+                return Ok(false);
+            };
+            let compact_sql: String = sql
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .flat_map(char::to_lowercase)
+                .collect();
+            if !compact_sql.contains(predicate) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }
 
 fn read_schema_version(conn: &Connection) -> Result<i64> {
@@ -1129,6 +1276,13 @@ mod tests {
         std::env::temp_dir().join(format!("dux-store-{tag}-{}", std::process::id()))
     }
 
+    fn error_text<T>(result: std::result::Result<T, anyhow::Error>) -> String {
+        match result {
+            Ok(_) => panic!("expected operation to fail"),
+            Err(error) => error.to_string(),
+        }
+    }
+
     #[test]
     fn path_of_display_unresolved_inode_does_not_panic() {
         let db = tmp("path-of");
@@ -1164,6 +1318,108 @@ mod tests {
         assert!(err.contains("schema is v3"));
         for s in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+    }
+
+    #[test]
+    fn v7_missing_path_graph_is_rebuildable_but_never_recreated_as_empty() {
+        let db = tmp("v7-missing-path-graph");
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        {
+            let store = Store::create_fresh(&db).unwrap();
+            store.finalize_bulk().unwrap();
+            store
+                .conn
+                .execute_batch("DROP TABLE dir_totals; DROP TABLE paths;")
+                .unwrap();
+        }
+
+        assert!(Store::needs_rebuild(&db).unwrap());
+        let read_error = error_text(Store::open_ro(&db));
+        assert!(read_error.contains("incomplete path graph"), "{read_error}");
+        let write_error = error_text(Store::open_rw(&db));
+        assert!(
+            write_error.contains("refusing to recreate missing tables"),
+            "{write_error}"
+        );
+        let conn = Connection::open(&db).unwrap();
+        assert!(!sqlite_table_exists(&conn, "paths").unwrap());
+        drop(conn);
+
+        // Atomic rebuild may still read the old v6-compatible projection and
+        // growth history while deliberately ignoring the damaged v7 graph.
+        let source = Store::open_rebuild_source(&db).unwrap();
+        assert_eq!(source.schema_version, SCHEMA_VERSION);
+        drop(source);
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+    }
+
+    #[test]
+    fn v7_path_graph_missing_required_column_or_index_requires_rebuild() {
+        let db = tmp("v7-incomplete-path-graph");
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        {
+            let store = Store::create_fresh(&db).unwrap();
+            store
+                .conn
+                .execute_batch(
+                    "DROP TABLE dir_totals;
+                 DROP TABLE paths;
+                 CREATE TABLE paths(path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,name BLOB);
+                 CREATE TABLE dir_totals(path_id INTEGER PRIMARY KEY,visible_bytes INTEGER,
+                   visible_entries INTEGER,unique_bytes INTEGER,unique_inodes INTEGER);",
+                )
+                .unwrap();
+        }
+        assert!(Store::needs_rebuild(&db).unwrap());
+        assert!(error_text(Store::open_rw(&db)).contains("incomplete path graph"));
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+
+        let db = tmp("v7-missing-path-index");
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        {
+            let store = Store::create_fresh(&db).unwrap();
+            store.finalize_bulk().unwrap();
+            store
+                .conn
+                .execute_batch("DROP INDEX paths_target;")
+                .unwrap();
+        }
+        assert!(Store::needs_rebuild(&db).unwrap());
+        assert!(error_text(Store::open_rw(&db)).contains("incomplete path graph"));
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+
+        let db = tmp("v7-wrong-path-index");
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        {
+            let store = Store::create_fresh(&db).unwrap();
+            store.finalize_bulk().unwrap();
+            store
+                .conn
+                .execute_batch(
+                    "DROP INDEX paths_target;
+                     CREATE INDEX paths_target ON paths(inode);",
+                )
+                .unwrap();
+        }
+        assert!(Store::needs_rebuild(&db).unwrap());
+        assert!(error_text(Store::open_ro(&db)).contains("incomplete path graph"));
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
         }
     }
 
@@ -1295,7 +1551,9 @@ mod tests {
         for suffix in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
         }
-        drop(Store::create_fresh(&db).unwrap());
+        let store = Store::create_fresh(&db).unwrap();
+        store.finalize_bulk().unwrap();
+        drop(store);
 
         let store = Store::open_rw(&db).unwrap();
         for name in [

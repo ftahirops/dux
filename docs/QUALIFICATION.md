@@ -8270,3 +8270,446 @@ showed zero OOMs. Controlled crashes, terminal exactness/history/integrity, and
 the remainder of the 72-hour soak are still pending. Raw compressed progress
 snapshot and digest are retained in
 `target/readiness/vps2-qualification-20261106/soak-archive/`.
+
+### Stale-parent event patch review and interrupted validation — 2026-11-07 08:21 UTC
+
+Reviewed unpushed patch `1f3343b` from the separate
+`claude/stale-dfid-classification` clone. Its ext4-only stale `DFID_NAME`
+classification is a plausible way to avoid treating certain deleted-parent
+races as lost coverage, but it is not a general queue-overflow fix and is not
+installed in production. The current production daemon remains dirty and not
+caught up; its read-only status at 08:21 UTC showed 33 lifetime kernel overflow
+notifications, 17 pending updates, and about 5h52m behind. The installed daemon
+is still the older build. The observed overflow increase during the test-build
+interval is correlated in time only; causation is unknown.
+
+A review branch, `hardening/stale-dfid-classification-review`, contains the
+patch plus a conservative guard: a stale parent with no resolvable path is
+ignored only when no matching inode row, target dirent, or child dirent exists
+in the index. Otherwise it remains an unresolved event and keeps coverage
+uncertain. Regression cases were added for each database footprint. The
+patch's ext4 integration test is explicitly ignored by default and must be run
+in an ext4 qualification profile, avoiding a false pass on filesystems where
+the test body would otherwise return early. This review branch is not merged,
+committed, pushed, or deployed.
+
+The focused build/test command was started in a 10% CPU / 2 GiB / no-swap
+systemd scope, with Cargo output on tmpfs. Host CPU PSI rose to 43.30% avg10,
+above the qualification stop threshold, before Dux compiled or any test ran.
+The scope exited with status 130 after cancellation. This is an **incomplete
+attempt**, not a source compile result and not a test pass/failure. Its partial
+tmpfs target was removed; `/dev/shm` returned to 1.1 MiB used. `cargo fmt` and
+`git diff --check` pass for the review branch. Full-suite and ext4 integration
+validation remain required in an isolated admitted environment.
+
+### Qualification-host contention observation — 2026-11-07 08:25 UTC
+
+At 08:23 UTC, the host had an unrelated `go test -race -count=1 -timeout 5m`
+workload active for `./internal/ws/...`, `./internal/router/...`, and
+`./agent/core/...`. Multiple Go `compile`/`vet` workers were concurrently
+visible; the largest sampled compiler was using more than one CPU core. CPU PSI
+some avg10 was 24% in that sample, while Dux continued watching `/`. By 08:24:58
+UTC CPU PSI some avg10 had fallen to 10.36%, but the Go test was still active.
+This is direct evidence of concurrent host contention and watched filesystem
+churn under `/tmp`; it does **not** establish that this workload caused any
+particular fanotify overflow. The VPS2 soak was also active at its 08:22
+checkpoint, so neither host was admitted for another resource-intensive Dux
+qualification run at this observation. New stress runs should use a separately
+admitted, isolated environment or wait until competing build/test activity has
+ended.
+
+At 08:26:54 UTC, after that `go test` process exited, another Go security-analysis
+and build workload was active: `gosec` plus multiple `go list`/`compile`
+processes. CPU PSI some avg10 reached 70.08% and load1 reached 21.61. A
+read-only Dux status at 08:27 UTC remained dirty and not caught up, with the
+same 33 lifetime overflow notifications, 17 pending updates, and about 5h58m
+behind. This later high-pressure sample further disqualifies the host for test
+admission; it still does not identify which workload, if any, caused the
+previous overflows.
+
+### Automatic reconciliation circuit audit — 2026-11-07 08:29 UTC
+
+Source review confirms the current retry policy is intentionally terminal after
+one automatic retry: `MAX_AUTOMATIC_RECONCILIATION_RETRIES` is 1, and the
+circuit opens once `failed_reconciliation_attempts` reaches 2. Startup honors
+the persisted open circuit; ordinary automatic requests are suppressed until
+an operator explicitly invokes `dux scan`, which resets the counter. This
+prevents repeated expensive root scans during persistent failures, but it also
+means a transient workload or filesystem condition can clear and the dirty
+index still will not self-recover. The capped exponential delay helper does
+not solve this after the circuit opens.
+
+This is a verified source-level reliability tradeoff and remains an open
+operational blocker. A replacement should retain dirty/fail-closed semantics
+and the scan resource guard, while allowing a later automatic retry after a
+persisted cooldown and a healthy admission/queue-drain window. Add restart,
+long-outage, repeated-overflow, and quiet-after-failure tests; do not simply
+remove the circuit and permit immediate full-root scan loops. No retry-policy
+code was changed in this review because current local and VPS2 workloads are
+not admitted for a meaningful system test.
+
+### Isolated VM asset/state restoration — 2026-11-07 08:34 UTC
+
+The earlier tmpfs cleanup left `target/readiness/vms` as a dangling symlink to
+`/dev/shm/dux-qualification-prep/base`. No QEMU or VM-manager process was active.
+I replaced that dangling link with the durable directory layout expected by
+`scripts/dux-qualification-vm.py`; the lost tmpfs cache did not contain a
+recoverable `images.json` manifest. I restored the Ubuntu 24.04 amd64 cloud base
+image and its official SHA256SUMS into `target/readiness/vms`. The 621,284,352-byte
+image SHA-256 is
+`04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`, matching
+the Ubuntu-published manifest at
+`https://cloud-images.ubuntu.com/releases/noble/release/SHA256SUMS`. The
+machine-readable manifest is `target/readiness/vms/images.json`. Root had 63
+GiB available afterward. The installed Dux daemon stayed active with one
+lifetime restart and its kernel overflow count stayed at 33 in the read-only
+08:34 status; this does not prove the image write had no other event impact.
+
+No VM was started: at 08:34 host load1 was 26.25 and CPU PSI some avg10 was
+35.06%, with concurrent Go compilation active. VM startup remains gated on the
+qualification manager's stable host-admission checks. The base image is a
+verified test dependency, not a disposable per-run overlay; each guest overlay,
+seed, and SSH identity remains on its unique tmpfs runtime and is cleaned only
+after the guest stops.
+
+### Qualification admission recheck — 2026-11-07 08:38 UTC
+
+The 08:35 load spike persisted through 08:38 and another external Go build/test
+started in `/home/xtop`: host load1 was 24.03 and CPU PSI some avg10 was
+16.54%. The running test processes used `/tmp` for Go build outputs and the
+host's watched ext4 for their source trees. The Dux daemon stayed active with
+its 33 overflow notifications; its read-only 08:37 status remained dirty/not
+caught up, with 6,270 pending updates and about 6h09m behind. This confirms
+that the host remains outside guest-start admission even between individual
+build processes. No guest or Dux test was started.
+
+### Stale-parent footprint predicate micro-check — 2026-11-07 08:39 UTC
+
+Executed the exact new SQLite `EXISTS` predicate in an in-memory Python SQLite
+connection. All four expected cases passed: no footprint returns false; an
+`inodes` row, a child `dirents` row, and a target `dirents` row each return
+true. This checks SQL semantics only; it does not compile the Rust helper,
+exercise event parsing, or replace its Rust regression tests. Host load1 was
+still 14.17 at this check, so VM admission and Rust test execution remain
+pending.
+
+### Event-loss guarantee and recovery design review — 2026-11-07 08:40 UTC
+
+A fanotify consumer cannot promise that the kernel will deliver every event in
+all circumstances. The kernel queue is finite; overflow explicitly reports
+that events were lost, and a process can also be stopped, restarted, or lose
+coverage across mount changes. The defensible product invariant is therefore:
+
+1. **Never claim exactness across a known or suspected coverage gap.** Persist
+   dirty/uncertain state before or atomically with processing that could hide a
+   gap; expose age, reason, overflow count, queue depth/backlog, and recovery
+   progress in status. A crash must not turn an uncertain database into clean.
+2. **Recover from authoritative filesystem state.** Treat notifications as a
+   low-latency change hint, not the source of truth. Reconcile a snapshot with
+   a protocol that accounts for changes concurrent with traversal (for
+   example, retain/replay a bounded event journal from a scan epoch and verify
+   the epoch at commit). If continuity cannot be proven, retry or restart the
+   scan; leave dirty set.
+3. **Do not get stuck forever after transient failures.** Keep full scans
+   rate-limited and resource-admitted, but persist a retry deadline/backoff and
+   retry automatically when the host is healthy and the event queue is drained
+   or bounded. Repeated failures should increase the delay and alert; they
+   should not permanently disable recovery until an operator happens to run
+   `dux scan`. Operator intervention remains useful for persistent invariant,
+   permission, I/O, or schema failures.
+4. **Bound work and state.** Coalesce hot paths, cap in-memory queues, reserve
+   disk/WAL headroom, yield to host pressure, and promote overflow to a
+   full-rescan request. If pressure prevents recovery, say stale and report the
+   blocker; never silently discard it. A scope that cannot catch up on the
+   actual mutation rate needs workload isolation, more capacity, narrower watch
+   roots, or a more scalable reconciliation/index design.
+5. **Prove it with fault injection.** Exercise queue overflow, daemon kill at
+   each scan/commit phase, restart with dirty metadata, stale/deleted/replaced
+   directory handles, mount/unmount and permission changes, disk full, SQLite
+   busy/I/O errors, WAL growth, sustained churn, and host pressure. For each
+   case compare the eventual index with an independent filesystem walk, assert
+   dirty remains true until equality, and assert eventual recovery when the
+   fault is removed. Measure event rate, overflow rate, catch-up time, CPU, I/O,
+   memory, and worst-case scan duration at representative 1M/10M-file scales.
+
+“Never have issues” cannot be guaranteed for a finite event queue on a general
+Linux host, especially when unrelated builds create unbounded churn. We can
+make the failure detectable, keep the result honest, and guarantee bounded
+resource use plus eventual recovery under stated capacity and availability
+assumptions. A hard guarantee of freshness requires controlling the workload
+and provisioning enough throughput so sustained change rate stays below
+processing capacity.
+
+The imported stale-parent patch needs an additional identity review before it
+can be accepted. It decodes ext4 `FILEID_INO32_GEN[_PARENT]` handles but maps the
+parent using only device and inode number; the handle also carries an inode
+generation. Inode numbers can be reused. The patch's final path reconciliation
+reduces risk, but the code currently has no test demonstrating that an old
+stale handle cannot alias an indexed replacement directory and affect the
+wrong path or coverage decision. Verify generation where possible (including
+how generation is represented in the index), or retain conservative uncertainty
+when identity cannot be proven. The “parent never indexed implies no indexed
+descendants” assumption also needs a crash/partial-commit regression test, not
+only the footprint SQL micro-check.
+
+At 08:40 UTC the local qualification VM manager still had no saved guest state,
+and the local daemon remained active (one lifetime restart). The VPS2 72-hour
+soak remained active with zero restarts at its latest direct systemd check;
+its report still marked only the soak suite running, with no terminal integrity
+or history checks yet. No guest or source test was started in this interval.
+
+### Retry-circuit recovery change — 2026-11-07 08:41 UTC
+
+Updated `src/watch.rs` so the existing retry circuit no longer stays paused
+forever after repeated reconciliation failures. It now records a bounded
+cooldown based on the persisted failed-attempt count (60 seconds, doubling to a
+maximum of 8.5 hours), then reopens automatic recovery and requests another
+scan. This retains pressure admission, queue-drain/backlog gating, the dirty
+state, and the one-retry circuit behavior between attempts. A successful
+accounting check resets the counter. A malformed counter uses the maximum
+cooldown and remains visibly dirty instead of permanently requiring an
+operator command. An explicit `dux scan` still resets the delay and requests
+immediate recovery.
+
+Added a unit assertion for the paused/unpaused and cooldown-elapsed transition.
+`cargo fmt --all -- --check` and `git diff --check` pass after the edit. The
+local qualification host currently has an unrelated, large Go test workload,
+so I did not start Rust compilation or tests; the new behavior is **not yet
+compiled or runtime-verified**. The circuit audit above is the 08:29 source
+snapshot and is superseded by this bounded automatic-reopen change; restart
+and repeated-failure tests remain required. The cooldown deadline itself is
+in-memory and is recomputed from the persisted attempt count after restart,
+which can delay the next retry by up to the capped interval but cannot disable
+recovery permanently.
+
+### Retry admission and qualification-host gate — 2026-11-07 08:46 UTC
+
+The retry circuit remains represented as paused in persisted status while its
+attempt-count cooldown is active. The watcher now retains the pending recovery
+request and admits it once that cooldown has elapsed; it does not clear the
+failure count until accounting verification succeeds. This keeps the status
+fail-closed while a scan is not yet proven and avoids dropping the retry
+request at startup.
+
+Attempted the qualification VM manager's normal start path. It refused before
+starting QEMU because a separate Go race-test/build workload was active, host
+load1 was **24.47** (limit 10), and CPU PSI some avg10 was **61.41%** (limit
+55%). No guest was created. Root disk had **60 GiB free** and `/dev/shm` had
+**13 GiB free**. `cargo fmt --all -- --check` and `git diff --check` pass;
+Rust compilation, unit tests, and the VM regression suite are still pending.
+The VPS2 soak service remains active with **zero restarts**, but its report is
+still `running` and lists 14 other suites as not run; it is not completion
+proof for this retry change or for production readiness.
+
+### Retry gate ordering correction — 2026-11-07 08:48 UTC
+
+A follow-up control-flow review found that the first retry-gate edit cached the
+circuit decision before reaping a completed scan worker. If that worker failed
+and opened the circuit in the same loop, a pending retry could use the stale
+pre-failure decision and start too early. The gate is now calculated immediately
+before scan admission, after worker completion has updated failure state and
+cooldown. Formatting and whitespace checks pass. This ordering correction is
+not compiled or tested yet; the admitted VM and Rust regression run remain
+pending until competing host build/test activity and CPU pressure clear.
+
+### Restart backoff and corrupt-counter correction — 2026-11-07 08:49 UTC
+
+Startup now applies the attempt-count backoff whenever a prior failure count is
+present, including the first failed attempt; restarting the daemon no longer
+turns that failure into an immediate scan. A malformed counter is treated as
+`u32::MAX` for scheduling, selecting the capped 30,720-second cooldown rather
+than the short second-attempt delay. The added unit assertion checks the
+malformed-count cap and existing formatter/whitespace checks pass. The deadline
+is still based on a process-local monotonic timer and is recomputed from the
+persisted count after every restart, so repeated daemon restarts can extend the
+wait; persisting an absolute retry deadline remains an improvement to consider
+with tests for clock changes and corrupted metadata. These source changes have
+not been compiled or executed.
+
+### Retry status clarity — 2026-11-07 08:50 UTC
+
+Updated `dux status` and JSON status to describe the circuit as bounded backoff,
+not a permanent pause requiring an operator. Human status now shows the retry
+interval and says automatic retry waits for the host and event-queue gates;
+`dux scan <root>` is presented as an earlier manual request. JSON includes
+`reconciliation_retry_backoff_seconds`. Corrupt retry metadata reports the
+30,720-second maximum interval and still allows recovery. Added query-status
+assertions for 60-, 120-, and 30,720-second backoff cases. Formatting and diff
+whitespace checks pass. These Rust tests remain unexecuted because concurrent
+Go static analysis and tests are active on the qualification host; no test or
+VM workload was started.
+
+### VPS2 soak observation — 2026-11-07 08:50 UTC
+
+The existing soak worker is still live on VPS2 (systemd main PID 1502495,
+`NRestarts=0`; its Dux child PID 1502510). Elapsed runtime is about 6h57m,
+short of the configured 72 hours. The test report still says `running` and its
+checkpoint timestamp has not advanced from 01:54 UTC, so the report is not a
+live progress feed. The daemon log contains successful flushes but also slow
+flush/rollup warnings in the 262–511 ms range under the configured 25 events/s
+workload. These are performance samples, not failures by themselves.
+
+A status command launched from the host namespace reported `no index yet`,
+then a namespace-aware read found a 2,523-node index and 4.3 MiB WAL, but
+reported `daemon_live=false` and no watcher counters. The private mount/runtime
+namespace hides the watch status from that probe; therefore it does not prove
+clean event coverage or current catch-up. Preserve the soak and fix its progress
+reporting/runtime observability before relying on it for production evidence.
+
+### Persisted retry deadline — 2026-11-07 08:53 UTC
+
+The exponential retry deadline is now stored as `reconciliation_retry_after_unix`
+in the index metadata and restored as a monotonic wait after daemon startup.
+Restoration clamps any future deadline to the maximum backoff for the recorded
+attempt count; expired deadlines retry immediately, and malformed deadlines
+fall back to that bounded maximum. Successful verification and explicit manual
+reset remove both the failure count and deadline. This prevents ordinary
+restarts from repeatedly restarting the full wait. Legacy read-only upgrade
+sources cannot persist the retry metadata until the new index is installed;
+that path remains a coverage limitation. Added pure assertions for elapsed,
+remaining, excessive-future, missing, and malformed deadlines. Formatting and
+whitespace checks pass; compile and runtime tests remain unrun because the host
+has active external Go analysis/tests and severe I/O pressure.
+
+### Retry deadline persistence follow-up — 2026-11-07 08:53 UTC
+
+The retry deadline is persisted with normal writable indexes and restored with
+its remaining wall-clock duration, capped by the attempt's maximum backoff. The
+live daemon then waits on a monotonic timer. Successful reconciliation and
+manual reset clear the deadline and failure count together. Startup against a
+read-only legacy upgrade source does not attempt a metadata write; its legacy
+failure path still has process-local retry accounting until atomic installation.
+The earlier note that all restart waits were process-local is superseded for
+writable indexes. The status JSON value is the configured backoff interval, not
+an exact remaining-time estimate. This follow-up remains uncompiled and
+untested; regression tests cover the pure deadline clamp logic, but SQLite
+restart persistence still needs an integration test.
+
+### Qualification recheck — 2026-11-07 08:57 UTC
+
+Retried the normal VM start gate after I/O pressure eased. It refused before
+starting QEMU: a Go race test for `./agent/loadtest` and its compiler were active,
+and host load1 was **11.13**, above the configured limit of 10. CPU PSI some
+avg10 was **21.09%**; `/dev/shm` remained mostly empty and root had about **60
+GiB free**. No Rust test or guest was started. This shows disk capacity is not
+the current test blocker; competing watched-host build activity and load remain
+the blocker.
+
+### Accounting success cleanup and admission retry — 2026-11-07 08:59 UTC
+
+A successful periodic accounting verification now clears stale retry count and
+deadline metadata as well as a successful reconciliation check; otherwise a
+prior failed verification could leave an obsolete deadline for a later restart.
+The existing dirty-state clearing rules remain limited to reconciliation
+verification with complete coverage. Formatting and diff whitespace checks
+pass. The VM gate was retried after the earlier Go test exited, but a Vitest
+run had started; the stable-sample gate refused at sample 3. No VM or Rust test
+was started. This and the restart/corrupt-deadline cases remain uncompiled and
+unexecuted pending a clear qualification window.
+
+### Retry deadline integration coverage added — 2026-11-07 09:01 UTC
+
+Added a SQLite-backed unit test that restores a future deadline, clamps an
+implausibly distant deadline, bounds malformed metadata, and verifies the
+read-only legacy path does not rewrite retry metadata. These tests exercise the
+persistence helper, not a daemon crash/restart or scheduler integration. They
+have not been executed. At 09:01 UTC a separate `go test ./collector ./engine`
+was active on the watched host, so Rust test/build work remains gated to avoid
+adding more filesystem churn to the live Dux watcher.
+
+### Production status and VM gate — 2026-11-07 09:02 UTC
+
+The stable host admission gate was retried. It rejected at sample 2/3 because a
+new Vitest worker started; no VM was created. A read-only production status
+check showed `/usr/bin/dux` **0.6.3** (source hash
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`), active
+PID **988284**, one lifetime restart, dirty/not caught up, **48** kernel
+fanotify overflow notifications, **23,643 seconds (6h34m) behind**, and
+**1,377,878 indexed nodes**. It reports 12 pending updates, no userspace drops,
+no write error, and a 128 MiB WAL. Its last full scan is about **44.2 hours**
+old. This confirms the installed daemon still has the operational problem;
+low immediate pending count does not repair its stale baseline. Root has about
+62 GiB free. The candidate-source changes remain uncompiled and undeployed.
+
+### VM quota argument correction — 2026-11-07 09:05 UTC
+
+A VM did pass admission and start at 09:04:33, but inspection of its saved state
+showed the standard **75% CPU quota**, not the intended 10%: this script accepts
+global options before the action (`--cpu-quota-percent 10 start watch-unit`),
+whereas my first invocation placed the option after the guest and argparse
+forwarded it. I stopped the disposable guest immediately; systemd reports it
+inactive and its ephemeral runtime was cleaned. No source was copied and no test
+ran. I retried with the correct option ordering, but a Vitest process started
+and admission refused at sample 2/3. Future qualification starts must verify
+the saved state quota before copying or running tests.
+
+### Stale-parent inode-generation check — 2026-11-07 09:09 UTC
+
+Hardened the imported ext4 stale-parent handling. When the indexed parent path
+still exists, Dux now obtains its current handle with `name_to_handle_at` and
+requires matching device, inode, and inode generation before reconciling a child
+path. If that proof fails or the path is inaccessible/replaced, the event stays
+unresolved and coverage remains uncertain. A confirmed missing indexed parent
+still follows the safe path-reconciliation branch. This closes the inode-number
+reuse ambiguity for existing paths while keeping the handling ext4/ino32-only.
+
+Added a generation decoder assertion and ext4 integration assertions that the
+current generation matches and a changed generation is rejected. The explicit
+ext4 fanotify integration test remains ignored by default and must be invoked
+explicitly. No compile or test has run yet. The current host gate is blocked by
+multiple external Go tests (`wordpress.test` and `go test` workloads) and I/O PSI
+some avg10 above 10%; no qualification VM is running.
+
+### Stale-parent name confinement and latest VM admission — 2026-11-07 09:10 UTC
+
+The stale-parent event-shape filter now rejects `..` and slash-containing names;
+only a single child component (or the existing `.` self-entry case) can reach
+path reconciliation. Added negative assertions for parent traversal and nested
+names. Formatting and diff whitespace checks pass. A corrected 10%-quota VM
+start was attempted after the prior test wave exited, but the final stable host
+sample caught new Go test binaries and refused startup. The retry/deadline and
+stale-parent changes remain uncompiled and untested; no VM is currently active.
+
+### Inode-reuse regression case added — 2026-11-07 09:12 UTC
+
+Extended the explicit ext4 stale-parent integration test with a synthetic old
+handle that has the same inode number as an existing indexed directory but a
+different generation. Expected behavior is that no path operation is queued and
+coverage is marked uncertain. This directly exercises the inode-reuse guard in
+the event parser, beyond the helper-level generation comparison. It is an
+ignored integration test that still requires an explicit run in the isolated
+ext4 VM; the active Go test/compiler workload and elevated CPU PSI have not
+cleared, so the Rust binary has not been built and this case has not run.
+
+### Production recheck and event-loss contract — 2026-11-07 09:15 UTC
+
+Rechecked the installed daemon read-only. `/usr/bin/dux` remains active as PID
+988284 with one lifetime restart. It reports root `/` dirty and not caught up,
+48 kernel fanotify overflow notifications, 24,389 seconds (6h46m) behind, 339
+pending updates, 1,383,382 nodes, and a last full scan 159,954 seconds (44h26m)
+old. It reports no userspace drops or write error; neither fact reverses the
+kernel overflow evidence or proves index completeness. Root has 66 GiB free and
+`/dev/shm` is nearly empty, so disk capacity is not the immediate qualification
+blocker. A Go `wordpress.test` process was active during this observation; CPU
+PSI some avg10 was 1.04%, I/O PSI some/full avg10 9.11%/8.73%. No Rust build or
+VM was started.
+
+The observed overload explanation is plausible but not yet causally isolated:
+the production counters establish event loss and staleness, not which workload
+caused each overflow or whether stale-parent events account for all failed
+reconciliations. Fanotify documentation explicitly says events beyond the
+finite queue limit are dropped (with `FAN_Q_OVERFLOW` notification), and lists
+coverage limitations including `mmap()` changes and remote network-filesystem
+events. `FAN_UNLIMITED_QUEUE` requires `CAP_SYS_ADMIN`; removing the limit does
+not raise the consumer's processing rate and must not be treated as a substitute
+for bounded resource use. Qualification therefore targets detection, truthful
+uncertainty, bounded resource use, and verified eventual reconciliation under
+a workload that becomes drainable; it cannot promise delivery of every kernel
+notification under unbounded sustained churn.
+
+Candidate retry and stale-parent edits remain modified, uncommitted, and
+uncompiled. Formatting and diff whitespace checks pass, but no runtime claim is
+made. Required evidence still includes executing all Rust tests, explicitly
+running the ignored ext4 deleted-parent/inode-reuse integration case, and
+testing representative 1.2M-file churn with forced overflow, concurrent scan,
+restart/crash, and eventual exact-state verification in an isolated guest.

@@ -114,9 +114,10 @@ def sample(source, db, root, binary):
             events_seen, events_resolved, updates_committed, dropped, behind_ms, max_pending = map(
                 int, fields[5:11])
             uncertain = fields[11] == '1' if version >= 2 and len(fields) >= 12 else False
+            scan_first = fields[14] == '1' if version >= 5 and len(fields) >= 15 else False
             os.kill(pid, 0)
             fresh = 0 <= time.time() - updated_at <= 5
-            valid = (version in (1, 2, 3) and fresh
+            valid = (version in (1, 2, 3, 4, 5) and fresh
                      and status_db.strip() == str(Path(db).resolve()))
             meta = dict(conn.execute('SELECT key,value FROM meta'))
             scan_path = (Path('/run/dux/scan.progress')
@@ -131,7 +132,7 @@ def sample(source, db, root, binary):
                 status = {
                     'caught_up': (pending == 0 and kernel_empty and behind_ms == 0
                                   and dropped == 0 and not uncertain and not dirty
-                                  and not paused and not scanning),
+                                  and not paused and not scanning and not scan_first),
                     'dirty': dirty, 'pending_updates': pending,
                     'events_dropped': dropped, 'behind_seconds': behind_ms / 1000,
                     'updates_committed': updates_committed,

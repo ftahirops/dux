@@ -655,6 +655,9 @@ pub struct WatchStatus {
     /// report how many individual events were lost; this counts loss episodes.
     /// `None` means the status record predates kernel overflow accounting.
     pub kernel_overflow_notifications: Option<u64>,
+    /// `true` when fanotify records are hints only and path resolution is not
+    /// attempted for individual events.
+    pub scan_first: bool,
     pub behind_ms: u64,
     pub max_pending: u64,
     pub uncertain: bool,
@@ -725,6 +728,39 @@ pub fn write_watch_status_with_overflows(
     kernel_overflow_notifications: u64,
     uncertain: bool,
 ) {
+    write_watch_status_with_mode(
+        db,
+        pending,
+        kernel_empty,
+        events_seen,
+        events_resolved,
+        updates_committed,
+        last_commit_at,
+        updates_dropped,
+        behind_ms,
+        max_pending,
+        kernel_overflow_notifications,
+        uncertain,
+        false,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn write_watch_status_with_mode(
+    db: &std::path::Path,
+    pending: usize,
+    kernel_empty: bool,
+    events_seen: u64,
+    events_resolved: u64,
+    updates_committed: u64,
+    last_commit_at: i64,
+    updates_dropped: u64,
+    behind_ms: u64,
+    max_pending: usize,
+    kernel_overflow_notifications: u64,
+    uncertain: bool,
+    scan_first: bool,
+) {
     let _ = std::fs::create_dir_all("/run/dux");
     let db = db
         .canonicalize()
@@ -733,7 +769,7 @@ pub fn write_watch_status_with_overflows(
         .into_owned();
     let now = now_secs();
     let body = format!(
-        "4 {} {} {} {} {} {} {} {} {} {} {} {} {}\n{}",
+        "5 {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n{}",
         now,
         std::process::id(),
         pending,
@@ -747,6 +783,7 @@ pub fn write_watch_status_with_overflows(
         uncertain as u8,
         last_commit_at,
         kernel_overflow_notifications,
+        scan_first as u8,
         db,
     );
     let status_path = runtime_path(std::path::Path::new(&db), "watch.status");
@@ -761,7 +798,7 @@ pub fn read_watch_status(db: &std::path::Path) -> Option<WatchStatus> {
     let (head, status_db) = s.split_once('\n')?;
     let mut f = head.split_whitespace();
     let version = f.next()?;
-    if !matches!(version, "1" | "2" | "3" | "4") {
+    if !matches!(version, "1" | "2" | "3" | "4" | "5") {
         return None;
     }
     let updated_at: i64 = f.next()?.parse().ok()?;
@@ -774,20 +811,25 @@ pub fn read_watch_status(db: &std::path::Path) -> Option<WatchStatus> {
     let updates_dropped = f.next()?.parse().ok()?;
     let behind_ms = f.next()?.parse().ok()?;
     let max_pending = f.next()?.parse().ok()?;
-    let uncertain = if matches!(version, "2" | "3" | "4") {
+    let uncertain = if matches!(version, "2" | "3" | "4" | "5") {
         parse_status_bool(f.next())?
     } else {
         false
     };
-    let last_commit_at = if matches!(version, "3" | "4") {
+    let last_commit_at = if matches!(version, "3" | "4" | "5") {
         f.next()?.parse().ok()?
     } else {
         0
     };
-    let kernel_overflow_notifications = if version == "4" {
+    let kernel_overflow_notifications = if matches!(version, "4" | "5") {
         Some(f.next()?.parse().ok()?)
     } else {
         None
+    };
+    let scan_first = if version == "5" {
+        parse_status_bool(f.next())?
+    } else {
+        false
     };
     if f.next().is_some() {
         return None;
@@ -809,6 +851,7 @@ pub fn read_watch_status(db: &std::path::Path) -> Option<WatchStatus> {
         updates_committed,
         updates_dropped,
         kernel_overflow_notifications,
+        scan_first,
         behind_ms,
         max_pending,
         uncertain,
@@ -1264,6 +1307,11 @@ mod tests {
         assert_eq!(status.pending, 7);
         assert_eq!(status.updates_dropped, 5);
         assert_eq!(status.kernel_overflow_notifications, Some(3));
+        write_watch_status_with_mode(&db, 0, true, 7, 0, 30, 0, 0, 0, 500000, 0, true, true);
+        let scan_first = read_watch_status(&db).unwrap();
+        assert!(scan_first.scan_first);
+        assert_eq!(scan_first.events_seen, 7);
+        assert_eq!(scan_first.events_resolved, 0);
         let stale = format!(
             "3 {} {} 0 1 10 10 10 0 0 500000 0 {}\n{}",
             now_secs() - WATCH_STATUS_MAX_AGE_SECS - 1,

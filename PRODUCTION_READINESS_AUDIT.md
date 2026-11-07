@@ -20899,3 +20899,467 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
 - Latest reports and metadata are retained under `target/readiness/vps2-r89-security-audit-20261106/`: current lockfile report SHA-256 `284c75c7dedb7743abadd121cd0ed06567d5871ec17a8c3174bb959fd705cc0b`, binary audit output SHA-256 `37b3aa7aa2eef811291d10a45ff36543e0ebcda788873b4e3080de9af8cef289`, and run metadata SHA-256 `04003d44dec048ce6ceb3378433ac3a8be9f0b1ab75951ecf87b77291453313d` (local ignored evidence, not committed).
 - The soak remains active with **0 restarts**, about **48 minutes** elapsed, **64,893 operations**, and **648 exactness samples**. Latest sample: **5,060 KiB RSS**, **11 file descriptors**, **4,268,352-byte WAL**, and **283 ms** exact convergence. The installed database identity remains **2382566 / 2,474,160,128 / 1791617440**; VPS root remains **62 GiB used / 27 GiB free**. No production database or service was accessed for these scans.
 - Security scanning, source tests, and the soak do not close the schema-v7 path-graph integration, root coverage, package lifecycle, safe recovery of the dirty production index, production-hardware SLO, or canary gates. The readiness goal remains active.
+
+
+### Queue-aware CPU governor implementation checkpoint — 2026-11-07 09:45–10:02 UTC
+
+- Read-only production sample: `/usr/bin/dux` is active (PID **988284**, one
+  restart), systemd limits it to **100% of one core** and **4 GiB**, and the
+  configured fanotify queue is **65,536 events**. Status reports dirty/not
+  caught up after **48** overflows, **26,189 seconds** behind, **161,754 seconds**
+  since the last scan, **1,387,393** nodes, **14** pending updates, and no scan
+  or write error. The ext4 root filesystem has **66 GiB free**. No service,
+  sysctl, or production database changes were made.
+- Implemented in the current working tree: queue-aware duty-cycle throttling
+  with high/low watermarks, fail-safe draining when pressure cannot be read,
+  and transition logging. FIONREAD remains an approximate signal. Added tests
+  for capacity-derived thresholds and queue-pressure hysteresis.
+- Validation for this exact working tree: `cargo fmt`; `git diff --check`; and
+  `cargo test --bin dux watch::tests:: -- --test-threads=1` (**100 passed, 0
+  failed, 1 ignored**, 71.07 seconds). The ignored test needs a qualified
+  handle-capable ext4 fixture. A first focused test build exposed a missing
+  `Clone` implementation in the pending stale-parent test fixture; deriving
+  `Clone, Copy` for the fixed-size C handle resolved the compile error.
+- This does not establish that throttling caused the production overflows.
+  Queue-aware behavior has not yet been calibrated with queued FIONREAD records,
+  replayed against a representative production trace, compared for overflow
+  rate, or canaried. The candidate remains uninstalled. Further work must
+  preserve the live-service guard and capture the exact source/binary/config
+  identities.
+- Follow-up: ran the ignored stale-parent integration test on the local ext4
+  root under `systemd-run --scope` with a **15% CPU quota** and **1 GiB memory
+  cap**. It passed (**1/1**, 0.51 seconds). The supplied VPS still has its
+  independent 72-hour soak active; it was not modified. This validates the
+  ext4 handle case only and does not replace workload replay or canary evidence.
+- Full-suite follow-up on this working tree: default features passed **273/273**
+  and `--all-features` (including fault-injection-gated code) passed **273/273**;
+  each run reported one ignored ext4 integration test, which passed separately
+  as recorded above. `cargo clippy --bin dux -- -D warnings`, `cargo fmt`, and
+  `git diff --check` passed. Clippy first found a production dead-code warning
+  for an inode-only helper used by tests; limiting that wrapper to test builds
+  fixed the warning. Runs were CPU/memory-capped. They do not measure actual
+  queue-fill performance or event-loss rates.
+- Final read-only post-test check at **09:55 UTC**: service still active as PID
+  **988284**, **1** restart, still **48** reported overflows; index remains dirty
+  and not caught up with **26,796 seconds** behind, **162,361 seconds** since
+  last scan, and **508** pending updates. Event totals advanced during the test
+  window; no new kernel overflow was recorded. Root ext4 had **65 GiB free**.
+  The pending count and these counters do not prove recovery or exactness.
+- Exact-final-source follow-up: `cargo test --all-features --all-targets --
+  --test-threads=1` passed **273 tests**, with one ignored ext4 integration
+  test (rerun separately and passed). `cargo clippy --all-features --all-targets
+  -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check` passed.
+  The first all-target Clippy attempt caught a redundant clone on a Copy test
+  fixture; it was corrected before these checks.
+- At **10:02 UTC**, production was still active with **1** restart, but the
+  overflow count had increased to **49** since the 09:55 sample. The index was
+  still dirty/not caught up, about **27,205 seconds** behind, with **3,871**
+  pending updates and about **162,771 seconds** since the last scan. The test
+  ran alongside unrelated Go test workloads, so this one overflow cannot be
+  attributed solely to the Rust test. This shared host is unsuitable for
+  comparing queue/throughput performance; keep subsequent load tests on an
+  isolated VM. Root ext4 reported **67 GiB free**.
+
+
+### Queue-pressure duration and rate telemetry added — 2026-11-07 10:07 UTC
+
+- Added working-tree counters for queue-pressure episodes and duration,
+  accumulated CPU-governor sleep time, last observed queue bytes, and periodic
+  aggregate events-seen/resolved rates. The first sample establishes a baseline
+  to avoid reporting lifetime event totals as a misleading rate. Per-top-level
+  producer attribution is still missing. Queue bytes remain an approximate
+  FIONREAD signal.
+- This telemetry patch is newer than the default/all-features test and strict
+  Clippy results above. Only `rustfmt --check src/watch.rs` and `git diff
+  --check` have been run on this patch; compilation/tests are intentionally
+  deferred to an isolated VM because the local production host is under
+  concurrent build/test activity and has already recorded another overflow
+  during the earlier test window.
+- Next verification: compile, test metric episode/duration accounting, inspect
+  emitted logs under an isolated event storm, and confirm resource bounds before
+  attempting representative trace replay. Do not treat the earlier green suite
+  as evidence for this newest edit.
+
+
+### Reconciliation-first architecture selected — 2026-11-07 10:20 UTC
+
+- Replaced the event-journal-first target in `docs/ARCHITECTURE_EVOLUTION.md`
+  and amended `docs/DEVELOPMENT_SPECIFICATION.md`: scans are the default
+  last-observed truth; fanotify provides bounded priority hints; overflow
+  schedules a full filesystem scan; ordinary event loss ages freshness but
+  cannot permanently stop automatic scans. A 15-minute maximum observation age
+  is an SLO to measure, not an existing guarantee. The default has no durable
+  event journal or provisional overlay.
+- The design explicitly preserves uncertainty for failed/incomplete scans and
+  requires successful parent enumeration before deleting stale child rows. A
+  live scan is not a point-in-time snapshot. Project quotas are optional for
+  managed build trees and do not suppress fanotify events unless Dux stops
+  per-file tracking on that mount/tree.
+- Read-only production sample at **10:20 UTC**: service active (PID **988284**,
+  **1** restart), index still dirty after **54** overflow notifications, about
+  **28,328 seconds** behind and **163,894 seconds** since last scan; **88**
+  pending updates, no scan or write error. Low pending does not establish
+  freshness. The VM's separate 72-hour soak is still active, so no compile or
+  scan-first fixture was run there in this checkpoint.
+- Current root is ext4 on LVM and its `tune2fs -l` feature list lacks `project`
+  and `quota`. Enabling quotas on this root would require offline maintenance;
+  no filesystem configuration was changed. Available LVM extents for a new
+  dedicated build volume remain unmeasured.
+- The architecture documents now agree on this target. The existing source
+  edits still implement the prior event-apply direction; the latest telemetry
+  portion remains uncompiled and untested. Do not treat earlier Rust test
+  results as validation of that latest edit or the scan-first architecture.
+
+### Read-only production/soak recheck — 2026-11-07 10:25 UTC
+
+- Production remains active (PID **988284**, **1** restart; 100% one-core CPU
+  quota, 4 GiB memory limit) with **54** kernel overflows, dirty state, **28,575
+  seconds** behind, and **164,140 seconds** since its last full scan. Status
+  reported **1,363,616** indexed nodes, **29,320** pending updates, and no
+  active scan or write error. The last event-commit timestamp matched sample
+  time. This demonstrates ongoing event commits but no clearing of the existing
+  uncertainty; it does not explain the cause of the original overflow or prove
+  a stable event drain rate.
+- Since 10:20, cumulative events seen/resolved rose by **270,026 / 112,057**
+  while the overflow counter stayed at 54. A five-minute interval is too short
+  to infer the sustained event-production/drain balance. Root had **65 GiB
+  available**; no production configuration or data was changed.
+- The qualification VM's `dux-soak-candidate-0b81fa8` unit remains active, with
+  the 72-hour run started at **01:54:12 UTC** and **22 GiB available** on its
+  filesystem. It was not disturbed. No current-source build or test was run in
+  this checkpoint.
+- Next: allow the soak to finish or use a separate isolated VM before current
+  source compilation and the scan-first prototype. The VM is running a static
+  soak binary; it does not validate the current working tree or the proposed
+  reconciliation-first runtime.
+
+### Status semantics and live stale-handle evidence — 2026-11-07 10:26 UTC
+
+- A current read-only status sample still showed the installed root index dirty
+  and **7.96 hours behind**, despite the event commit timestamp being current;
+  the last full scan remained **45.6 hours old**. It reported **6,912** pending
+  updates and **54** historical overflow notifications. The service journal
+  contained **252** unresolvable `ESTALE` handle warnings during 10:20–10:26
+  UTC. This confirms stale-handle events recur on the live event path; it does
+  not prove they explain every unresolved event or the earlier overflow.
+- Fixed a misleading human-status label in `src/query.rs`: “pipeline: drained”
+  described only an empty kernel queue and could be read as fully applied work.
+  It now says “events: kernel queue empty” and explicitly labels pending
+  userspace updates. Added a regression assertion for empty-kernel/nonempty-
+  pending state. `cargo fmt --check` and `git diff --check` pass; this test has
+  not been run because the supplied VM's 72-hour soak is active and local test
+  churn can perturb production's watched root.
+- This is a clarity/correctness improvement only. It does not reconcile the
+  production index, reduce fanotify event production, or validate the current
+  event-handler/telemetry changes. Current-source test evidence remains open.
+
+### Recovery circuit and schema dependency rechecked — 2026-11-07 10:30 UTC
+
+- Read-only query of `/var/lib/dux/dux.db` confirmed
+  `failed_reconciliation_attempts=2`, no `reconciliation_retry_after_unix`
+  metadata, and dirty reason `fanotify queue overflow`. The installed daemon's
+  startup journal contains one explicit “automatic reconciliation remains
+  paused after repeated failures” error. This is direct evidence of a recovery
+  circuit that remains closed indefinitely in the installed build, not merely
+  an inference from the old scan timestamp. The working-tree bounded-retry
+  change is still uncompiled, untested, and not deployed.
+- Code inspection confirmed that steady-state `SCHEMA_SQL` is v6 and has no
+  persisted path-instance graph; `PATH_GRAPH_TABLES_SQL` is staging-only and
+  scan publication still projects into v6 inode/dirent tables. Therefore the
+  prior order—incremental multi-mount reconciliation before schema v7—could not
+  satisfy the all-mount path-identity contract. Updated the architecture and
+  development-specification gates so schema-v7 path identity precedes the
+  general incremental reconciler. This is an ordering correction within the
+  selected reconciliation-first design, not a new architecture switch.
+- Fresh status at **10:30:54 UTC** remained dirty/not caught up: **54** overflow
+  notifications, **28,926 seconds** behind, **164,492 seconds** since the last
+  full scan, **1,394,207** indexed nodes, **4,658** pending updates, and no
+  active scan or write error. Event commit/watch status was current at sample
+  time. No production state was changed.
+- No current-source tests were run: the qualification VM's 72-hour static-binary
+  soak remains active, and running a compiler/test load alongside it would
+  contaminate the endurance evidence. The source status-label regression is
+  added but unverified; all architecture and retry gates remain open.
+
+### Legacy retry deadline migration correction — 2026-11-07 10:31 UTC
+
+- Static review of the working-tree retry patch found that a missing deadline
+  (the state produced by older releases) inherited the maximum exponential
+  delay. With two prior failures, rollout could therefore wait 120 seconds; at
+  the maximum persisted attempt count it could wait 8.5 hours before its first
+  automatic recovery attempt. Changed missing legacy deadlines to use the
+  60-second base delay while retaining bounded handling for malformed or
+  implausibly future deadlines. Added helper and persistence assertions.
+- This specifically addresses the live DB shape observed at 10:30: two failed
+  attempts and no retry-deadline metadata. It would schedule a retry after the
+  base delay once a candidate containing the change is installed; it does not
+  itself recover the live index or authorize deployment.
+- `cargo fmt --check` and `git diff --check` pass after the change. Unit tests,
+  strict Clippy, and a daemon recovery exercise remain pending because the
+  supplied VM's 72-hour soak is still running and local production-root builds
+  would generate watched filesystem churn.
+
+### Retry status now distinguishes delay from due state — 2026-11-07 10:33 UTC
+
+- Status previously exposed the configured retry interval as though the daemon
+  were still waiting, even after the deadline elapsed. Added a helper and JSON
+  fields for remaining seconds and retry-due state; human status now says either
+  the seconds remaining, that retry is due subject to host/queue gates, or that
+  the deadline is unavailable. Added future/expired deadline regression
+  assertions.
+- No runtime behavior was changed by this status-only edit. Formatting and diff
+  checks pass; tests remain unrun pending a qualification window that does not
+  contaminate the active 72-hour soak.
+
+### Active-soak and production recheck — 2026-11-07 10:39 UTC
+
+- The qualification VM's `dux-soak-candidate-0b81fa8` is still active, started
+  at **01:54:12 UTC**, with roughly **22 GiB** disk available, **2.6 GiB** memory
+  available, and **1.5 GiB** swap in use. Its report remains `running` on the
+  soak suite. Do not run current-source cargo tests beside it; that would add
+  CPU/memory pressure and weaken the dedicated endurance result.
+- Production read-only status at **10:39 UTC** remains dirty/not caught up:
+  **54** overflow notifications, **29,433 seconds** behind, **164,998 seconds**
+  since full scan, **1,393,695** indexed nodes, **9** pending updates, and no
+  active scan/write error. Event/watch status was current at sample time. Root
+  has **66 GiB** available. The live retry metadata remains two failed attempts
+  without a persisted deadline; the installed binary has not received any
+  working-tree changes.
+- Since 10:30:54, events seen/resolved advanced from **25,116,107 / 15,812,167**
+  to **25,320,218 / 15,933,946**, while overflow notifications stayed at 54.
+  This shows continuing event traffic and commits, not convergence of the
+  dirty baseline. The short window does not establish sustained rates.
+- Added a status field and regression assertions to distinguish retry interval,
+  remaining seconds, and due state. `cargo fmt --check` and `git diff --check`
+  pass; current-source Rust tests and Clippy remain unrun.
+
+### Current-source qualification on VPS2 — 2026-11-07 10:52–11:14 UTC
+
+- Copied the working-tree Rust source files (`query.rs`, `watch.rs`, `scan.rs`,
+  `store.rs`) and changed Python validation files into the isolated
+  `/var/tmp/claude-dux` checkout on VPS2. No source or data in the production
+  `/home/dux` tree or the soak's `/dev/shm` fixture was changed. Qualification
+  ran in dedicated low-priority systemd units; the main Rust test scope was
+  capped at **20% of one CPU**, **2 GiB memory**, low I/O weight, and nice 19.
+- `cargo test --offline -j1`: **275 passed, 0 failed, 1 ignored** (the ignored
+  case requires a handle-capable ext4 integration profile). Runtime was 10m40s,
+  CPU time **1m57s**, peak memory **1.3 GiB**, no swap. Re-ran with
+  `--all-features --all-targets`: **275 passed, 0 failed, 1 ignored**; runtime
+  4m04s, CPU time **37.6s**, peak memory **836 MiB**, no swap. The ignored stale-
+  parent test was then explicitly run on VPS2's ext4 filesystem and passed
+  (**1 passed, 0 failed**, 0.58s test runtime). The first `--lib` invocation
+  selected a nonexistent library target and exited 101 before compiling; the
+  package is a binary target, and the corrected binary-target suite passed.
+- `cargo clippy --all-targets --offline -j1 -- -D warnings` passed (3m02s,
+  **36.4s CPU**, **497 MiB** peak memory, no swap). Local `cargo fmt --check`
+  and `git diff --check` also passed.
+- Four changed Python test modules passed **65/65** in a separate low-priority
+  unit: backup validation, canary monitor, live schema preflight, and live
+  observer (2.31s test time, **0.216s CPU**, 2.8 MiB peak memory, no swap).
+- A broader `unittest discover` pass ran **304 tests** under a stricter **5%
+  CPU quota** to minimize interference with the soak. **301 passed**; three
+  package-release/build tests raised `TimeoutExpired` at their own 5s, 10s, and
+  30s time limits. The first attempt had two additional `rustc`-not-found
+  failures because systemd's environment omitted the toolchain; the rerun
+  supplied `PATH`, `CARGO_HOME`, and `RUSTUP_HOME`, eliminating those but
+  retaining the three build timeouts. This is an incomplete broad-suite result,
+  not evidence of three code assertion failures. The scoped changed-module suite
+  remains 65/65. The full sweep used **13.8s CPU** and **162 MiB** peak memory.
+- These results verify compilation, unit regressions, the ext4 stale-handle
+  case, lint, and the listed Python helpers. They do **not** prove scan-first
+  behavior, v7 event/query integration, a production recovery, throughput
+  overhead, 72-hour soak completion, 24-hour canary, all supported filesystems,
+  or zero errors for arbitrary workloads. No production binary, database,
+  service, or host configuration was changed.
+- Fresh read-only production sample at **11:13 UTC** remains dirty and not
+  caught up: **58** kernel overflow notifications, **31,510 seconds** behind,
+  **167,075 seconds** since last full scan, **1,447,299** indexed nodes,
+  **2,913** pending updates, and no active scan/write error. The installed
+  service is still PID **988284** with **1** lifetime restart. Root has **59
+  GiB** free. VPS2's 72-hour soak remains active since **01:54:12 UTC**; its
+  report still shows only the soak suite running, with 14 other qualification
+  suites not run. VPS2 had **21 GiB** free and **2.9 GiB** available RAM after
+  these bounded tests. Passing source tests did not clear production dirtiness
+  or qualify a candidate release.
+
+### Post-test production and soak check — 2026-11-07 11:24 UTC
+
+- A second read-only production status sample after qualification still reports
+  `dirty=true`, `caught_up=false`, reason `fanotify queue overflow`, **58**
+  kernel overflows, **32,163 seconds** behind, **167,728 seconds** since full
+  scan, **1,430,920** indexed nodes, **10,795** pending updates, and no active
+  scan or write error. The overflow count stayed at 58 between the 11:13 and
+  11:24 samples; the behind duration and pending count increased. This confirms
+  the tests did not recover production and provides no proof about which
+  workload caused the backlog.
+- The VPS2 soak service remained active with **0** restarts. Root had **21 GiB**
+  free, available RAM was **2.9 GiB**, and swap use remained **1.8 GiB**. The
+  soak process remained on its existing tmpfs fixture; no candidate was
+  installed and no service configuration was changed.
+
+### Production event-flow sample — 2026-11-07 11:31 UTC
+
+- Read-only status now reports **58** overflows, **32,567 seconds** behind,
+  **168,132 seconds** since full scan, **274** pending updates, **29,296,009**
+  events seen, **18,333,436** resolved, and **4,775,347** committed updates.
+  There is no active scan, write error, or userspace drop. The daemon used
+  **10.3% CPU** at the instantaneous process sample.
+- Compared with 11:24, the overflow counter did not increase and pending work
+  fell from **10,795** to **274**, while seen events advanced by about **1.06M**
+  and commits by about **887K**. Yet the index remains dirty and last-scan age
+  increased. This supports that the event pipeline can drain a finite backlog;
+  it does not repair uncertainty from prior overflow or show that current
+  throttling is the sole cause. This is an uncontrolled observation, not an
+  A/B test of CPU budgets.
+
+### Read-only disk review during active host builds — 2026-11-07 11:27 UTC
+
+- Production root filesystem: **185 GiB total, 118 GiB used, 59 GiB free**.
+  `/home/dux/target` totals **9.6 GiB**: `target/readiness` **7.7 GiB**,
+  `target/debug` **1.5 GiB**, and `target/release` **480 MiB**. Readiness
+  artifacts are qualification evidence and were left intact.
+- `/tmp` totals **12 GiB**. Large entries include `/tmp/x.tsfSo` (**1.4 GiB**),
+  Go caches (**1.1–2.5 GiB** each across named directories), a staticcheck cache
+  (**395 MiB**), Go load-test cache (**551 MiB**), and XTOP replay data/caches
+  (**480–492 MiB** each). A live Go compiler and multiple Go test processes
+  were observed writing under `/tmp`; `/tmp/x.tsfSo` was modified at 11:27 UTC.
+  These are external active workloads, not verified disposable Dux artifacts.
+- No files were deleted. Clearing `/tmp` at this point could terminate active
+  tests or remove their evidence and would add destructive filesystem churn
+  while Dux watches `/`. Recheck ownership and activity after those jobs exit;
+  the remaining 59 GiB free means disk pressure is not currently an emergency.
+- A follow-up low-priority directory inventory found `/var` at **38 GiB**
+  (including **30 GiB** `/var/lib`, **3.3 GiB** `/var/backups`, and **2.1 GiB**
+  `/var/log`), `/home` at **29 GiB**, and `/root` at **29 GiB**. These are
+  directory totals, not reclaimable-space estimates. Container/application data,
+  backups, logs, toolchains, and user caches need ownership-specific retention
+  checks before deletion; none were altered.
+
+### RustSec audit of production binary and source lockfile — 2026-11-07 11:31 UTC
+
+- `cargo audit --deny warnings --file Cargo.lock --format json` exited **0**:
+  229 lockfile dependencies, **0 known vulnerability advisories**, and no
+  warning entries. Advisory DB commit `309392b18f6b17022f82c701f300433126901068`
+  is dated **2026-11-06 15:34:32 UTC**; therefore this is not a guarantee about
+  advisories disclosed after that database snapshot.
+- `cargo audit bin /usr/bin/dux` exited **0** and found auditable metadata for
+  202 dependencies in the exact production executable. `/proc/988284/exe`
+  resolves to `/usr/bin/dux`; both paths have SHA-256
+  `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`.
+  No advisory warning was emitted. This audits Rust dependency advisories only;
+  it does not assess application logic, OS packages, configuration, or runtime
+  behavior. No binary or service files were changed.
+
+### Final-source v7 schema guard verification — 2026-11-07 11:53 UTC
+
+- Added a fail-closed schema completeness check for the v7 path graph. Read-only
+  and read/write opens now reject absent required graph columns or indexes;
+  `needs_rebuild` marks the index for rebuild, and migration refuses to silently
+  create an empty graph over an existing v7 projection. The rebuild-source
+  reader remains able to read the compatibility projection for an atomic repair.
+- Focused `cargo test --offline -j1 v7_ -- --nocapture`: **4 passed, 0 failed**.
+  Full `cargo test --offline --all-features --all-targets -j1`: **277 passed, 0
+  failed, 1 ignored**. Strict `cargo clippy --offline --all-features
+  --all-targets -j1 -- -D warnings`, `cargo fmt --check`, and `git diff --check`
+  passed. These final-source runs were local; VPS2's current shell lacks Cargo,
+  so the attempted final-source VPS2 run did not start. The ignored test needs
+  the separate handle-capable ext4 qualification profile.
+- This guard prevents a specific false-valid-schema failure. It does not verify
+  graph row completeness or event/query coherence, measure filesystem scan
+  overhead, or establish the selected scan-first architecture.
+- At 11:50 UTC, read-only live status still showed dirty/not caught up, **65**
+  kernel overflows, about **33,708 seconds** behind, about **169,274 seconds**
+  since scan, **1,437,481** nodes, and **750** pending updates. The installed
+  daemon was not changed. The isolated VPS2 soak was active with **0** restarts
+  after about **9 h 56 min**; it does not reproduce vps1's workload.
+
+### Experimental scan-first runtime slice — 2026-11-07 12:11 UTC
+
+- Added opt-in `dux daemon --reconcile-first`. The default daemon remains
+  event-apply mode. In the new mode, fanotify records are structurally checked
+  and drained as hints; per-event handle resolution and path-level SQLite writes
+  are skipped. Overflow or malformed records request a reconciliation. A full
+  atomic observation runs every 15 minutes. Events during a walk leave the
+  result visibly stale and defer the next observation to the cadence instead of
+  treating normal churn as a failed scan.
+- Added version-5 watch status with an explicit scan-first bit. The TUI labels
+  hint counts and last-observed freshness without showing a per-file resolution
+  percentage or claiming real-time caught-up state. The readiness harness,
+  live observer, and exact-mismatch status fallback understand v5 and do not
+  convert scan-first status into a real-time caught-up claim.
+- Disposable runtime smoke test passed: initial scan indexed `before.dat`; after
+  creating `after.dat`, a query did not see it before reconciliation; SIGHUP
+  initiated a full observation, after which the query found `after.dat`. The
+  test process exited cleanly. CLI help lists the mode and explicitly labels it
+  experimental. The smoke test ran locally on a disposable directory, not on the
+  production root or VPS2.
+- Final-source Rust all-features/all-targets suite: **279 passed, 0 failed, 1
+  ignored**. Two fanotify-hint parser tests passed; status/TUI focused tests
+  passed. Strict all-features/all-targets Clippy, formatting, and diff checks
+  passed. Readiness-workflow and live-observer Python modules passed **63/63**.
+- This is a working architectural prototype, not a production-ready new
+  architecture. It still creates a full atomic index replacement every 15
+  minutes, so its write amplification, temporary disk, WAL, CPU, and I/O costs
+  have not been qualified. No changed-row reconciler, per-directory scan
+  generations, incomplete-scope preservation, forced kernel-overflow runtime
+  test, representative replay, or production canary has been completed.
+- The final source checks ran locally because the current VPS2 shell has no
+  Cargo binary. No source/binary was installed on VPS2, and no production binary,
+  database, service, or host configuration was changed.
+- Fresh read-only production status at **12:11 UTC** remains dirty and behind:
+  **80** fanotify overflows; **34,611,613** events seen and **21,314,143**
+  resolved; **52,258** pending; about **34,957 seconds** behind; **170,523
+  seconds** since last full scan; **1,392,965** nodes; **2.12 GiB** database and
+  **128 MiB** WAL; no active scan or write error. Root has **57 GiB** free. The
+  VPS2 soak remains active with **0** restarts after about **10 h 17 min**;
+  available memory is **2.8 GiB**. The isolated soak is not representative of
+  production churn and has 14 qualification suites still unrun.
+
+### Scan-first status-contract verification — 2026-11-07 12:18 UTC
+
+- Extended human and JSON status so scan-first mode is labeled explicitly and
+  can never report real-time `caught_up=true`. The TUI shows hint counts rather
+  than a misleading per-file resolution percentage. Version-5 watch sidecars
+  are parsed by the readiness workflow, live observer, and exact-mismatch
+  fallback; observer tests confirm scan-first is not treated as caught up.
+- Final all-features/all-targets Rust suite after these changes: **279 passed,
+  0 failed, 1 ignored**. Strict all-features Clippy passed with `-D warnings`,
+  as did `cargo fmt --check` and `git diff --check`. The readiness-workflow and
+  live-observer Python suites passed **63/63**, and `py_compile` passed for the
+  three changed status readers.
+- Repeated runtime smoke test passed against the final debug binary: initial
+  scan indexed a pre-existing file; fanotify activity did not index a newly
+  created file directly; status JSON reported `scan_first=true` and
+  `caught_up=false`; a SIGHUP-triggered reconciliation indexed the file; daemon
+  exited with code **0**. This was a disposable directory on the local host.
+- Fresh read-only production sample at **12:18 UTC**: daemon PID **988284**,
+  **1** lifetime restart, dirty reason fanotify overflow, **80** overflow
+  notices, **34,837,723** events seen, **21,442,859** resolved, **5** pending,
+  **35,378 seconds** behind, **170,943 seconds** since full scan, **1,422,811**
+  nodes, **2.12 GiB** database, **128 MiB** WAL, no scan/write error, **63 GiB**
+  free root space. Overflows stayed at 80 from 12:11 to 12:18 while pending work
+  fell from 52,258 to 5. This uncontrolled interval is not a comparative
+  performance test; production was not modified.
+- VPS2 soak at **12:18 UTC** remains active with **0** restarts after **10 h 24
+  min**, **20 GiB** free disk, and **2.5 GiB** available RAM. The VPS2 source
+  shell still has no Cargo; no candidate was copied or installed there.
+- Remaining architectural gaps are unchanged: full atomic rebuilds instead of
+  changed-row writes, no per-directory generation/freshness, no incomplete-scope
+  preservation test, no runtime forced-overflow/replay test, and no 1.37M-entry
+  cost measurement or production-like canary. Do not switch production to this
+  experimental mode yet.
+
+### Final scan-first smoke and host resample — 2026-11-07 12:21 UTC
+
+- Rebuilt the debug executable from the final source and repeated the isolated
+  runtime check. It verified initial observation, no direct per-event index
+  update, JSON `scan_first=true` with `caught_up=false`, and successful file
+  discovery after SIGHUP reconciliation. The temporary daemon exited **0**.
+- Production read-only status: PID **988284**, **1** restart, **80** overflows,
+  **35,004,613** events seen, **21,537,600** resolved, **9** pending, **35,585
+  seconds** behind, **171,150 seconds** since scan, **1,428,827** nodes, **2.13
+  GiB** database, **128 MiB** WAL, no scan/write error; root has **62 GiB** free.
+  The overflow count remains at 80; this is a point-in-time sample, not a
+  controlled comparison. No production binary, database, or service changed.
+- VPS2 soak is still active with **0** restarts after **10 h 27 min**, **20 GiB**
+  free disk, and **2.7 GiB** available memory. No candidate was installed.

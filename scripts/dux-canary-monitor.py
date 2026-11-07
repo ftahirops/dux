@@ -17,7 +17,7 @@ OBSERVER_PATH = Path(__file__).with_name("dux-live-observer.py")
 OBSERVER_SPEC = importlib.util.spec_from_file_location("dux_live_observer", OBSERVER_PATH)
 OBSERVER = importlib.util.module_from_spec(OBSERVER_SPEC)
 OBSERVER_SPEC.loader.exec_module(OBSERVER)
-EXPECTED_SCHEMA_VERSION = "6"
+EXPECTED_SCHEMA_VERSION = "7"
 
 
 def sha256_file(path):

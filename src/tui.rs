@@ -2827,6 +2827,19 @@ fn freshness_text(app: &App) -> String {
 }
 
 fn watch_status_label(w: &crate::util::WatchStatus) -> String {
+    if w.scan_first {
+        return if w.uncertain {
+            match w.kernel_overflow_notifications {
+                Some(overflows) if overflows > 0 => format!(
+                    "scan-first · stale observation · {} kernel overflows",
+                    count_human(overflows as i64)
+                ),
+                _ => "scan-first · stale observation · reconciliation scheduled".into(),
+            }
+        } else {
+            "scan-first · last observation verified".into()
+        };
+    }
     if w.uncertain {
         match w.kernel_overflow_notifications {
             Some(overflows) if overflows > 0 => format!(
@@ -3784,15 +3797,19 @@ fn draw_explore(f: &mut Frame, app: &mut App) {
             app.watch
                 .as_ref()
                 .map(|w| {
-                    format!(
-                        "{} ({:.0}% resolved)",
-                        count_human(w.pending as i64),
-                        if w.events_seen == 0 {
-                            100.0
-                        } else {
-                            w.events_resolved as f64 * 100.0 / w.events_seen as f64
-                        }
-                    )
+                    if w.scan_first {
+                        format!("{} hints · scans", count_human(w.events_seen as i64))
+                    } else {
+                        format!(
+                            "{} ({:.0}% resolved)",
+                            count_human(w.pending as i64),
+                            if w.events_seen == 0 {
+                                100.0
+                            } else {
+                                w.events_resolved as f64 * 100.0 / w.events_seen as f64
+                            }
+                        )
+                    }
                 })
                 .unwrap_or_else(|| "—".into()),
             Style::default(),
@@ -4600,6 +4617,25 @@ mod tests {
         assert_eq!(
             watch_status_label(&caught_up),
             "live · caught up · 5 updates"
+        );
+
+        let scan_first = crate::util::WatchStatus {
+            scan_first: true,
+            uncertain: true,
+            kernel_overflow_notifications: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(
+            watch_status_label(&scan_first),
+            "scan-first · stale observation · 2 kernel overflows"
+        );
+        let verified_scan_first = crate::util::WatchStatus {
+            scan_first: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            watch_status_label(&verified_scan_first),
+            "scan-first · last observation verified"
         );
     }
 

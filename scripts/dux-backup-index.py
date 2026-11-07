@@ -20,7 +20,7 @@ from urllib.parse import quote
 CHUNK_BYTES = 1024 * 1024
 BACKUP_PAGES = 1024
 MIN_FREE_RESERVE_BYTES = 1024 * 1024 * 1024
-SUPPORTED_SCHEMA_VERSIONS = frozenset({4, 5, 6})
+SUPPORTED_SCHEMA_VERSIONS = frozenset({4, 5, 6, 7})
 REQUIRED_INDEX_COLUMNS = {
     "meta": {"key", "value"},
     "inodes": {"dev_id", "inode", "kind", "blocks"},
@@ -58,6 +58,15 @@ def _validate_dux_schema(connection: sqlite3.Connection, schema_version: int) ->
         required_columns["inodes"].add("birth_ns")
     if schema_version >= 6:
         required_columns["growth"].add("birth_ns")
+    if schema_version >= 7:
+        required_columns["paths"] = {
+            "path_id", "parent_path_id", "name", "dev_id", "inode",
+            "birth_ns", "kind", "mount_id", "prime", "cycle",
+        }
+        required_columns["dir_totals"] = {
+            "path_id", "visible_bytes", "visible_entries", "unique_bytes",
+            "unique_inodes",
+        }
 
     tables = {
         name: (sql or "")

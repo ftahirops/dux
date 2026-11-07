@@ -28,9 +28,11 @@ def status(**overrides):
 
 
 def sample():
-    accounting = {"schema_version": "6", "root_matches_inode_aggregate": True,
+    accounting = {"schema_version": "7", "root_matches_inode_aggregate": True,
                   "sampled_rollup_mismatches": [], "orphan_dirents": 0,
-                  "invalid_prime_attribution": 0, "quick_check": [("ok",)]}
+                  "invalid_prime_attribution": 0,
+                  "path_graph": {"passed": True, "path_count": 12},
+                  "quick_check": [("ok",)]}
     return {"binary_sha256": EXPECTED_BINARY,
             "service_binary_sha256": EXPECTED_BINARY,
             "process_binary_sha256": EXPECTED_BINARY,
@@ -130,10 +132,20 @@ class CanaryMonitorTests(unittest.TestCase):
         value = sample()
         value["accounting"]["schema_version"] = "4"
         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
-        self.assertIn("database schema '4' differs from candidate schema 6", errors)
+        self.assertIn("database schema '4' differs from candidate schema 7", errors)
+
+    def test_v7_path_graph_corruption_fails_canary(self):
+        value = sample()
+        value["accounting"]["path_graph"] = {
+            "passed": False,
+            "path_count": 12,
+            "bad_parent_count": 1,
+        }
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("exact accounting snapshot failed", errors)
 
     def test_candidate_schema_version_is_explicit(self):
-        self.assertEqual(MONITOR.EXPECTED_SCHEMA_VERSION, "6")
+        self.assertEqual(MONITOR.EXPECTED_SCHEMA_VERSION, "7")
 
     def test_restart_and_resource_limit_breach_fail(self):
         value = sample()

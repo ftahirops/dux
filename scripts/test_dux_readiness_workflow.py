@@ -165,6 +165,26 @@ class ReadinessHarnessTests(unittest.TestCase):
         self.assertTrue(result["uncertain"])
         self.assertEqual(result["kernel_overflow_notifications"], 6)
 
+    def test_runtime_status_v5_identifies_scan_first_hint_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            db = base / "index.db"
+            runtime = base / "runtime"
+            runtime.mkdir()
+            status = READINESS.runtime_path(db, runtime, "watch.status")
+            status.write_text(
+                f"5 100 {os.getpid()} 0 1 42 0 0 0 500 500000 1 123 2 1\n{db.resolve()}"
+            )
+            case = SimpleNamespace(db=db, runtime=runtime)
+            daemon = READINESS.Daemon.__new__(READINESS.Daemon)
+            daemon.case = case
+            daemon.process = SimpleNamespace(pid=os.getpid())
+            result = daemon.record()
+
+        self.assertTrue(result["scan_first"])
+        self.assertTrue(result["uncertain"])
+        self.assertEqual(result["kernel_overflow_notifications"], 2)
+
     def test_pressure_suite_requires_fault_binary_before_starting_worker(self):
         result = subprocess.run(
             [sys.executable, str(HARNESS), "--suites", "pressure"],

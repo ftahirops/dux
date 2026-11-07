@@ -94,10 +94,10 @@ const RECONCILE_BACKLOG_GRACE: Duration = Duration::from_secs(30);
 
 /// Bound full-root retries when another overflow occurs during reconciliation.
 const RECONCILE_RETRY_BACKOFF: Duration = Duration::from_secs(60);
-/// A full reconciliation that fails accounting, coverage, or installation is
-/// evidence of a continuing defect or outage, not a reason to scan forever.
-/// Permit one automatic retry, then leave the index dirty and require an
-/// explicit `dux scan` after the cause is addressed.
+const SCAN_FIRST_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const RECONCILIATION_RETRY_AFTER_META: &str = "reconciliation_retry_after_unix";
+/// Open the automatic-reconciliation circuit after one retry fails. Automatic
+/// requests pass the open circuit after its bounded attempt-count cooldown.
 pub(crate) const MAX_AUTOMATIC_RECONCILIATION_RETRIES: u32 = 1;
 
 fn reconciliation_retry_delay(failed_attempts: u32) -> Duration {
@@ -107,6 +107,61 @@ fn reconciliation_retry_delay(failed_attempts: u32) -> Duration {
             .as_secs()
             .saturating_mul(1u64 << exponent),
     )
+}
+
+fn bounded_retry_remaining_seconds(
+    retry_after: Option<&str>,
+    now: i64,
+    maximum: Duration,
+) -> (u64, bool) {
+    let maximum = maximum.as_secs();
+    match retry_after {
+        // Older releases persisted an attempt count but no deadline. Give that
+        // legacy state the base cooldown; applying the exponential maximum on
+        // upgrade could leave an already-stale index waiting for hours.
+        None => (RECONCILE_RETRY_BACKOFF.as_secs().min(maximum), false),
+        Some(value) => match value.parse::<i64>() {
+            Ok(deadline) => {
+                let remaining = deadline.saturating_sub(now).max(0) as u64;
+                (remaining.min(maximum), false)
+            }
+            Err(_) => (maximum, true),
+        },
+    }
+}
+
+fn persist_reconciliation_retry_deadline(store: &Store, failed_attempts: u32) -> Result<Instant> {
+    let delay = reconciliation_retry_delay(failed_attempts);
+    let delay_seconds = i64::try_from(delay.as_secs()).unwrap_or(i64::MAX);
+    let deadline = crate::util::now_secs().saturating_add(delay_seconds);
+    store.set_meta(RECONCILIATION_RETRY_AFTER_META, &deadline.to_string())?;
+    Ok(Instant::now() + delay)
+}
+
+fn restore_reconciliation_retry_deadline(
+    store: &Store,
+    failed_attempts: u32,
+    persist: bool,
+) -> Result<Instant> {
+    let now = crate::util::now_secs();
+    let maximum = reconciliation_retry_delay(failed_attempts);
+    let stored = store.get_meta(RECONCILIATION_RETRY_AFTER_META)?;
+    let (remaining, corrupt) = bounded_retry_remaining_seconds(stored.as_deref(), now, maximum);
+    let remaining = Duration::from_secs(remaining);
+    let remaining_seconds = i64::try_from(remaining.as_secs()).unwrap_or(i64::MAX);
+    let deadline = now.saturating_add(remaining_seconds);
+    // Normalize missing, malformed, or implausibly distant deadlines. This
+    // preserves the remaining cooldown across restarts while keeping corrupt
+    // metadata from creating an unbounded recovery delay.
+    if persist {
+        store.set_meta(RECONCILIATION_RETRY_AFTER_META, &deadline.to_string())?;
+    }
+    if corrupt {
+        tracing::error!(
+            "persisted reconciliation retry deadline is corrupt; applying maximum bounded backoff"
+        );
+    }
+    Ok(Instant::now() + remaining)
 }
 
 fn automatic_reconciliation_circuit_open(failed_attempts: u32) -> bool {
@@ -119,16 +174,16 @@ fn parse_reconciliation_attempts(value: Option<&str>) -> (u32, bool) {
         Some(value) => match value.parse::<u32>() {
             Ok(attempts) => (attempts, false),
             // A corrupt retry counter must not silently reset the circuit and
-            // admit another expensive full-root scan. Keep the circuit open
-            // until an operator explicitly requests reconciliation.
-            Err(_) => (MAX_AUTOMATIC_RECONCILIATION_RETRIES.saturating_add(1), true),
+            // admit another immediate full-root scan. Keep it on maximum
+            // backoff while still allowing eventual automatic recovery.
+            Err(_) => (u32::MAX, true),
         },
     }
 }
 
 /// Expose the persisted automatic-reconciliation circuit state to status
 /// callers. Missing metadata means this index predates the circuit; malformed
-/// metadata must report paused because daemon startup treats it fail-closed.
+/// metadata reports the circuit open while automatic recovery uses max backoff.
 pub(crate) fn reconciliation_retry_status(value: Option<&str>) -> (Option<u32>, Option<bool>) {
     match value {
         None => (None, None),
@@ -144,6 +199,25 @@ pub(crate) fn reconciliation_retry_status(value: Option<&str>) -> (Option<u32>, 
             }
         }
     }
+}
+
+pub(crate) fn reconciliation_retry_backoff_seconds(value: Option<&str>) -> Option<u64> {
+    value.map(|value| {
+        let (attempts, _) = parse_reconciliation_attempts(Some(value));
+        reconciliation_retry_delay(attempts).as_secs()
+    })
+}
+
+pub(crate) fn reconciliation_retry_remaining_seconds(
+    retry_after: Option<&str>,
+    now: i64,
+) -> Option<u64> {
+    retry_after.and_then(|value| {
+        value
+            .parse::<i64>()
+            .ok()
+            .map(|deadline| deadline.saturating_sub(now).max(0) as u64)
+    })
 }
 
 fn backlog_exceeded(pending: usize, deferred: usize, target_refreshes: usize) -> bool {
@@ -182,6 +256,10 @@ fn automatic_reconciliation_request_allowed(
     request_pending: bool,
 ) -> bool {
     request_pending && !retry_paused && !scan_active && !accounting_check_active
+}
+
+fn reconciliation_retry_circuit_blocks_request(paused: bool, cooldown_elapsed: bool) -> bool {
+    paused && !cooldown_elapsed
 }
 
 fn watcher_poll_timeout(
@@ -329,6 +407,14 @@ const MOVE_PAIR_GRACE: Duration = Duration::from_millis(500);
 /// burst can't stall forever; the heartbeat is refreshed mid-sleep so a long
 /// throttle never makes the daemon look dead.
 const MAX_THROTTLE_SLEEP_SECS: f64 = 30.0;
+/// Use FIONREAD as a queue-pressure signal so CPU duty-cycle repayment cannot
+/// starve fanotify draining. Linux kernels may report metadata bytes only while
+/// queued records can carry additional variable-size information; treat this
+/// as an approximate watermark, never as an exact queue-depth metric.
+const DEFAULT_FANOTIFY_MAX_QUEUED_EVENTS: u64 = 16_384;
+const FANOTIFY_QUEUE_HIGH_WATERMARK_PERCENT: u64 = 75;
+const FANOTIFY_QUEUE_LOW_WATERMARK_PERCENT: u64 = 50;
+const FANOTIFY_FIONREAD: libc::c_ulong = 0x541B;
 
 /// Request lower scheduling priority: IDLE I/O class and a low CPU nice. These
 /// are best-effort hints; they reduce priority but do not eliminate contention.
@@ -511,20 +597,29 @@ fn start_accounting_check(
 }
 
 /// CPU governor: targets an average duty cycle of `target` (a fraction of ONE
-/// core) for the measured event-loop thread. `throttle()` is called once per loop
-/// iteration; if measured CPU exceeds the budget for elapsed wall time, it sleeps
-/// up to the configured throttle interval to pay down the excess. Under a storm
-/// the daemon therefore does a bounded slice of work, then sleeps — bursts buffer
-/// in the kernel's fanotify queue (our "message queue"), and if that ever
-/// overflows the existing FAN_Q_OVERFLOW path marks the index dirty for a later
-/// reconcile. This limits the measured event-loop thread's average CPU use across
-/// governor intervals. It does not cap other threads or bound instantaneous
-/// bursts; a finite kernel queue can overflow and mark the index dirty. Idle
-/// iterations (poll blocked, ~no CPU) never sleep here.
+/// core) for the measured event-loop thread while the fanotify queue is below its
+/// high watermark. `throttle()` yields only while queue pressure is low; when the
+/// queue is high it bypasses the sleep until backlog falls below a hysteretic low
+/// watermark. This can exceed the event-thread target during backlog recovery,
+/// but the service's process-wide CPUQuota remains the hard ceiling. The queue is
+/// still finite and may overflow if sustained event production exceeds drain
+/// capacity; overflow keeps the index uncertain and triggers reconciliation.
 struct CpuGovernor {
     target: f64,
     cpu_ref: f64,
     wall_ref: Instant,
+    queue_high_watermark_bytes: u64,
+    queue_low_watermark_bytes: u64,
+    queue_pressure_override: bool,
+    queue_pressure_started: Option<Instant>,
+    queue_pressure_total: Duration,
+    queue_pressure_episodes: u64,
+    last_queue_bytes: Option<u64>,
+    throttle_sleep_total: Duration,
+    telemetry_logged_at: Instant,
+    telemetry_events_seen: u64,
+    telemetry_events_resolved: u64,
+    telemetry_initialized: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -538,12 +633,13 @@ struct ThrottleWatchSnapshot {
     behind_ms: u64,
     kernel_overflow_notifications: u64,
     uncertain: bool,
+    scan_first: bool,
 }
 
 fn publish_throttled_watch_status(db: &Path, snapshot: ThrottleWatchSnapshot, elapsed: Duration) {
     // The kernel queue is not observed while the governor sleeps, so keep the
     // metrics available without claiming the queue was empty at publication.
-    crate::util::write_watch_status_with_overflows(
+    crate::util::write_watch_status_with_mode(
         db,
         snapshot.pending,
         false,
@@ -558,19 +654,34 @@ fn publish_throttled_watch_status(db: &Path, snapshot: ThrottleWatchSnapshot, el
         MAX_PENDING,
         snapshot.kernel_overflow_notifications,
         snapshot.uncertain,
+        snapshot.scan_first,
     );
 }
 
 impl CpuGovernor {
-    fn new(target_frac: f64) -> Self {
+    fn new(target_frac: f64, max_queued_events: u64) -> Self {
+        let (queue_high_watermark_bytes, queue_low_watermark_bytes) =
+            fanotify_queue_watermarks(max_queued_events);
         Self {
             target: target_frac.clamp(0.01, 1.0),
             cpu_ref: thread_cpu_secs(),
             wall_ref: Instant::now(),
+            queue_high_watermark_bytes,
+            queue_low_watermark_bytes,
+            queue_pressure_override: false,
+            queue_pressure_started: None,
+            queue_pressure_total: Duration::ZERO,
+            queue_pressure_episodes: 0,
+            last_queue_bytes: None,
+            throttle_sleep_total: Duration::ZERO,
+            telemetry_logged_at: Instant::now(),
+            telemetry_events_seen: 0,
+            telemetry_events_resolved: 0,
+            telemetry_initialized: false,
         }
     }
 
-    fn throttle(&mut self, db: &Path, watch: Option<ThrottleWatchSnapshot>) {
+    fn throttle(&mut self, fanotify_fd: RawFd, db: &Path, watch: Option<ThrottleWatchSnapshot>) {
         let dcpu = (thread_cpu_secs() - self.cpu_ref).max(0.0);
         let dwall = self.wall_ref.elapsed().as_secs_f64();
         // Sleep the shortfall in small chunks so a SIGTERM/SIGHUP is handled
@@ -587,8 +698,15 @@ impl CpuGovernor {
         // becomes eligible in the main loop before this governor is reached,
         // so only shutdown needs to interrupt the duty-cycle sleep.
         while remaining > 0.0 && !SHUTDOWN.load(Ordering::SeqCst) {
+            self.update_queue_pressure(fanotify_fd);
+            if self.queue_pressure_override {
+                self.log_pressure_metrics_if_due(watch);
+                break;
+            }
             let chunk = remaining.min(0.05);
+            let sleep_started = Instant::now();
             std::thread::sleep(Duration::from_secs_f64(chunk));
+            self.throttle_sleep_total += sleep_started.elapsed();
             remaining -= chunk;
             if hb.elapsed() >= Duration::from_secs(2) {
                 crate::util::write_heartbeat(db);
@@ -597,10 +715,162 @@ impl CpuGovernor {
                 }
                 hb = Instant::now();
             }
+            self.log_pressure_metrics_if_due(watch);
         }
         self.cpu_ref = thread_cpu_secs();
         self.wall_ref = Instant::now();
     }
+
+    fn update_queue_pressure(&mut self, fanotify_fd: RawFd) {
+        let queued_bytes = read_fanotify_queue_bytes(fanotify_fd);
+        self.last_queue_bytes = queued_bytes;
+        let readable = if queued_bytes.is_none() {
+            fanotify_queue_readable(fanotify_fd)
+        } else {
+            None
+        };
+        let pressure = fanotify_queue_pressure_override(
+            self.queue_pressure_override,
+            queued_bytes,
+            readable,
+            self.queue_high_watermark_bytes,
+            self.queue_low_watermark_bytes,
+        );
+        self.set_queue_pressure(pressure, Instant::now());
+    }
+
+    fn set_queue_pressure(&mut self, pressure: bool, now: Instant) {
+        if pressure == self.queue_pressure_override {
+            return;
+        }
+        self.queue_pressure_override = pressure;
+        if pressure {
+            self.queue_pressure_started = Some(now);
+            self.queue_pressure_episodes = self.queue_pressure_episodes.saturating_add(1);
+            tracing::info!(
+                queue_bytes = self.last_queue_bytes,
+                queue_pressure_episodes = self.queue_pressure_episodes,
+                high_watermark_bytes = self.queue_high_watermark_bytes,
+                low_watermark_bytes = self.queue_low_watermark_bytes,
+                "temporarily bypassing event-thread CPU sleep to drain fanotify backlog"
+            );
+        } else if let Some(started) = self.queue_pressure_started.take() {
+            let elapsed = now.saturating_duration_since(started);
+            self.queue_pressure_total += elapsed;
+            tracing::info!(
+                queue_bytes = self.last_queue_bytes,
+                queue_pressure_episode_ms = elapsed.as_millis(),
+                queue_pressure_total_ms = self.queue_pressure_total.as_millis(),
+                queue_pressure_episodes = self.queue_pressure_episodes,
+                "fanotify backlog fell below the low watermark"
+            );
+        }
+    }
+
+    fn log_pressure_metrics_if_due(&mut self, watch: Option<ThrottleWatchSnapshot>) {
+        if !self.telemetry_initialized {
+            if let Some(snapshot) = watch {
+                self.telemetry_events_seen = snapshot.events_seen;
+                self.telemetry_events_resolved = snapshot.events_resolved;
+            }
+            self.telemetry_logged_at = Instant::now();
+            self.telemetry_initialized = true;
+            return;
+        }
+        if self.telemetry_logged_at.elapsed() < Duration::from_secs(10) {
+            return;
+        }
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(self.telemetry_logged_at);
+        let queue_pressure_total = self.queue_pressure_total
+            + self
+                .queue_pressure_started
+                .map(|started| now.saturating_duration_since(started))
+                .unwrap_or_default();
+        let (events_seen_per_sec, events_resolved_per_sec) = watch
+            .map(|snapshot| {
+                let seconds = elapsed.as_secs_f64().max(f64::EPSILON);
+                (
+                    snapshot
+                        .events_seen
+                        .saturating_sub(self.telemetry_events_seen) as f64
+                        / seconds,
+                    snapshot
+                        .events_resolved
+                        .saturating_sub(self.telemetry_events_resolved) as f64
+                        / seconds,
+                )
+            })
+            .unwrap_or((0.0, 0.0));
+        if let Some(snapshot) = watch {
+            self.telemetry_events_seen = snapshot.events_seen;
+            self.telemetry_events_resolved = snapshot.events_resolved;
+        }
+        tracing::info!(
+            queue_bytes = self.last_queue_bytes,
+            queue_pressure_active = self.queue_pressure_override,
+            queue_pressure_episodes = self.queue_pressure_episodes,
+            queue_pressure_total_ms = queue_pressure_total.as_millis(),
+            throttle_sleep_total_ms = self.throttle_sleep_total.as_millis(),
+            events_seen_per_sec,
+            events_resolved_per_sec,
+            "fanotify watcher pressure metrics"
+        );
+        self.telemetry_logged_at = now;
+    }
+}
+
+fn fanotify_queue_watermarks(max_queued_events: u64) -> (u64, u64) {
+    let event_slots = max_queued_events.max(1);
+    let minimum_record_bytes = FAN_EVENT_METADATA_LEN as u64;
+    let capacity_lower_bound = event_slots.saturating_mul(minimum_record_bytes);
+    let high = capacity_lower_bound.saturating_mul(FANOTIFY_QUEUE_HIGH_WATERMARK_PERCENT) / 100;
+    let low = capacity_lower_bound.saturating_mul(FANOTIFY_QUEUE_LOW_WATERMARK_PERCENT) / 100;
+    (
+        high.max(minimum_record_bytes),
+        low.max(minimum_record_bytes).min(high),
+    )
+}
+
+fn fanotify_queue_pressure_override(
+    currently_overridden: bool,
+    queued_bytes: Option<u64>,
+    queue_readable: Option<bool>,
+    high_watermark_bytes: u64,
+    low_watermark_bytes: u64,
+) -> bool {
+    match queued_bytes {
+        Some(bytes) if currently_overridden => bytes > low_watermark_bytes,
+        Some(bytes) => bytes >= high_watermark_bytes,
+        None => queue_readable.unwrap_or(true),
+    }
+}
+
+fn read_fanotify_queue_bytes(fanotify_fd: RawFd) -> Option<u64> {
+    let mut bytes: libc::c_int = 0;
+    let result = unsafe { libc::ioctl(fanotify_fd, FANOTIFY_FIONREAD, &mut bytes) };
+    (result == 0 && bytes >= 0).then_some(bytes as u64)
+}
+
+fn fanotify_queue_readable(fanotify_fd: RawFd) -> Option<bool> {
+    let mut descriptor = libc::pollfd {
+        fd: fanotify_fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
+    if result < 0 {
+        return None;
+    }
+    Some(result > 0 && descriptor.revents != 0)
+}
+
+fn fanotify_max_queued_events() -> u64 {
+    std::fs::read_to_string("/proc/sys/fs/fanotify/max_queued_events")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_FANOTIFY_MAX_QUEUED_EVENTS)
 }
 
 /// How long to sleep to hold a `target` duty cycle, given the CPU and wall time
@@ -656,6 +926,47 @@ struct FanotifyEventMetadata {
 // the read. Assert it at compile time so editing the struct can't silently drift.
 const _: () = assert!(std::mem::size_of::<FanotifyEventMetadata>() == FAN_EVENT_METADATA_LEN);
 
+/// Drain fanotify records without resolving file handles or touching SQLite.
+/// The scan-first mode deliberately treats records as lossy hints only.
+fn parse_fanotify_hints(mut buf: &[u8], max_events: usize) -> (u64, u64, usize, bool) {
+    let input_len = buf.len();
+    let (mut seen, mut overflows, mut parsed, mut consumed) = (0u64, 0u64, 0usize, 0usize);
+    let mut lost = false;
+    while buf.len() >= FAN_EVENT_METADATA_LEN && parsed < max_events {
+        let meta: FanotifyEventMetadata =
+            unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
+        let event_len = meta.event_len as usize;
+        let metadata_len = meta.metadata_len as usize;
+        if meta.vers != FANOTIFY_METADATA_VERSION
+            || metadata_len < FAN_EVENT_METADATA_LEN
+            || event_len < metadata_len
+            || event_len > buf.len()
+        {
+            lost = true;
+            consumed = input_len;
+            break;
+        }
+        if meta.mask & FAN_Q_OVERFLOW != 0 {
+            overflows = overflows.saturating_add(1);
+            lost = true;
+        } else {
+            seen = seen.saturating_add(1);
+            // FID-mode notifications normally use FAN_NOFD. Close defensively if
+            // a kernel or future mark mode supplies an event descriptor.
+            if meta.fd >= 0 {
+                unsafe { libc::close(meta.fd) };
+            }
+        }
+        parsed += 1;
+        consumed += event_len;
+        buf = &buf[event_len..];
+    }
+    if consumed < input_len && buf.len() < FAN_EVENT_METADATA_LEN {
+        consumed = input_len;
+    }
+    (seen, overflows, consumed, lost)
+}
+
 #[repr(C)]
 struct InfoHeader {
     info_type: u8,
@@ -667,6 +978,7 @@ struct InfoHeader {
 const _: () = assert!(std::mem::size_of::<InfoHeader>() == 4);
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct FileHandle {
     handle_bytes: u32,
     handle_type: i32,
@@ -678,9 +990,206 @@ struct ResolvedEventRecord {
     entry: Option<(PathBuf, std::ffi::OsString)>,
     target_inode: Option<(i64, i64)>,
     stale_target_fsid: Option<(i32, i32)>,
+    stale_parent: Option<StaleParentEntry>,
     info_type_mask: u64,
     info_record_count: usize,
     info_records_complete: bool,
+}
+
+/// A DFID_NAME record whose directory handle returned `ESTALE`. The name is
+/// retained so an indexed parent can still be refreshed by path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StaleParentEntry {
+    fsid: (i32, i32),
+    handle_type: i32,
+    handle: Vec<u8>,
+    name: std::ffi::OsString,
+}
+
+/// Outcome for an otherwise unresolved event whose parent directory handle is
+/// stale on a filesystem whose handles are known to round-trip.
+#[derive(Debug, PartialEq, Eq)]
+enum StaleParentOutcome {
+    /// The parent inode is still indexed: refresh `parent/name` from final disk
+    /// state. This is correct whether the directory was deleted, replaced, or
+    /// the stale handle was spurious, because the batched writer stats the path.
+    RefreshIndexedPath(PathBuf),
+    /// The stale parent inode has no indexed path. A freed directory that was
+    /// never committed cannot own indexed descendants; any indexed ancestor's
+    /// removal is reported by its own resolvable parent event.
+    ParentNotIndexed,
+}
+
+// `f_type` is signed on glibc and unsigned on musl; compare normalized u64
+// bit patterns, as `scan::fs_magic` does.
+const EXT4_SUPER_MAGIC: u64 = 0xEF53;
+// generic_encode_ino32_fh() layouts used by ext4 for fanotify FIDs.
+const FILEID_INO32_GEN: i32 = 1;
+const FILEID_INO32_GEN_PARENT: i32 = 2;
+
+/// Inode number encoded in an ext4 `FILEID_INO32_GEN[_PARENT]` handle. Other
+/// handle types (and other filesystems, which may reuse type numbers with a
+/// different layout) are rejected by the caller's filesystem check.
+#[cfg(test)]
+fn ino32_handle_inode(handle_type: i32, handle: &[u8]) -> Option<u32> {
+    ino32_handle_identity(handle_type, handle).map(|(ino, _)| ino)
+}
+
+fn ino32_handle_identity(handle_type: i32, handle: &[u8]) -> Option<(u32, u32)> {
+    if handle_type != FILEID_INO32_GEN && handle_type != FILEID_INO32_GEN_PARENT {
+        return None;
+    }
+    let ino = u32::from_ne_bytes(handle.get(0..4)?.try_into().ok()?);
+    let generation = u32::from_ne_bytes(handle.get(4..8)?.try_into().ok()?);
+    (ino != 0).then_some((ino, generation))
+}
+
+fn ext4_path_handle_identity(path: &Path) -> Option<(u32, u32)> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut handle = FileHandle {
+        handle_bytes: MAX_HANDLE_SZ as u32,
+        handle_type: 0,
+        f_handle: [0; MAX_HANDLE_SZ],
+    };
+    let mut mount_id: libc::c_int = 0;
+    let result = unsafe {
+        libc::name_to_handle_at(
+            libc::AT_FDCWD,
+            path.as_ptr(),
+            (&mut handle as *mut FileHandle).cast::<libc::file_handle>(),
+            &mut mount_id,
+            0,
+        )
+    };
+    if result != 0 || handle.handle_bytes as usize > MAX_HANDLE_SZ {
+        return None;
+    }
+    ino32_handle_identity(
+        handle.handle_type,
+        &handle.f_handle[..handle.handle_bytes as usize],
+    )
+}
+
+fn ext4_path_matches_handle(path: &Path, dev: i64, ino: i64, generation: u32) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    metadata.is_dir()
+        && crate::util::indexed_identity(&metadata).ok() == Some((dev, ino))
+        && ext4_path_handle_identity(path) == Some((ino as u32, generation))
+}
+
+/// Only complete records carrying exactly one DFID_NAME and at most one FID
+/// qualify; anything else keeps the conservative lost-coverage behavior.
+fn stale_parent_event_shape_ok(
+    record: &ResolvedEventRecord,
+    handle_capable_fsids: &HashSet<(i32, i32)>,
+) -> bool {
+    let dfid = 1u64 << FAN_EVENT_INFO_TYPE_DFID_NAME;
+    let fid = 1u64 << FAN_EVENT_INFO_TYPE_FID;
+    let shape_ok = (record.info_type_mask == dfid && record.info_record_count == 1)
+        || (record.info_type_mask == dfid | fid && record.info_record_count == 2);
+    let name_safe = record.stale_parent.as_ref().is_some_and(|parent| {
+        parent.name != ".." && !parent.name.as_os_str().as_bytes().contains(&b'/')
+    });
+    record.entry.is_none()
+        && record.target_inode.is_none()
+        && record.info_records_complete
+        && shape_ok
+        && name_safe
+        && record
+            .stale_parent
+            .as_ref()
+            .is_some_and(|parent| handle_capable_fsids.contains(&parent.fsid))
+}
+
+/// Indexed (dev, inode) of a stale ext4 parent handle, or `None` when the
+/// mount is not ext4 or the handle layout is not the ext4 ino32 encoding.
+fn stale_ext4_parent_identity(
+    parent: &StaleParentEntry,
+    fsfds: &HashMap<(i32, i32), RawFd>,
+) -> Option<(i64, i64, u32)> {
+    let (ino, generation) = ino32_handle_identity(parent.handle_type, &parent.handle)?;
+    let mount_fd = *fsfds.get(&parent.fsid)?;
+    let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    if unsafe { libc::fstatfs(mount_fd, fs.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    if unsafe { fs.assume_init() }.f_type as u64 != EXT4_SUPER_MAGIC {
+        return None;
+    }
+    let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
+    if unsafe { libc::fstat(mount_fd, st.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    let dev = i64::try_from(unsafe { st.assume_init() }.st_dev).ok()?;
+    Some((dev, i64::from(ino), generation))
+}
+
+fn classify_stale_parent_event(
+    record: &ResolvedEventRecord,
+    handle_capable_fsids: &HashSet<(i32, i32)>,
+    fsfds: &HashMap<(i32, i32), RawFd>,
+    conn: &rusqlite::Connection,
+    parent_paths: &mut IndexedParentPathCache,
+) -> Result<Option<StaleParentOutcome>> {
+    if !stale_parent_event_shape_ok(record, handle_capable_fsids) {
+        return Ok(None);
+    }
+    let Some(parent) = record.stale_parent.as_ref() else {
+        return Ok(None);
+    };
+    let Some((dev, ino, generation)) = stale_ext4_parent_identity(parent, fsfds) else {
+        return Ok(None);
+    };
+    Ok(Some(match parent_paths.resolve(conn, dev, ino)? {
+        Some(dir) => {
+            match std::fs::symlink_metadata(&dir) {
+                Ok(_) if !ext4_path_matches_handle(&dir, dev, ino, generation) => {
+                    // An inode number can be reused. If the path now names
+                    // another generation, do not apply an old event to it.
+                    return Ok(None);
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    // The indexed parent path is gone, so reconciling its old
+                    // child path is safe and removes stale rows if still present.
+                }
+                Err(_) => return Ok(None),
+            }
+            let full = if parent.name.is_empty() || parent.name == "." {
+                dir
+            } else {
+                dir.join(&parent.name)
+            };
+            StaleParentOutcome::RefreshIndexedPath(full)
+        }
+        None if stale_parent_has_index_footprint(conn, dev, ino)? => {
+            // A missing parent path is not enough to prove this event is
+            // irrelevant: a prior partial update can leave the inode or its
+            // child edges in the index without a resolvable parent path. Keep
+            // coverage uncertain so a reconciliation can remove/repair those
+            // rows instead of silently blessing an orphaned subtree.
+            return Ok(None);
+        }
+        None => StaleParentOutcome::ParentNotIndexed,
+    }))
+}
+
+fn stale_parent_has_index_footprint(
+    conn: &rusqlite::Connection,
+    dev: i64,
+    ino: i64,
+) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2)
+             OR EXISTS(SELECT 1 FROM dirents WHERE dev_id=?1 AND inode=?2)
+             OR EXISTS(SELECT 1 FROM dirents WHERE parent_dev=?1 AND parent_inode=?2)",
+        params![dev, ino],
+        |row| row.get(0),
+    )?)
 }
 
 fn event_identity_unresolved(record: &ResolvedEventRecord) -> bool {
@@ -945,6 +1454,7 @@ fn mark_index_dirty_before_reconciliation(store: &Store, read_only_source: bool)
 
 /// Run the watch daemon. Uses fanotify FID mode so creates, deletes, renames,
 /// and size-growth are all tracked live — no rescan needed for normal activity.
+#[allow(clippy::too_many_arguments)]
 pub fn run_daemon(
     db: &Path,
     root: &Path,
@@ -953,6 +1463,7 @@ pub fn run_daemon(
     alert: Option<AlertConfig>,
     growth_days: i64,
     max_cpu_frac: f64,
+    reconcile_first: bool,
 ) -> Result<()> {
     // How long to keep per-inode growth history. Shorter = smaller index on a
     // high-churn host. Clamp to >= 1 day so the growth/heat features still work.
@@ -1021,6 +1532,16 @@ pub fn run_daemon(
 
     let mut initial_mounts = mount_topology(&root_canon, one_file_system)?;
     let mut last_mount_check = Instant::now();
+    let max_queued_events = fanotify_max_queued_events();
+    let (queue_high_watermark_bytes, queue_low_watermark_bytes) =
+        fanotify_queue_watermarks(max_queued_events);
+    tracing::info!(
+        max_queued_events,
+        queue_high_watermark_bytes,
+        queue_low_watermark_bytes,
+        reconcile_first,
+        "fanotify queue-pressure CPU throttle thresholds"
+    );
     let fan_guard = RawFdGuard(init_fanotify().context(
         "fanotify_init (need CAP_SYS_ADMIN and Linux 5.17+ or a vendor backport of FAN_REPORT_TARGET_FID)",
     )?);
@@ -1118,6 +1639,12 @@ pub fn run_daemon(
         fsfds.len(),
         flush_ms
     );
+    if reconcile_first {
+        tracing::warn!(
+            scan_interval_seconds = SCAN_FIRST_INTERVAL.as_secs(),
+            "experimental reconciliation-first mode: fanotify events are hints only; scheduled scans currently use full atomic rebuilds"
+        );
+    }
     if let Some(a) = &alert {
         tracing::info!(
             "alerts: >{} growth in {}s{}",
@@ -1154,16 +1681,29 @@ pub fn run_daemon(
         parse_reconciliation_attempts(store.get_meta("failed_reconciliation_attempts")?.as_deref());
     let mut reconciliation_retry_paused = retry_state_corrupt
         || automatic_reconciliation_circuit_open(failed_reconciliation_attempts);
+    let persisted_retry_deadline = store.get_meta(RECONCILIATION_RETRY_AFTER_META)?;
+    if failed_reconciliation_attempts > 0
+        || retry_state_corrupt
+        || persisted_retry_deadline.is_some()
+    {
+        // Restore the remaining wall-clock deadline, bounded to this attempt's
+        // maximum delay, then use a monotonic timer for the live wait.
+        rescan_retry_after = Some(restore_reconciliation_retry_deadline(
+            &store,
+            failed_reconciliation_attempts,
+            !read_only_source,
+        )?);
+    }
     if retry_state_corrupt {
         mark_index_dirty(
             &store,
-            "reconciliation retry state is corrupt; automatic scans paused pending operator review",
+            "reconciliation retry state is corrupt; automatic recovery uses maximum cooldown",
         )?;
         tracing::error!(
-            "persisted reconciliation retry count is malformed; automatic reconciliation paused until an operator requests a scan"
+            "persisted reconciliation retry count is malformed; automatic recovery remains enabled with maximum cooldown"
         );
         crate::util::systemd_notify(
-            "READY=1\nSTATUS=Reconciliation retry state is corrupt; automatic scans paused",
+            "READY=1\nSTATUS=Retry state corrupt; automatic recovery uses maximum cooldown",
         );
     }
     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
@@ -1176,10 +1716,9 @@ pub fn run_daemon(
         std::collections::HashSet::new();
     let mut indexed_parent_paths = IndexedParentPathCache::default();
     // CPU governor — limits the measured event-loop thread's average CPU duty
-    // cycle. It is not a process-wide cap and does not prevent short bursts.
-    // Excess load buffers in the finite kernel fanotify queue; if that overflows,
-    // the index is marked dirty and requires reconciliation.
-    let mut gov = CpuGovernor::new(max_cpu_frac);
+    // cycle while queue pressure is low. Backlog suspends duty-cycle repayment;
+    // the service cgroup remains the process-wide resource ceiling.
+    let mut gov = CpuGovernor::new(max_cpu_frac, max_queued_events);
     // Paths CREATEd since the last flush — lets a same-window delete cancel a
     // transient file before it does any index work (see parse_events). Cleared
     // whenever `pending` is cleared, so it only ever spans one flush window.
@@ -1232,10 +1771,13 @@ pub fn run_daemon(
     } else if reconcile_on_start {
         tracing::error!(
             failed_attempts = failed_reconciliation_attempts,
-            "automatic reconciliation remains paused after repeated failures; run `dux scan` after addressing the cause"
+            "automatic reconciliation is cooling down after repeated failures; it will retry automatically"
         );
+        // Keep the request pending while the persisted attempt count is in its
+        // cooldown. The request gate below admits it when the deadline elapses.
+        RESCAN.store(true, Ordering::SeqCst);
         crate::util::systemd_notify(
-            "READY=1\nSTATUS=Accounting recovery paused after repeated failures; operator action required",
+            "READY=1\nSTATUS=Accounting recovery cooling down; automatic retry scheduled",
         );
     }
     crate::util::write_watch_status(db, 0, true, 0, 0, 0, 0, 0, 0, MAX_PENDING, index_uncertain);
@@ -1260,53 +1802,55 @@ pub fn run_daemon(
                     );
                     last_integrity = Instant::now() - Duration::from_secs(300);
                 }
-                Ok(Some(true)) => match kind {
-                    AccountingCheckKind::Periodic => tracing::debug!(
-                        elapsed_ms = elapsed.as_millis(),
-                        "periodic accounting verification passed"
-                    ),
-                    AccountingCheckKind::Reconciliation { safe_to_clear } => {
-                        pending_reconciliation_check = None;
-                        failed_reconciliation_attempts = 0;
-                        reconciliation_retry_paused = false;
-                        rescan_retry_after = None;
-                        store.conn.execute(
-                            "DELETE FROM meta WHERE key='failed_reconciliation_attempts'",
-                            [],
-                        )?;
-                        let clean = safe_to_clear
-                            && !coverage_incomplete
-                            && !resolve_warned
-                            && !lost_events
-                            && !RESCAN.load(Ordering::SeqCst);
-                        if clean {
-                            let reason = store.get_meta("dirty_reason")?;
-                            if reason.as_deref() == Some(RECONCILIATION_ACCOUNTING_PENDING) {
-                                store.conn.execute(
+                Ok(Some(true)) => {
+                    failed_reconciliation_attempts = 0;
+                    reconciliation_retry_paused = false;
+                    rescan_retry_after = None;
+                    store.conn.execute(
+                        "DELETE FROM meta WHERE key IN ('failed_reconciliation_attempts', 'reconciliation_retry_after_unix')",
+                        [],
+                    )?;
+                    match kind {
+                        AccountingCheckKind::Periodic => tracing::debug!(
+                            elapsed_ms = elapsed.as_millis(),
+                            "periodic accounting verification passed"
+                        ),
+                        AccountingCheckKind::Reconciliation { safe_to_clear } => {
+                            pending_reconciliation_check = None;
+                            let clean = safe_to_clear
+                                && !coverage_incomplete
+                                && !resolve_warned
+                                && !lost_events
+                                && !RESCAN.load(Ordering::SeqCst);
+                            if clean {
+                                let reason = store.get_meta("dirty_reason")?;
+                                if reason.as_deref() == Some(RECONCILIATION_ACCOUNTING_PENDING) {
+                                    store.conn.execute(
                                     "DELETE FROM meta WHERE key IN ('dirty_since','dirty_reason')",
                                     [],
                                 )?;
-                                index_uncertain = false;
-                                tracing::info!(
-                                    elapsed_ms = elapsed.as_millis(),
-                                    "reconciliation accounting verification passed"
-                                );
+                                    index_uncertain = false;
+                                    tracing::info!(
+                                        elapsed_ms = elapsed.as_millis(),
+                                        "reconciliation accounting verification passed"
+                                    );
+                                } else {
+                                    index_uncertain = true;
+                                    tracing::warn!(
+                                        elapsed_ms = elapsed.as_millis(),
+                                        "reconciliation verified but another dirty reason remains"
+                                    );
+                                }
                             } else {
                                 index_uncertain = true;
                                 tracing::warn!(
-                                    elapsed_ms = elapsed.as_millis(),
-                                    "reconciliation verified but another dirty reason remains"
-                                );
-                            }
-                        } else {
-                            index_uncertain = true;
-                            tracing::warn!(
                                 elapsed_ms = elapsed.as_millis(),
                                 "reconciliation accounting passed, but coverage or events remain uncertain"
                             );
+                            }
                         }
                     }
-                },
+                }
                 Ok(Some(false)) => {
                     pending_reconciliation_check = None;
                     index_uncertain = true;
@@ -1321,7 +1865,11 @@ pub fn run_daemon(
                     }
                     if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
                         reconciliation_retry_paused = true;
-                        rescan_retry_after = None;
+                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                            &store,
+                            failed_reconciliation_attempts,
+                        )?);
+                        RESCAN.store(true, Ordering::SeqCst);
                         store.set_meta(
                             "dirty_reason",
                             &format!(
@@ -1341,10 +1889,11 @@ pub fn run_daemon(
                             "dirty_reason",
                             "directory accounting invariant failed; one bounded automatic reconciliation retry remains",
                         )?;
-                        rescan_retry_after = Some(
-                            Instant::now()
-                                + reconciliation_retry_delay(failed_reconciliation_attempts),
-                        );
+                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                            &store,
+                            failed_reconciliation_attempts,
+                        )?);
+                        RESCAN.store(true, Ordering::SeqCst);
                         tracing::error!(
                             elapsed_ms = elapsed.as_millis(),
                             failed_attempts = failed_reconciliation_attempts,
@@ -1370,7 +1919,11 @@ pub fn run_daemon(
                     }
                     if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
                         reconciliation_retry_paused = true;
-                        rescan_retry_after = None;
+                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                            &store,
+                            failed_reconciliation_attempts,
+                        )?);
+                        RESCAN.store(true, Ordering::SeqCst);
                         store.set_meta(
                             "dirty_reason",
                             &format!(
@@ -1391,10 +1944,10 @@ pub fn run_daemon(
                             "dirty_reason",
                             "directory accounting verification could not complete",
                         )?;
-                        rescan_retry_after = Some(
-                            Instant::now()
-                                + reconciliation_retry_delay(failed_reconciliation_attempts),
-                        );
+                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                            &store,
+                            failed_reconciliation_attempts,
+                        )?);
                         tracing::warn!(
                             elapsed_ms = elapsed.as_millis(),
                             error = %e,
@@ -1636,18 +2189,12 @@ pub fn run_daemon(
             reconciliation_retry_paused = false;
             rescan_retry_after = None;
             store.conn.execute(
-                "DELETE FROM meta WHERE key='failed_reconciliation_attempts'",
+                "DELETE FROM meta WHERE key IN ('failed_reconciliation_attempts', 'reconciliation_retry_after_unix')",
                 [],
             )?;
             RESCAN.store(true, Ordering::SeqCst);
             tracing::warn!(
                 "operator requested a full reconciliation; resetting the accounting retry circuit"
-            );
-        }
-        if reconciliation_retry_paused && RESCAN.swap(false, Ordering::SeqCst) {
-            tracing::debug!(
-                failed_attempts = failed_reconciliation_attempts,
-                "automatic reconciliation request suppressed by accounting retry circuit"
             );
         }
         if scan_job.as_ref().is_some_and(|job| job.is_finished()) {
@@ -1685,7 +2232,10 @@ pub fn run_daemon(
                         failed_reconciliation_attempts.saturating_add(1);
                     if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
                         reconciliation_retry_paused = true;
-                        rescan_retry_after = None;
+                        rescan_retry_after = Some(
+                            Instant::now()
+                                + reconciliation_retry_delay(failed_reconciliation_attempts),
+                        );
                         tracing::error!(
                             failed_attempts = failed_reconciliation_attempts,
                             error = %error,
@@ -1736,6 +2286,11 @@ pub fn run_daemon(
                             && !resolve_warned
                             && !lost_events
                             && stats.errors == 0;
+                        let event_race_only = reconcile_first
+                            && lost_events
+                            && !coverage_incomplete
+                            && !resolve_warned
+                            && stats.errors == 0;
                         index_uncertain = true;
                         pending_reconciliation_check = safe_to_clear.then_some(true);
                         store.set_meta("dirty_since", &now_secs().to_string())?;
@@ -1743,11 +2298,25 @@ pub fn run_daemon(
                             "dirty_reason",
                             if safe_to_clear {
                                 RECONCILIATION_ACCOUNTING_PENDING
+                            } else if event_race_only {
+                                "filesystem changed during observation; next periodic scan scheduled"
                             } else {
                                 "incomplete coverage or changes lost during reconciliation"
                             },
                         )?;
-                        if !safe_to_clear {
+                        if event_race_only {
+                            // Hints arriving during the walk make this a valid
+                            // last-observed view, but not a clean post-churn
+                            // baseline. Keep it visibly stale and let the fixed
+                            // cadence retry without turning ordinary churn into
+                            // a failed-scan circuit-breaker attempt.
+                            last_reconcile = Instant::now();
+                            RESCAN.store(false, Ordering::SeqCst);
+                            lost_events = false;
+                            tracing::info!(
+                                "filesystem changed during scan-first observation; next full observation is scheduled"
+                            );
+                        } else if !safe_to_clear {
                             failed_reconciliation_attempts =
                                 failed_reconciliation_attempts.saturating_add(1);
                             store.set_meta(
@@ -1757,7 +2326,11 @@ pub fn run_daemon(
                             if automatic_reconciliation_circuit_open(failed_reconciliation_attempts)
                             {
                                 reconciliation_retry_paused = true;
-                                rescan_retry_after = None;
+                                rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                                    &store,
+                                    failed_reconciliation_attempts,
+                                )?);
+                                RESCAN.store(true, Ordering::SeqCst);
                                 store.set_meta(
                                 "dirty_reason",
                                 &format!(
@@ -1776,12 +2349,10 @@ pub fn run_daemon(
                                 "READY=1\nSTATUS=Reconciliation incomplete repeatedly; automatic scans paused",
                             );
                             } else {
-                                rescan_retry_after = Some(
-                                    Instant::now()
-                                        + reconciliation_retry_delay(
-                                            failed_reconciliation_attempts,
-                                        ),
-                                );
+                                rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                                    &store,
+                                    failed_reconciliation_attempts,
+                                )?);
                                 RESCAN.store(true, Ordering::SeqCst);
                                 tracing::warn!(
                                 failed_attempts = failed_reconciliation_attempts,
@@ -1810,7 +2381,10 @@ pub fn run_daemon(
                     Err(e) if cancelled_for_pressure => {
                         index_uncertain = true;
                         RESCAN.store(true, Ordering::SeqCst);
-                        rescan_retry_after = Some(Instant::now() + RECONCILE_RETRY_BACKOFF);
+                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                            &store,
+                            failed_reconciliation_attempts,
+                        )?);
                         store.set_meta("dirty_since", &now_secs().to_string())?;
                         store.set_meta(
                             "dirty_reason",
@@ -1835,7 +2409,11 @@ pub fn run_daemon(
                         )?;
                         if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
                             reconciliation_retry_paused = true;
-                            rescan_retry_after = None;
+                            rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                                &store,
+                                failed_reconciliation_attempts,
+                            )?);
+                            RESCAN.store(true, Ordering::SeqCst);
                             store.set_meta(
                             "dirty_reason",
                             &format!(
@@ -1855,10 +2433,10 @@ pub fn run_daemon(
                                 "dirty_reason",
                                 &format!("rescan failed; one bounded retry remains: {e:#}"),
                             )?;
-                            rescan_retry_after = Some(
-                                Instant::now()
-                                    + reconciliation_retry_delay(failed_reconciliation_attempts),
-                            );
+                            rescan_retry_after = Some(persist_reconciliation_retry_deadline(
+                                &store,
+                                failed_reconciliation_attempts,
+                            )?);
                             RESCAN.store(true, Ordering::SeqCst);
                             tracing::error!(
                                 failed_attempts = failed_reconciliation_attempts,
@@ -1912,6 +2490,9 @@ pub fn run_daemon(
                 }
             }
         }
+        if reconcile_first && last_reconcile.elapsed() >= SCAN_FIRST_INTERVAL {
+            RESCAN.store(true, Ordering::SeqCst);
+        }
         let rescan_requested = RESCAN.load(Ordering::SeqCst);
         let queues_drained = kernel_empty
             && pending.is_empty()
@@ -1919,6 +2500,12 @@ pub fn run_daemon(
             && target_refreshes.is_empty();
         let retry_backoff_elapsed =
             rescan_retry_after.is_none_or(|retry_after| Instant::now() >= retry_after);
+        // Recompute after reaping completed workers: a failed scan may have
+        // opened the circuit and scheduled its cooldown earlier in this loop.
+        let retry_circuit_blocks_request = reconciliation_retry_circuit_blocks_request(
+            reconciliation_retry_paused,
+            retry_backoff_elapsed,
+        );
         let reconciliation_ready = reconciliation_scan_ready(
             rescan_requested,
             queues_drained,
@@ -1926,7 +2513,7 @@ pub fn run_daemon(
             retry_backoff_elapsed,
         );
         if automatic_reconciliation_request_allowed(
-            reconciliation_retry_paused,
+            retry_circuit_blocks_request,
             scan_job.is_some(),
             accounting_check.is_some(),
             rescan_requested,
@@ -1998,8 +2585,27 @@ pub fn run_daemon(
                     "RELOADING=1\nSTATUS=Rebuilding index; collecting concurrent changes",
                 );
                 scan_cancel = Some(cancel);
+                // Scan-first mode treats events as hints and does not mutate the
+                // live index while observing. Mark the index uncertain before
+                // the writer opens SQLite so event bursts cannot trigger a
+                // competing metadata write during the publication transaction.
+                if reconcile_first {
+                    index_uncertain = true;
+                    store.set_meta("dirty_since", &now_secs().to_string())?;
+                    store.set_meta(
+                        "dirty_reason",
+                        "periodic filesystem observation in progress",
+                    )?;
+                }
                 scan_job = Some(std::thread::spawn(move || {
-                    crate::scan::rebuild_atomic(&scan_db, &scan_root, &opts)
+                    if reconcile_first && !opts.one_file_system {
+                        (|| {
+                            let mut live = Store::open_rw(&scan_db)?;
+                            crate::scan::reconcile_in_place(&mut live, &scan_root, &opts)
+                        })()
+                    } else {
+                        crate::scan::rebuild_atomic(&scan_db, &scan_root, &opts)
+                    }
                 }));
             }
         }
@@ -2076,22 +2682,47 @@ pub fn run_daemon(
                 }
 
                 let parse_deadline = (Instant::now() + EVENT_PARSE_SLICE).min(drain_deadline);
-                let (seen, resolved, overflows, consumed) = parse_events_bounded(
-                    &buf[..buf_len],
-                    &fsfds,
-                    &mut handle_capable_fsids,
-                    &root_canon,
-                    db,
-                    &mut pending,
-                    &mut born,
-                    &mut target_refreshes,
-                    &mut indexed_parent_paths,
-                    &mut store,
-                    scan_job.is_none(),
-                    &mut lost_events,
-                    MAX_EVENTS_PER_PARSE,
-                    parse_deadline,
-                );
+                let (seen, resolved, overflows, consumed) = if reconcile_first {
+                    let (seen, overflows, consumed, lost) =
+                        parse_fanotify_hints(&buf[..buf_len], MAX_EVENTS_PER_PARSE);
+                    if seen > 0 || lost {
+                        if !index_uncertain {
+                            persist_dirty_marker_best_effort(
+                                &store,
+                                "filesystem changes await a reconciliation scan",
+                            );
+                        }
+                        index_uncertain = true;
+                        if scan_job.is_some() || lost {
+                            lost_events = true;
+                        }
+                        if let Some(check) = &accounting_check {
+                            check.cancel.store(true, Ordering::Relaxed);
+                            pending_reconciliation_check = None;
+                        }
+                    }
+                    if overflows > 0 || lost {
+                        RESCAN.store(true, Ordering::SeqCst);
+                    }
+                    (seen, 0, overflows, consumed)
+                } else {
+                    parse_events_bounded(
+                        &buf[..buf_len],
+                        &fsfds,
+                        &mut handle_capable_fsids,
+                        &root_canon,
+                        db,
+                        &mut pending,
+                        &mut born,
+                        &mut target_refreshes,
+                        &mut indexed_parent_paths,
+                        &mut store,
+                        scan_job.is_none(),
+                        &mut lost_events,
+                        MAX_EVENTS_PER_PARSE,
+                        parse_deadline,
+                    )
+                };
                 if consumed > 0 {
                     buf.copy_within(consumed..buf_len, 0);
                     buf_len -= consumed;
@@ -2122,7 +2753,7 @@ pub fn run_daemon(
             // events but open_by_handle_at EPERMs on every one, so NONE resolve and
             // the index silently never updates. If we've seen a meaningful number of
             // events and resolved zero, say so loudly (once) and mark dirty.
-            if !resolve_warned && ev_seen >= 64 && ev_resolved == 0 {
+            if !reconcile_first && !resolve_warned && ev_seen >= 64 && ev_resolved == 0 {
                 tracing::error!(
                     "received {ev_seen} fanotify events but resolved 0 paths — the daemon \
                      likely lacks CAP_DAC_READ_SEARCH (open_by_handle_at is failing). Live \
@@ -2169,7 +2800,7 @@ pub fn run_daemon(
                 RESCAN.store(true, Ordering::SeqCst);
             }
             // Publish loss before starting a potentially expensive SQL batch.
-            crate::util::write_watch_status_with_overflows(
+            crate::util::write_watch_status_with_mode(
                 db,
                 pending
                     .len()
@@ -2185,6 +2816,7 @@ pub fn run_daemon(
                 MAX_PENDING,
                 kernel_overflow_notifications,
                 true,
+                reconcile_first,
             );
         }
         if last_flush.elapsed() >= active_flush_interval {
@@ -2446,7 +3078,7 @@ pub fn run_daemon(
                 tracing::info!("caught up — live updates resumed");
             }
             index_uncertain |= lost_events;
-            crate::util::write_watch_status_with_overflows(
+            crate::util::write_watch_status_with_mode(
                 db,
                 pending
                     .len()
@@ -2462,6 +3094,7 @@ pub fn run_daemon(
                 MAX_PENDING,
                 kernel_overflow_notifications,
                 index_uncertain,
+                reconcile_first,
             );
             // Reap any finished alert children EVERY cycle (cheap try_wait) so a
             // stopped alert script never lingers as a zombie under sustained
@@ -2596,13 +3229,13 @@ pub fn run_daemon(
             }
             last_flush = Instant::now();
         }
-        // CPU GOVERNOR: hold the event-loop thread's duty cycle under its target.
-        // If this iteration burned more CPU than its share of wall time allows,
-        // sleep the difference — the event backlog waits in the kernel fanotify
-        // queue. This limits average event-loop CPU over the governor interval; it
-        // is not a process-wide cap or a bound on short bursts. Idle iterations
-        // don't sleep here.
+        // CPU governor: repay event-thread CPU debt while fanotify queue pressure
+        // is low. When the queue crosses its high watermark, bypass sleep until
+        // it falls below the low watermark. This is a soft event-thread target;
+        // the service CPUQuota remains the process-wide cap. Idle iterations do
+        // not sleep here.
         gov.throttle(
+            fan,
             db,
             Some(ThrottleWatchSnapshot {
                 pending: pending
@@ -2617,6 +3250,7 @@ pub fn run_daemon(
                 behind_ms: last_caught_up.elapsed().as_millis().min(u64::MAX as u128) as u64,
                 kernel_overflow_notifications,
                 uncertain: index_uncertain || lost_events,
+                scan_first: reconcile_first,
             }),
         );
     }
@@ -3085,7 +3719,7 @@ fn parse_events_with_budget(
     pending: &mut HashMap<PathBuf, Op>,
     born: &mut std::collections::HashSet<PathBuf>,
     target_refreshes: &mut std::collections::HashSet<(i64, i64)>,
-    _indexed_parent_paths: &mut IndexedParentPathCache,
+    indexed_parent_paths: &mut IndexedParentPathCache,
     store: &mut Store,
     coalesce: bool,
     lost_events: &mut bool,
@@ -3165,6 +3799,42 @@ fn parse_events_with_budget(
                     mask = format_args!("{:#x}", meta.mask),
                     "ignored stale target-only FAN_ATTRIB for deleted object"
                 );
+            } else if let Some(outcome) = match classify_stale_parent_event(
+                &resolved_record,
+                handle_capable_fsids,
+                fsfds,
+                &store.conn,
+                indexed_parent_paths,
+            ) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    // Fall through to the conservative lost-coverage branch.
+                    tracing::warn!(%error, "could not classify stale-parent fanotify event");
+                    None
+                }
+            } {
+                match outcome {
+                    StaleParentOutcome::RefreshIndexedPath(full) => {
+                        if full.starts_with(root) && !crate::util::is_index_artifact(&full, db) {
+                            // Decide from final disk state at flush, exactly like
+                            // a merged CREATE|DELETE: never trust the event mask
+                            // for a directory whose identity could not be opened.
+                            tracing::debug!(
+                                path = %full.display(),
+                                mask = format_args!("{:#x}", meta.mask),
+                                "stale parent handle mapped to indexed path; reconciling"
+                            );
+                            born.remove(&full);
+                            pending.insert(full, Op::Reconcile);
+                        }
+                    }
+                    StaleParentOutcome::ParentNotIndexed => {
+                        tracing::debug!(
+                            mask = format_args!("{:#x}", meta.mask),
+                            "ignored event under freed, never-indexed parent directory"
+                        );
+                    }
+                }
             } else if event_identity_unresolved(&resolved_record) {
                 // Aggregate all-unresolved detection cannot catch one lost
                 // notification in an otherwise healthy stream. A single event
@@ -3320,8 +3990,12 @@ fn resolve_record(
     // open_by_handle_at plus fstat on every such event. Keep target identity
     // resolution only for target-only metadata events and deletes, where the
     // named path may already be gone and surviving hardlinks still need refresh.
-    let entry =
-        entry_payload.and_then(|payload| resolve_handle(payload, fsfds, handle_capable_fsids));
+    let (entry, stale_parent) =
+        match entry_payload.map(|payload| resolve_handle(payload, fsfds, handle_capable_fsids)) {
+            Some(EntryResolution::Resolved(dir, name)) => (Some((dir, name)), None),
+            Some(EntryResolution::Stale(parent)) => (None, Some(parent)),
+            Some(EntryResolution::Unresolved) | None => (None, None),
+        };
     let (target_inode, stale_target_fsid) = if needs_target_identity(mask, entry.is_some()) {
         match target_payload
             .map(|payload| resolve_handle_identity(payload, fsfds, handle_capable_fsids))
@@ -3337,6 +4011,7 @@ fn resolve_record(
         entry,
         target_inode,
         stale_target_fsid,
+        stale_parent,
         info_type_mask,
         info_record_count,
         info_records_complete,
@@ -3446,18 +4121,30 @@ fn enqueue_inode_refreshes(
     Ok(())
 }
 
+enum EntryResolution {
+    Resolved(PathBuf, std::ffi::OsString),
+    Stale(StaleParentEntry),
+    Unresolved,
+}
+
 fn resolve_handle(
     payload: &[u8],
     fsfds: &HashMap<(i32, i32), RawFd>,
     handle_capable_fsids: &mut HashSet<(i32, i32)>,
-) -> Option<(PathBuf, std::ffi::OsString)> {
+) -> EntryResolution {
     if payload.len() < 16 {
-        return None;
+        return EntryResolution::Unresolved;
     }
     // payload: [fsid:8][handle_bytes:4][handle_type:4][f_handle:hb][name...]
-    let hb = u32::from_ne_bytes(payload[8..12].try_into().ok()?) as usize;
+    let Some(hb) = payload[8..12]
+        .try_into()
+        .ok()
+        .map(|bytes| u32::from_ne_bytes(bytes) as usize)
+    else {
+        return EntryResolution::Unresolved;
+    };
     if hb == 0 || hb > MAX_HANDLE_SZ || payload.len() < 16 + hb {
-        return None;
+        return EntryResolution::Unresolved;
     }
 
     // name follows the handle, NUL-terminated
@@ -3472,12 +4159,32 @@ fn resolve_handle(
     use std::os::unix::ffi::OsStrExt;
     let name = std::ffi::OsStr::from_bytes(&name_bytes[..name_end]).to_owned();
 
-    let dfd = open_handle(payload, fsfds, handle_capable_fsids).ok()?;
+    let dfd = match open_handle(payload, fsfds, handle_capable_fsids) {
+        Ok(fd) => fd,
+        Err(HandleOpenError::Stale) => {
+            let (Some(fsid), Ok(handle_type)) = (
+                payload_fsid(payload),
+                payload[12..16].try_into().map(i32::from_ne_bytes),
+            ) else {
+                return EntryResolution::Unresolved;
+            };
+            return EntryResolution::Stale(StaleParentEntry {
+                fsid,
+                handle_type,
+                handle: payload[16..16 + hb].to_vec(),
+                name,
+            });
+        }
+        Err(HandleOpenError::Other) => return EntryResolution::Unresolved,
+    };
     let dir = std::fs::read_link(format!("/proc/self/fd/{dfd}")).ok();
     unsafe {
         libc::close(dfd);
     }
-    dir.map(|d| (d, name))
+    match dir {
+        Some(dir) => EntryResolution::Resolved(dir, name),
+        None => EntryResolution::Unresolved,
+    }
 }
 
 enum TargetHandleResolution {
@@ -5962,6 +6669,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let id = id_of(&dir);
         let store = Store::create_fresh(&db).unwrap();
+        store.finalize_bulk().unwrap();
         drop(store);
 
         assert!(
@@ -6292,6 +7000,64 @@ mod tests {
     }
 
     #[test]
+    fn scan_first_hint_parser_counts_records_without_resolving_paths() {
+        let records = [
+            FanotifyEventMetadata {
+                event_len: FAN_EVENT_METADATA_LEN as u32,
+                vers: FANOTIFY_METADATA_VERSION,
+                reserved: 0,
+                metadata_len: FAN_EVENT_METADATA_LEN as u16,
+                mask: FAN_MODIFY,
+                fd: -1,
+                pid: 123,
+            },
+            FanotifyEventMetadata {
+                event_len: FAN_EVENT_METADATA_LEN as u32,
+                vers: FANOTIFY_METADATA_VERSION,
+                reserved: 0,
+                metadata_len: FAN_EVENT_METADATA_LEN as u16,
+                mask: FAN_Q_OVERFLOW,
+                fd: -1,
+                pid: 0,
+            },
+        ];
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                records.as_ptr().cast::<u8>(),
+                std::mem::size_of_val(&records),
+            )
+        };
+        let (seen, overflows, consumed, lost) = parse_fanotify_hints(bytes, 8);
+        assert_eq!(seen, 1);
+        assert_eq!(overflows, 1);
+        assert_eq!(consumed, bytes.len());
+        assert!(lost);
+    }
+
+    #[test]
+    fn scan_first_hint_parser_rejects_malformed_record_lengths() {
+        let malformed = FanotifyEventMetadata {
+            event_len: (FAN_EVENT_METADATA_LEN - 1) as u32,
+            vers: FANOTIFY_METADATA_VERSION,
+            reserved: 0,
+            metadata_len: FAN_EVENT_METADATA_LEN as u16,
+            mask: FAN_MODIFY,
+            fd: -1,
+            pid: 123,
+        };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&malformed as *const FanotifyEventMetadata).cast::<u8>(),
+                FAN_EVENT_METADATA_LEN,
+            )
+        };
+        let (seen, overflows, consumed, lost) = parse_fanotify_hints(bytes, 8);
+        assert_eq!((seen, overflows), (0, 0));
+        assert_eq!(consumed, bytes.len());
+        assert!(lost);
+    }
+
+    #[test]
     fn one_identity_less_event_marks_coverage_uncertain() {
         let root = tmp("unresolved-event-root");
         let db = tmp("unresolved-event-db");
@@ -6573,6 +7339,7 @@ mod tests {
             entry: None,
             target_inode: None,
             stale_target_fsid: Some(fsid),
+            stale_parent: None,
             info_type_mask: 1u64 << FAN_EVENT_INFO_TYPE_FID,
             info_record_count: 1,
             info_records_complete: true,
@@ -6620,6 +7387,7 @@ mod tests {
             entry: Some((PathBuf::from("/watched"), "file".into())),
             target_inode: None,
             stale_target_fsid: Some(fsid),
+            stale_parent: None,
             info_type_mask: 1u64 << FAN_EVENT_INFO_TYPE_FID,
             info_record_count: 1,
             info_records_complete: true,
@@ -6638,6 +7406,367 @@ mod tests {
             HandleOpenError::Other
         );
         assert_eq!(classify_handle_open_error(None), HandleOpenError::Other);
+    }
+
+    #[test]
+    fn stale_parent_shape_and_ino32_handle_decoding() {
+        let mut handle = 41u32.to_ne_bytes().to_vec();
+        handle.extend_from_slice(&7u32.to_ne_bytes());
+        assert_eq!(
+            ino32_handle_identity(FILEID_INO32_GEN, &handle),
+            Some((41, 7))
+        );
+        assert_eq!(ino32_handle_inode(FILEID_INO32_GEN, &handle), Some(41));
+        assert_eq!(
+            ino32_handle_inode(FILEID_INO32_GEN_PARENT, &handle),
+            Some(41)
+        );
+        assert_eq!(ino32_handle_inode(0x81, &handle), None, "ino64 layout");
+        assert_eq!(ino32_handle_inode(FILEID_INO32_GEN, &handle[..4]), None);
+        let zero = [0u8; 8];
+        assert_eq!(ino32_handle_inode(FILEID_INO32_GEN, &zero), None);
+
+        let fsid = (5, 9);
+        let dfid = 1u64 << FAN_EVENT_INFO_TYPE_DFID_NAME;
+        let fid = 1u64 << FAN_EVENT_INFO_TYPE_FID;
+        let record = ResolvedEventRecord {
+            entry: None,
+            target_inode: None,
+            stale_target_fsid: None,
+            stale_parent: Some(StaleParentEntry {
+                fsid,
+                handle_type: FILEID_INO32_GEN,
+                handle,
+                name: "child".into(),
+            }),
+            info_type_mask: dfid,
+            info_record_count: 1,
+            info_records_complete: true,
+        };
+        let known = HashSet::from([fsid]);
+        assert!(stale_parent_event_shape_ok(&record, &known));
+        let with_fid = ResolvedEventRecord {
+            info_type_mask: dfid | fid,
+            info_record_count: 2,
+            ..record.clone()
+        };
+        assert!(stale_parent_event_shape_ok(&with_fid, &known));
+        for rejected in [
+            ResolvedEventRecord {
+                info_type_mask: fid,
+                ..record.clone()
+            },
+            ResolvedEventRecord {
+                info_record_count: 2,
+                ..record.clone()
+            },
+            ResolvedEventRecord {
+                info_records_complete: false,
+                ..record.clone()
+            },
+            ResolvedEventRecord {
+                target_inode: Some((1, 2)),
+                ..record.clone()
+            },
+            ResolvedEventRecord {
+                entry: Some((PathBuf::from("/watched"), "child".into())),
+                ..record.clone()
+            },
+            ResolvedEventRecord {
+                stale_parent: None,
+                ..record.clone()
+            },
+        ] {
+            assert!(!stale_parent_event_shape_ok(&rejected, &known));
+        }
+        for unsafe_name in ["..", "nested/name"] {
+            let mut rejected = record.clone();
+            rejected.stale_parent.as_mut().unwrap().name = unsafe_name.into();
+            assert!(
+                !stale_parent_event_shape_ok(&rejected, &known),
+                "accepted unsafe stale-parent event name {unsafe_name:?}"
+            );
+        }
+        assert!(
+            !stale_parent_event_shape_ok(&record, &HashSet::new()),
+            "an unprobed filesystem must keep lost-coverage semantics"
+        );
+    }
+
+    #[test]
+    fn stale_parent_footprint_detects_unresolvable_inode_and_child_edges() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE inodes(dev_id INTEGER NOT NULL,inode INTEGER NOT NULL);
+             CREATE TABLE dirents(parent_dev INTEGER NOT NULL,parent_inode INTEGER NOT NULL,
+                                 dev_id INTEGER NOT NULL,inode INTEGER NOT NULL);",
+        )
+        .unwrap();
+        assert!(!stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
+
+        // An inode row without a resolvable dirent path is already an index
+        // footprint and must prevent the stale-event ignore optimization.
+        conn.execute("INSERT INTO inodes VALUES(8,81)", []).unwrap();
+        assert!(stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
+
+        conn.execute("DELETE FROM inodes WHERE dev_id=8 AND inode=81", [])
+            .unwrap();
+        conn.execute("INSERT INTO dirents VALUES(8,81,8,82)", [])
+            .unwrap();
+        assert!(stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
+
+        conn.execute("DELETE FROM dirents", []).unwrap();
+        conn.execute("INSERT INTO dirents VALUES(8,80,8,81)", [])
+            .unwrap();
+        assert!(stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
+    }
+
+    #[test]
+    #[ignore = "requires handle-capable ext4; run explicitly in the ext4 qualification profile"]
+    fn stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = tmp("stale-parent-root");
+        let db = tmp("stale-parent-db");
+        cleanup(&root, &db);
+        std::fs::create_dir_all(root.join("gone")).unwrap();
+        std::fs::write(root.join("gone/x"), b"indexed").unwrap();
+        std::fs::create_dir_all(root.join("kept")).unwrap();
+        let mount_fd = RawFdGuard(open_dir(&root).unwrap());
+        let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
+        assert_eq!(unsafe { libc::fstatfs(mount_fd.0, fs.as_mut_ptr()) }, 0);
+        let ext4_supported = unsafe { fs.assume_init() }.f_type as u64 == EXT4_SUPER_MAGIC
+            && probe_handle_capability(&root, mount_fd.0);
+        if !ext4_supported {
+            drop(mount_fd);
+            cleanup(&root, &db);
+            panic!("explicit stale-parent integration test requires handle-capable ext4 TMPDIR");
+        }
+        scan_into(&root, &db);
+        // Created after the scan, so never committed to the index.
+        std::fs::create_dir_all(root.join("transient")).unwrap();
+
+        let handle_of = |path: &Path| -> FileHandle {
+            let c = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+            let mut handle = FileHandle {
+                handle_bytes: MAX_HANDLE_SZ as u32,
+                handle_type: 0,
+                f_handle: [0; MAX_HANDLE_SZ],
+            };
+            let mut mount_id = 0;
+            let rc = unsafe {
+                libc::name_to_handle_at(
+                    libc::AT_FDCWD,
+                    c.as_ptr(),
+                    (&mut handle as *mut FileHandle).cast::<libc::file_handle>(),
+                    &mut mount_id,
+                    0,
+                )
+            };
+            assert_eq!(rc, 0, "name_to_handle_at {}", path.display());
+            handle
+        };
+        let fsid = statfs_fsid(&root).unwrap();
+        let dfid_name_event = |mask: u64, handle: &FileHandle, name: &[u8]| -> Vec<u8> {
+            let hb = handle.handle_bytes as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&fsid.0.to_ne_bytes());
+            payload.extend_from_slice(&fsid.1.to_ne_bytes());
+            payload.extend_from_slice(&handle.handle_bytes.to_ne_bytes());
+            payload.extend_from_slice(&handle.handle_type.to_ne_bytes());
+            payload.extend_from_slice(&handle.f_handle[..hb]);
+            payload.extend_from_slice(name);
+            payload.push(0);
+            while (4 + payload.len()) % 4 != 0 {
+                payload.push(0);
+            }
+            let info = InfoHeader {
+                info_type: FAN_EVENT_INFO_TYPE_DFID_NAME,
+                pad: 0,
+                len: (4 + payload.len()) as u16,
+            };
+            let metadata = FanotifyEventMetadata {
+                event_len: (FAN_EVENT_METADATA_LEN + 4 + payload.len()) as u32,
+                vers: FANOTIFY_METADATA_VERSION,
+                reserved: 0,
+                metadata_len: FAN_EVENT_METADATA_LEN as u16,
+                mask,
+                fd: -1,
+                pid: 123,
+            };
+            let mut event = vec![0u8; FAN_EVENT_METADATA_LEN + 4];
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
+                    event.as_mut_ptr(),
+                    FAN_EVENT_METADATA_LEN,
+                );
+                std::ptr::copy_nonoverlapping(
+                    (&info as *const InfoHeader).cast::<u8>(),
+                    event.as_mut_ptr().add(FAN_EVENT_METADATA_LEN),
+                    4,
+                );
+            }
+            event.extend_from_slice(&payload);
+            event
+        };
+        let gone = handle_of(&root.join("gone"));
+        let transient = handle_of(&root.join("transient"));
+        let kept = handle_of(&root.join("kept"));
+        let kept_identity = ino32_handle_identity(
+            kept.handle_type,
+            &kept.f_handle[..kept.handle_bytes as usize],
+        )
+        .expect("ext4 directory handle includes inode generation");
+        let kept_path = root.join("kept");
+        let kept_stat = std::fs::symlink_metadata(&kept_path).unwrap();
+        let (kept_dev, kept_ino) = crate::util::indexed_identity(&kept_stat).unwrap();
+        assert!(ext4_path_matches_handle(
+            &kept_path,
+            kept_dev,
+            kept_ino,
+            kept_identity.1
+        ));
+        assert!(!ext4_path_matches_handle(
+            &kept_path,
+            kept_dev,
+            kept_ino,
+            kept_identity.1.wrapping_add(1)
+        ));
+        std::fs::remove_dir_all(root.join("gone")).unwrap();
+        std::fs::remove_dir(root.join("transient")).unwrap();
+        if ino32_handle_inode(
+            gone.handle_type,
+            &gone.f_handle[..gone.handle_bytes as usize],
+        )
+        .is_none()
+        {
+            drop(mount_fd);
+            cleanup(&root, &db);
+            panic!("explicit stale-parent integration test requires ext4 ino32 handles");
+        }
+
+        let fsfds = HashMap::from([(fsid, mount_fd.0)]);
+        let mut store = Store::open_rw(&db).unwrap();
+        let run = |events: &[Vec<u8>], capable: HashSet<(i32, i32)>, store: &mut Store| {
+            let buf: Vec<u8> = events.concat();
+            let mut capable = capable;
+            let mut pending = HashMap::new();
+            let mut born = HashSet::new();
+            let mut targets = HashSet::new();
+            let mut parent_paths = IndexedParentPathCache::default();
+            let mut lost = false;
+            parse_events(
+                &buf,
+                &fsfds,
+                &mut capable,
+                &root,
+                &db,
+                &mut pending,
+                &mut born,
+                &mut targets,
+                &mut parent_paths,
+                store,
+                true,
+                &mut lost,
+            );
+            (pending, lost)
+        };
+
+        // Indexed parent whose handle went stale: reconcile its child by path.
+        let (pending, lost) = run(
+            &[dfid_name_event(FAN_DELETE, &gone, b"x")],
+            HashSet::from([fsid]),
+            &mut store,
+        );
+        assert!(
+            !lost,
+            "an indexed stale parent is repaired by path, not lost"
+        );
+        assert_eq!(pending.get(&root.join("gone/x")), Some(&Op::Reconcile));
+
+        // A stale handle whose inode number aliases a live path but whose
+        // generation differs must not reconcile against that replacement.
+        let mut reused = kept;
+        let stale_generation = kept_identity.1.wrapping_add(1);
+        reused.f_handle[4..8].copy_from_slice(&stale_generation.to_ne_bytes());
+        let (pending, lost) = run(
+            &[dfid_name_event(FAN_DELETE, &reused, b"x")],
+            HashSet::from([fsid]),
+            &mut store,
+        );
+        assert!(
+            lost,
+            "inode reuse with a different generation must stay uncertain"
+        );
+        assert!(
+            pending.is_empty(),
+            "unsafe replacement path was queued: {pending:?}"
+        );
+
+        // An orphaned parent identity is different from a never-indexed
+        // temporary directory. Removing its path edge while leaving its inode
+        // and child rows simulates a partial index update; the stale event must
+        // keep coverage uncertain instead of taking the ignore branch.
+        let (gone_dev, gone_ino): (i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT dev_id,inode FROM dirents WHERE name=?1 LIMIT 1",
+                [&b"gone"[..]],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "DELETE FROM dirents WHERE dev_id=?1 AND inode=?2",
+                params![gone_dev, gone_ino],
+            )
+            .unwrap();
+        let (_, lost) = run(
+            &[dfid_name_event(FAN_DELETE, &gone, b"x")],
+            HashSet::from([fsid]),
+            &mut store,
+        );
+        assert!(
+            lost,
+            "an unresolvable parent with indexed rows must not be ignored"
+        );
+
+        // Freed directory that was never indexed: nothing indexed can be under it.
+        let (pending, lost) = run(
+            &[
+                dfid_name_event(FAN_CREATE, &transient, b"y"),
+                dfid_name_event(FAN_DELETE, &transient, b"y"),
+                dfid_name_event(FAN_CREATE | FAN_ONDIR, &transient, b"z"),
+            ],
+            HashSet::from([fsid]),
+            &mut store,
+        );
+        assert!(!lost);
+        assert!(pending.is_empty(), "unexpected pending: {pending:?}");
+
+        // A live parent still resolves normally and is unaffected.
+        let (pending, lost) = run(
+            &[dfid_name_event(FAN_CREATE, &kept, b"new")],
+            HashSet::from([fsid]),
+            &mut store,
+        );
+        assert!(!lost);
+        assert!(pending.contains_key(&root.join("kept/new")));
+
+        // Without a prior successful handle round trip on this filesystem the
+        // stale parent proves nothing, so coverage must stay uncertain.
+        let (_, lost) = run(
+            &[dfid_name_event(FAN_DELETE, &gone, b"x")],
+            HashSet::new(),
+            &mut store,
+        );
+        assert!(lost, "an unprobed filesystem keeps lost-coverage semantics");
+
+        drop(store);
+        drop(mount_fd);
+        cleanup(&root, &db);
     }
 
     #[test]
@@ -7298,6 +8427,41 @@ mod tests {
         assert_eq!(reconciliation_retry_delay(2), Duration::from_secs(120));
         assert!(!automatic_reconciliation_circuit_open(1));
         assert!(automatic_reconciliation_circuit_open(2));
+        assert!(!reconciliation_retry_circuit_blocks_request(false, false));
+        assert!(reconciliation_retry_circuit_blocks_request(true, false));
+        assert!(!reconciliation_retry_circuit_blocks_request(true, true));
+        assert_eq!(
+            bounded_retry_remaining_seconds(Some("150"), 100, Duration::from_secs(120)),
+            (50, false)
+        );
+        assert_eq!(
+            bounded_retry_remaining_seconds(Some("90"), 100, Duration::from_secs(120)),
+            (0, false)
+        );
+        assert_eq!(
+            bounded_retry_remaining_seconds(Some("1000"), 100, Duration::from_secs(120)),
+            (120, false)
+        );
+        assert_eq!(
+            bounded_retry_remaining_seconds(Some("corrupt"), 100, Duration::from_secs(120)),
+            (120, true)
+        );
+        assert_eq!(
+            bounded_retry_remaining_seconds(None, 100, Duration::from_secs(120)),
+            (60, false)
+        );
+        assert_eq!(
+            reconciliation_retry_remaining_seconds(Some("150"), 100),
+            Some(50)
+        );
+        assert_eq!(
+            reconciliation_retry_remaining_seconds(Some("90"), 100),
+            Some(0)
+        );
+        assert_eq!(
+            reconciliation_retry_remaining_seconds(Some("corrupt"), 100),
+            None
+        );
     }
 
     #[test]
@@ -7307,8 +8471,82 @@ mod tests {
         for corrupt in ["", "-1", "not-a-number", "4294967296"] {
             let (attempts, corrupt_state) = parse_reconciliation_attempts(Some(corrupt));
             assert!(corrupt_state, "accepted malformed retry count {corrupt:?}");
+            assert_eq!(attempts, u32::MAX);
             assert!(automatic_reconciliation_circuit_open(attempts));
+            assert_eq!(
+                reconciliation_retry_delay(attempts),
+                Duration::from_secs(30_720)
+            );
         }
+    }
+
+    #[test]
+    fn persisted_reconciliation_retry_deadline_survives_restart_bounded() {
+        let dir = tmp("retry-deadline");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("index.db");
+        let store = Store::open_rw(&db).unwrap();
+        let now = crate::util::now_secs();
+
+        // Legacy indexes may have failed-attempt metadata without a persisted
+        // deadline. Upgrade with only the short base delay, not the 8.5-hour
+        // maximum delay implied by a large historic attempt count.
+        let restored = restore_reconciliation_retry_deadline(&store, 2, true).unwrap();
+        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
+        assert!((45..=60).contains(&remaining));
+        let normalized = store
+            .get_meta(RECONCILIATION_RETRY_AFTER_META)
+            .unwrap()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+        assert!(normalized <= crate::util::now_secs() + 60);
+
+        store
+            .set_meta(RECONCILIATION_RETRY_AFTER_META, &(now + 50).to_string())
+            .unwrap();
+        let restored = restore_reconciliation_retry_deadline(&store, 2, true).unwrap();
+        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
+        assert!((48..=50).contains(&remaining));
+
+        store
+            .set_meta(RECONCILIATION_RETRY_AFTER_META, &(now + 10_000).to_string())
+            .unwrap();
+        let restored = restore_reconciliation_retry_deadline(&store, 2, true).unwrap();
+        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
+        assert!((118..=120).contains(&remaining));
+        let normalized = store
+            .get_meta(RECONCILIATION_RETRY_AFTER_META)
+            .unwrap()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+        assert!(normalized <= crate::util::now_secs() + 120);
+
+        store
+            .set_meta(RECONCILIATION_RETRY_AFTER_META, "invalid")
+            .unwrap();
+        let restored = restore_reconciliation_retry_deadline(&store, u32::MAX, true).unwrap();
+        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
+        assert!((30_718..=30_720).contains(&remaining));
+
+        store
+            .set_meta(RECONCILIATION_RETRY_AFTER_META, "legacy-read-only")
+            .unwrap();
+        let restored = restore_reconciliation_retry_deadline(&store, 2, false).unwrap();
+        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
+        assert!((118..=120).contains(&remaining));
+        assert_eq!(
+            store
+                .get_meta(RECONCILIATION_RETRY_AFTER_META)
+                .unwrap()
+                .as_deref(),
+            Some("legacy-read-only")
+        );
+
+        drop(store);
+        cleanup(&dir, &db);
     }
 
     #[test]
@@ -7414,6 +8652,82 @@ mod tests {
     }
 
     #[test]
+    fn fanotify_queue_watermarks_scale_with_configured_capacity() {
+        let (high, low) = fanotify_queue_watermarks(100);
+        assert_eq!(high, 100 * FAN_EVENT_METADATA_LEN as u64 * 75 / 100);
+        assert_eq!(low, 100 * FAN_EVENT_METADATA_LEN as u64 / 2);
+        assert!(fanotify_queue_watermarks(0).0 >= FAN_EVENT_METADATA_LEN as u64);
+    }
+
+    #[test]
+    fn fanotify_queue_pressure_uses_hysteresis_and_fails_safe() {
+        let (high, low) = fanotify_queue_watermarks(100);
+        assert!(!fanotify_queue_pressure_override(
+            false,
+            Some(high - 1),
+            None,
+            high,
+            low
+        ));
+        assert!(fanotify_queue_pressure_override(
+            false,
+            Some(high),
+            None,
+            high,
+            low
+        ));
+        assert!(fanotify_queue_pressure_override(
+            true,
+            Some(low + 1),
+            None,
+            high,
+            low
+        ));
+        assert!(!fanotify_queue_pressure_override(
+            true,
+            Some(low),
+            None,
+            high,
+            low
+        ));
+        assert!(fanotify_queue_pressure_override(
+            false,
+            None,
+            Some(true),
+            high,
+            low
+        ));
+        assert!(!fanotify_queue_pressure_override(
+            false,
+            None,
+            Some(false),
+            high,
+            low
+        ));
+        // Unknown queue state must prefer draining over sleeping.
+        assert!(fanotify_queue_pressure_override(
+            false, None, None, high, low
+        ));
+    }
+
+    #[test]
+    fn governor_counts_queue_pressure_episodes_and_duration() {
+        let mut governor = CpuGovernor::new(0.25, 100);
+        let started = Instant::now();
+        governor.last_queue_bytes = Some(governor.queue_high_watermark_bytes);
+        governor.set_queue_pressure(true, started);
+        governor.set_queue_pressure(true, started + Duration::from_secs(1));
+        assert_eq!(governor.queue_pressure_episodes, 1);
+        assert_eq!(governor.queue_pressure_total, Duration::ZERO);
+
+        governor.last_queue_bytes = Some(governor.queue_low_watermark_bytes);
+        governor.set_queue_pressure(false, started + Duration::from_millis(2_500));
+        assert_eq!(governor.queue_pressure_episodes, 1);
+        assert_eq!(governor.queue_pressure_total, Duration::from_millis(2_500));
+        assert!(governor.queue_pressure_started.is_none());
+    }
+
+    #[test]
     fn throttled_watch_status_stays_available_without_claiming_empty_kernel_queue() {
         let db = std::env::temp_dir().join(format!(
             "dux-throttled-status-{}-{}.db",
@@ -7433,6 +8747,7 @@ mod tests {
                 behind_ms: 5_000,
                 kernel_overflow_notifications: 3,
                 uncertain: false,
+                scan_first: false,
             },
             Duration::from_secs(4),
         );
@@ -7461,7 +8776,10 @@ mod tests {
             now_secs()
         ));
         let status_path = crate::util::runtime_path(&db, "watch.status");
-        let mut governor = CpuGovernor::new(0.10);
+        let mut pipe = [0; 2];
+        assert_eq!(unsafe { libc::pipe(pipe.as_mut_ptr()) }, 0);
+        let (read_fd, write_fd) = (pipe[0], pipe[1]);
+        let mut governor = CpuGovernor::new(0.10, 100);
         let cpu_start = thread_cpu_secs();
         let wall_start = Instant::now();
         // Inject synthetic duty-cycle debt instead of busy-spinning. Under a
@@ -7471,6 +8789,7 @@ mod tests {
         governor.cpu_ref = cpu_start - 0.5;
         governor.wall_ref = wall_start;
         governor.throttle(
+            read_fd,
             &db,
             Some(ThrottleWatchSnapshot {
                 pending: 4,
@@ -7482,6 +8801,7 @@ mod tests {
                 behind_ms: 1_000,
                 kernel_overflow_notifications: 0,
                 uncertain: false,
+                scan_first: false,
             }),
         );
         let elapsed = wall_start.elapsed().as_secs_f64();
@@ -7490,6 +8810,10 @@ mod tests {
         RESCAN.store(old_rescan, Ordering::SeqCst);
         SHUTDOWN.store(old_shutdown, Ordering::SeqCst);
         let _ = std::fs::remove_file(status_path);
+        unsafe {
+            libc::close(read_fd);
+            libc::close(write_fd);
+        }
 
         assert!(elapsed >= 2.0, "governor skipped wait: {elapsed:.3}s");
         assert!(
