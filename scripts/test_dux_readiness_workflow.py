@@ -124,6 +124,29 @@ class ReadinessHarnessTests(unittest.TestCase):
 
         self.assertFalse(READINESS.overflow_reconciliation_evidence(log)['passed'])
 
+    def test_scan_first_overflow_requires_full_accounted_exact_reconciliation(self):
+        log = "\n".join((
+            "starting background reconciliation of /fixture; event ingestion remains active",
+            "rescan complete: 118443 files, 10 dirs, 118454 staged path instances (0 coverage issues)",
+            "reconciliation accounting verification passed",
+        ))
+        evidence = READINESS.scan_first_overflow_recovery_evidence(
+            log, 2, 3, "7", "8", True,
+        )
+        self.assertTrue(evidence["passed"])
+        self.assertEqual(evidence["mode"], "scan_first")
+        self.assertTrue(evidence["exact_filesystem_match_and_clean_status"])
+
+    def test_scan_first_overflow_rejects_incomplete_or_nonexact_recovery(self):
+        log = "\n".join((
+            "starting background reconciliation of /fixture; event ingestion remains active",
+            "rescan complete: 118443 files, 10 dirs (1 coverage issue)",
+        ))
+        evidence = READINESS.scan_first_overflow_recovery_evidence(
+            log, 2, 3, "7", "8", False,
+        )
+        self.assertFalse(evidence["passed"])
+
     def test_legacy_pipeline_status_is_parsed_without_runtime_marker(self):
         output = (
             "pipeline: drained; 3 pending / 500000 cap; 41 events (92.7% resolved); "

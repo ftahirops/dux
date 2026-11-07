@@ -594,52 +594,133 @@ def overflow_reconciliation_evidence(daemon_log):
     }
 
 
+def scan_first_overflow_recovery_evidence(
+    daemon_log, overflow_before, overflow_after, generation_before,
+    generation_after, exact_index,
+):
+    """Prove scan-first repairs a real queue overflow without event replay."""
+    overflow_observed = overflow_after > overflow_before
+    start_at = daemon_log.find("starting background reconciliation of ")
+    scan_at = daemon_log.find("rescan complete:", start_at) if start_at >= 0 else -1
+    accounting_at = (
+        daemon_log.find("reconciliation accounting verification passed", scan_at)
+        if scan_at >= 0 else -1
+    )
+    scan_completed = scan_at >= 0
+    accounting_verified = accounting_at >= 0
+    generation_advanced = generation_after != generation_before
+    return {
+        "mode": "scan_first",
+        "overflow_observed": overflow_observed,
+        "overflow_notifications_before": overflow_before,
+        "overflow_notifications_after": overflow_after,
+        "reconciliation_started": start_at >= 0,
+        "scan_completed_after_reconciliation": scan_completed,
+        "accounting_verified_after_reconciliation": accounting_verified,
+        "scan_generation_advanced": generation_advanced,
+        "exact_filesystem_match_and_clean_status": exact_index,
+        "passed": (
+            overflow_observed and start_at >= 0 and scan_completed
+            and accounting_verified and generation_advanced and exact_index
+        ),
+    }
+
+
 def overflow_test(case, _args, evidence):
     maximum = int(Path("/proc/sys/fs/fanotify/max_queued_events").read_text())
     assert maximum <= 65536, "configured kernel queue too large for this bounded local test"
     statvfs = os.statvfs(case.tree)
     validate_overflow_recovery_headroom(statvfs.f_bavail * statvfs.f_frsize)
     daemon = Daemon(case)
-    before = daemon.exact()["scan_generation"]
+    before_meta = daemon.exact()
+    before = before_meta["scan_generation"]
+    before_record = daemon.record()
+    log_path = case.base / "daemon.log"
+    log_offset = log_path.stat().st_size
     daemon.process.send_signal(signal.SIGSTOP)
     try:
         with contextlib.closing(sqlite3.connect(case.db)) as conn, conn:
-            conn.execute("CREATE TRIGGER block_dirty BEFORE INSERT ON meta WHEN new.key='dirty_since' BEGIN SELECT RAISE(ABORT,'dirty metadata unavailable'); END")
+            conn.execute("CREATE TRIGGER block_dirty BEFORE INSERT ON meta WHEN new.key='dirty_reason' AND new.value='fanotify queue overflow' BEGIN SELECT RAISE(ABORT,'dirty metadata unavailable'); END")
         storm = case.tree / "storm"
         storm.mkdir()
         for i in range(maximum + 2048):
             (storm / f"queued-{i}").touch()
     finally:
         daemon.process.send_signal(signal.SIGCONT)
-    daemon.wait(lambda: daemon.record()["uncertain"], "explicit uncertainty after true kernel queue overflow")
-    with contextlib.closing(snapshot(case.db)) as conn:
-        assert conn.execute("SELECT value FROM meta WHERE key='dirty_since'").fetchone() is None
-    status = command(case.binary, "--db", case.db, "status", env=case.env).stdout
-    assert "DIRTY" in status, "SQLite metadata failure hid actual event loss"
-    metrics = command(case.binary, "--db", case.db, "metrics", "--top", "0", env=case.env).stdout
-    assert "\ndux_index_dirty 1\n" in metrics, "monitoring hid actual event loss"
-    assert "\ndux_index_caught_up 0\n" in metrics, "monitoring incorrectly reported trustworthy data"
-    with contextlib.closing(sqlite3.connect(case.db, timeout=10)) as conn, conn:
-        conn.execute("DROP TRIGGER block_dirty")
-    daemon.process.send_signal(signal.SIGHUP)
-    started = time.monotonic()
-    # Recovery includes rebuilding the full overflowed path set, then two
-    # exact filesystem snapshots. Under the production cgroup budget the scan
-    # and truth walks can trigger the pressure guardian; preserve a generous
-    # but finite bound and let exact() report whether delay came from pause,
-    # index mismatch, or missing fresh watcher publications.
-    daemon.exact(before, timeout=600)
-    daemon_log = (case.base / "daemon.log").read_text(errors="replace")
-    reconciliation_evidence = overflow_reconciliation_evidence(daemon_log)
-    evidence.update(queue_capacity=maximum, created=maximum+2048,
-                    recovery_seconds=round(time.monotonic()-started, 3),
-                    metadata_write_failure_visible=True,
-                    persistent_backlog_reconciliation=reconciliation_evidence)
-    persistent_backlog_reconciled = reconciliation_evidence['passed']
-    assert persistent_backlog_reconciled, (
-        "overflow recovery did not reconcile, verify accounting, and catch up after a "
-        f"persistent backlog: {reconciliation_evidence}"
-    )
+    if before_record["scan_first"]:
+        overflow_record = daemon.wait(
+            lambda: (
+                (record := daemon.record())["kernel_overflow_notifications"]
+                > before_record["kernel_overflow_notifications"]
+            ) and record,
+            "scan-first observes a true kernel queue overflow",
+        )
+        assert overflow_record["uncertain"], (
+            "kernel overflow counter advanced without exposing uncertainty: "
+            f"{overflow_record}"
+        )
+        daemon.wait(
+            lambda: "could not persist dirty index marker and reason" in
+            log_path.read_text(errors="replace")[log_offset:],
+            "failed dirty-metadata write is logged while uncertainty stays latched",
+        )
+        # Remove the injected metadata failure as soon as the kernel loss is
+        # observed. The daemon's in-memory uncertainty must already be latched;
+        # automatic reconciliation then has to repair without an operator scan.
+        with contextlib.closing(sqlite3.connect(case.db, timeout=10)) as conn, conn:
+            conn.execute("DROP TRIGGER block_dirty")
+        log = log_path.read_text(errors="replace")[log_offset:]
+        started = time.monotonic()
+        recovered_meta = daemon.exact(before, timeout=600)
+        recovery_seconds = round(time.monotonic() - started, 3)
+        after_record = daemon.record()
+        reconciliation_evidence = scan_first_overflow_recovery_evidence(
+            log,
+            before_record["kernel_overflow_notifications"],
+            overflow_record["kernel_overflow_notifications"],
+            before,
+            recovered_meta.get("scan_generation"),
+            not after_record["uncertain"]
+            and not any(key in recovered_meta for key in ("dirty_since", "flush_error")),
+        )
+        evidence.update(
+            queue_capacity=maximum,
+            created=maximum + 2048,
+            recovery_seconds=recovery_seconds,
+            metadata_write_failure_visible=True,
+            automatic_scan_first_overflow_recovery=reconciliation_evidence,
+        )
+        assert reconciliation_evidence["passed"], (
+            "scan-first overflow recovery did not complete a full, accounted, exact scan: "
+            f"{reconciliation_evidence}; log={log[-4000:]}"
+        )
+    else:
+        daemon.wait(lambda: daemon.record()["uncertain"], "explicit uncertainty after true kernel queue overflow")
+        with contextlib.closing(sqlite3.connect(case.db)) as conn:
+            assert conn.execute("SELECT value FROM meta WHERE key='dirty_since'").fetchone() is None
+        status = command(case.binary, "--db", case.db, "status", env=case.env).stdout
+        assert "DIRTY" in status, "SQLite metadata failure hid actual event loss"
+        metrics = command(case.binary, "--db", case.db, "metrics", "--top", "0", env=case.env).stdout
+        assert "\ndux_index_dirty 1\n" in metrics, "monitoring hid actual event loss"
+        assert "\ndux_index_caught_up 0\n" in metrics, "monitoring incorrectly reported trustworthy data"
+        with contextlib.closing(sqlite3.connect(case.db, timeout=10)) as conn, conn:
+            conn.execute("DROP TRIGGER block_dirty")
+        daemon.process.send_signal(signal.SIGHUP)
+        started = time.monotonic()
+        daemon.exact(before, timeout=600)
+        daemon_log = log_path.read_text(errors="replace")[log_offset:]
+        reconciliation_evidence = overflow_reconciliation_evidence(daemon_log)
+        evidence.update(
+            queue_capacity=maximum,
+            created=maximum + 2048,
+            recovery_seconds=round(time.monotonic() - started, 3),
+            metadata_write_failure_visible=True,
+            persistent_backlog_reconciliation=reconciliation_evidence,
+        )
+        assert reconciliation_evidence["passed"], (
+            "overflow recovery did not reconcile, verify accounting, and catch up after a "
+            f"persistent backlog: {reconciliation_evidence}"
+        )
     case.history()
     # Keep later suites inside the disposable filesystem's bounded inode
     # budget. The recovery assertion above includes the full overflow storm;
@@ -649,10 +730,15 @@ def overflow_test(case, _args, evidence):
     for path in storm.iterdir():
         path.unlink()
         removed += 1
-        if removed % 2000 == 0:
+        if removed % 2000 == 0 and not before_record["scan_first"]:
             daemon.exact(timeout=180)
             case.history()
     storm.rmdir()
+    if before_record["scan_first"]:
+        # Ordinary scan-first hints do not mutate rows; request one complete
+        # observation after the bulk cleanup instead of forcing a full-tree
+        # scan after every small delete batch.
+        daemon.process.send_signal(signal.SIGHUP)
     daemon.exact(timeout=600)
     case.history()
     daemon.stop()

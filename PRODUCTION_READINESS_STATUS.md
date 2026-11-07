@@ -1,10 +1,23 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 15:27 UTC
+**Updated:** 2026-11-07 16:00 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
 ## Live production evidence
+
+Fresh read-only sample at **16:00 UTC**: `dux.service` remains active with one
+lifetime restart, but the installed `/usr/bin/dux` is still 0.6.3 (source hash
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`; binary
+SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`).
+The index remains dirty from fanotify overflow, with **169 kernel overflows**,
+**505,945 dropped userspace updates**, **29 pending updates**, and **13 h 32 m
+reported behind**. The last full scan is **51 h 11 m old**. It reports
+1,252,544 indexed nodes and 117,773,639,680 indexed bytes; the SQLite file is
+2,407,358,464 bytes and its WAL is 128 MiB. Root has 65 GiB free. The service
+still has a 100% one-core quota and 4 GiB memory limit. These are production
+observations, not a controlled causal test. No production files or service
+settings were changed.
 
 Fresh sample at **14:01 UTC**: the production daemon remains active but the
 index is dirty from fanotify overflow, about **11 h 32 min behind**, with its
@@ -187,8 +200,9 @@ An unresolvable individual scope instead leaves freshness stale for the normal
 cadence; ordinary churn during a scan no longer schedules an immediate scan
 loop. Actual kernel overflow and userspace pipeline loss still trigger an
 immediate follow-up after the current scan. The full VPS2 suite passed **292
-tests, 2 ignored** after this change. Strict Clippy and exact candidate build
-are in progress. This is still a partial scan-first implementation: event
+tests, 2 ignored** after this change. Strict all-target/all-feature Clippy,
+formatting, diff checks, and the exact debug candidate build passed. This is
+still a partial scan-first implementation: event
 prioritization remains full-root, and forced-overflow replay and concurrent
 churn convergence have not yet been qualified. The 72-hour soak is running a
 previous candidate build and is not evidence for this source revision.
@@ -200,6 +214,13 @@ candidate completed the follow-up observation with the new file included in
 the scan totals. Both runs had zero forced-followup log entries and zero kernel
 overflow reports. These are short functional checks, not burst-capacity or
 long-duration qualification.
+
+**Dependency audit (2026-11-07):** online `cargo audit -D warnings --json`
+against the current `Cargo.lock` reported zero known vulnerabilities and zero
+warnings across 229 locked dependencies. The refreshed RustSec database was at
+commit `309392b18f6b17022f82c701f300433126901068` (2026-11-06 15:34 UTC), about
+24.5 hours before this check. This is a clean audit against that advisory
+snapshot; repeat it at release time because the feed changes continuously.
 
 **Status correctness fix (2026-11-07):** human and JSON status now consult the
 live watch mode before interpreting persisted retry counters. A legacy counter
