@@ -8063,3 +8063,36 @@ After creating the directory, the suite passed. This setup failure is not
 counted as product evidence. Machine-readable evidence for this post-fix run
 has not yet been exported to a qualification JSON artifact; the command output
 and systemd result are the evidence for this run.
+
+### Production binary and live watcher follow-up — 2026-11-07 07:32 UTC
+
+Read-only `dux status` still reports the production index `dirty=true`,
+`caught_up=false`, dirty reason `fanotify queue overflow`, **16 lifetime kernel
+overflow notifications**, **219 pending updates**, and **18,235.9 seconds
+(5h03m56s) behind**. No reconciliation scan was in progress. The installed
+`/usr/bin/dux` and running `/proc/988284/exe` have SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060` and report
+commit `e0cc915f8f37` / source-tree SHA-256
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`. This
+commit is an ancestor of candidate source commit `0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5`, whose source-tree SHA-256 is
+`39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3`.
+
+The production journal had **799** `open_by_handle_at ... ESTALE` unresolved
+event warnings in the sampled interval from 07:00 UTC to this observation, and
+zero corresponding `ignored stale target-only FAN_ATTRIB` messages. The
+candidate's intervening source changes add startup filesystem handle-capability
+probing and narrowly suppress only stale target-only `FAN_ATTRIB` events on a
+filesystem whose handle round-trip probe succeeded (commits `690507c`,
+`49901ba`, and `075f3f5`). Focused tests for these paths passed earlier, but
+this comparison does **not** prove that this change alone fixes the production
+overflow recurrence. The candidate 72-hour isolated soak remains active on
+VPS2; no production binary/service/database change was made during this
+observation. The installed executable is still the older build, so production
+recovery after a reviewed candidate deployment remains an explicit gate.
+
+Disk check at this checkpoint: root filesystem had **65 GiB available / 64%
+used**; `target/readiness` occupied **7.1 GiB**, while durable
+`docs/qualification` occupied **4.2 MiB**. The readiness directory contains
+preserved failed indexes, test binaries, logs, and scale/failure fixtures; this
+pass only inventoried the contents and deleted nothing, to avoid destroying
+failure evidence needed for diagnosis.
