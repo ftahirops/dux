@@ -297,6 +297,14 @@ fn fanotify_reader_loop(
         pfd.revents = 0;
         let polled = unsafe { libc::poll(&mut pfd, 1, HINT_READER_POLL_MS) };
         if polled == 0 {
+            // A previous bounded drain may have stopped at its time/read cap
+            // with `kernel_empty=false`. Once poll observes the fd idle for a
+            // full interval, publish that the kernel queue is now drained;
+            // otherwise reconciliation and accounting checks can remain
+            // blocked forever after a burst that ended between reader ticks.
+            if !kernel_empty.swap(true, Ordering::AcqRel) {
+                notify_hint_reader(notify);
+            }
             continue;
         }
         if polled < 0 {
@@ -625,6 +633,14 @@ fn scan_first_forced_followup(
         && scan_errors == 0
 }
 
+fn scan_first_hint_invalidates_observation(
+    scan_active: bool,
+    in_scope: bool,
+    scope_unresolved: bool,
+) -> bool {
+    in_scope || (scan_active && scope_unresolved)
+}
+
 fn automatic_reconciliation_request_allowed(
     retry_paused: bool,
     scan_active: bool,
@@ -895,8 +911,12 @@ fn accounting_check_should_cancel(
     kernel_empty: bool,
     pending: usize,
     deferred: usize,
+    reconcile_first: bool,
 ) -> bool {
-    pressure == crate::guard::Pressure::Critical || !kernel_empty || pending > 0 || deferred > 0
+    pressure == crate::guard::Pressure::Critical
+        || (!reconcile_first && !kernel_empty)
+        || pending > 0
+        || deferred > 0
 }
 
 /// Periodic whole-index accounting checks must not monopolize the watcher
@@ -2307,7 +2327,12 @@ pub fn run_daemon(
             while let Ok(result) = resolver.rx.try_recv() {
                 reader.queued_chunks.fetch_sub(1, Ordering::AcqRel);
                 ev_seen = ev_seen.saturating_add(result.seen);
-                if result.seen > 0 || result.lost {
+                let observation_invalidated = scan_first_hint_invalidates_observation(
+                    scan_job.is_some(),
+                    result.seen > 0,
+                    result.lost,
+                );
+                if observation_invalidated {
                     if !index_uncertain {
                         persist_dirty_marker_best_effort(
                             &store,
@@ -2329,9 +2354,15 @@ pub fn run_daemon(
                     // Keep the index stale and let the fixed cadence repair it;
                     // immediately rescanning an active, noisy filesystem can
                     // otherwise form an unbounded scan loop.
-                    tracing::debug!(
-                        "fanotify parent scope could not be resolved; full observation remains scheduled"
-                    );
+                    if observation_invalidated {
+                        tracing::debug!(
+                            "fanotify parent scope could not be resolved during observation; full observation remains scheduled"
+                        );
+                    } else {
+                        tracing::debug!(
+                            "fanotify parent scope could not be resolved after observation; last-observed view remains available until the next scan"
+                        );
+                    }
                 }
             }
             if resolver.dropped.swap(false, Ordering::AcqRel) {
@@ -3090,6 +3121,7 @@ pub fn run_daemon(
             kernel_empty,
             pending.len(),
             deferred_from.len().saturating_add(target_refreshes.len()),
+            reconcile_first,
         ) || RESCAN.load(Ordering::SeqCst)
         {
             if let Some(check) = &accounting_check {
@@ -3879,7 +3911,13 @@ pub fn run_daemon(
                 }
             }
             if scan_job.is_none() && pressure != crate::guard::Pressure::Critical {
-                let caught_up = kernel_empty && pending.is_empty() && deferred_from.is_empty();
+                // Scan-first accounting verifies the last completed observation.
+                // Do not require the global fanotify queue to become empty: it
+                // can contain only out-of-root filesystem activity, and any
+                // in-scope hint received while checking cancels this worker.
+                let caught_up = (reconcile_first || kernel_empty)
+                    && pending.is_empty()
+                    && deferred_from.is_empty();
                 if accounting_check.is_none()
                     && pending_reconciliation_check == Some(true)
                     && caught_up
@@ -7163,6 +7201,57 @@ mod tests {
         drop(notify_guard);
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dedicated_hint_reader_clears_stale_nonempty_state_after_idle_poll() {
+        let mut pipe = [-1; 2];
+        assert_eq!(
+            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) },
+            0
+        );
+        let read_guard = RawFdGuard(pipe[0]);
+        let write_guard = RawFdGuard(pipe[1]);
+        let notify = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        assert!(notify >= 0);
+        let notify_guard = RawFdGuard(notify);
+        let (tx, _rx) = mpsc::sync_channel(2);
+        let kernel_empty = Arc::new(AtomicBool::new(false));
+        let queued_chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_empty = Arc::clone(&kernel_empty);
+        let thread_queued = Arc::clone(&queued_chunks);
+        let thread_dropped = Arc::clone(&dropped);
+        let thread_stop = Arc::clone(&stop);
+        let join = std::thread::spawn(move || {
+            let read_fd = read_guard.0;
+            fanotify_reader_loop(
+                read_fd,
+                notify,
+                tx,
+                thread_empty,
+                thread_queued,
+                thread_dropped,
+                thread_stop,
+            );
+            drop(read_guard);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !kernel_empty.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(
+            kernel_empty.load(Ordering::Acquire),
+            "an idle reader must clear the nonempty state after its poll timeout"
+        );
+
+        stop.store(true, Ordering::Release);
+        join.join().unwrap();
+        drop(write_guard);
+        drop(notify_guard);
+    }
+
     #[test]
     fn hint_resolver_processes_bounded_jobs_off_coordinator() {
         let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
@@ -7903,6 +7992,16 @@ mod tests {
         assert!(scan_first_forced_followup(true, true, false, false, 0));
         assert!(!scan_first_forced_followup(true, true, true, false, 0));
         assert!(!scan_first_forced_followup(false, true, false, false, 0));
+    }
+
+    #[test]
+    fn scan_first_unresolved_hint_only_invalidates_an_active_observation() {
+        assert!(scan_first_hint_invalidates_observation(true, false, true));
+        assert!(scan_first_hint_invalidates_observation(false, true, false));
+        assert!(!scan_first_hint_invalidates_observation(false, false, true));
+        assert!(!scan_first_hint_invalidates_observation(
+            false, false, false
+        ));
     }
 
     #[test]
@@ -9056,24 +9155,45 @@ mod tests {
             true,
             0,
             0,
+            false,
         ));
         assert!(accounting_check_should_cancel(
             crate::guard::Pressure::Normal,
             false,
             0,
             0,
+            false,
         ));
         assert!(accounting_check_should_cancel(
             crate::guard::Pressure::Normal,
             true,
             1,
             0,
+            false,
         ));
         assert!(accounting_check_should_cancel(
             crate::guard::Pressure::Critical,
             true,
             0,
             0,
+            false,
+        ));
+        assert!(
+            !accounting_check_should_cancel(
+                crate::guard::Pressure::Normal,
+                false,
+                0,
+                0,
+                true,
+            ),
+            "scan-first accounting may verify a last-observed view while irrelevant kernel hints drain"
+        );
+        assert!(accounting_check_should_cancel(
+            crate::guard::Pressure::Critical,
+            false,
+            0,
+            0,
+            true,
         ));
     }
 

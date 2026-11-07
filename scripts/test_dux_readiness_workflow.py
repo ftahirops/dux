@@ -208,6 +208,17 @@ class ReadinessHarnessTests(unittest.TestCase):
         self.assertTrue(result["uncertain"])
         self.assertEqual(result["kernel_overflow_notifications"], 2)
 
+    def test_scan_first_last_observation_does_not_wait_for_irrelevant_queue_drain(self):
+        self.assertTrue(READINESS.pipeline_records_drained({
+            "pending": 0, "drained": False, "scan_first": True,
+        }))
+        self.assertFalse(READINESS.pipeline_records_drained({
+            "pending": 1, "drained": False, "scan_first": True,
+        }))
+        self.assertFalse(READINESS.pipeline_records_drained({
+            "pending": 0, "drained": False, "scan_first": False,
+        }))
+
     def test_pressure_suite_requires_fault_binary_before_starting_worker(self):
         result = subprocess.run(
             [sys.executable, str(HARNESS), "--suites", "pressure"],

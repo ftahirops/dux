@@ -1,0 +1,76 @@
+{
+  "started_at": "2026-11-07T17:09:24Z",
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "seed": 20261022,
+  "binary": "/var/tmp/dux-host-target-2b02502/release/dux",
+  "binary_sha256": "67e4c964a26d5f4ae4f5b25af1adf2e932c89953cef9d1447ceea4b64c376c1e",
+  "fault_binary_sha256": null,
+  "crash_rounds": 30,
+  "filesystem": "ext4 disposable loop image",
+  "workspace_parent": "/dev/shm",
+  "workspace_device": 26,
+  "workspace_filesystem_type": "tmpfs",
+  "workspace_free_bytes_at_start": 2257936384,
+  "harness_sha256": "d4e0cc3379db54904478a1f7fd98ebb6f406058eb582208a904a620475fda99b",
+  "seed_files": 256,
+  "filesystem_image_mib": 1536,
+  "qualification_worker_limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "not_qualified_by_this_run": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "capability",
+    "churn",
+    "coverage",
+    "cpu",
+    "crash",
+    "disk",
+    "mount",
+    "oom",
+    "pressure",
+    "retry",
+    "root",
+    "soak",
+    "startup",
+    "wal"
+  ],
+  "suites": {
+    "overflow": {
+      "status": "passed",
+      "evidence": {
+        "queue_capacity": 16384,
+        "created": 18432,
+        "recovery_seconds": 13.063,
+        "automatic_scan_first_overflow_recovery": {
+          "mode": "scan_first",
+          "overflow_observed": true,
+          "overflow_notifications_before": 0,
+          "overflow_notifications_after": 1,
+          "reconciliation_started": true,
+          "scan_completed_after_reconciliation": true,
+          "accounting_verified_after_reconciliation": true,
+          "scan_generation_advanced": true,
+          "exact_filesystem_match_and_clean_status": true,
+          "passed": true
+        }
+      },
+      "elapsed_seconds": 23.343
+    }
+  },
+  "status": "passed",
+  "current_suite": null,
+  "last_checkpoint_at": "2026-11-07T17:09:47Z",
+  "current_suite_started_at": "2026-11-07T17:09:24Z",
+  "log_tail": "\u001b[2m2026-11-07T17:09:24.622533Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected startup index source \u001b[3mrebuilt\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mschema_version\u001b[0m\u001b[2m=\u001b[0m7 \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-07T17:09:24.622585Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m resuming a pre-existing index this daemon didn't build \u2014 marking dirty; automatic background reconciliation will start\n\u001b[2m2026-11-07T17:09:24.623681Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify queue-pressure CPU throttle thresholds \u001b[3mmax_queued_events\u001b[0m\u001b[2m=\u001b[0m16384 \u001b[3mqueue_high_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m294912 \u001b[3mqueue_low_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m196608 \u001b[3mreconcile_first\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-07T17:09:24.623931Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m dux daemon watching /dev/shm/dux-readiness-k29dip1_/filesystem/tree (1 filesystem(s), FID mode: create/delete/rename/modify, flush 100ms)\n\u001b[2m2026-11-07T17:09:24.623934Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m experimental reconciliation-first mode: fanotify events are hints only; complete full-root observations merge in place after the initial baseline \u001b[3mscan_interval_seconds\u001b[0m\u001b[2m=\u001b[0m900 \u001b[3min_place_full_root_reconciliation\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-07T17:09:24.624174Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-07T17:09:24.624178Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-readiness-k29dip1_/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-07T17:09:24.749369Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 259 files, 9 dirs, 268 staged path instances (0 directory alias paths), visible 1093632 bytes/268 entries, unique 1089536 bytes/267 inodes, 1.04 MiB (0 coverage issues); replaying 0 pending paths\n\u001b[2m2026-11-07T17:09:24.756421Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m reconciliation accounting verification passed \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m5\n\u001b[2m2026-11-07T17:09:28.192518Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m temporarily bypassing event-thread CPU sleep to drain fanotify backlog \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m369792 \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3mhigh_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m294912 \u001b[3mlow_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m196608\n\u001b[2m2026-11-07T17:09:28.199983Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify backlog fell below the low watermark \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_episode_ms\u001b[0m\u001b[2m=\u001b[0m7 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m7 \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m1\n\u001b[2m2026-11-07T17:09:28.200278Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-07T17:09:28.200284Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-readiness-k29dip1_/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-07T17:09:32.398334Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint resolver backlog overflowed; discarded scopes require a full observation\n\u001b[2m2026-11-07T17:09:32.398641Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint resolver backlog overflowed; discarded scopes require a full observation\n\u001b[2m2026-11-07T17:09:32.405374Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:32.513288Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify loss overlapped the observation; scheduling immediate follow-up\n\u001b[2m2026-11-07T17:09:32.513298Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 18691 files, 10 dirs, 18701 staged path instances (0 directory alias paths), visible 1630208 bytes/18701 entries, unique 1626112 bytes/18700 inodes, 1.55 MiB (0 coverage issues); replaying 0 pending paths\n\u001b[2m2026-11-07T17:09:32.513440Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-07T17:09:32.513452Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-readiness-k29dip1_/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-07T17:09:34.889972Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m7 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m54 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m1595.8561845953388 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:09:37.895007Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 18691 files, 10 dirs, 18701 staged path instances (0 directory alias paths), visible 1630208 bytes/18701 entries, unique 1626112 bytes/18700 inodes, 1.55 MiB (0 coverage issues); replaying 0 pending paths\n\u001b[2m2026-11-07T17:09:38.198134Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m reconciliation accounting verification passed \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m302\n\u001b[2m2026-11-07T17:09:41.798537Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:41.800942Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:42.001503Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint resolver backlog overflowed; discarded scopes require a full observation\n\u001b[2m2026-11-07T17:09:42.004548Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-07T17:09:42.004556Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-readiness-k29dip1_/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-07T17:09:43.189381Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:43.397306Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:43.694271Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:44.194912Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:44.892510Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m48 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m7 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m1346 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m1549.2066318037996 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:09:44.894034Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:45.400198Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m operator requested a full reconciliation; resetting the accounting retry circuit\n\u001b[2m2026-11-07T17:09:46.719920Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:46.721071Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:09:46.752051Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify loss overlapped the observation; scheduling immediate follow-up\n\u001b[2m2026-11-07T17:09:46.752060Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 12912 files, 10 dirs, 12922 staged path instances (0 directory alias paths), visible 1630208 bytes/12922 entries, unique 1626112 bytes/12921 inodes, 1.55 MiB (0 coverage issues); replaying 0 pending paths\n\u001b[2m2026-11-07T17:09:46.752159Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-07T17:09:46.752163Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-readiness-k29dip1_/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-07T17:09:47.274088Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 259 files, 9 dirs, 268 staged path instances (0 directory alias paths), visible 1093632 bytes/268 entries, unique 1089536 bytes/267 inodes, 1.04 MiB (0 coverage issues); replaying 0 pending paths\n\u001b[2m2026-11-07T17:09:47.281080Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m reconciliation accounting verification passed \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m6\n\u001b[2m2026-11-07T17:09:47.917748Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m dux daemon: received SIGTERM/SIGINT \u2014 drained + flushed, exiting\n",
+  "finished_at": "2026-11-07T17:09:47Z"
+}

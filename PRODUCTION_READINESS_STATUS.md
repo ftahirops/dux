@@ -1,23 +1,62 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 16:00 UTC
+**Updated:** 2026-11-07 17:12 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
+## Latest architecture qualification result (17:09 UTC)
+
+Built the current reconciliation-first source on VPS2 with
+`cargo build --locked --offline --release --bin dux` (GNU release; not the
+packaged static-musl artifact). Binary SHA-256:
+`67e4c964a26d5f4ae4f5b25af1adf2e932c89953cef9d1447ceea4b64c376c1e`.
+The isolated ext4 overflow suite passed under a 25% CPU quota: it generated
+18,432 files against a 16,384-event kernel queue, observed one kernel overflow,
+completed automatic full-root reconciliation and accounting verification, and
+matched an exact filesystem oracle with clean status. Recovery took **13.063
+seconds**. The reader's bounded userspace hint/resolver queues also reported
+loss during the storm; the full observation repaired it without operator
+intervention. Machine-readable evidence and run identity are in
+[`docs/qualification/scan-first-overflow-20261107/`](docs/qualification/scan-first-overflow-20261107/).
+
+The run exposed and drove fixes for stale kernel-queue-empty state after an
+idle reader poll and for scan-first accounting being blocked by unrelated
+queue activity or unresolved hints arriving after a completed observation.
+Active-scan unresolved hints and resolved in-scope changes still invalidate
+that observation. Several initial qualification attempts also exposed harness
+issues (fault-injection noise and reading the log before recovery completed);
+those were corrected before this passing run. This is one bounded ext4 fixture
+run, not production-scale or endurance qualification. The packaged static-musl
+build, 100k/1m/10m budgets, additional filesystems/kernels, 72-hour soak, and
+production canary remain open. No production service or settings were changed.
+
+The current source test set passed **294 tests** (2 ignored); the readiness
+Python harness passed **36 tests**; strict all-target/all-feature Clippy,
+formatting, and diff checks passed. The soak process on VPS2 remains separate
+and was not restarted or modified by this work.
+
 ## Live production evidence
 
-Fresh read-only sample at **16:00 UTC**: `dux.service` remains active with one
-lifetime restart, but the installed `/usr/bin/dux` is still 0.6.3 (source hash
+Fresh read-only sample at **17:12 UTC**: `dux.service` is active with **2
+lifetime restarts**; its current process started at 16:18:43 UTC. The installed
+`/usr/bin/dux` remains 0.6.3 (source hash
 `b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`; binary
 SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`).
-The index remains dirty from fanotify overflow, with **169 kernel overflows**,
-**505,945 dropped userspace updates**, **29 pending updates**, and **13 h 32 m
-reported behind**. The last full scan is **51 h 11 m old**. It reports
-1,252,544 indexed nodes and 117,773,639,680 indexed bytes; the SQLite file is
-2,407,358,464 bytes and its WAL is 128 MiB. Root has 65 GiB free. The service
-still has a 100% one-core quota and 4 GiB memory limit. These are production
-observations, not a controlled causal test. No production files or service
-settings were changed.
+The index is dirty from fanotify overflow: **32 kernel overflow
+notifications**, **0 userspace updates dropped**, **4 pending updates**, and
+about **53 min behind**. The last full scan is **52 h 23 min old**. It reports
+1,274,678 indexed nodes and 127,961,706,496 indexed bytes; the SQLite file is
+2,407,358,464 bytes, WAL about 18.1 MiB. It remains without a scan in progress
+and has no write error. These are live production observations, not a
+controlled causal test. The service, index, and settings were not changed.
+Raw capture: [`production-1712.json`](docs/qualification/live-prod-20261107/production-1712.json).
+
+Earlier read-only sample at **16:00 UTC**: the same installed binary was dirty
+with 169 kernel overflows, 505,945 dropped userspace updates, 29 pending
+updates, and 13 h 32 m reported behind. The service had one lifetime restart
+at that point. The 16:18 restart and counter reset occurred externally; no
+restart was initiated by this work. These are uncontrolled production
+observations.
 
 Fresh sample at **14:01 UTC**: the production daemon remains active but the
 index is dirty from fanotify overflow, about **11 h 32 min behind**, with its

@@ -1,0 +1,42 @@
+{
+  "captured_at": "2026-11-07T17:12:04Z",
+  "host": "vps1",
+  "read_only": true,
+  "service": {
+    "name": "dux.service",
+    "active_state": "active",
+    "main_pid": 681124,
+    "lifetime_restarts": 2,
+    "current_process_started_at": "2026-11-07T16:18:43Z"
+  },
+  "binary": {
+    "version": "dux 0.6.3 (e0cc915f8f37) [production]",
+    "source_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+    "binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060"
+  },
+  "status": {
+    "behind_seconds": 3200.485,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "events_dropped": 0,
+    "events_resolved": 3986896,
+    "events_seen": 6852181,
+    "index_bytes": 127961706496,
+    "index_bytes_on_disk": 2407358464,
+    "index_nodes": 1274678,
+    "kernel_overflow_notifications": 32,
+    "last_scan_age_seconds": 188562,
+    "last_scan_timestamp_seconds": 1793882962,
+    "pending_updates": 4,
+    "scan_in_progress": false,
+    "throttled_since_timestamp_seconds": 1794068323,
+    "updates_committed": 788244,
+    "userspace_updates_dropped": 0,
+    "wal_bytes": 18997352,
+    "watch_status_available": true,
+    "write_error": null
+  },
+  "production_mutations_by_this_work": 0
+}

@@ -1,0 +1,36 @@
+{
+  "started_at": "2026-11-07T17:09:24Z",
+  "host": "VPS2 192.168.5.106",
+  "kernel": "6.8.0-147-generic",
+  "filesystem": "ext4 disposable loop image",
+  "source_base_commit": "097608369de5e813599f12a0225209877402d4c7",
+  "source_state": "base commit plus the uncommitted working-tree changes represented by this qualification run",
+  "build_command": "cargo build --locked --offline --release --bin dux",
+  "artifact_profile": "GNU optimized release; not packaged static-musl",
+  "binary_sha256": "67e4c964a26d5f4ae4f5b25af1adf2e932c89953cef9d1447ceea4b64c376c1e",
+  "embedded_source_sha256": "73fabddba57608fecdf96926b5c9bb8e6df51546ef59597c2da4e97b79280b5e",
+  "harness_sha256": "d4e0cc3379db54904478a1f7fd98ebb6f406058eb582208a904a620475fda99b",
+  "suite": "overflow",
+  "worker_cpu_quota_percent": 25,
+  "worker_memory_max_mib": 4096,
+  "kernel_queue_capacity": 16384,
+  "created_files": 18432,
+  "kernel_overflow_notifications": 1,
+  "result": "passed",
+  "recovery_seconds": 13.063,
+  "verified": [
+    "automatic full-root reconciliation started after overflow",
+    "reconciliation scan completed",
+    "post-scan accounting verification passed",
+    "scan generation advanced",
+    "indexed state matched exact filesystem truth and status was clean"
+  ],
+  "not_qualified": [
+    "packaged static-musl artifact",
+    "100k/1m/10m performance budgets",
+    "other filesystems or kernels",
+    "power loss or media corruption",
+    "72-hour soak",
+    "24-hour production canary"
+  ]
+}
