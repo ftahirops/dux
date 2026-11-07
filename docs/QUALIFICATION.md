@@ -7492,3 +7492,65 @@ snapshot:
 `docs/qualification/all-features-20261107/soak-progress-0545.json`
 (SHA-256
 `950186207c3667642944e94767a150a4dd4a41ba82e7b695fd927e7d4ad9bc35`).
+
+### Revision-23 systemd runtime, recovery, and crash-restart smoke — 2026-11-07 05:49–05:58 UTC
+
+Extracted the exact revision-23 DEB into a temporary directory on VPS2; its
+`/usr/bin/dux` binary hash is
+`0ce0d2eba91f6325fad8c6e6e5d61380805d56c57bc774d2714567d1be5b417e` and the
+DEB hash is
+`41a50ea031d666c6d782d2c5432a7b1363e1271f757b39bfbf33c6ae055521e1`. The
+embedded version identifies source commit `0b81fa8a6eb2` and source-tree hash
+`39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3`. Both
+unit files extracted from that package match the tracked packaging files by
+SHA-256, and `systemd-analyze verify` passed for both on systemd
+`255.4-1ubuntu8.18`.
+
+A first runtime attempt watched a test subtree on VPS2's shared ext4 root.
+Another workload (`clickhouse-server`, PID 2651) generated a compound
+create/delete/close event whose FID returned `ESTALE`; because that subtree
+could not determine whether the unresolved event belonged inside its root,
+Dux correctly set `lost_events`, marked coverage dirty, and scheduled a retry.
+This attempt is retained as a non-pass in
+`shared-ext4-failure.log` (SHA-256
+`a65c176f827712e14377da7c0b9e87f9acd502d5f9b26feb4cc8a942e40f6d77`). It
+demonstrates why exact subtree qualification must isolate the watched
+filesystem from unrelated same-filesystem workloads.
+
+The test was repeated on a disposable 256 MiB ext4 loop filesystem. A
+transient systemd unit ran the package-extracted binary with the packaged
+capabilities, secure bits, syscall deny set, address-family restriction,
+watchdog, resource limits, and I/O settings. Its bounded profile used a 25%
+CPU quota, 384 MiB `MemoryHigh`, and 512 MiB `MemoryMax`. The initial baseline
+covered 131 files and five directories. A workload of 64 creates, 20 renames,
+16 deletes, an atomic replacement, and a hardlink produced 142 observed events;
+125 were resolved and 124 committed, with zero drops or kernel overflows.
+The independent filesystem/index exactness comparison passed, with root
+totals `(1,011,712 bytes, 184 inodes)`.
+
+The service then passed a manual systemd restart and exact recovery of 12
+creates, one delete, and one rename made while it was stopped. A separate
+`Restart=always` systemd unit received an intentional `SIGKILL`; 24 creates and
+eight deletes made during its five-second restart delay were recovered after
+systemd restarted it (`NRestarts=1`). Final status was clean and caught up;
+the independent exact comparison reported `(1,167,360 bytes, 222 inodes)` and
+SQLite `PRAGMA integrity_check` returned `ok`. The product unit uses a 30-second
+restart delay; this bounded test shortened it to five seconds. Detailed
+properties, logs, exactness results, and hashes are in
+`docs/qualification/systemd-smoke-20261107/summary.json` (SHA-256
+`4a8870b96471edfc49e8de7b3c843ced33c4c3d3ac1b6172e354f5c907d42fd2`) and
+its adjacent evidence files. All temporary test services, database state,
+package extraction, loop image, mount, and temporary group were removed.
+
+This qualifies the extracted DEB binary's runtime behavior under a transient
+unit matching the packaged security/resource policy on this Ubuntu/ext4
+configuration. It does not qualify `dpkg` installation hooks, activation of
+the installed package unit, RPM service activation, a live production upgrade,
+or the production canary. Exact live recovery, complete root coverage, schema
+v7 path-instance publication, and the unfinished 72-hour soak remain release
+gates. At **05:58 UTC**, that soak was still active with zero restarts after
+**14,656.1 seconds** and **327,999 operations**. It had completed four hourly
+mutation bursts; its six-hour reader and twelve-hour restart phases and final
+exactness/history/integrity checks were still pending. The checkpoint is
+`docs/qualification/all-features-20261107/soak-progress-0558.json` (SHA-256
+`60d636b651a3141c50eb27cd39b6a8bbaf8f02219a1aaf1b60098a6c6cb02a93`).

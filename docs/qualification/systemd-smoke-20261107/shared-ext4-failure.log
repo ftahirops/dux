@@ -1,0 +1,53 @@
+MainPID=2119647
+Result=success
+NRestarts=0
+CPUQuotaPerSecUSec=250ms
+MemoryHigh=402653184
+MemoryMax=536870912
+UMask=0027
+LimitCORE=0
+OOMScoreAdjust=0
+SecureBits=3
+CapabilityBoundingSet=cap_dac_read_search cap_sys_admin
+AmbientCapabilities=cap_dac_read_search cap_sys_admin
+User=root
+Group=dux
+NoNewPrivileges=yes
+SystemCallFilter=~_sysctl adjtimex afs_syscall bdflush bpf break chroot clock_adjtime clock_adjtime64 clock_settime clock_settime64 create_module delete_module finit_module fsconfig fsmount fsopen fspick ftime get_kernel_syms getpmsg gtty idle init_module ioperm iopl kexec_file_load kexec_load lock lookup_dcookie modify_ldt mount mount_setattr move_mount mpx open_tree pciconfig_iobase pciconfig_read pciconfig_write perf_event_open pidfd_getfd pivot_root prof profil ptrace putpmsg query_module reboot rtas s390_pci_mmio_read s390_pci_mmio_write s390_runtime_instr security settimeofday sgetmask ssetmask stime stty subpage_prot swapoff swapon switch_endian sysfs tuxcall ulimit umount umount2 uselib ustat vm86 vm86old vserver
+RestrictAddressFamilies=AF_UNIX
+RuntimeDirectory=dux-r23-systemd-smoke
+StateDirectoryMode=0750
+StateDirectory=dux-r23-systemd-smoke
+ActiveState=active
+SubState=running
+    PID COMMAND         COMMAND
+   2651 clickhouse-serv clickhouse-server --config-file=/etc/clickhouse-server/config.xml
+2026-11-07T05:49:46+00:00 vps2 systemd[1]: Starting dux-r23-systemd-smoke.service - Disposable packaged Dux systemd policy smoke...
+2026-11-07T05:49:46+00:00 vps2 dux[2119647]: 2026-11-07T05:49:46.554157Z  INFO dux::watch: initial baseline or schema upgrade will run after filesystem watches are active
+2026-11-07T05:49:46+00:00 vps2 dux[2119647]: 2026-11-07T05:49:46.575513Z  INFO dux::watch: dux daemon watching /var/tmp/dux-r23-smoke-tree (1 filesystem(s), FID mode: create/delete/rename/modify, flush 100ms)
+2026-11-07T05:49:46+00:00 vps2 dux[2119647]: 2026-11-07T05:49:46.575906Z  INFO dux::watch: starting background reconciliation of /var/tmp/dux-r23-smoke-tree; event ingestion remains active
+2026-11-07T05:49:46+00:00 vps2 systemd[1]: Started dux-r23-systemd-smoke.service - Disposable packaged Dux systemd policy smoke.
+2026-11-07T05:49:47+00:00 vps2 dux[2119647]: 2026-11-07T05:49:47.636793Z  INFO dux::watch: rescan complete: 132 files, 5 dirs, 137 staged path instances (0 directory alias paths), visible 557056 bytes/137 entries, unique 552960 bytes/136 inodes, 540 KiB (0 coverage issues); replaying 0 pending paths
+2026-11-07T05:49:47+00:00 vps2 dux[2119647]: 2026-11-07T05:49:47.637359Z  WARN dux::watch: fanotify event has no resolvable parent/name or target identity mask=0x308 info_type_mask=0x6 target_detail=open_by_handle_at failed: fsid=(-908395297, -2143955110) handle_type=1 handle_bytes=8 errno=Some(116) error=Stale file handle (os error 116) event_pid=2651 self_generated=false metadata_len=24 event_len=144 suppressed_events=0
+2026-11-07T05:49:48+00:00 vps2 dux[2119647]: 2026-11-07T05:49:48.130091Z  WARN dux::watch: reconciliation accounting passed, but coverage or events remain uncertain elapsed_ms=321
+2026-11-07T05:49:48+00:00 vps2 dux[2119647]: 2026-11-07T05:49:48.130283Z  INFO dux::watch: starting background reconciliation of /var/tmp/dux-r23-smoke-tree; event ingestion remains active
+2026-11-07T05:49:48+00:00 vps2 dux[2119647]: 2026-11-07T05:49:48.813087Z  INFO dux::watch: rescan complete: 132 files, 5 dirs, 137 staged path instances (0 directory alias paths), visible 557056 bytes/137 entries, unique 552960 bytes/136 inodes, 540 KiB (0 coverage issues); replaying 0 pending paths
+2026-11-07T05:49:49+00:00 vps2 dux[2119647]: 2026-11-07T05:49:49.524122Z  WARN dux::watch: reconciliation accounting passed, but coverage or events remain uncertain elapsed_ms=303
+2026-11-07T05:49:49+00:00 vps2 dux[2119647]: 2026-11-07T05:49:49.524296Z  INFO dux::watch: starting background reconciliation of /var/tmp/dux-r23-smoke-tree; event ingestion remains active
+2026-11-07T05:49:50+00:00 vps2 dux[2119647]: 2026-11-07T05:49:50.379652Z  WARN dux::watch: reconciliation incomplete; one bounded automatic retry scheduled failed_attempts=1 scan_errors=0 coverage_incomplete=false resolve_warned=false lost_events=true retry_after_seconds=59
+2026-11-07T05:49:50+00:00 vps2 dux[2119647]: 2026-11-07T05:49:50.379687Z  INFO dux::watch: rescan complete: 132 files, 5 dirs, 137 staged path instances (0 directory alias paths), visible 557056 bytes/137 entries, unique 552960 bytes/136 inodes, 540 KiB (0 coverage issues); replaying 0 pending paths
+2026-11-07T05:49:53+00:00 vps2 dux[2119647]: 2026-11-07T05:49:53.515228Z  WARN dux::watch: slow fanotify event resolution mask=0x208 event_elapsed_ms=100 resolve_elapsed_ms=100 has_parent_name=false target_refresh_queued=false pending_updates=0
+2026-11-07T05:50:01+00:00 vps2 dux[2119647]: 2026-11-07T05:50:01.629851Z  INFO dux::watch: index backlog persists — 15s since last caught up
+2026-11-07T05:50:47+00:00 vps2 dux[2119647]: 2026-11-07T05:50:47.205829Z  WARN dux::watch: fanotify event has no resolvable parent/name or target identity mask=0x8 info_type_mask=0x6 target_detail=open_by_handle_at failed: fsid=(-908395297, -2143955110) handle_type=1 handle_bytes=8 errno=Some(116) error=Stale file handle (os error 116) event_pid=2651 self_generated=false metadata_len=24 event_len=132 suppressed_events=191964
+2026-11-07T05:50:50+00:00 vps2 dux[2119647]: 2026-11-07T05:50:50.598294Z  INFO dux::watch: starting background reconciliation of /var/tmp/dux-r23-smoke-tree; event ingestion remains active
+2026-11-07T05:50:51+00:00 vps2 dux[2119647]: 2026-11-07T05:50:51.326362Z  INFO dux::watch: rescan complete: 132 files, 5 dirs, 137 staged path instances (0 directory alias paths), visible 557056 bytes/137 entries, unique 552960 bytes/136 inodes, 540 KiB (0 coverage issues); replaying 0 pending paths
+2026-11-07T05:50:51+00:00 vps2 dux[2119647]: 2026-11-07T05:50:51.418437Z  INFO dux::watch: index backlog persists — 64s since last caught up
+2026-11-07T05:50:51+00:00 vps2 dux[2119647]: 2026-11-07T05:50:51.600284Z  WARN dux::watch: reconciliation accounting passed, but coverage or events remain uncertain elapsed_ms=181
+2026-11-07T05:50:51+00:00 vps2 dux[2119647]: 2026-11-07T05:50:51.600466Z  INFO dux::watch: starting background reconciliation of /var/tmp/dux-r23-smoke-tree; event ingestion remains active
+2026-11-07T05:50:52+00:00 vps2 dux[2119647]: 2026-11-07T05:50:52.208896Z  INFO dux::watch: rescan complete: 132 files, 5 dirs, 137 staged path instances (0 directory alias paths), visible 557056 bytes/137 entries, unique 552960 bytes/136 inodes, 540 KiB (0 coverage issues); replaying 0 pending paths
+2026-11-07T05:50:52+00:00 vps2 dux[2119647]: 2026-11-07T05:50:52.318477Z  INFO dux::watch: index backlog persists — 65s since last caught up
+2026-11-07T05:50:52+00:00 vps2 dux[2119647]: 2026-11-07T05:50:52.499671Z  WARN dux::watch: starting reconciliation with queued changes after persistent backlog pending_updates=0 deferred_renames=0 kernel_queue_empty=false behind_seconds=65
+2026-11-07T05:50:52+00:00 vps2 dux[2119647]: 2026-11-07T05:50:52.499698Z  INFO dux::watch: starting background reconciliation of /var/tmp/dux-r23-smoke-tree; event ingestion remains active
+2026-11-07T05:50:52+00:00 vps2 dux[2119647]: 2026-11-07T05:50:52.952987Z  WARN dux::watch: reconciliation incomplete; one bounded automatic retry scheduled failed_attempts=1 scan_errors=0 coverage_incomplete=false resolve_warned=false lost_events=true retry_after_seconds=59
+2026-11-07T05:50:52+00:00 vps2 dux[2119647]: 2026-11-07T05:50:52.953011Z  INFO dux::watch: rescan complete: 132 files, 5 dirs, 137 staged path instances (0 directory alias paths), visible 557056 bytes/137 entries, unique 552960 bytes/136 inodes, 540 KiB (0 coverage issues); replaying 0 pending paths
+2026-11-07T05:50:52+00:00 vps2 dux[2119647]: 2026-11-07T05:50:52.967480Z  INFO dux::watch: index backlog persists — 66s since last caught up
