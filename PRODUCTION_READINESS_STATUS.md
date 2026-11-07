@@ -1,10 +1,29 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 13:12 UTC
+**Updated:** 2026-11-07 13:39 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
 ## Live production evidence
+
+Read-only sample after the local scale run at **13:38 UTC**:
+
+- The installed `/usr/bin/dux daemon /` (PID 988284) remains active and still
+  reports “Accounting recovery paused after repeated failures; operator
+  action required.” Its index is dirty due to fanotify overflow, is about
+  **11 h 09 min behind**, and the last full scan is about **48 h 48 min** old.
+- Status reports **117 kernel overflows**, **505,945 userspace updates
+  dropped**, **1,377,799 indexed nodes**, and **158,787 pending updates**. The
+  DB is **2,345,058,304 bytes** and its WAL is **128 MiB**. The root filesystem
+  has **62 GiB available** (66% used).
+- The preceding recorded sample at 13:09 had 83 overflows and zero userspace
+  drops. The scale run below created and deleted 1.37 million files under
+  `/tmp` on this same host. The service journal names the test process and
+  records additional overflow warnings during that run. The run therefore
+  materially stressed the live watcher and is not isolated evidence. The
+  fixture and staging DB are removed. No service, configuration, or production
+  index changes were made. Do not repeat filesystem-churn qualification on
+  this host; use an isolated VM or filesystem.
 
 Read-only sample from `/` on the production host at **13:09 UTC**:
 
@@ -157,6 +176,19 @@ Rust tests now cover this behavior.
   free space returned to **20 GiB**. This supports feasibility for a static
   1.37M-entry observation on VPS2; it does not establish mutation correctness
   under concurrent churn, peak disk use across hosts, or a production SLO.
+- Current-source 1.37M-entry scale test on vps1 used the debug Rust test
+  executable SHA-256
+  `d55969f98018381752b0fede6306ed04704db29a3de0f6bb6baa0956cef06655` at
+  commit `7999b2c`. On a 1.37M-file static tree, the initial atomic scan took
+  **154.204 s** and the following unchanged in-place scan took **146.364 s**;
+  both database measurements were **441,020,416 bytes**. A sampled peak of the
+  private stage file was **422,600,704 bytes**; this was not continuously
+  monitored, and peak RSS was not captured. The fixture test passed and its
+  RAII cleanup removed the tree and DB. This is static-tree scale evidence,
+  not a controlled performance comparison or safe production-load test: the
+  running legacy watcher saw the generated churn, logged stale-handle events,
+  and its overflow count increased during the run. Current post-run disk
+  availability returned to 62 GiB.
 - The independent VPS2 soak remains active at the latest archived sample
   (**13:11 UTC**): 40,564 s elapsed, 862,300 operations, 11 mutation bursts, no
   controlled crash rounds, and one 300-second held-reader phase with WAL
