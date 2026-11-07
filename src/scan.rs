@@ -1945,6 +1945,21 @@ mod tests {
         assert_eq!(alias_paths, 2);
         assert_eq!(count_repeated_directory_identities(&conn).unwrap(), 2);
         assert_eq!(count_cycle_paths(&conn).unwrap(), 1);
+        let file_incarnations: Vec<(i64, i64, i64)> = conn
+            .prepare(
+                "SELECT birth_ns,COUNT(*),SUM(prime) FROM paths
+                 WHERE dev_id=2 AND inode=42 GROUP BY birth_ns ORDER BY birth_ns",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            file_incarnations,
+            vec![(4000, 2, 1), (5000, 1, 1)],
+            "same dev/inode with different birth times are distinct incarnations; hardlinks within one incarnation share a prime path",
+        );
         assert_eq!(
             conn.query_row("SELECT cycle FROM paths WHERE path_id=8", [], |row| row
                 .get::<_, i64>(0))

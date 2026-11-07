@@ -8160,6 +8160,17 @@ it never ran; the existing candidate-equivalent `staged_v7_path_graph...` test
 remains the only pass evidence for that fixture. `git diff --check` passed and
 the source worktree has no unverified test edit.
 
+The focused build was later resumed during an admitted low-pressure interval.
+The staged-v7 test now explicitly asserts that two path rows with the same
+`(dev,inode,birth_ns)` share exactly one prime attribution, while a second
+`birth_ns` for the same `(dev,inode)` forms a separate incarnation and receives
+its own prime. The focused test passed, then the full Rust default-feature
+suite passed **268/268** under a 25% CPU / 2 GiB / no-swap scope using a tmpfs
+target. The summary and executable/source hashes are recorded in
+`docs/qualification/schema-v7-pathgraph-20261107/incarnation-invariant-suite/`.
+This closes the test-assertion verification gap, but not live v7 publication or
+event/query/migration behavior.
+
 ### VPS2 soak first held-reader phase — 2026-11-07 07:59 UTC
 
 The candidate soak remains active with zero worker restarts. At this checkpoint

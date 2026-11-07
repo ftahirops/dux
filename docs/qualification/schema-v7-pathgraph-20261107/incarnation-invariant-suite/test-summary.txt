@@ -1,0 +1,7 @@
+Command: cargo test --offline --locked -- --test-threads=1
+Run under transient systemd unit dux-rust-full-v7-20261107.service.
+Result: 268 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out.
+Elapsed test time: 74.28 s. Service runtime: 87.116 s.
+CPU time: 16.165 s. Peak memory: 21.5 MiB. Swap: 0 B.
+Target directory and temporary directory were on /dev/shm.
+The new explicit staged-v7 incarnation/prime assertion passed as part of this run.
