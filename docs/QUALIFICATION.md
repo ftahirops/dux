@@ -7480,3 +7480,15 @@ qualification VM manager's 6 GiB minimum for the standard disposable guest.
 Therefore the systemd-enabled package lifecycle guest was not started from
 this host. The existing Debian/Rocky container lifecycle evidence remains
 valid for package file upgrade/rollback and state preservation only.
+
+**05:45 UTC follow-up:** the soak remained active with zero restarts at
+**13,873.6 seconds** and **310,800 operations**; reader, controlled-restart,
+and final validation phases remain pending. After confirming the completed
+all-features test unit was inactive and no file descriptors referenced its
+target directory, removed `/var/tmp/dux-allfeatures-build-0b81fa8`. This
+reclaimed **1.1 GiB**; the exact candidate, active soak files, and qualification
+evidence were preserved. VPS2 `/` now has **22 GiB free (76% used)**. Progress
+snapshot:
+`docs/qualification/all-features-20261107/soak-progress-0545.json`
+(SHA-256
+`950186207c3667642944e94767a150a4dd4a41ba82e7b695fd927e7d4ad9bc35`).
