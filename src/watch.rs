@@ -253,6 +253,14 @@ fn scan_first_observation_due(last_started: Instant, now: Instant) -> bool {
     now.saturating_duration_since(last_started) >= SCAN_FIRST_INTERVAL
 }
 
+fn scan_first_can_use_in_place(
+    reconcile_first: bool,
+    baseline_ready: bool,
+    one_file_system: bool,
+) -> bool {
+    reconcile_first && baseline_ready && !one_file_system
+}
+
 fn automatic_reconciliation_request_allowed(
     retry_paused: bool,
     scan_active: bool,
@@ -2581,6 +2589,8 @@ pub fn run_daemon(
                 lost_events = false;
                 let scan_db = db.to_path_buf();
                 let scan_root = root_canon.clone();
+                let use_in_place_observation =
+                    scan_first_can_use_in_place(reconcile_first, baseline_ready, one_file_system);
                 let cancel = Arc::new(AtomicBool::new(false));
                 let opts =
                     background_reconciliation_scan_options(one_file_system, Arc::clone(&cancel));
@@ -2607,7 +2617,7 @@ pub fn run_daemon(
                     )?;
                 }
                 scan_job = Some(std::thread::spawn(move || {
-                    if reconcile_first && !opts.one_file_system {
+                    if use_in_place_observation {
                         (|| {
                             let mut live = Store::open_rw(&scan_db)?;
                             crate::scan::reconcile_in_place(&mut live, &scan_root, &opts)
@@ -7056,6 +7066,14 @@ mod tests {
             due.duration_since(finished) < SCAN_FIRST_INTERVAL,
             "a raced scan must not add its duration to the next observation interval"
         );
+    }
+
+    #[test]
+    fn scan_first_uses_atomic_upgrade_until_a_v7_baseline_is_ready() {
+        assert!(!scan_first_can_use_in_place(true, false, false));
+        assert!(scan_first_can_use_in_place(true, true, false));
+        assert!(!scan_first_can_use_in_place(true, true, true));
+        assert!(!scan_first_can_use_in_place(false, true, false));
     }
 
     #[test]

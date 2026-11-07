@@ -1,10 +1,26 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 13:55 UTC
+**Updated:** 2026-11-07 14:01 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
 ## Live production evidence
+
+Fresh sample at **14:01 UTC**: the production daemon remains active but the
+index is dirty from fanotify overflow, about **11 h 32 min behind**, with its
+last full scan about **49 h 12 min old**. The kernel overflow counter is now
+**131** (up from 118 at 13:56); dropped userspace updates remain **505,945**,
+and pending updates are **177**. No vps1 load test ran during that interval;
+the increase is an uncontrolled production observation, so its producer is
+unknown. The SQLite DB is **2,345,058,304 bytes**, WAL **128 MiB**, and root
+free space is **61 GiB**.
+
+Read-only SQLite inspection confirms `/var/lib/dux/dux.db` is **schema v6**;
+it has `inodes` and `dirents` but lacks the v7 `paths` and `dir_totals` tables.
+The installed daemon is `dux 0.6.3`, source hash
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`, and
+systemd still reports “Accounting recovery paused after repeated failures;
+operator action required.” This is not the current candidate binary.
 
 Latest read-only sample at **13:44 UTC**: the same daemon remains active, but
 the index is still dirty from fanotify overflow, about **11 h 15 min behind**,
@@ -228,6 +244,14 @@ Rust tests now cover this behavior.
   ignored**; strict all-target/all-feature Clippy, formatting, and diff checks
   pass. These checks used tmpfs fixtures/build output; ext4-specific and
   live-daemon cadence behavior still need an isolated ext4 qualification host.
+- Read-only inspection showed the live production DB is still schema v6, while
+  `reconcile_in_place` requires v7. Fixed scan-first dispatch to use an atomic
+  baseline/rebuild until `baseline_ready` is true, then use changed-row in-place
+  observations for full-root scans. One-filesystem mode remains atomic. A
+  regression test covers the dispatch matrix, and the existing v6-to-v7
+  migration test passes. Current full Rust run: **285 passed, 0 failed, 2
+  ignored**; strict Clippy and format checks pass. This does not qualify an
+  actual production upgrade or rollback.
 - The independent VPS2 soak remains active at the latest archived sample
   (**13:11 UTC**): 40,564 s elapsed, 862,300 operations, 11 mutation bursts, no
   controlled crash rounds, and one 300-second held-reader phase with WAL
