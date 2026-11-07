@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 14:36 UTC
+**Updated:** 2026-11-07 14:41 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -144,7 +144,12 @@ one-core tmpfs fixture with no competing workload and does not establish ext4
 or VPS performance, peak staging bytes, overflow recovery, churn convergence,
 or 15-minute freshness. The harness initially failed because it excluded its
 tmpfs fixture as pseudo; it now explicitly enables pseudo traversal for this
-isolated test root.
+isolated test root. The same harness also passed at **1,000,000 files**:
+baseline **79.374 s**, unchanged reconciliation **91.153 s**, DB unchanged at
+**306,790,400 bytes**. This 1m fixture temporarily raised total `/dev/shm` use
+from 1.2 GiB to 5.7 GiB; after the test's cleanup it returned to 1.2 GiB. These
+are single-core tmpfs measurements and are not a production-filesystem
+capacity or performance guarantee.
 
 In-place reconciliation still walks every entry and builds a disk-backed scan
 staging database with graph and rollup projections. It reduces full database
