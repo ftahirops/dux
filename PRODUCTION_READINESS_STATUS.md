@@ -149,7 +149,10 @@ baseline **79.374 s**, unchanged reconciliation **91.153 s**, DB unchanged at
 **306,790,400 bytes**. This 1m fixture temporarily raised total `/dev/shm` use
 from 1.2 GiB to 5.7 GiB; after the test's cleanup it returned to 1.2 GiB. These
 are single-core tmpfs measurements and are not a production-filesystem
-capacity or performance guarantee.
+capacity or performance guarantee. Both scale runs used source commit
+`c683011d75dccb03b78f8a722a66671d9b8e60a8`, Rust 1.99.1, and the debug test
+executable SHA-256
+`96960437293282ba261a9105702c1cec9f4d8920e8711cead1c530dd3257ec1a`.
 
 In-place reconciliation still walks every entry and builds a disk-backed scan
 staging database with graph and rollup projections. It reduces full database
