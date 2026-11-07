@@ -7458,5 +7458,25 @@ is an interim checkpoint, not a soak pass.
 
 These checks add no production-host validation. The exact live recovery and
 complete root coverage gates remain open, as do v7 path-instance publication,
-production canary, package lifecycle for this exact candidate, and the
-remaining phases and final checks of the 72-hour soak.
+production canary, and the remaining phases and final checks of the 72-hour
+soak. Clarification: revision-23 packages built from this same source commit
+already passed file-level upgrade, rollback, removal, state-preservation, and
+clean-install checks in Debian 12 and Rocky 9 containers (see the 02:36 UTC
+section above). The remaining package gates are systemd-enabled service
+activation/restart and a live-daemon upgrade in a disposable KVM guest; the
+container lifecycle pass does not prove those transitions.
+
+**05:41 UTC soak follow-up:** the same service remained active with zero
+restarts. The progress checkpoint advanced to **13,633.2 seconds** and
+**305,430 operations**, with three mutation bursts and **3,039 periodic
+exactness samples**. Maximum sampled convergence remained 1.5 seconds; final
+exactness/history/integrity and the six-hour reader phase are still pending.
+Snapshot SHA-256:
+`2253234c6b7dbb294cceeb09566fb954f1cee2f67521e10c103e35c584ed1d68` in
+`docs/qualification/all-features-20261107/soak-progress-0541.json`.
+
+VPS2 does not expose `/dev/kvm`; its 3.48 GiB `MemAvailable` is also below the
+qualification VM manager's 6 GiB minimum for the standard disposable guest.
+Therefore the systemd-enabled package lifecycle guest was not started from
+this host. The existing Debian/Rocky container lifecycle evidence remains
+valid for package file upgrade/rollback and state preservation only.
