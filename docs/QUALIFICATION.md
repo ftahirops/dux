@@ -7592,3 +7592,28 @@ six-hour held-reader and twelve-hour controlled-restart phases, then require
 its terminal exactness/history/integrity checks. Exact production recovery,
 complete root coverage, path-instance/schema-v7 publication, installed-package
 activation, and a production canary remain open release gates.
+
+### Production filesystem FID round-trip capability — 2026-11-07 06:11 UTC
+
+Performed the candidate startup probe's read-only file-handle round trip against
+production root `/` on `vps1`, after confirming its mount is ext4 with FSID
+`d32f83920c90bad3`, the same FSID in the production event diagnostics. Using an
+`O_RDONLY | O_DIRECTORY | O_CLOEXEC` descriptor (the mode used by the
+candidate helper), `name_to_handle_at("/")` returned an 8-byte handle and
+`open_by_handle_at` succeeded; `fstat` of the reopened handle matched the root
+mount descriptor's device and inode. This confirms the candidate's filesystem
+capability precondition for the narrowly filtered target-only stale
+`FAN_ATTRIB` events on this exact production root.
+
+An initial diagnostic using an `O_PATH` mount descriptor returned `EBADF` from
+`open_by_handle_at`; that descriptor did not match the candidate helper and
+was discarded. The matching read-only probe then passed. No files were
+modified, and neither the production service nor its database was touched.
+The captured result and both descriptor modes are recorded in
+`docs/qualification/live-prod-20261107/handle-capability-probe-0611.json`.
+
+This closes only the probe-precondition uncertainty. It does not prove the
+candidate binary has been exercised on production, resolve the observed
+compound unresolved events, clear the existing overflow/dirty state, or
+establish exact filesystem/index equivalence. Production recovery remains an
+open gate and requires an explicitly controlled deployment/recovery procedure.

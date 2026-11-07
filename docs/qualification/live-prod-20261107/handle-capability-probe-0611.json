@@ -1,0 +1,33 @@
+{
+  "captured_at_utc": "2026-11-07T06:11:50Z",
+  "hostname": "vps1",
+  "uid": 0,
+  "kernel": "6.8.0-147-generic",
+  "root_mount": {
+    "source": "/dev/mapper/ubuntu--vg-ubuntu--lv",
+    "filesystem_type": "ext4",
+    "target": "/",
+    "statfs_fsid_hex": "d32f83920c90bad3",
+    "mount_id": 30,
+    "device": 64512,
+    "inode": 2
+  },
+  "probe": {
+    "name_to_handle_at": "success",
+    "handle_bytes": 8,
+    "handle_type": 1,
+    "open_by_handle_at": "success",
+    "resolved_same_device_inode": true,
+    "mount_fd_mode": "O_RDONLY | O_DIRECTORY | O_CLOEXEC",
+    "matches_candidate_probe_descriptor_mode": true
+  },
+  "initial_invalid_probe_attempt": {
+    "mount_fd_mode": "O_PATH | O_DIRECTORY | O_CLOEXEC",
+    "open_by_handle_at_errno": 9,
+    "open_by_handle_at_error": "EBADF",
+    "reason": "The candidate helper uses an O_RDONLY directory fd; this diagnostic's O_PATH fd was not equivalent and is superseded by the successful matching probe."
+  },
+  "mutations_performed": false,
+  "production_service_or_database_touched": false,
+  "conclusion": "The exact production root filesystem passes the candidate's read-only file-handle round-trip capability precondition. This qualifies only the stale target-only FAN_ATTRIB filter's filesystem-capability gate; it does not establish production index exactness or explain unresolved compound events and queue overflows."
+}
