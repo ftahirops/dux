@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / "scripts/dux-readiness.py"
+WAL_STRESS = ROOT / "scripts/dux-wal-budget-stress.py"
 SCALE_HARNESS = ROOT / "scripts/dux-scale.py"
 VM_HARNESS = ROOT / "scripts/dux-qualification-vm.py"
 READINESS_SPEC = importlib.util.spec_from_file_location("dux_readiness_harness", HARNESS)
@@ -21,6 +22,30 @@ READINESS_SPEC.loader.exec_module(READINESS)
 
 
 class ReadinessHarnessTests(unittest.TestCase):
+    def test_wal_budget_stress_matches_guard_threshold_and_proves_pause_recovery(self):
+        source = WAL_STRESS.read_text()
+        self.assertIn('DUX_WAL_STRESS_TARGET_MIB", "256"', source)
+        self.assertIn('guard_still_active": GUARD in log and RECOVERED not in log', source)
+        self.assertIn('committed_index_unchanged": committed == committed_at_guard', source)
+        self.assertIn('daemon.wait(lambda: RECOVERED in log_text()', source)
+        self.assertIn('quiescent_wal_bytes=final', source)
+
+    def test_wal_budget_stress_reserves_inodes_for_threshold_workload(self):
+        source = WAL_STRESS.read_text()
+        self.assertIn('minimum_inode_reserve = int(os.environ.get("DUX_WAL_STRESS_MAX_FILES", "220000"))', source)
+        self.assertIn('--churn-operations must be at least the WAL stress file limit', source)
+
+    def test_wal_budget_stress_rejects_an_undersized_inode_reserve(self):
+        env = os.environ.copy()
+        env.pop("DUX_EXPECTED_BINARY_SHA256", None)
+        result = subprocess.run(
+            [sys.executable, str(WAL_STRESS), "--binary", str(WAL_STRESS),
+             "--churn-operations", "100"],
+            capture_output=True, text=True, env=env, timeout=15,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--churn-operations must be at least the WAL stress file limit", result.stderr)
+
     def test_short_soak_does_not_claim_the_72_hour_gate(self):
         gates = READINESS.not_qualified_by_this_run({"soak"}, 259_199, "ext4")
         self.assertIn("72-hour dedicated soak and 24-hour canary", gates)

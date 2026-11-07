@@ -7282,8 +7282,63 @@ The exact-candidate P0 `wal` suite held a consistent reader snapshot and
 reclaimed the WAL after release, but its report records a peak of only
 1,615,072 bytes (zero after quiescent truncate). Its workload is 12 rounds of
 48 small file writes, far below the 128 MiB event-write guard and the
-269,707,592-byte production checkpoint incident. Therefore the P0 WAL pass
-does not qualify large-WAL guard behavior or recovery under production-scale
-reader pinning. Add a bounded high-volume held-reader test that crosses the
-guard threshold, proves event-write pause/resume and exact catch-up, then proves
-WAL reclamation before treating this behavior as release-qualified.
+269,707,592-byte production checkpoint incident. That P0 pass alone did not
+qualify large-WAL guard behavior. The strict high-volume held-reader case below
+adds this coverage for the exact candidate on this ext4/kernel configuration;
+its remaining limits are listed with the result.
+
+### Large-WAL guard and held-reader recovery qualification — 2026-11-07 04:54–04:58 UTC
+
+Ran a stricter, exact-binary-bound stress case on `192.168.5.106` using static
+candidate SHA-256
+`952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287` on
+Ubuntu 24.04 / kernel `6.8.0-147-generic`. The test used a disposable 768 MiB
+ext4 loop image under tmpfs, a 25% CPU quota, and a 2 GiB outer systemd memory
+cap (916.2 MiB observed peak). It created 158,500 empty files while a separate
+SQLite reader held a stable snapshot.
+
+The run crossed the source-defined 256 MiB guard at **268,541,632 bytes**
+(threshold **268,435,456 bytes**). While the guard was still active, 965 events
+were pending; the live index aggregate remained unchanged at
+`(SUM(blocks)=7,663,616, COUNT(*)=158,151)`. The held reader's original snapshot
+and `PRAGMA integrity_check` remained valid. After releasing the reader, the
+daemon resumed writes, reached exact filesystem/index catch-up, passed history
+and integrity checks, and truncated the quiescent WAL to **0 bytes**. The run
+passed in **236.693 seconds** with zero dropped events and zero kernel-overflow
+notifications.
+
+The report is retained at
+`docs/qualification/wal-budget-20261107/report.json`
+(SHA-256
+`04763821d5a1a1e24b12bf73ca2a2255de0289816d850db6f527473887e2471e`). The
+repeatable runner at `scripts/dux-wal-budget-stress.py` has SHA-256
+`07ab43b3471e354e0447c86821171443f9cec6c3f2d974fb77af8be4f9c05eb5`; the run
+also binds the base readiness harness SHA-256
+`7355818f18537f99bf5c9e418b7bdb81ac1e4fb2578a007fabe6e538ace38dc5`.
+Systemd execution details are retained in
+`docs/qualification/wal-budget-20261107/run-metadata.json`. The readiness
+workflow unit tests passed **29/29** after adding checks for the threshold,
+guarded backlog/index-stability assertions, and inode-reserve preflight.
+The report's internal `qualification_worker_limits.memory_max_mib` field shows
+the harness default (4096 MiB); the enclosing VM systemd unit actually enforced
+2048 MiB, as confirmed by its unit properties and 916.2 MiB observed peak.
+Earlier attempts using a 128 MiB target did not reach this candidate's actual
+256 MiB threshold and are excluded from the pass evidence.
+
+This closes the high-volume held-reader WAL guard/recovery test gap for this
+candidate on this ext4/kernel configuration. It does not qualify power loss,
+other kernels or filesystems, multi-day reader pinning, package lifecycle,
+production-scale performance budgets, the 72-hour soak, or a canary. At the
+04:58 UTC checkpoint, the exact candidate soak remained active with zero
+restarts after **10,989.8 seconds** and **247,472 mutations**; final exactness,
+history, and SQLite integrity checks were still pending.
+
+**04:58 UTC live-host follow-up (read-only):** the installed production service
+is active with one recorded restart, but still reports
+`dirty=true`, `caught_up=false`, and `dirty_reason="daemon startup requires
+reconciliation"`; no scan is in progress. It is **8,975.829 seconds behind**
+with 29 pending updates, a 2,073,255,936-byte index database, and a
+134,217,728-byte WAL. Dropped events, kernel overflows, write errors, and pause
+state are all zero/absent in this sample. This does not prove exact live
+accounting; the production recovery and fresh-baseline gates remain open. No
+production service or database was modified.
