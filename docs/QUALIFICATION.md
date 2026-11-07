@@ -6984,3 +6984,16 @@ progress snapshot SHA-256 is
 `f9a4beca2060783bb9282def0947b4ddfcd7d3dc4cddd3dcda3881ea9a2da3e9`; the live
 P0 journal snapshot SHA-256 is
 `aa117503416f63d443da4279c81a90d23b170f3fbc2cc1231291271d2e9df13c`.
+
+**02:58 UTC runtime checkpoint:** the exact-source crash matrix advanced to
+**27/30** passing rounds, including `watch.flush_committed`. All three
+qualification services remained active with zero restarts; the P0 memory peak
+remained 1.34 GiB. Host CPU PSI `some avg10` had fallen to 53.87% and `full`
+remained 0%; 2.3 GiB memory was available and 23 GiB remained free on `/`.
+The candidate soak had run **3,843 seconds**, recording **86,893 mutations**
+and **863 exactness samples**. Sampled maxima remained 7,792 KiB RSS, 12 file
+descriptors, and a 4,251,872-byte WAL; p95 convergence was 491 ms and maximum
+convergence was 1,339 ms. Final exactness/history/SQLite checks remain
+pending. Snapshot SHA-256 values are `eff31d12ef8a00d1dbd92b5d62694f72f3ad9e79e504dfa9e194b7fda8d40e26`
+for soak progress and `d6adf2c60f6f620b725986912cd2dc572708f827c6494a64d8e3776a80a98614`
+for the live P0 journal.
