@@ -6967,3 +6967,20 @@ latest journal snapshot SHA-256 is
 `6040a37f2c895ea35b6ce46083ad35253a8c72c0ee6babe7c39e2912fac34d72`; the soak
 progress snapshot SHA-256 is
 `a7f60c00fcaff45a016e325550e60be7b1684a855c16803a27cc7d86ab67c158`.
+
+**02:54 UTC runtime checkpoint:** the exact-source P0 matrix passed **25/30**
+crash-recovery rounds, including `watch.flush_before_commit`. The matrix,
+candidate soak, and independent older soak all remained active with zero
+systemd restarts. The matrix memory peak remained 1.34 GiB. Host memory
+available was 2.3 GiB, root filesystem free space was 23 GiB, and CPU PSI
+`some avg10` was 67.77% with CPU `full` at 0%; the capped tests continued under
+monitoring. The exact-candidate soak had run **3,602.9 seconds** and completed
+**81,411 mutations** / **809 exactness samples**. Its sampled maxima were
+7,792 KiB RSS, 12 file descriptors, and a 4,251,872-byte WAL; p95 exact
+convergence was 493 ms and maximum convergence was 1,339 ms. These interim
+measurements do not establish the final endurance gate: final exactness,
+history, and SQLite integrity checks are still pending. The latest local
+progress snapshot SHA-256 is
+`f9a4beca2060783bb9282def0947b4ddfcd7d3dc4cddd3dcda3881ea9a2da3e9`; the live
+P0 journal snapshot SHA-256 is
+`aa117503416f63d443da4279c81a90d23b170f3fbc2cc1231291271d2e9df13c`.
