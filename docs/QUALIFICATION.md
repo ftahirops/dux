@@ -7634,3 +7634,27 @@ state remains the authoritative blocker. Capture:
 `docs/qualification/live-prod-20261107/production-0612.json` (SHA-256
 `1402687e4e698531b71c1262879e294ceeb51b47bdfdbfd26a26e88ad799febd`). No
 production mutation was performed.
+
+### Candidate handling review for remaining production event shapes — 2026-11-07
+
+Reviewed `resolve_record`, `event_identity_unresolved`, and
+`stale_target_attrib_is_benign` against the 23 nonmatching warning records in
+the 06:13 capture. The current candidate suppresses only a complete,
+**single-FID**, target-only `FAN_ATTRIB` (optionally with `FAN_ONDIR`) whose
+stale target FSID passed the startup probe. It deliberately marks every other
+event with neither a resolvable parent/name nor target identity as lost
+coverage. This means the confirmed handle capability will address the 176
+matching warnings but cannot by itself clear dirty coverage while the other
+23 event shapes recur.
+
+Those 23 records include create/delete-on-directory (`0x40000300` and
+`0x40000200`), delete (`0x200`), and combined modify/close-write with
+create/delete (`0xa`, `0x10a`, `0x20a`, `0x30a`). The create/delete shapes carry
+path-structure changes, so dropping them without a recovered name would risk a
+stale index. The five pure modify/close-write shapes (`0xa`) are also outside
+the candidate's current predicate; changing that policy requires a dedicated
+race test proving final-state index recovery, including hardlinks and path
+replacement. No filter expansion was made from log correlation alone. A
+controlled, exact recovery test that injects these event classes and then
+compares the complete indexed tree with the filesystem remains necessary before
+any narrower policy is accepted.
