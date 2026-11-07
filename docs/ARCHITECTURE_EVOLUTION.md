@@ -92,12 +92,19 @@ flowchart LR
 
 ### Event hints and overflow
 
-- Fanotify is an optimization for choosing what to scan sooner. The reader
-  validates enough record structure to identify a filesystem and dirty parent
-  scope, then inserts a bounded hint. It does not open file handles for every
-  change, update SQLite, or decide the indexed size from the event stream.
+- Fanotify is an optimization for choosing what to scan sooner. The target
+  reader validates records, coalesces dirty parent scopes, and inserts bounded
+  hints without blocking on filesystem handle resolution or SQLite. The current
+  source coalesces DFID_NAME parent handles (up to 32 distinct handles per
+  parser slice), then resolves them synchronously on the watcher thread to
+  filter events outside the indexed root. This is transitional: root filtering
+  is useful, but synchronous `open_by_handle_at` work does not meet the target
+  reader design. A saturated or unresolved batch widens recovery to a full
+  observation.
 - Repeated hints coalesce by filesystem and directory identity. If a parent
   cannot be resolved safely, widen to a known ancestor or the whole filesystem.
+  The current implementation widens to a full-root observation; subtree
+  prioritization has not been implemented.
 - A kernel queue overflow schedules a full scan of the affected filesystem as
   soon as resource guards allow it. It can make the view stale until that scan
   completes, but cannot permanently prevent later scans from repairing it.

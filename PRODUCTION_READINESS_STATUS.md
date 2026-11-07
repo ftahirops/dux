@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 14:46 UTC
+**Updated:** 2026-11-07 15:03 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -103,8 +103,8 @@ and test gates.
 The working-tree daemon now defaults to reconciliation-first; `--event-apply`
 selects the legacy event-apply path for controlled comparison or rollback.
 `--reconcile-first` remains a hidden compatibility alias. The reconciliation
-path drains and validates fanotify records as hints, without resolving per-file
-handles or applying per-event SQLite updates. It requests scans on overflow or
+path drains and validates fanotify records as hints, without resolving every
+file handle or applying per-event SQLite updates. It requests scans on overflow or
 malformed records and performs periodic scans every 15 minutes. After the
 initial atomic v7 baseline, complete observations reconcile the existing
 database in one publication transaction. Existing path IDs are reused by
@@ -122,26 +122,43 @@ legacy event-apply circuit remains unchanged. The hint parser also excludes
 notifications emitted by the Dux process itself so index/WAL/staging writes do
 not make its own scan look raced. Reconciliation-first is now the source
 default; the `--event-apply` escape hatch and default-mode CLI behavior are
-covered by tests. The latest source passed 286 Rust tests (2 ignored), strict
+covered by tests. The latest source passed 287 Rust tests (2 ignored), strict
 all-target/all-feature Clippy, formatting, and diff checks on 2026-11-07. A
 disposable tmpfs end-to-end run verified v6-to-v7 atomic upgrade followed by
 an in-place observation that indexed a newly created file. A fresh release
 executable also started a new daemon with no mode flag and reported
 `scan_first=true`, proving the new source default is wired through runtime
 dispatch. That tmpfs run also showed the current hint path treats unrelated
-activity on the same marked filesystem as a stale hint; there is no root-scope
-filter until hints carry resolvable scope. These checks are not production-scale
-qualification: directory-level hint prioritization is not implemented, and no
-production-shaped endurance, forced-overflow replay, package rollout, or canary
-evidence exists. Do not interpret this change as production readiness or as a
-production deployment.
+activity on the same marked filesystem as a stale hint; the current candidate
+now filters resolved hints by indexed-root scope. Each batch validates
+DFID_NAME parent handles, coalesces equal handles, and resolves at most 32
+distinct parents. Malformed, stale, overflowed, or saturated hints widen to a
+full observation. Resolution currently runs on the watcher thread, so this
+reduces work for repeated events in the same directory but does not yet meet the
+dedicated nonblocking-reader design. Hints do not prioritize or reconcile
+subtrees; scans remain full-root observations.
+
+A real-fanotify tmpfs E2E test created 25 files outside the indexed root on the
+same filesystem: status remained clean with zero in-scope events. A file
+created inside the root marked it stale; the explicit reconciliation indexed
+it and cleared the marker. This validated root filtering and scan repair on the
+test kernel/tmpfs only. The release executable SHA-256 was
+`dbe52df6eea586ddf085e9a148a9cf7d6f430f8fc34cc9aa2f60707f13f8fc59`; embedded
+source SHA-256 was
+`88e0ae444bf7e171196d77503a20ee8f703ef0c2bf7d1c40b2bdc7dacdef30bc`.
+
+These checks are not production-scale qualification: directory-level hint
+prioritization, nonblocking hint resolution, forced-overflow replay, and
+concurrent-churn recovery remain open. There is no production-shaped endurance,
+package rollout, or canary evidence. Do not interpret this change as production
+readiness or as a production deployment.
 
 **Status correctness fix (2026-11-07):** human and JSON status now consult the
 live watch mode before interpreting persisted retry counters. A legacy counter
 above the retry limit no longer falsely says that reconciliation-first scans
 are paused; event-apply mode continues to report its actual retry circuit. The
 regression test covers both modes and corrupt/over-limit counters. Full Rust
-suite: 286 passed, 2 ignored; strict Clippy, formatting, and diff checks pass.
+suite: 287 passed, 2 ignored; strict Clippy, formatting, and diff checks pass.
 
 **Isolated scale sample (2026-11-07):** the existing manual reconciliation
 scale test passed with 100,000 files on tmpfs, pinned to one CPU core. Initial

@@ -930,6 +930,10 @@ const FAN_EVENT_INFO_TYPE_DFID_NAME: u8 = 2;
 const FAN_EVENT_INFO_TYPE_FID: u8 = 1;
 const MAX_HANDLE_SZ: usize = 128;
 const FANOTIFY_METADATA_VERSION: u8 = 3;
+/// Bound open_by_handle_at work for one event-parser slice. A burst touching
+/// more directories than this widens to a full scan instead of synchronously
+/// resolving an unbounded number of distinct scopes on the watcher thread.
+const MAX_FANOTIFY_HINT_HANDLES: usize = 32;
 
 #[repr(C)]
 struct FanotifyEventMetadata {
@@ -946,12 +950,17 @@ struct FanotifyEventMetadata {
 // the read. Assert it at compile time so editing the struct can't silently drift.
 const _: () = assert!(std::mem::size_of::<FanotifyEventMetadata>() == FAN_EVENT_METADATA_LEN);
 
-/// Drain fanotify records without resolving file handles or touching SQLite.
-/// The scan-first mode deliberately treats records as lossy hints only.
-fn parse_fanotify_hints(mut buf: &[u8], max_events: usize) -> (u64, u64, usize, bool) {
+/// Validate fanotify records and coalesce parent handles without resolving
+/// paths or touching SQLite. One unresolved record or saturated handle set
+/// widens recovery to a full observation.
+fn parse_fanotify_hints(
+    mut buf: &[u8],
+    max_events: usize,
+) -> (u64, usize, bool, Vec<(Vec<u8>, u64)>) {
     let input_len = buf.len();
-    let (mut seen, mut overflows, mut parsed, mut consumed) = (0u64, 0u64, 0usize, 0usize);
+    let (mut overflows, mut parsed, mut consumed) = (0u64, 0usize, 0usize);
     let mut lost = false;
+    let mut handles = HashMap::<Vec<u8>, u64>::new();
     while buf.len() >= FAN_EVENT_METADATA_LEN && parsed < max_events {
         let meta: FanotifyEventMetadata =
             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
@@ -975,7 +984,68 @@ fn parse_fanotify_hints(mut buf: &[u8], max_events: usize) -> (u64, u64, usize, 
             // user-tree changes (the scanner excludes those artifacts), so
             // they must not make every observation appear raced.
             if meta.pid != std::process::id() as i32 {
-                seen = seen.saturating_add(1);
+                let mut off = metadata_len;
+                let mut parent_handle = None;
+                let mut info_valid = true;
+                while off < event_len {
+                    if off.saturating_add(std::mem::size_of::<InfoHeader>()) > event_len {
+                        info_valid = false;
+                        break;
+                    }
+                    let header: InfoHeader = unsafe {
+                        std::ptr::read_unaligned(buf[off..].as_ptr().cast::<InfoHeader>())
+                    };
+                    let record_len = header.len as usize;
+                    if record_len < std::mem::size_of::<InfoHeader>()
+                        || off.saturating_add(record_len) > event_len
+                    {
+                        info_valid = false;
+                        break;
+                    }
+                    if header.info_type == FAN_EVENT_INFO_TYPE_DFID_NAME {
+                        if parent_handle.is_some() {
+                            info_valid = false;
+                            break;
+                        }
+                        let payload_start = off + std::mem::size_of::<InfoHeader>();
+                        let payload_end = off + record_len;
+                        let payload = &buf[payload_start..payload_end];
+                        if payload.len() < 16 {
+                            info_valid = false;
+                            break;
+                        }
+                        let handle_bytes = u32::from_ne_bytes(
+                            payload[8..12].try_into().expect("validated FID prefix"),
+                        ) as usize;
+                        let handle_end = 16usize.saturating_add(handle_bytes);
+                        if handle_bytes == 0
+                            || handle_bytes > MAX_HANDLE_SZ
+                            || handle_end >= payload.len()
+                            || !payload[handle_end..].contains(&0)
+                        {
+                            info_valid = false;
+                            break;
+                        }
+                        // The filename is deliberately discarded. Parent handle
+                        // alone is the coalescing key and sufficient to scope a
+                        // dirty-directory hint after the reader has drained.
+                        parent_handle = Some(payload[..handle_end].to_vec());
+                    }
+                    off += record_len;
+                }
+                if !info_valid || off != event_len || parent_handle.is_none() {
+                    lost = true;
+                } else if let Some(handle) = parent_handle {
+                    if let Some(count) = handles.get_mut(&handle) {
+                        *count = count.saturating_add(1);
+                    } else if handles.len() < MAX_FANOTIFY_HINT_HANDLES {
+                        handles.insert(handle, 1);
+                    } else {
+                        // Preserve bounded memory and explicitly widen to a full
+                        // scan rather than silently discarding an unseen scope.
+                        lost = true;
+                    }
+                }
             }
             // FID-mode notifications normally use FAN_NOFD. Close defensively if
             // a kernel or future mark mode supplies an event descriptor.
@@ -990,7 +1060,38 @@ fn parse_fanotify_hints(mut buf: &[u8], max_events: usize) -> (u64, u64, usize, 
     if consumed < input_len && buf.len() < FAN_EVENT_METADATA_LEN {
         consumed = input_len;
     }
-    (seen, overflows, consumed, lost)
+    (overflows, consumed, lost, handles.into_iter().collect())
+}
+
+/// Resolve each coalesced parent at most once, then discard events outside the
+/// indexed root. Failure to prove scope widens to a full-root observation.
+fn resolve_fanotify_hint_scope(
+    handles: Vec<(Vec<u8>, u64)>,
+    fsfds: &HashMap<(i32, i32), RawFd>,
+    handle_capable_fsids: &mut HashSet<(i32, i32)>,
+    ambiguous_fsids: &HashSet<(i32, i32)>,
+    root: &Path,
+) -> (u64, bool) {
+    let mut in_scope = 0u64;
+    let mut lost = false;
+    for (handle, count) in handles {
+        if payload_fsid(&handle).is_some_and(|fsid| ambiguous_fsids.contains(&fsid)) {
+            // One physical filesystem can have multiple visible mount paths.
+            // open_by_handle_at returns a path through the selected mount fd,
+            // not necessarily the alias that generated this event. Treat that
+            // filesystem as in scope to avoid a false negative.
+            in_scope = in_scope.saturating_add(count);
+            continue;
+        }
+        match resolve_handle(&handle, fsfds, handle_capable_fsids) {
+            EntryResolution::Resolved(parent, _) if parent.starts_with(root) => {
+                in_scope = in_scope.saturating_add(count);
+            }
+            EntryResolution::Resolved(_, _) => {}
+            EntryResolution::Stale(_) | EntryResolution::Unresolved => lost = true,
+        }
+    }
+    (in_scope, lost)
 }
 
 #[repr(C)]
@@ -1591,6 +1692,8 @@ pub fn run_daemon(
     let mut handle_capable_fsids: HashSet<(i32, i32)> = HashSet::new();
     let mut fsfd_guards = Vec::new();
     let mut mark_failures = 0u32;
+    let mut mounted_fsids = HashSet::new();
+    let mut ambiguous_hint_fsids = HashSet::new();
     for mp in real_mounts(&root_canon, one_file_system)? {
         let fsid = match statfs_fsid(&mp) {
             Ok(f) => f,
@@ -1604,6 +1707,9 @@ pub fn run_daemon(
                 continue;
             }
         };
+        if !mounted_fsids.insert(fsid) {
+            ambiguous_hint_fsids.insert(fsid);
+        }
         if let std::collections::hash_map::Entry::Vacant(e) = fsfds.entry(fsid) {
             match open_dir(&mp) {
                 Ok(fd) => {
@@ -2749,8 +2855,16 @@ pub fn run_daemon(
 
                 let parse_deadline = (Instant::now() + EVENT_PARSE_SLICE).min(drain_deadline);
                 let (seen, resolved, overflows, consumed) = if reconcile_first {
-                    let (seen, overflows, consumed, lost) =
+                    let (overflows, consumed, mut lost, handles) =
                         parse_fanotify_hints(&buf[..buf_len], MAX_EVENTS_PER_PARSE);
+                    let (seen, scope_lost) = resolve_fanotify_hint_scope(
+                        handles,
+                        &fsfds,
+                        &mut handle_capable_fsids,
+                        &ambiguous_hint_fsids,
+                        &root_canon,
+                    );
+                    lost |= scope_lost;
                     if seen > 0 || lost {
                         if !index_uncertain {
                             persist_dirty_marker_best_effort(
@@ -7066,47 +7180,31 @@ mod tests {
     }
 
     #[test]
-    fn scan_first_hint_parser_counts_records_without_resolving_paths() {
-        let records = [
-            FanotifyEventMetadata {
-                event_len: FAN_EVENT_METADATA_LEN as u32,
-                vers: FANOTIFY_METADATA_VERSION,
-                reserved: 0,
-                metadata_len: FAN_EVENT_METADATA_LEN as u16,
-                mask: FAN_MODIFY,
-                fd: -1,
-                pid: std::process::id() as i32,
-            },
-            FanotifyEventMetadata {
-                event_len: FAN_EVENT_METADATA_LEN as u32,
-                vers: FANOTIFY_METADATA_VERSION,
-                reserved: 0,
-                metadata_len: FAN_EVENT_METADATA_LEN as u16,
-                mask: FAN_MODIFY,
-                fd: -1,
-                pid: 123,
-            },
-            FanotifyEventMetadata {
-                event_len: FAN_EVENT_METADATA_LEN as u32,
-                vers: FANOTIFY_METADATA_VERSION,
-                reserved: 0,
-                metadata_len: FAN_EVENT_METADATA_LEN as u16,
-                mask: FAN_Q_OVERFLOW,
-                fd: -1,
-                pid: 0,
-            },
-        ];
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                records.as_ptr().cast::<u8>(),
-                std::mem::size_of_val(&records),
-            )
-        };
-        let (seen, overflows, consumed, lost) = parse_fanotify_hints(bytes, 8);
-        assert_eq!(seen, 1, "ignore Dux's own index and staging writes");
+    fn scan_first_hint_parser_coalesces_parent_handles_and_bounds_memory() {
+        let mut bytes = synthetic_hint_record(std::process::id() as i32, 9, b"dux.db");
+        bytes.extend(synthetic_hint_record(123, 42, b"one"));
+        bytes.extend(synthetic_hint_record(123, 42, b"two"));
+        bytes.extend(synthetic_overflow_record());
+        let (overflows, consumed, lost, handles) = parse_fanotify_hints(&bytes, 8);
+        assert_eq!(handles.len(), 1, "same parent handle must be coalesced");
+        assert_eq!(handles[0].1, 2);
         assert_eq!(overflows, 1);
         assert_eq!(consumed, bytes.len());
-        assert!(lost);
+        assert!(lost, "kernel overflow widens recovery to a full scan");
+
+        let mut saturated = Vec::new();
+        for ino in 1..=(MAX_FANOTIFY_HINT_HANDLES as u32 + 1) {
+            saturated.extend(synthetic_hint_record(123, ino, b"x"));
+        }
+        let (overflows, consumed, lost, handles) =
+            parse_fanotify_hints(&saturated, MAX_FANOTIFY_HINT_HANDLES + 1);
+        assert_eq!(overflows, 0);
+        assert_eq!(consumed, saturated.len());
+        assert_eq!(handles.len(), MAX_FANOTIFY_HINT_HANDLES);
+        assert!(
+            lost,
+            "a saturated hint set must request full reconciliation"
+        );
     }
 
     #[test]
@@ -7149,10 +7247,109 @@ mod tests {
                 FAN_EVENT_METADATA_LEN,
             )
         };
-        let (seen, overflows, consumed, lost) = parse_fanotify_hints(bytes, 8);
-        assert_eq!((seen, overflows), (0, 0));
+        let (overflows, consumed, lost, handles) = parse_fanotify_hints(bytes, 8);
+        assert_eq!(overflows, 0);
+        assert!(handles.is_empty());
         assert_eq!(consumed, bytes.len());
         assert!(lost);
+    }
+
+    #[test]
+    fn scan_first_hint_parser_fails_closed_for_bad_or_unresolvable_parent_handles() {
+        let mut malformed = synthetic_hint_record(123, 42, b"entry");
+        malformed[36..40].copy_from_slice(&((MAX_HANDLE_SZ as u32) + 1).to_ne_bytes());
+        let (overflows, consumed, lost, handles) = parse_fanotify_hints(&malformed, 8);
+        assert_eq!(overflows, 0);
+        assert_eq!(consumed, malformed.len());
+        assert!(handles.is_empty());
+        assert!(
+            lost,
+            "invalid handle lengths must request a full observation"
+        );
+
+        let encoded = synthetic_hint_record(123, 43, b"entry");
+        let (overflows, consumed, lost, handles) = parse_fanotify_hints(&encoded, 8);
+        assert_eq!(overflows, 0);
+        assert!(!lost);
+        assert_eq!(consumed, encoded.len());
+        let (seen, unresolved) = resolve_fanotify_hint_scope(
+            handles,
+            &HashMap::new(),
+            &mut HashSet::new(),
+            &HashSet::new(),
+            Path::new("/indexed-root"),
+        );
+        assert_eq!(seen, 0);
+        assert!(unresolved, "unresolvable scope must widen to a full scan");
+
+        let (_, _, _, ambiguous_hints) = parse_fanotify_hints(&encoded, 8);
+        let (seen, unresolved) = resolve_fanotify_hint_scope(
+            ambiguous_hints,
+            &HashMap::new(),
+            &mut HashSet::new(),
+            &HashSet::from([(1, 2)]),
+            Path::new("/indexed-root"),
+        );
+        assert_eq!(seen, 1);
+        assert!(
+            !unresolved,
+            "ambiguous mount aliases must conservatively count as in scope"
+        );
+    }
+
+    fn synthetic_hint_record(pid: i32, inode: u32, name: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1i32.to_ne_bytes());
+        payload.extend_from_slice(&2i32.to_ne_bytes());
+        payload.extend_from_slice(&8u32.to_ne_bytes());
+        payload.extend_from_slice(&FILEID_INO32_GEN.to_ne_bytes());
+        payload.extend_from_slice(&inode.to_ne_bytes());
+        payload.extend_from_slice(&1u32.to_ne_bytes());
+        payload.extend_from_slice(name);
+        payload.push(0);
+
+        let info_len = std::mem::size_of::<InfoHeader>() + payload.len();
+        let mut event = Vec::with_capacity(FAN_EVENT_METADATA_LEN + info_len);
+        let metadata = FanotifyEventMetadata {
+            event_len: (FAN_EVENT_METADATA_LEN + info_len) as u32,
+            vers: FANOTIFY_METADATA_VERSION,
+            reserved: 0,
+            metadata_len: FAN_EVENT_METADATA_LEN as u16,
+            mask: FAN_MODIFY,
+            fd: -1,
+            pid,
+        };
+        let metadata_bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
+                FAN_EVENT_METADATA_LEN,
+            )
+        };
+        event.extend_from_slice(metadata_bytes);
+        event.push(FAN_EVENT_INFO_TYPE_DFID_NAME);
+        event.push(0);
+        event.extend_from_slice(&(info_len as u16).to_ne_bytes());
+        event.extend_from_slice(&payload);
+        event
+    }
+
+    fn synthetic_overflow_record() -> Vec<u8> {
+        let metadata = FanotifyEventMetadata {
+            event_len: FAN_EVENT_METADATA_LEN as u32,
+            vers: FANOTIFY_METADATA_VERSION,
+            reserved: 0,
+            metadata_len: FAN_EVENT_METADATA_LEN as u16,
+            mask: FAN_Q_OVERFLOW,
+            fd: -1,
+            pid: 0,
+        };
+        unsafe {
+            std::slice::from_raw_parts(
+                (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
+                FAN_EVENT_METADATA_LEN,
+            )
+        }
+        .to_vec()
     }
 
     #[test]
