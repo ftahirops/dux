@@ -7862,3 +7862,44 @@ bounded fault, scale, WAL, and transient-systemd evidence, but is **not
 qualified as production-ready**. The incomplete root coverage, dirty production
 index, open schema-v7 work, unfinished soak, and remaining installed-package
 and canary gates prevent a 100% production-readiness claim.
+
+### Live soak and production recheck — 2026-11-07 06:54–06:56 UTC
+
+The candidate soak on VPS2 is still actively running under
+`dux-soak-candidate-0b81fa8.service` (`MainPID=1502495`, zero restarts). The
+fresh progress snapshot at 06:54:41 UTC records **18,027.4 seconds** elapsed,
+**398,604 operations**, **3,961 periodic exactness samples**, and five mutation
+bursts. It has not yet reached the older r89 failure checkpoint of 480,200
+operations; no held-reader phase or controlled crash has occurred. Final
+exactness/history/integrity remain false/pending. Sampled maxima are 9,720 KiB
+RSS, 13 descriptors, 13,913,272-byte WAL, and 2,483 ms exact convergence
+(p95 833 ms). The archived progress JSON is
+`docs/qualification/all-features-20261107/soak-progress-0654.json`, SHA-256
+`81e92ce91af14f261cae8d5a27385728be43e80ce40c47ad3bf72e616de09192`.
+Do not infer additional completed phases from the live process alone; retain
+the terminal report and final checks.
+
+A new read-only status sample on the production host at **06:55:51 UTC** still
+reports the installed daemon active but dirty from `fanotify queue overflow`,
+with 16 lifetime kernel overflow notifications, zero userspace-dropped events,
+45,880 pending updates, and **16,023 seconds behind**. It had no active scan,
+the last completed scan was 151,589 seconds old, and the WAL was at the
+128 MiB guard. The I/O-pressure pause cleared between samples; status at
+06:55:51 showed `paused=false`, while `/proc/pressure/io` still showed
+`some avg10=5.59%`, `full avg10=5.31%`, and elevated `avg60` values. The
+service logged successful event flushes taking 446–896 ms for 128 updates,
+and a 718 ms upsert phase for 77 items. Root had 58 GiB free (68% used), so
+this sample does not point to disk-capacity exhaustion. It does show ongoing
+high event backlog and slow writes, and it still does not prove exactness or
+recovery. The daemon was not changed, restarted, or forced to scan.
+
+The VM also retained several failed transient test units from earlier
+qualification attempts. Inspection showed the focused Python reruns failed on
+incorrect module paths/class names, the isolated WAL retry first hit tmpfs
+`ENOSPC`, and another WAL attempt correctly refused `/var/tmp` because it
+resolves to the watched root filesystem. These are harness invocation or
+environment failures, not product assertion failures. I reran the two focused
+release-publication regressions from the current checkout using their actual
+module/class names; both passed (**2/2**, 2.313 s). The complete Python suite
+remains the separately recorded 296/296 result. No new production fault test
+or mutation was run.
