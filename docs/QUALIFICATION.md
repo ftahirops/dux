@@ -7682,3 +7682,24 @@ needed for continued candidate qualification. Failed WAL/P0 diagnostic
 artifacts were left intact pending evidence-by-evidence reconciliation. The
 soak remained running at **15,980 seconds**, **355,775 operations**, and four
 mutation bursts; reader, restart, and final checks were pending.
+
+### Forensic comparison of the older r89 soak timeout — 2026-11-07
+
+Recomputed the archived r89 failure's indexed path map from its retained
+`index.db` and compared it with `filesystem-truth.sqlite`. The independently
+reconstructed comparison confirms **27 path mismatches** and **18 inode
+mismatches** (one missing inode, three extra inodes, and 14 differing block
+counts), matching the previously reported totals. At the harness timeout, the
+captured watcher status still had **41 pending updates**, with `drained=true`,
+`uncertain=false`, zero dropped events, and zero kernel overflows. The test
+stopped before that backlog converged, then saved its filesystem-truth snapshot;
+therefore the post-stop differences are consistent with unfinished event
+processing, but the evidence does not prove that this alone caused them. The
+SQLite integrity check passed, which does not imply path exactness.
+
+The active `0b81fa8` candidate soak has not yet reached the old failure's
+480,200-operation checkpoint. Preserve its exact binary and harness, keep the
+soak isolated from competing VM workloads, and require it to pass exactness
+through and beyond that count plus terminal history and integrity checks. A
+repeat failure with drained backlog or mismatches after a stable caught-up
+window would be a candidate defect, not a timing-only failure.
