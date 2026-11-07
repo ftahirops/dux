@@ -1,0 +1,10 @@
+{
+  "source_workspace_private_path": "/dev/shm/dux-qualification/dux-readiness-mrzz9_cq",
+  "captured_at_epoch": 1794072735.8893812,
+  "binary_sha256": "67e4c964a26d5f4ae4f5b25af1adf2e932c89953cef9d1447ceea4b64c376c1e",
+  "harness_sha256": "fd669c3691da97b2fe899b441724ccd01a2839d10105ddc0a8ec4ea47123f2f2",
+  "sqlite_backup_captured_before_daemon_stop": true,
+  "filesystem_truth_captured_after_daemon_stop": true,
+  "filesystem_truth_is_authoritative_exact_tree_snapshot": true,
+  "full_file_content_copy_saved": false
+}

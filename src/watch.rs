@@ -606,17 +606,11 @@ fn scan_first_can_use_in_place(
 fn scan_first_event_race_only(
     reconcile_first: bool,
     lost_events: bool,
-    forced_reconciliation: bool,
     coverage_incomplete: bool,
     resolve_warned: bool,
     scan_errors: u64,
 ) -> bool {
-    reconcile_first
-        && lost_events
-        && !forced_reconciliation
-        && !coverage_incomplete
-        && !resolve_warned
-        && scan_errors == 0
+    reconcile_first && lost_events && !coverage_incomplete && !resolve_warned && scan_errors == 0
 }
 
 fn scan_first_forced_followup(
@@ -2911,14 +2905,17 @@ pub fn run_daemon(
                         // dirty until both the exact SQL predicate and scan coverage
                         // are proven; the watcher loop remains free to ingest and
                         // commit events while the read-only snapshot runs.
+                        // In scan-first mode, event loss does not invalidate a
+                        // completed last-observed walk. It means the view may
+                        // already be older than the walk, which freshness
+                        // reports honestly; replaying hints is not a correctness
+                        // gate. A coverage/accounting failure still is.
                         let safe_to_clear = !coverage_incomplete
-                            && !resolve_warned
-                            && !lost_events
-                            && stats.errors == 0;
+                            && stats.errors == 0
+                            && (reconcile_first || (!resolve_warned && !lost_events));
                         let event_race_only = scan_first_event_race_only(
                             reconcile_first,
                             lost_events,
-                            forced_reconciliation_after_scan,
                             coverage_incomplete,
                             resolve_warned,
                             stats.errors,
@@ -2946,11 +2943,13 @@ pub fn run_daemon(
                             },
                         )?;
                         if event_race_only {
-                            // Hints arriving during the walk make this a valid
-                            // last-observed view, but not a clean post-churn
-                            // baseline. Keep it visibly stale and let the fixed
-                            // cadence retry without turning ordinary churn into
-                            // a failed-scan circuit-breaker attempt.
+                            // A complete walk remains the source of truth even
+                            // when its lossy hint stream overflows. Keep the
+                            // next observation on the fixed cadence instead of
+                            // creating an immediate full-scan loop. The
+                            // post-scan accounting check can still clear dirty
+                            // state; scan-first freshness never claims real-time
+                            // caught-up status.
                             // Keep the cadence anchored to observation start.
                             // Resetting here would add the full scan duration to
                             // the configured maximum interval on every raced scan.
@@ -7982,13 +7981,12 @@ mod tests {
     }
 
     #[test]
-    fn scan_first_distinguishes_event_race_from_known_loss() {
-        assert!(scan_first_event_race_only(
-            true, true, false, false, false, 0
-        ));
-        assert!(!scan_first_event_race_only(
-            true, true, true, false, false, 0
-        ));
+    fn scan_first_accepts_a_complete_last_observation_after_hint_loss() {
+        assert!(scan_first_event_race_only(true, true, false, false, 0));
+        assert!(!scan_first_event_race_only(true, true, true, false, 0));
+        assert!(!scan_first_event_race_only(true, true, false, true, 0));
+        assert!(!scan_first_event_race_only(true, true, false, false, 1));
+        assert!(!scan_first_event_race_only(false, true, false, false, 0));
         assert!(scan_first_forced_followup(true, true, false, false, 0));
         assert!(!scan_first_forced_followup(true, true, true, false, 0));
         assert!(!scan_first_forced_followup(false, true, false, false, 0));

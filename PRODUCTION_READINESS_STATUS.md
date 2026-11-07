@@ -1,8 +1,72 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 17:12 UTC
+**Updated:** 2026-11-07 18:00 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
+
+## Latest 100k reconciliation-first qualification (17:58 UTC)
+
+The updated candidate passed the production-shaped churn suite on VPS2 using
+an isolated disposable ext4 loop filesystem: **100,000 seeded files, 20,000
+mutations in ten 2,000-operation batches, and a full reconciliation forced
+during concurrent writes at the midpoint**. Every batch matched the
+independent filesystem oracle for paths, inode allocations, and all rollups;
+history continuity passed; the harness recorded zero dropped indexed events
+and no uncertain status at checkpoints. Runtime was **953 seconds** wall / **217
+seconds** worker CPU at a 25% one-core quota, with a 4 GiB cgroup memory limit
+and 1.2 GiB measured peak. Maximum batch convergence was **153 seconds**.
+
+The midpoint scan observed transient coverage errors while files were changing;
+Dux retained uncertainty, retried after bounded backoff and pressure admission,
+then converged exactly after churn stopped. This validates recovery for this
+ext4/Linux 6.8 fixture. It does not establish the 15-minute freshness SLO,
+10k/sec or larger event-rate behavior, other filesystems, endurance, packaging,
+or a production canary. Userspace hint-ring loss warnings still appeared in
+the daemon log; this run proves recovery from those losses in this fixture, not
+that ring loss is eliminated.
+
+The passing candidate binary SHA-256 is
+`a908849a5d793cf76c15af8e3e1c68000f9fe899ef8badcd39d67777fc375ae2`, with
+embedded source SHA-256
+`34836e74490006c084089ec6a677d67719cfd517de115baf6c8484463c48e76e`.
+Harness SHA-256 is
+`fd669c3691da97b2fe899b441724ccd01a2839d10105ddc0a8ec4ea47123f2f2`.
+Machine-readable result: [100k churn report](docs/qualification/scan-first-churn-20261107/report-fixed.json).
+
+This followed a failed 100k startup attempt on the previous candidate. That
+run stopped before mutations because repeated hint-ring loss kept status
+uncertain after two completed scans. It led to the policy change: hint loss
+during a complete, accounting-verified scan no longer triggers an immediate
+redundant full scan. The failed attempt and log are retained for comparison.
+
+## Prior 100k reconciliation-first failure (17:32 UTC)
+
+The current GNU candidate (binary SHA-256
+`67e4c964a26d5f4ae4f5b25af1adf2e932c89953cef9d1447ceea4b64c376c1e`) was
+run on VPS2 against a disposable ext4 loop filesystem with 100,000 seeded
+files, a 25% one-core CPU quota, and a 4 GiB worker memory limit. This attempt
+**failed before the churn mutations began**: startup reconciliation repeatedly
+reported userspace hint-ring loss while scans were active; two full-root
+observations completed but the watch status remained uncertain, and the
+readiness harness timed out waiting for pipeline convergence. The recorded
+fanotify kernel overflow counter was zero, and indexed event counters/drops
+were zero. This is a real candidate failure, not a successful churn result.
+
+The harness was changed to request a scan after each mutation batch in
+scan-first mode; without that, its 90-second exactness check incorrectly waits
+for the candidate's 15-minute cadence. With that fix, the run still failed in
+the initial convergence gate, before exercising any mutations. The log shows
+repeated **userspace hint-ring** overflow warnings and immediate follow-up
+scans. The cause of those ring drops is not proven; filesystem-wide marks also
+cover the database/WAL when they share the watched filesystem, so
+self-generated write notifications remain a hypothesis, not a confirmed
+cause.
+
+Evidence: [attempt report](docs/qualification/scan-first-churn-20261107/attempt-100k-report.json),
+[daemon log](docs/qualification/scan-first-churn-20261107/attempt-100k-daemon.log),
+and [run metadata](docs/qualification/scan-first-churn-20261107/attempt-100k-metadata.json).
+The 72-hour soak remains on an earlier candidate and does not cover this
+failure. No production service or index was changed.
 
 ## Latest architecture qualification result (17:09 UTC)
 

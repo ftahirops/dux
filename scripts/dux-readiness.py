@@ -943,6 +943,15 @@ def production_churn_test(case, args, evidence):
                 mutate_batch()
 
             try:
+                # Reconciliation-first deliberately does not apply ordinary
+                # events to the live rows. Ask it to observe the batch now so
+                # this suite measures convergence after concurrent churn,
+                # rather than waiting for the 15-minute background cadence.
+                # The midpoint case above still injects SIGHUP while writes
+                # are in flight; this post-batch request guarantees a complete
+                # observation after the mutator has stopped.
+                if daemon.record()["scan_first"]:
+                    daemon.process.send_signal(signal.SIGHUP)
                 print(f"PROGRESS churn batch {batch+1}/{total_batches}: mutations complete; checking exact state",
                       flush=True)
                 daemon.exact(timeout=180)
