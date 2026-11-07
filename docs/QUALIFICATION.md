@@ -7016,3 +7016,25 @@ SHA-256 values are
 progress and
 `f01848d5110d68842170b25ffdb6da55ad38583e5fff1ff2c343b1a51911a7bd` for the
 P0 journal.
+
+**03:10 UTC runtime checkpoint:** the candidate overflow suite passed in
+476.277 seconds. The kernel queue capacity was 16,384; the test created 18,432
+entries, forced the dirty-metadata write to fail, observed explicit
+uncertainty, and verified that reconciliation began after the backlog
+persisted, completed a scan and accounting check, and caught up. Recovery
+took 81.235 seconds. The report now marks both `crash` and `overflow` passed;
+the CPU event-burst suite is running and the remaining matrix suites are
+pending. The matrix, candidate soak, and independent older soak remained
+active with zero restarts; matrix memory peak remained 1.34 GiB. The exact
+candidate soak had run **4,563.4 seconds**, with **102,969 mutations** and
+**1,024 exactness samples**. Sampled maxima were 7,792 KiB RSS, 12 file
+descriptors, and a 4,272,472-byte WAL; p95 convergence was 500 ms and maximum
+convergence 1,339 ms. Its final exactness, history, and SQLite checks are
+pending. Host CPU PSI `some avg10` was 60.64% and `full` was 0%; available
+memory was 2.3 GiB and `/` had 23 GiB free. Snapshot SHA-256 values are
+`0fd497ff71def9a403fdf28fe1c95667281facc61e72866db52f3239bd16e774` for the
+matrix report,
+`2003ffdc8e988971ad39688c8606d7a085ab8ae2112c88602a9dcd9a43f28c5f` for soak
+progress, and
+`4376857098059095240223cbcc95a0b266c3a0b231408caf018b18382e0840b4` for the
+P0 journal.
