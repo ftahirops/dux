@@ -7017,6 +7017,28 @@ progress and
 `f01848d5110d68842170b25ffdb6da55ad38583e5fff1ff2c343b1a51911a7bd` for the
 P0 journal.
 
+**03:30 UTC runtime checkpoint:** the exact-source churn suite passed all
+**20,000 operations over a 100,000-file baseline** in 10 exact-validated
+batches, with a forced concurrent rebuild and continuous history checks. It
+observed 90,034 kernel events and **zero dropped events**; all batches kept
+the index certain and exact. The slowest exact convergence batch took
+142.209 seconds, within the 180-second per-batch limit. The report now marks
+`crash`, `overflow`, `cpu`, and `churn` passed; disk fault testing is running.
+The matrix, candidate soak, and independent older soak remained active with
+zero restarts; P0 memory peak remained 1.34 GiB. CPU PSI `some avg10` fell to
+53.83% at recheck, CPU and memory `full` pressure were 0%, 1.7 GiB memory was
+available, and `/` had 23 GiB free. The exact-candidate soak had run
+**5,764.7 seconds**, recording **130,100 mutations** and **1,296 exactness
+samples**. Sampled maxima were 7,968 KiB RSS, 12 file descriptors, and a
+4,293,072-byte WAL; p95 exact convergence was 495 ms and maximum was 1,339 ms.
+Final soak checks remain pending. Snapshot SHA-256 values are
+`57a3b49509bfcb7a3d0fe27d3fbcd05ff1978980ebf34725407f86d9db361d64` for the
+matrix report,
+`9d965d53eacc98e00af9b6392a5852ef8be2c64a3d726c3b902d039da7a9d4fd` for soak
+progress, and
+`d15c7968aeebc51f6d3f524158158aa7bc8ed96a6271f11fa225d0766a1309b0` for the
+P0 journal.
+
 **03:15 UTC runtime checkpoint:** the CPU event-burst suite passed with
 12,118 events observed from 12,000 created entries, 21.804-second catch-up,
 26.994-second exact validation, and 0.101 CPU cores measured against a
