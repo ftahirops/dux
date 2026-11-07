@@ -6997,3 +6997,22 @@ convergence was 1,339 ms. Final exactness/history/SQLite checks remain
 pending. Snapshot SHA-256 values are `eff31d12ef8a00d1dbd92b5d62694f72f3ad9e79e504dfa9e194b7fda8d40e26`
 for soak progress and `d6adf2c60f6f620b725986912cd2dc572708f827c6494a64d8e3776a80a98614`
 for the live P0 journal.
+
+**03:02 UTC runtime checkpoint:** the exact-candidate crash suite completed
+with **30/30 rounds passed**; individual recovery times ranged from 48.798 to
+91.513 seconds. The current matrix report marks `crash=passed` and
+`overflow=running`; the other planned suites have not yet completed. Its JSON
+snapshot SHA-256 is
+`6a2e2d5026aeda9d632b711e61abe5646191e5db9702fb7f5a6d3d9e0da57b44`. The
+matrix, candidate soak, and independent older soak remained active with zero
+restarts; P0 memory peak remained 1.34 GiB. The candidate soak had run
+**4,083.1 seconds**, with **92,349 mutations** and **918 exactness samples**.
+Sampled maxima were 7,792 KiB RSS, 12 file descriptors, and a 4,251,872-byte
+WAL; p95 exact convergence was 493 ms and maximum was 1,339 ms. Endurance
+final-integrity checks remain pending. Host CPU PSI `some avg10` was 51.20%,
+`full` was 0%, available memory 2.3 GiB, and `/` had 23 GiB free. Snapshot
+SHA-256 values are
+`a6fb56a3add8e9b64ba45e605e16e7c348fccbda3dad25380ca97f825d7fe4ee` for soak
+progress and
+`f01848d5110d68842170b25ffdb6da55ad38583e5fff1ff2c343b1a51911a7bd` for the
+P0 journal.
