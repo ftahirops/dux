@@ -1668,3 +1668,44 @@ are on VPS2 at `/root/dux-canary-d8ea72d/`; sample 1 is preserved at
 This is a candidate canary on the test VM, not production sign-off. The 24-hour
 window is still running; continued exact observations and no critical errors
 are required for it to pass. Rollback artifacts remain in place during the run.
+
+## Release 106 canary collector v3 — 2026-11-08 22:10 UTC
+
+The corrected five-minute v2 monitor recorded 13 consecutive passing samples
+from 21:07 through 22:07 UTC. It was then stopped to replace the observer, not
+because Dux failed. This is roughly one hour of evidence, not a 24-hour pass.
+The v2 progress JSONL is preserved at
+`docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl`.
+
+The replacement monitor adds strict cgroup-v2 per-device I/O capture. Its
+focused Python suite passed 34 tests. Full Python discovery was rerun after the
+change at 22:14 UTC: 330 tests passed. The read-only VPS2 cgroup check showed stacked
+device rows `252:0` and `8:0`; values are retained individually rather than
+summed to avoid double-counting.
+
+The transient VPS2 unit `dux-canary-409a2f4-v3.service` is active. Sample 1
+passed at 22:10:34 UTC after 169.6 seconds, with no monitor errors. The running
+binary and unit hashes matched expectations; SQLite quick-check, schema-v7
+path graph, and accounting checks passed. Dux had zero restarts, kernel
+overflows, userspace drops, and OOM events. Its peak memory remained about
+1.51 GiB under the 4 GiB limit. The index was dirty with a periodic full
+observation in progress; the last completed observation was 1,042 seconds old.
+Thus the sample passes the monitor's bounded scan-first gate but does not show
+real-time freshness or a completed soak. No CPU or I/O efficiency thresholds
+have been defined, so overhead acceptability remains unproven. Sample data is
+preserved at
+`docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v3-progress.jsonl`.
+
+The VPS1 production service remains unchanged on its older installed release.
+The last read-only production snapshot in this record (22:02 UTC) showed it
+dirty and not caught up, with 312 cumulative kernel overflows and a last full
+scan about 81.2 hours old. A production-host candidate canary, a 24-hour VPS2
+canary using v3, a longer soak, sustained overflow-storm qualification, and
+
+At 22:14:58 UTC, v3 sample 2 also passed after 133.6 seconds. The completed
+scan age was 407 seconds, with no scan running at the sample; the index was
+dirty because filesystem changes awaited the next observation. The sample
+again showed zero Dux restarts, kernel overflows, userspace drops, or OOM
+events. The latest preserved JSONL now contains both v3 samples. This extends
+the canary evidence by one interval only; it does not change the open soak,
+freshness-SLO, production-host, or full-root qualification gates.

@@ -96,7 +96,7 @@ collector; the earlier failed evidence is preserved in
 [`live/failed-5m-canary-monitor-calibration.jsonl`](live/failed-5m-canary-monitor-calibration.jsonl)
 and does not count as a pass.
 
-### Corrected 24-hour canary progress (2026-11-08 22:02 UTC)
+### Corrected 24-hour canary progress (2026-11-08 22:02 UTC; superseded)
 
 The corrected five-minute canary started at 21:05:37 UTC and remains active.
 Its first twelve samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
@@ -158,3 +158,36 @@ and a last full scan 292,410 seconds old (about 81.2 hours). Its journal had
 248 slow-flush and 17 stale-handle warnings during that interval. The overflow
 increase confirms the brief backlog drain was not recovery. No production
 service or database changes were made.
+
+### Canary collector v3 progress (updated 2026-11-08 22:15 UTC)
+
+The v2 monitor was stopped after sample 13 so the canary could use the new
+collector with per-device cgroup-v2 I/O. The v2 run was partial: 13 samples
+passed from 21:07 through 22:07 UTC, but this is not a 24-hour soak. Its final
+sample remains preserved in
+[`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
+
+The replacement transient unit `dux-canary-409a2f4-v3.service` is active on
+VPS2. Samples 1 and 2 passed at 22:10:34 and 22:14:58 UTC after 169.6 and
+133.6 seconds of collection, with no monitor errors. The expected binary, service unit, and monitor hashes were
+verified by the collector. Dux had zero restarts, kernel overflows, userspace
+drops, and OOM events at that sample. SQLite, schema-v7 graph, and accounting
+checks passed. The collector recorded cgroup I/O for device rows `252:0` and
+`8:0`; they are retained separately because they are stacked devices and must
+not be summed as independent physical I/O.
+
+These samples are not a completed soak. At sample 1 the index was dirty and a
+periodic full observation was in progress; at sample 2 it was dirty with no
+scan in progress. The last completed observation was 1,042 seconds old at
+sample 1 and 407 seconds old at sample 2. Both were within the monitor's
+bounded scan-first freshness gate, but neither establishes real-time
+freshness. Dux remained below its 4 GiB memory cap; peak memory was about 1.51
+GiB. There is no CPU or I/O efficiency budget defined yet, so these samples do
+not establish that overhead is low enough.
+
+The v3 collector focused suite passed 34/34 tests. Full Python discovery was
+rerun after this change at 22:14 UTC: **330 tests passed**. The v3 JSONL remains
+live on VPS2 at `/root/dux-canary-409a2f4/canary-24h-5m-v3.jsonl`; its captured
+progress through sample 2 is also preserved in
+[`live/canary-24h-5m-v3-progress.jsonl`](live/canary-24h-5m-v3-progress.jsonl).
+The v3 canary is still in progress.
