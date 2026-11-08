@@ -1332,3 +1332,41 @@ restarts, while systemd continued to show `reloading/reload-notify` for nearly
 four hours and logs continued to show full-root reconciliation activity. The
 candidate has not been installed there. Full-root convergence remains
 unverified.
+
+## Pushed candidate VPS2 canary — started 2026-11-08 18:23 UTC
+
+The exact clean commit `d8ea72d31953b741794ed4b1c62b24eec306a457` was built
+as static-musl and installed on the dedicated VPS2 test VM. Binary SHA-256 is
+`d7e41c5361011bc6acb2caa9b716488b3c5354f17b7c9b7bcc69ce73b2127b7e`; embedded
+source SHA-256 is `b68589d3208409a05c69c0b626a538b54540f0c14ae99c630098180900fcc2b6`.
+The old `e90f3c3` executable, systemd unit, and a 580,390,912-byte consistent
+SQLite snapshot were saved under `/root/dux-rollback-d8ea72d/` before replacement.
+The snapshot passed `PRAGMA integrity_check`, contained 1,495,096 inode rows,
+and remains root-only. Its SHA-256 is
+`1689b2e8487bc93d358d8e06c0e246a1204e452f44818d34519ca3190748dad3`.
+
+The initial candidate full-root attempt failed closed: it recorded one
+inode-incarnation conflict and concurrent hint-loss uncertainty, preserved the
+old indexed rows, and scheduled a bounded 60-second retry. The automatic retry
+then completed in about 182 seconds over 1,361,780 files and 163,202 directories
+(1,524,982 staged path instances), with 0 coverage issues. Visible allocated
+bytes were 86,700,855,296; unique bytes were 85,492,142,080. Independent
+accounting verification passed after 50.85 seconds. Filesystem hints arrived
+during the scan, so the last-observed index remains marked dirty until a later
+observation; this is expected in scan-first mode and is not reported as
+caught-up. At the latest sample there were no kernel overflows, userspace
+drops, daemon restarts, or OOM events. The daemon used about 560 MiB and the
+host had about 8 GiB free. The status and log are captured in the qualification
+artifacts and the live journal on VPS2.
+
+A new read-only 24-hour candidate canary started at 18:34:32 UTC using the
+existing fail-closed monitor at 20% CPU and 1 GiB memory. Its first sample at
+18:35:15 passed: exact running binary and systemd unit hashes; fresh completed
+observation; schema-v7 path graph and accounting checks; SQLite quick check;
+no restart/OOM increase; and no critical journal events. It samples hourly and
+requires observation age no greater than 20 minutes. The live monitor and JSONL
+are on VPS2 at `/root/dux-canary-d8ea72d/`; sample 1 is preserved at
+`docs/qualification/scan-first-fixed-cadence-20261108/canary-d8ea72d-initial-20261108.jsonl`.
+This is a candidate canary on the test VM, not production sign-off. The 24-hour
+window is still running; continued exact observations and no critical errors
+are required for it to pass. Rollback artifacts remain in place during the run.
