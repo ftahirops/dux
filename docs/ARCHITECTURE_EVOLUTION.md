@@ -13,9 +13,10 @@ redesign in this file and the corresponding draft in
 `--event-apply` retains the legacy mode for controlled comparison/rollback; the
 installed production service is unchanged until rollout gates pass. The new
 mode does not resolve per-event handles or apply path mutations. It performs an
-initial atomic baseline and then in-place observations every 15 minutes; overflow or
-malformed records request reconciliation, while events observed during a scan
-keep the view visibly stale and defer the next attempt to the fixed cadence.
+initial atomic baseline and then in-place observations on a 15-minute cadence.
+Overflow and malformed records mark the last-observed view stale without
+pulling the next observation forward; explicit requests and failed observations
+retain their retry behavior.
 This remains experimental. Changed-row reconciliation is implemented. The
 exact current candidate passed one 1.37M-path ext4 scale profile on VPS2:
 196.3 seconds at a 50% CPU quota and 154 MiB scan RSS. This is one profile,
@@ -44,8 +45,11 @@ requires a filesystem snapshot or an equivalent filesystem-specific primitive.
 The installed production index has remained dirty for hours after fanotify
 overflows. Event delivery is useful for low-latency hints, but it is not a
 durable source of truth. A periodic scan makes event loss recoverable without
-requiring event replay to prove every path update. Dux continues to bound its
-resources and report when it cannot meet freshness.
+requiring event replay to prove every path update. In scan-first mode, hint
+loss marks the last-observed view stale; it does not pull a full-root scan
+forward. Only an explicit operator request, a failed/incomplete observation,
+or a failed accounting check can request an earlier retry. Dux continues to
+bound its resources and report when it cannot meet freshness.
 
 Earlier runs measured a 10M-inode scan at **1,004.445 s** and **868 s**;
 linear extrapolation to 1.37M entries suggested **2.0–2.3 minutes**. A current
@@ -96,25 +100,29 @@ flowchart LR
 
 ### Event hints and overflow
 
-- Fanotify is an optimization for choosing what to scan sooner. The current
+- Fanotify is an optimization for prioritizing branches within the next scan. The current
   scan-first reader drains raw record chunks on a dedicated thread into a
   bounded 128-chunk channel (32 KiB per chunk). It never waits for queue
   capacity, handle resolution, or database work. A full channel discards that
-  chunk, records explicit loss, and requests a full observation. The coordinator
+  chunk and records explicit loss. The next observation remains on its fixed
+  cadence. The coordinator
   validates DFID_NAME records and coalesces at most 32 distinct parent handles
   per parse slice. A separate resolver thread performs bounded handle-to-root
   checks; both work queues are bounded, and saturation is recorded as loss.
   Ordinary unresolvable scopes leave the view stale for the fixed scan cadence
   rather than forcing repeated immediate scans. Kernel overflow and userspace
-  pipeline loss still request a follow-up observation after an active scan.
+  pipeline loss during an active scan also leave the next observation on its
+  fixed cadence.
 - Repeated hints coalesce by filesystem and directory identity. If a parent
   cannot be resolved safely, widen to a known ancestor or the whole filesystem.
   The current implementation widens to a full-root observation; subtree
   prioritization has not been implemented. On shutdown the reader is stopped
   and joined before exit, and the next startup is required to observe the tree.
-- A kernel queue overflow schedules a full scan of the affected filesystem as
-  soon as resource guards allow it. It can make the view stale until that scan
-  completes, but cannot permanently prevent later scans from repairing it.
+- A kernel queue overflow marks the view stale. The next full-root observation
+  stays on the fixed 15-minute cadence; the event stream is not the truth and
+  cannot force repeated scans. An operator can still request an immediate
+  observation, and failed or incomplete observations retain their bounded
+  retry policy.
 - Hints cannot reduce the number of kernel notifications produced by a
   filesystem mark. On a build filesystem that still floods the queue, Dux must
   stop per-file watching there or place that workload on a separate mount.

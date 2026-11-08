@@ -608,6 +608,24 @@ fn scan_first_observation_due(last_started: Instant, now: Instant) -> bool {
     now.saturating_duration_since(last_started) >= SCAN_FIRST_INTERVAL
 }
 
+/// Scan-first mode treats fanotify loss as freshness information only. A full
+/// observation is already scheduled on the fixed cadence, so a lossy hint
+/// queue must not pull that scan forward or create repeated whole-root work.
+fn hint_loss_requests_immediate_scan(reconcile_first: bool) -> bool {
+    !reconcile_first
+}
+
+fn dirty_retry_due_for_event_mode(
+    reconcile_first: bool,
+    dirty: bool,
+    last_started: Instant,
+    now: Instant,
+) -> bool {
+    !reconcile_first
+        && dirty
+        && now.saturating_duration_since(last_started) >= Duration::from_secs(300)
+}
+
 fn scan_first_can_use_in_place(
     reconcile_first: bool,
     baseline_ready: bool,
@@ -2424,9 +2442,11 @@ pub fn run_daemon(
                     &store,
                     "fanotify hint resolver capacity was exceeded",
                 );
-                RESCAN.store(true, Ordering::SeqCst);
+                if hint_loss_requests_immediate_scan(reconcile_first) {
+                    RESCAN.store(true, Ordering::SeqCst);
+                }
                 tracing::warn!(
-                    "fanotify hint resolver backlog overflowed; discarded scopes require a full observation"
+                    "fanotify hint resolver backlog overflowed; discarded scopes leave the index stale until its next observation"
                 );
             }
         }
@@ -3410,9 +3430,11 @@ pub fn run_daemon(
                                         &store,
                                         "fanotify hint ring capacity was exceeded",
                                     );
-                                    RESCAN.store(true, Ordering::SeqCst);
+                                    if hint_loss_requests_immediate_scan(reconcile_first) {
+                                        RESCAN.store(true, Ordering::SeqCst);
+                                    }
                                     tracing::warn!(
-                                        "fanotify hint ring overflowed; discarded hints require a full observation"
+                                        "fanotify hint ring overflowed; discarded hints leave the index stale until its next observation"
                                     );
                                 }
                                 break;
@@ -3422,9 +3444,11 @@ pub fn run_daemon(
                                 lost_events = true;
                                 forced_reconciliation_after_scan = true;
                                 index_uncertain = true;
-                                RESCAN.store(true, Ordering::SeqCst);
+                                if hint_loss_requests_immediate_scan(reconcile_first) {
+                                    RESCAN.store(true, Ordering::SeqCst);
+                                }
                                 tracing::error!(
-                                    "fanotify hint reader stopped unexpectedly; requesting full observation"
+                                    "fanotify hint reader stopped unexpectedly; index remains stale until the next observation"
                                 );
                                 break;
                             }
@@ -3493,7 +3517,9 @@ pub fn run_daemon(
                         }
                         if overflows > 0 {
                             forced_reconciliation_after_scan = true;
-                            RESCAN.store(true, Ordering::SeqCst);
+                            if hint_loss_requests_immediate_scan(reconcile_first) {
+                                RESCAN.store(true, Ordering::SeqCst);
+                            }
                         }
                     }
                     let job = HintResolutionJob { handles };
@@ -3599,11 +3625,12 @@ pub fn run_daemon(
         if lost_events || resolve_warned {
             index_uncertain = true;
             if lost_events {
-                // Loss is already a correctness failure; waiting for the
-                // periodic 5-minute integrity sweep leaves the UI stale even
-                // when the queue can be reconciled immediately. RESCAN is
-                // gated above until kernel and userspace backlogs are drained.
-                RESCAN.store(true, Ordering::SeqCst);
+                // Event-apply mode needs a full repair after capture loss.
+                // Scan-first mode treats fanotify as a lossy hint source and
+                // waits for its fixed observation cadence instead.
+                if !reconcile_first {
+                    RESCAN.store(true, Ordering::SeqCst);
+                }
             }
             // Publish loss before starting a potentially expensive SQL batch.
             crate::util::write_watch_status_with_mode(
@@ -4033,8 +4060,13 @@ pub fn run_daemon(
                 }
                 if !coverage_incomplete
                     && !reconciliation_retry_paused
-                    && last_reconcile.elapsed() >= Duration::from_secs(300)
                     && (index_uncertain || store.get_meta("dirty_since")?.is_some())
+                    && dirty_retry_due_for_event_mode(
+                        reconcile_first,
+                        true,
+                        last_reconcile,
+                        Instant::now(),
+                    )
                 {
                     RESCAN.store(true, Ordering::SeqCst);
                 }
@@ -8071,6 +8103,26 @@ mod tests {
             due.duration_since(finished) < SCAN_FIRST_INTERVAL,
             "a raced scan must not add its duration to the next observation interval"
         );
+    }
+
+    #[test]
+    fn scan_first_hint_loss_waits_for_fixed_cadence_but_event_mode_repairs() {
+        assert!(!hint_loss_requests_immediate_scan(true));
+        assert!(hint_loss_requests_immediate_scan(false));
+
+        let started = Instant::now();
+        let retry_time = started + Duration::from_secs(300);
+        let cadence_time = started + SCAN_FIRST_INTERVAL;
+        assert!(!dirty_retry_due_for_event_mode(
+            true, true, started, retry_time
+        ));
+        assert!(dirty_retry_due_for_event_mode(
+            false, true, started, retry_time
+        ));
+        assert!(!dirty_retry_due_for_event_mode(
+            false, false, started, retry_time
+        ));
+        assert!(scan_first_observation_due(started, cadence_time));
     }
 
     #[test]
