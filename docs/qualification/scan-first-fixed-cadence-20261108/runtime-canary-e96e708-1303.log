@@ -1,0 +1,45 @@
+VPS2 source-matched runtime canary
+Date: 2026-11-08 UTC
+Candidate commit: e96e708a7c4bf8b2803eba24cae520065be42332
+Candidate binary SHA-256: dc047ff97234f10c75abce17ae26e59cd5c0024842bd3247383b6284dface93a
+Candidate version: dux 0.6.3 (e96e708a7c4b) [production]
+
+Rollback preparation
+- Existing /usr/bin/dux SHA-256 before replacement:
+  8f9a6f631f6c08b9df2fad7516d0fe8808ce76d5cb1c5371aee23f0d67e533c1
+- Backup: /root/dux-canary-e96e708/dux.previous (mode 0755, root owned)
+- Candidate: /root/dux-canary-e96e708/dux.candidate
+- Service: dux.service, ExecStart=/usr/bin/dux daemon /
+- Existing v7 database was retained; no schema or index files were replaced
+  during canary setup.
+
+Runtime
+- Candidate service start: 2026-11-08 13:03:44 UTC.
+- First full-root scan completed: 13:06:52 UTC (188 seconds).
+- Scan covered 1,307,547 files, 157,131 directories, and 1,464,678 staged
+  path instances.
+- Scanner logged 36 conflicting inode incarnations. Reconciliation was
+  correctly rejected; prior published rows were retained, dirty stayed true,
+  and failed reconciliation attempts increased to 6.
+- At 13:08:30 UTC: ActiveState=active, NRestarts=0, kernel_overflow_notifications=0,
+  userspace_updates_dropped=0, events_seen=2,073,502, dirty=true,
+  caught_up=false. The last accepted scan remained old because this observation
+  was incomplete.
+- Since candidate start, journal count was zero for both "hint ring overflowed"
+  and "hint resolver backlog overflowed". The older binary emitted both
+  warnings repeatedly before the service restart.
+- Cumulative service counters immediately after the scan were about 192 CPU
+  seconds, 1.95 GB read, and 2.01 GB written. This is one run, not a controlled
+  before/after performance benchmark.
+- The status at 13:08:30 showed a 1,920-second retry delay. The scan-first
+  fixed cadence remains 900 seconds; observation of the next cadence is still
+  required.
+
+Interpretation
+The canary supports that scan-first discard-and-count removes the prior
+userspace raw-event ring/resolver overflow under this workload. It does not
+prove zero kernel loss under higher load, bounded freshness, or acceptable
+production-scale I/O. It did not fix the independent live-scan inode-reuse
+problem: 36 conflicts caused a safe fail-closed result. Keep the rollback copy
+until the remaining scan correctness test is complete. Do not claim production
+readiness from this canary.

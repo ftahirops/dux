@@ -756,12 +756,31 @@ The reader test passed a 10,000-event synthetic burst without queueing payloads
 or recording drops. The metadata parser test covers malformed/truncated input
 and self-generated events. These are local pipe-based tests, not a fanotify
 kernel throughput benchmark. The full suite passed (305 passed, 0 failed, 2
-ignored); strict Clippy, formatting, and release build passed. It has not yet
-been deployed to VPS2. That host's previous binary continued to overflow the userspace hint
-ring while the kernel queue reported zero overflows; a source-matched canary
-must verify that this change removes that specific failure without creating
-kernel queue loss or hurting scan latency. The inode-reuse race, bounded
-freshness under sustained churn, and production-scale I/O budget remain open.
+ignored); strict Clippy, formatting, and release build passed. The following
+source-matched VPS2 canary tested the userspace ring behavior; it did not
+resolve the independent live-scan inode-reuse conflicts. Bounded freshness
+under sustained churn and production-scale I/O budget remain open.
+
+## Source-matched scan-first reader canary — VPS2, 2026-11-08 13:03–13:08 UTC
+
+The pushed candidate `e96e708` was installed manually after verifying a
+rollback copy of the prior binary. The first full-root walk completed in 188
+seconds across 1,307,547 files and 157,131 directories. During and after that
+scan, Dux reported zero kernel overflow notifications and zero userspace
+updates dropped; the journal contained zero scan-first hint-ring or resolver
+overflow warnings after the candidate started. It had counted 2.07M events by
+13:08:30. This supports that removing per-event handle resolution and the
+payload queue addresses the specific ring-saturation failure on this VPS2
+workload.
+
+The scan itself found 36 conflicting inode incarnations, so Dux retained the
+previous index and remained dirty. The service stayed active with zero
+restarts; its retry backoff was 1,920 seconds. Therefore the canary does not
+prove scan convergence, freshness, or production readiness. The scan used
+about 192 CPU seconds, read 1.95 GB, and wrote 2.01 GB; without a controlled
+comparison those counters are a single-run cost, not an improvement claim.
+Evidence and rollback location are recorded in
+[`runtime-canary-e96e708-1303.log`](docs/qualification/scan-first-fixed-cadence-20261108/runtime-canary-e96e708-1303.log).
 
 ## Current-source package and live-root qualification — 2026-11-08 10:41 UTC
 
