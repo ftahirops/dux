@@ -1768,6 +1768,36 @@ by no measured block I/O in the next interval. Per-device stacked rows are not
 summed. This is evidence for the cost of this specific mixed workload, not a
 steady-state overhead claim or pass against an efficiency budget.
 
+## VPS2 high-event scan observation — 2026-11-08 22:45 UTC
+
+V3 samples 7 and 8 passed at 22:40:17 and 22:44:56 UTC. Sample 7 caught a
+periodic full observation in progress (scan age 1,025 seconds); sample 8 saw
+it complete (age 405 seconds, no scan in progress). The sample-8 index was
+still dirty while awaiting the next observation, but there were zero kernel
+overflows, userspace drops, restarts, or OOM events.
+
+The VPS2 service journal confirms a full scan from 22:38:11 to 22:42:03 over
+1,353,657 files and 161,163 directories (1,514,820 staged paths), with zero
+coverage issues. Dux accounting verification passed at 22:43:13 in 69.7
+seconds. Across 41 watcher-pressure records in the captured 6m43s interval,
+the reported rate ranged 10,939–24,383 events/s; queue bytes peaked at 1,680,
+with no active or cumulative queue-pressure episodes and no overflow. The
+sample and journal are preserved under
+`docs/qualification/release-409a2f4-20261108/live/`.
+
+This is encouraging evidence on one Ubuntu 24.04/Linux 6.8/ext4 VM under its
+current workload. It is not a deterministic event-rate replay, does not show
+that the index is caught up between periodic scans, and does not qualify other
+kernel/filesystem combinations or the production host.
+
+The scan-plus-accounting window (samples 7→8) used 244.3 Dux CPU-seconds over
+278.8 seconds (87.6% of one core), with about 1.75 GiB read and 1.66 GiB
+written in the service cgroup counters. This is material cost and remains an
+optimization target. One partial WAL checkpoint warning reported busy=0,
+7 frames total, 3 checkpointed, and a 34.4 MB WAL. It remained below the 256
+MiB write-pause guard and the canary passed, but recurrence and WAL growth
+should be tracked; whether the read-only observer contributed is unknown.
+
 ## Workspace disk cleanup — 2026-11-08
 
 The local `/` filesystem was 61% used with 70 GiB free. The repository's

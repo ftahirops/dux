@@ -159,7 +159,7 @@ and a last full scan 292,410 seconds old (about 81.2 hours). Its journal had
 increase confirms the brief backlog drain was not recovery. No production
 service or database changes were made.
 
-### Canary collector v3 progress (updated 2026-11-08 22:35 UTC)
+### Canary collector v3 progress (updated 2026-11-08 22:45 UTC)
 
 The v2 monitor was stopped after sample 13 so the canary could use the new
 collector with per-device cgroup-v2 I/O. The v2 run was partial: 13 samples
@@ -168,20 +168,21 @@ sample remains preserved in
 [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
 
 The replacement transient unit `dux-canary-409a2f4-v3.service` is active on
-VPS2. Samples 1–6 passed at 22:10:34, 22:14:58, 22:19:24, 22:25:10, 22:30:06,
-and 22:35:35 UTC. Collection took 169.6, 133.6, 99.1, 145.0, 141.7, and 170.0
-seconds, with no monitor errors. The expected binary, service unit, and monitor hashes
-were verified by the collector. Dux had zero restarts, kernel overflows,
-userspace drops, and OOM events across these samples. SQLite, schema-v7 graph,
-and accounting checks passed. The
+VPS2. Samples 1–8 passed at 22:10:34, 22:14:58, 22:19:24, 22:25:10, 22:30:06,
+22:35:35, 22:40:17, and 22:44:56 UTC. Collection took 169.6, 133.6, 99.1,
+145.0, 141.7, 170.0, 152.5, and 131.3 seconds, with no monitor errors. The
+expected binary, service unit, and monitor hashes were verified by the
+collector. Dux had zero restarts, kernel overflows, userspace drops, and OOM
+events across these samples. SQLite, schema-v7 graph, and accounting checks
+passed. The
 collector recorded cgroup I/O for device rows `252:0` and
 `8:0`; they are retained separately because they are stacked devices and must
 not be summed as independent physical I/O.
 
 These samples are not a completed soak. At sample 1 the index was dirty and a
 periodic full observation was in progress; at sample 2 it was dirty with no
-scan in progress. The last completed observation was 1,042, 407, 672, 1,018,
-415, and 743 seconds old across samples 1–6. These readings met the monitor's
+scan in progress. The observation age was 1,042, 407, 672, 1,018, 415, 743,
+1,025, and 405 seconds across samples 1–8. These readings met the monitor's
 bounded scan-first freshness gate but do not establish real-time freshness.
 Dux remained below its 4 GiB memory cap; peak memory was about 1.51 GiB. There
 is no CPU or I/O efficiency budget defined yet, so these samples do not
@@ -197,6 +198,29 @@ rollback/data value are not established. This was an
 uncontrolled cleanup workload, not a repeatable event-rate stress test; the
 coincidence does not establish that all of the events came from the cleanup.
 
+Sample 7 caught the next full observation in progress. The VPS2 service journal
+shows it began at 22:38:11 and completed at 22:42:03: 1,353,657 files,
+161,163 directories, 1,514,820 staged paths, and zero coverage issues. The
+daemon's accounting verification passed at 22:43:13 after 69.7 seconds. Across
+41 watcher-pressure records from 22:38:10 to 22:44:53, observed event rates
+ranged from 10,939 to 24,383 per second; queue bytes peaked at 1,680, with zero
+queue-pressure episodes and zero overflows. Sample 8 then passed with the scan
+complete, age 405 seconds, no scan in progress, and the index dirty while
+waiting for the next observation. Raw records are in
+[`live/vps2-scan-pressure-20261108-2242.log`](live/vps2-scan-pressure-20261108-2242.log)
+and the v3 JSONL. This is a useful high-event-rate single-host result, not a
+repeatable controlled burst test or proof for other filesystems and kernels.
+
+The scan-plus-accounting interval from samples 7→8 used about 244.3 CPU-seconds
+over 278.8 seconds (87.6% of one core) and added about 1.75 GiB read and 1.66
+GiB written in the Dux service cgroup counters. The next optimization work must
+address this measurable scan cost; the zero-overflow result does not make the
+resource cost negligible. One WAL checkpoint warning occurred in this window:
+busy=0, 7 log frames, 3 checkpointed, 34.4 MB WAL. That is below the 256 MiB
+write-pause guard and did not fail sample 8, but recurrence and WAL trend should
+be checked during the soak. The available evidence does not establish whether
+the canary observer contributed to the pinned frames.
+
 For a rough process-cost view, cgroup CPU counters from samples 3–6 imply
 about 307.5 CPU-seconds over 970.9 wall-seconds (31.7% of one core). This
 period includes the scan and cleanup interval: the sample 4→5 interval used
@@ -209,6 +233,6 @@ not a steady-state benchmark or acceptance result; no CPU/I/O budget exists.
 The v3 collector focused suite passed 34/34 tests. Full Python discovery was
 rerun after this change at 22:14 UTC: **330 tests passed**. The v3 JSONL remains
 live on VPS2 at `/root/dux-canary-409a2f4/canary-24h-5m-v3.jsonl`; its captured
-progress through sample 6 is also preserved in
+progress through sample 8 is also preserved in
 [`live/canary-24h-5m-v3-progress.jsonl`](live/canary-24h-5m-v3-progress.jsonl).
 The v3 canary is still in progress.
