@@ -96,30 +96,30 @@ collector; the earlier failed evidence is preserved in
 [`live/failed-5m-canary-monitor-calibration.jsonl`](live/failed-5m-canary-monitor-calibration.jsonl)
 and does not count as a pass.
 
-### Corrected 24-hour canary progress (2026-11-08 21:54 UTC)
+### Corrected 24-hour canary progress (2026-11-08 21:58 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and remains active.
-Its first ten samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
-21:32:04, 21:37:21, 21:43:18, 21:47:36, and 21:52:26 UTC) passed with no monitor
-errors. All samples matched the release binary and unit hashes; SQLite
-quick-check, schema-v7 graph, and accounting checks passed. At sample 10 the
-service had zero restarts, kernel overflows, userspace drops, and OOM events.
-The latest full observation was 946 seconds old, with no scan in progress. The index was dirty
+Its first eleven samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
+21:32:04, 21:37:21, 21:43:18, 21:47:36, 21:52:26, and 21:58:42 UTC) passed
+with no monitor errors. All samples matched the release binary and unit hashes;
+SQLite quick-check, schema-v7 graph, and accounting checks passed. At sample 11
+the service had zero restarts, kernel overflows, userspace drops, and OOM events.
+The latest full observation was 330 seconds old, with no scan in progress. The index was dirty
 after filesystem changes. The reported
 `behind_seconds` is the
 legacy event-pipeline catch-up timer; `last_scan_age_seconds` is the relevant
-scan-first freshness measure. Ten samples are an early checkpoint only, not a
+scan-first freshness measure. Eleven samples are an early checkpoint only, not a
 soak pass. Peak Dux memory was about 1.51 GiB against the 4 GiB service limit.
-The slowest collection so far took 161 seconds, below the 300-second sample
-interval. Across sample intervals 1→10, Dux used 1,140.0 CPU-seconds over
-2,712.9 wall-seconds (42.0% of one core on average), with interval rates from 16.5% to
+The slowest collection so far took 184.1 seconds, below the 300-second sample
+interval. Across sample intervals 1→11, Dux used 1,334.7 CPU-seconds over
+3,088.6 wall-seconds (43.2% of one core on average), with interval rates from 16.5% to
 86.8%. A cgroup snapshot at 21:34 showed throttling in 8,240 of 31,374 CPU
 periods (26.3%) and cumulative service I/O of 7,471,202,304 bytes read and
 6,704,386,048 bytes written. These early totals include initial indexing and
 must not be projected as steady state. The monitor checks the one-core hard
 CPU ceiling and memory limit, but does not enforce a CPU or I/O budget; these
 passes therefore do not establish a defined efficiency target. The raw
-append-only snapshot through sample 10
+append-only snapshot through sample 11
 is [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
 
 The active collector was not changed during the soak. A newer collector source
@@ -135,3 +135,11 @@ This VPS2 qualification is not production sign-off. It covers one KVM guest,
 Ubuntu 24.04, Linux 6.8, and ext4. A completed 24-hour candidate canary,
 production-host canary, sustained overflow storm, longer soak, exact live
 full-root comparison, and other filesystem/kernel/package targets remain open.
+
+### VPS1 read-only backlog update (2026-11-08 21:58 UTC)
+
+The legacy production daemon still reports dirty and not caught up, with 295
+cumulative kernel overflows and no userspace drops. Pending updates fell from
+23,807 at 21:50 to 181 at 21:58; however, the last full scan was 292,172 seconds
+old (about 81.2 hours). The recent queue drain is not recovery of the stale
+whole-filesystem view. No production service or database changes were made.
