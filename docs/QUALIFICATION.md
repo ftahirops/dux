@@ -8713,3 +8713,49 @@ made. Required evidence still includes executing all Rust tests, explicitly
 running the ignored ext4 deleted-parent/inode-reuse integration case, and
 testing representative 1.2M-file churn with forced overflow, concurrent scan,
 restart/crash, and eventual exact-state verification in an isolated guest.
+
+### Exact candidate churn, overflow, production-count scale and dependency audit — 2026-11-08 10:02 UTC
+
+The exact optimized GNU candidate SHA-256
+`f5318e04ecbd7ca460c75a850e369b534ac9fdaa553d70812b1c003290da0d24`
+(source SHA-256
+`351d2df5afbeb8b706abb4eed5c779eaba4aebed344b708543cbffa477b808a8`)
+received additional isolated qualification on VPS2, Linux 6.8.0-147-generic,
+ext4. The production service and production index were not used or changed.
+
+- The same binary passed two 100,000-file / 20,000-mutation churn runs under a
+  25% CPU quota and 4 GiB memory cap. Across 20 exact checkpoints, independent
+  path, inode, allocation and rollup comparisons matched. There were zero
+  dropped events. One midpoint observation correctly remained incomplete
+  during mutation and recovered through bounded retry. The first run took
+  747.388 s (max batch convergence 141.997 s); the repeat took 708.328 s (max
+  129.611 s).
+- A forced-overflow run generated 18,432 entries against a 16,384-event kernel
+  queue. The kernel overflow counter advanced from 0 to 1; automatic full
+  reconciliation completed accounting verification and exact filesystem
+  comparison in 7.147 s.
+- The current scale harness previously accepted arbitrary path counts but
+  failed its budget lookup for counts between 1M and 10M. Added a size-based
+  scan budget, including a 300 s gate at 1.37M, and regression assertions. The
+  focused scale-measurement suite passed 4/4.
+- The exact candidate passed the 1M and 1.37M scale profiles at 50% CPU quota
+  and a 2 GiB worker cap. Scan times were 115.384 s and 196.253 s; measured
+  scan RSS was 153,844 KiB and 153,180 KiB. Both profiles passed independent
+  materialized-count checks, SQLite integrity, six query-latency checks and
+  TUI input/quit budgets. At 1.37M, cgroup memory peaked at its 2 GiB limit and
+  swap peaked at 114 MiB; there were no OOM events. The 1.37M run had 1,372,686
+  directory entries and a 543,105,024-byte database.
+- `cargo audit --deny warnings` exited 0 for all 229 `Cargo.lock` dependencies,
+  with zero advisories and warnings against the RustSec database last updated
+  2026-11-06. `cargo audit bin` on this GNU candidate warned that it lacks
+  `cargo-auditable` metadata and recovered only 43 dependencies; binary-level
+  inventory is incomplete. The release script requires cargo-auditable, but a
+  current-source static-musl release/package has not been built and qualified.
+
+Machine-readable reports, source/test metadata, and retained command logs are
+in [`docs/qualification/scan-first-self-filter-20261108/`](qualification/scan-first-self-filter-20261108/).
+This evidence still does not establish the 15-minute observation-age SLO,
+10M scale, other filesystems/kernels, repeated scale variance, multi-day
+endurance, packaged release lifecycle, privilege acceptance, or production
+canary. The earlier `c323aee` false-clean failure still has no reproduced root
+cause; it remains a release blocker.

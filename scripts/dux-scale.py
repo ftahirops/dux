@@ -148,6 +148,17 @@ def timing_summary(values):
             'p95_seconds': percentile(values, .95)}
 
 
+def scan_budget_seconds(path_count):
+    """Return the strict scan budget for a supported fixture size."""
+    if path_count <= 100000:
+        return 30
+    if path_count <= 1000000:
+        return 180
+    if path_count <= 1500000:
+        return 300
+    return 1800
+
+
 def process_peak_rss_kib(pid):
     """Read this process's own Linux RSS high-water mark, excluding our parent."""
     try:
@@ -346,7 +357,8 @@ def worker(args):
               'scan_jobs': args.scan_jobs, 'levels': [],
               'workspace_parent': str(args.workspace_parent.resolve()),
               'calibrated_budgets': {
-                  'scan_wall_seconds': {'100000': 30, '1000000': 180, '10000000': 1800},
+                  'scan_wall_seconds': {'100000': 30, '1000000': 180,
+                                        '1370000': 300, '10000000': 1800},
                   'peak_rss_mib': 256,
                   'query_p95_seconds': {
                       '100000': {'all': 1.0}, '1000000': {'all': 1.0},
@@ -491,7 +503,7 @@ def worker(args):
                     level['database_bytes'] = db.stat().st_size
                     wal = Path(str(db)+'-wal')
                     level['wal_bytes'] = wal.stat().st_size if wal.exists() else 0
-                    assert level['scan']['wall_seconds'] < {100000: 30, 1000000: 180, 10000000: 1800}[size], level['scan']
+                    assert level['scan']['wall_seconds'] < scan_budget_seconds(size), level['scan']
                     assert level['scan']['peak_rss_kib'] < 256 * 1024, level['scan']
                     assert level['tui_quit_p95_seconds'] < .25, level['tui_quit_p95_seconds']
                     assert level['tui_input_ack_p95_seconds'] < .1, level['tui_input_ack_p95_seconds']

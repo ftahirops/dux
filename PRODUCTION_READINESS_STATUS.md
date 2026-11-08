@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 10:05 UTC
+**Updated:** 2026-11-08 10:02 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -20,16 +20,30 @@ through bounded retry; the repeat passed without an uncertain checkpoint.
 The exact same binary also passed a forced kernel-overflow test: 18,432 creates
 overflowed a 16,384-event queue, the overflow counter advanced from 0 to 1, and
 automatic full reconciliation returned an exact, clean result in 7.147 s.
+It also passed isolated 1M- and 1.37M-path scale profiles. At 1.37M, the full
+scan took 196.253 s at 153,180 KiB peak scan RSS; exact materialized counts,
+queries, TUI latency, and SQLite integrity passed. The worker used a 50% CPU
+quota and a 2 GiB memory cap; cgroup peak reached 2 GiB and used 114 MiB swap.
+At 1M, scan time was 115.384 s at 153,844 KiB peak scan RSS. These are single
+profiles, not repeat variance or a 15-minute scope-age guarantee.
+
+The current lockfile audit also passed `cargo audit --deny warnings`: 229
+dependencies and zero advisories against the RustSec database last updated
+2026-11-06. A binary-level audit of this GNU qualification binary is
+incomplete because it lacks `cargo-auditable` metadata; `cargo audit bin`
+recovered only 43 dependencies. The official static-musl build path requires
+`cargo-auditable`, but that exact release artifact has not yet been built and
+qualified with this source.
 Machine-readable evidence and logs are in
 [`docs/qualification/scan-first-self-filter-20261108/`](docs/qualification/scan-first-self-filter-20261108/).
 
 This materially improves evidence for churn and overflow recovery on one VPS2
 ext4 fixture. It does not resolve the broader release blockers below: the false-clean
 failure observed on the older `c323aee` candidate still lacks a reproduced root
-cause; the current exact candidate has only two 100k churn runs; the 15-minute
-freshness SLO, 1.37M current-source workload, sustained/repeated overflow,
-other filesystems/kernels, 72-hour soak, package rollback/security review, and
-24-hour production canary remain unqualified. Production remains on its older
+cause; the current exact candidate has only two 100k churn runs and one run at
+each 1M and 1.37M scale; the 15-minute freshness SLO, 10M scale, sustained/repeated
+overflow, other filesystems/kernels, 72-hour soak, package rollback/security
+review, and 24-hour production canary remain unqualified. Production remains on its older
 installed daemon; nothing was deployed by this work.
 
 ## New source change after the exact-commit qualification

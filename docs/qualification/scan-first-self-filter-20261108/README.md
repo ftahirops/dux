@@ -60,6 +60,35 @@ checkpoints matched the filesystem oracle; the first run exercised an
 incomplete midpoint observation and automatic recovery, while the repeat had
 no incomplete checkpoint.
 
+The same exact binary also passed the isolated 1M scale profile on VPS2/Linux
+6.8 ext4 at 50% CPU quota and a 2 GiB worker memory cap. The exact scan took
+115.384 s at 153,844 KiB peak RSS; one million generated paths matched the
+independent inode/allocation/directory-entry oracle. Ten samples per query had
+p95 latencies of 2.4–60.2 ms; TUI input and quit p95 were 52.4 ms and 63.6 ms.
+The 390 MB database passed the harness's integrity and performance budgets.
+The run used an ext4 disk fixture under `/mnt/dux-readiness` in the isolated
+KVM guest, with a private mount namespace. This is one 1M profile run and does
+not qualify 10M scale, repeated query variance, or the 15-minute freshness
+target. Full report: [scale-1m-report.json](scale-1m-report.json).
+
+The scale harness's CLI accepted arbitrary sizes but its scan-time budget map
+only accepted the three standard levels. I fixed the lookup and added a
+300-second gate for the 1.37M production-count fixture; the four focused scale
+measurement tests pass. The exact candidate then passed that 1.37M profile:
+scan time 196.253 s, scan RSS 153,180 KiB, and exact path/allocation/inode
+counts. Query p95 was at most 65.9 ms and TUI input/quit p95 were 1.3/31.7 ms.
+SQLite integrity and all scale performance budgets passed. Cgroup memory peaked
+at its 2 GiB cap and used 114 MiB swap; the scanner's measured RSS remained
+about 150 MiB. See [scale-1370k-report.json](scale-1370k-report.json).
+
+`cargo audit --deny warnings` passed for the 229 dependencies in `Cargo.lock`
+with zero advisories against the RustSec database last updated 2026-11-06; the
+raw report is [cargo-audit-lockfile.json](cargo-audit-lockfile.json). A binary
+audit of the GNU qualification build warns that it lacks cargo-auditable
+metadata and recovers only 43 dependencies. Treat that binary inventory as
+incomplete; the current-source static-musl release artifact still needs to be
+built and audited.
+
 An unfiltered f5c84b3 control with the same harness and workload failed before
 mutations: it remained uncertain after 240 seconds, with 16 userspace ring
 overflow warnings in the captured tail and no kernel overflow notices. The
@@ -70,11 +99,12 @@ cause of the earlier production backlog. See
 
 ## Scope and remaining gaps
 
-This confirms improvement for one 100k-file ext4 workload on one VM and kernel.
-It does not prove zero errors under arbitrary load, 15-minute freshness, or
-general production readiness. Forced kernel-overflow recovery on the exact
-candidate, other filesystems/kernels, 1m/10m scale, extended WAL endurance,
-power-loss behavior, release packaging/upgrade/rollback, privilege review, a
-72-hour soak, and a 24-hour canary remain unqualified. The change reduces
-self-generated ring pressure; fanotify remains a lossy hint source and full
-reconciliation remains necessary.
+These runs show improvement on bounded ext4 workloads up to 1.37M paths on one
+VM and kernel.
+They do not prove zero errors under arbitrary load or general production
+readiness. The 10M scale, repeated query variance, 15-minute freshness SLO,
+other filesystems/kernels, extended WAL
+endurance, power-loss behavior, release packaging/upgrade/rollback, privilege
+review, a 72-hour soak, and a 24-hour canary remain unqualified. The change
+reduces self-generated ring pressure; fanotify remains a lossy hint source and
+full reconciliation remains necessary.

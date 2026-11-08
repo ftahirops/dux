@@ -15,6 +15,12 @@ SPEC.loader.exec_module(DUX_SCALE)
 
 
 class ScaleMeasurementTests(unittest.TestCase):
+    def test_scan_budget_covers_production_count_between_standard_levels(self):
+        self.assertEqual(DUX_SCALE.scan_budget_seconds(100000), 30)
+        self.assertEqual(DUX_SCALE.scan_budget_seconds(1000000), 180)
+        self.assertEqual(DUX_SCALE.scan_budget_seconds(1370000), 300)
+        self.assertEqual(DUX_SCALE.scan_budget_seconds(10000000), 1800)
+
     def test_reused_fixture_requires_a_read_only_mount(self):
         with tempfile.TemporaryDirectory(prefix='dux-scale-reuse-rw-') as directory:
             with self.assertRaisesRegex(RuntimeError, 'read-only mount'):
