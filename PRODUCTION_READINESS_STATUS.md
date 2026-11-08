@@ -10,11 +10,13 @@ The current working tree adds a persistent-path-ID assignment pass that also
 establishes deterministic breadth-first scan order during in-place
 reconciliation. This removes a separate staging pass for that mode; the
 atomic rebuild path still uses the existing ordering implementation. The
-focused regression test passed. A 250,000-entry release A/B benchmark on VPS2
-measured 11.127 s baseline versus 10.915 s candidate for unchanged in-place
-reconciliation (about 1.9% faster in this single pair); this is inconclusive,
-not evidence of a reliable speedup. Baseline scan times were 11.926 s and
-11.976 s respectively, with databases about 79.9 MB.
+focused regression test passed. Two valid paired 250,000-entry release A/B
+runs on VPS2 measured unchanged reconciliation at 11.127 s baseline / 10.915 s
+candidate, then 21.111 s / 15.640 s. The latter pair appears 25.9% faster for
+the candidate. However, atomic scan timings also varied from 11.926/11.976 s
+in the first pair to 17.540/14.591 s in the second. This confirms substantial
+host variance; the speedup is promising but unqualified. All databases were
+about 79.9 MB. The matching benchmark test passed once per source revision.
 
 The candidate then passed the full release all-features Rust binary suite on
 VPS2: **321 passed, 0 failed, 2 ignored**, in 52.8 seconds (systemd-bounded at
@@ -38,10 +40,11 @@ canary-monitor diagnostic fix are committed and pushed on
 `hardening/stale-dfid-classification-review`; neither is installed on
 production or the VPS2 service.
 
-Disk snapshot at 23:14 UTC: local workspace root is 60% used with 72 GiB free,
-and regenerable `target/` is 1.6 GiB. VPS2 root is 86% used with 14 GiB free;
-`/var/tmp` is 4.7 GiB and `/var/lib/dux` is 660 MiB. No further cleanup was
-performed because the contents may include active build and rollback evidence.
+Disk snapshot: local workspace root is 60% used with 72 GiB free and regenerable
+`target/` is 1.6 GiB. VPS2 root was 87% used with 13 GiB free after the repeated
+benchmark; `/var/tmp` was 4.7 GiB and `/var/lib/dux` 660 MiB at the earlier
+23:14 snapshot. No further cleanup was performed because the contents may
+include active build and rollback evidence.
 
 ## Test and coverage update (2026-11-08, latest local run)
 

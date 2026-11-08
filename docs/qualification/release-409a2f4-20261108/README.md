@@ -250,3 +250,15 @@ The current Rust working tree passes all-features release tests on VPS2
 (321 passed, 2 ignored), all-features llvm-cov tests (321 passed, 2 ignored),
 strict Clippy, formatting, and diff checks. Exact-tree coverage is 72.17% line,
 70.99% region, and 76.00% function; stable branch coverage is unavailable.
+
+The scan-order optimization's repeated 250,000-entry release benchmark gave
+unchanged-reconcile timings of 11.127 s baseline / 10.915 s candidate in the
+first valid pair and 21.111 s / 15.640 s in the second. Although the second
+pair favors the candidate by 25.9%, its atomic scan times also shifted from
+11.926/11.976 s to 17.540/14.591 s. The VPS2 workload varied enough that these
+measurements do not establish a reliable speedup; the optimization is retained
+for correctness and removal of a staging pass, with performance still an open
+qualification item. All four valid test invocations (two baseline and two
+candidate) passed and produced 79,859,712-byte databases. A first retry attempt
+with an incorrect exact-name filter ran zero tests and is excluded from these
+results.
