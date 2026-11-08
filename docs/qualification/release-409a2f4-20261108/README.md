@@ -197,6 +197,15 @@ rollback/data value are not established. This was an
 uncontrolled cleanup workload, not a repeatable event-rate stress test; the
 coincidence does not establish that all of the events came from the cleanup.
 
+For a rough process-cost view, cgroup CPU counters from samples 3–6 imply
+about 307.5 CPU-seconds over 970.9 wall-seconds (31.7% of one core). This
+period includes the scan and cleanup interval: the sample 4→5 interval used
+about 67% of one core and the next about 17%. Dux service block-I/O counters
+rose by about 1.32 GiB read and 1.63 GiB written during sample 4→5, then did
+not move during sample 5→6. Stacked device rows report essentially identical
+values and must not be summed. These are short, mixed-workload observations,
+not a steady-state benchmark or acceptance result; no CPU/I/O budget exists.
+
 The v3 collector focused suite passed 34/34 tests. Full Python discovery was
 rerun after this change at 22:14 UTC: **330 tests passed**. The v3 JSONL remains
 live on VPS2 at `/root/dux-canary-409a2f4/canary-24h-5m-v3.jsonl`; its captured

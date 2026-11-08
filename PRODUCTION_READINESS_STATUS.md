@@ -1759,6 +1759,15 @@ restarts, overflows, userspace drops, and OOM events. The JSONL is preserved
 through sample 6. This remains only about 28 minutes of canary operation, not
 a 24-hour or 72-hour soak.
 
+The same cgroup counters give an early, non-SLO performance estimate: over
+samples 3→6 Dux used about 307.5 CPU-seconds over 970.9 wall-seconds (31.7% of
+one core). This includes one full scan and the cleanup interval; individual
+intervals ranged from about 15% to 67%. The full-scan interval added about
+1.32 GiB reads and 1.63 GiB writes in Dux's block-I/O cgroup counters, followed
+by no measured block I/O in the next interval. Per-device stacked rows are not
+summed. This is evidence for the cost of this specific mixed workload, not a
+steady-state overhead claim or pass against an efficiency budget.
+
 ## Workspace disk cleanup — 2026-11-08
 
 The local `/` filesystem was 61% used with 70 GiB free. The repository's
