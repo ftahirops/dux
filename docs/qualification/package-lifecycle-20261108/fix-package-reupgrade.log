@@ -1,0 +1,15 @@
+(Reading database ... 138543 files and directories currently installed.)
+Preparing to unpack .../dux_0.6.3-100_amd64.deb ...
+Unpacking dux (0.6.3-100) over (0.6.3-98) ...
+Setting up dux (0.6.3-100) ...
+dux: starting service — the initial scan of / runs in the BACKGROUND.
+dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)
+dux: the index is readable by root and the 'dux' group (it lists every
+dux: filename on /). Grant a user access with: usermod -aG dux <user>
+{
+  "package_version": "0.6.3-100",
+  "binary_sha256": "cfdcb0f8e2923831b8109100f8806b5cb54345eefd555513242c74fb98d796dc",
+  "binary_version": "dux 0.6.3 (720a0882b97a) [production] source-sha256=04597f761eb297aa4acf46aa7dd163133a97b6a8001fab781952c3534788bb4e",
+  "service_active": "inactive",
+  "service_enabled": "disabled"
+}

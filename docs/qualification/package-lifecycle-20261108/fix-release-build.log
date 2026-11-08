@@ -1,0 +1,55 @@
+>> building auditable static musl binary (v0.6.3) with cargo-auditable 0.7.7
+   Compiling dux v0.6.3 (/var/tmp/dux-release-487dab6)
+    Finished `release` profile [optimized + debuginfo] target(s) in 1m 05s
+>> splitting Build-ID-matched debug symbols
+>> auditing Cargo.lock with cargo-audit-audit 0.22.2
+>> auditing exact release binary
+>> .deb
+dpkg-deb: building package 'dux' in '/tmp/tmp.WUfF13Xp5G/output/dux_0.6.3-100_amd64.deb'.
+>> .rpm
+Executing(%install): /bin/sh -e /var/tmp/rpm-tmp.2NnRVK
++ umask 022
++ cd /tmp/tmp.WUfF13Xp5G/rpm/BUILD
++ /bin/rm -rf /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64
++ /bin/mkdir -p /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT
++ /bin/mkdir /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64
++ rm -rf /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64
++ mkdir -p /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/bin /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/lib/dux /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/lib/systemd/system /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/share/doc/dux
++ mkdir -p /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/var/lib/dux
++ install -m0755 /tmp/tmp.WUfF13Xp5G/rpm/SOURCES/dux /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/bin/dux
++ install -m0755 /tmp/tmp.WUfF13Xp5G/rpm/SOURCES/secure-index-permissions.sh /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/lib/dux/secure-index-permissions.sh
++ install -m0755 /tmp/tmp.WUfF13Xp5G/rpm/SOURCES/dux-backup-index.py /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/lib/dux/dux-backup-index.py
++ install -m0644 /tmp/tmp.WUfF13Xp5G/rpm/SOURCES/dux.service /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/lib/systemd/system/dux.service
++ install -m0644 /tmp/tmp.WUfF13Xp5G/rpm/SOURCES/dux-tunnel.service /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/lib/systemd/system/dux-tunnel.service
+Processing files: dux-0.6.3-100.x86_64
++ install -m0644 /tmp/tmp.WUfF13Xp5G/rpm/SOURCES/README.md /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64/usr/share/doc/dux/README.md
+Provides: dux = 0.6.3-100 dux(x86-64) = 0.6.3-100
+Requires(interp): /bin/sh /bin/sh /bin/sh /bin/sh
+Requires(rpmlib): rpmlib(CompressedFileNames) <= 3.0.4-1 rpmlib(FileDigests) <= 4.6.0-1 rpmlib(PayloadFilesHavePrefix) <= 4.0-1
+Requires(pre): /bin/sh shadow-utils
+Requires(post): /bin/sh
+Requires(preun): /bin/sh
+Requires(postun): /bin/sh
+Checking for unpackaged file(s): /usr/lib/rpm/check-files /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64
+Wrote: /tmp/tmp.WUfF13Xp5G/rpm/RPMS/x86_64/dux-0.6.3-100.x86_64.rpm
+Executing(%clean): /bin/sh -e /var/tmp/rpm-tmp.5RwRcR
++ umask 022
++ cd /tmp/tmp.WUfF13Xp5G/rpm/BUILD
++ /bin/rm -rf /tmp/tmp.WUfF13Xp5G/rpm/BUILDROOT/dux-0.6.3-100.x86_64
++ RPM_EC=0
++ jobs -p
++ exit 0
+Executing(rmbuild): /bin/sh -e /var/tmp/rpm-tmp.bE22Jr
++ umask 022
++ cd /tmp/tmp.WUfF13Xp5G/rpm/BUILD
++ RPM_EC=0
++ jobs -p
++ exit 0
+>> done — artifacts in /var/tmp/dux-release-output-720a088/:
+SHA256SUMS
+build-manifest.json
+dux-0.6.3-100.x86_64.rpm
+dux-0.6.3-x86_64-linux-static
+dux.debug
+dux_0.6.3-100_amd64.deb
+source.tar.gz

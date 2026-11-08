@@ -8821,3 +8821,33 @@ all-target/all-feature Clippy with `-D warnings`, formatting, and **70 Python
 package-lifecycle tests**. The exact release package and runtime policy are
 still unqualified. Logs are `fix-cargo-test.log` and `fix-lint-test.log` in the
 evidence directory.
+
+## Fixed-cadence scan-first runtime qualification — 2026-11-08 11:42 UTC
+
+Follow-up commit `559097852ac5333bf575299394758af7b7a9cb3d` addressed a
+verified scheduler mismatch: scan-first hint loss and dirty state were still
+triggering scans before the documented 15-minute cadence. Package 101 was
+built as static musl and installed on disposable VPS2. Its build manifest says
+the worktree was dirty because qualification artifacts were untracked; the
+manifest includes source-file hashes and the exact commit/source digest.
+
+A 40,000-file create/delete burst on `/tmp` caused userspace hint-ring and
+resolver loss, with no kernel queue overflow. The first live observation ended
+with one scan coverage issue, so the daemon retained dirty status and scheduled
+one bounded retry. After the synthetic writes stopped, the retry completed
+with zero coverage issues across 1,294,356 files and 155,553 directories. The
+status remained dirty due to hint loss; it did not claim `caught_up`. No scan
+started at the previous 300-second dirty-retry boundary or through 11:41:34,
+more than five minutes after the successful retry began. The daemon had zero
+restarts. `PRAGMA quick_check`, the integer storage-class check, and the exact
+Dux recursive-accounting SQL predicate all passed read-only after the scan.
+
+This validates the changed scheduler under this bounded VPS2 ext4 burst and
+documents recovery from one incomplete scan. It does not establish zero hint
+loss, convergence under continuous churn, the full 15-minute age SLO, or low
+scan I/O: the service used 311 seconds CPU, read 3.1 GiB, and wrote 5.8 GiB
+during the roughly 11-minute candidate window containing its baseline and
+bounded retry. The prior package-100 run recorded repeated five-minute scans
+and 12m43s CPU / 15.7 GiB writes over about 21 minutes. These are individual
+runs, not a controlled benchmark. Full source/build/runtime evidence is in
+[`qualification/scan-first-fixed-cadence-20261108/`](qualification/scan-first-fixed-cadence-20261108/).

@@ -77,16 +77,23 @@ avoid a repeated full-scan loop.
 This longer run does not prove that the daemon would never converge, but it
 demonstrates a real retry-amplification problem: one scan-time ring overflow
 caused an immediate new full observation, which can repeat under sustained
-churn. The candidate was changed afterward to defer scan-time hint loss to the
-next fixed observation interval. The exact source change passed the full Rust
-suite (300 passed, 0 failed, 2 ignored), strict Clippy, formatting, and all 70
-package-lifecycle unit tests. It has not yet been release-built or tested in
-the live-root runtime. Package `0.6.3-98` and the reconciled index were
-retained on VPS2; no production host or data was modified. The 300-second
-harness cutoff proved too short for the package's full-root baseline and was
-increased to match the systemd one-hour startup allowance. The lifecycle
-harness now treats a completed scan-first observation as readiness and records
-`caught_up=false` separately, since that mode never promises real-time exactness.
+churn. At the time this initial note was written, the change had not yet been
+release-built or tested in the live-root runtime. The source then passed 300
+Rust tests (2 ignored), strict Clippy, formatting, and all 70
+package-lifecycle unit tests. The 300-second harness cutoff proved too short
+for the package's full-root baseline and was increased to match the systemd
+one-hour startup allowance. The lifecycle harness now treats a completed
+scan-first observation as readiness and records `caught_up=false` separately,
+since that mode never promises real-time exactness.
+
+Subsequent release and runtime results are recorded in the
+[fixed-cadence scan-first qualification](../scan-first-fixed-cadence-20261108/README.md).
+In brief, package 101 was built and exercised on VPS2; a 40,000-file burst
+caused userspace hint loss and one incomplete observation, followed by a
+successful bounded retry. The fixed-cadence scheduler avoided the old
+300-second dirty retry after that successful scan. These follow-up results do
+not qualify sustained churn, 15-minute freshness, or production readiness.
+VPS2 remains the only host modified for these tests; production was untouched.
 
 ## Evidence files
 

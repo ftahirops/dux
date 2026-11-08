@@ -1,8 +1,37 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 10:02 UTC
+**Updated:** 2026-11-08 11:42 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
+
+## Latest fixed-cadence implementation and VPS2 evidence (11:42 UTC)
+
+Commit `559097852ac5333bf575299394758af7b7a9cb3d` removes two causes of
+unnecessary full-root scans in scan-first mode: hint-ring/resolver loss no
+longer directly requests a scan, and a dirty marker no longer triggers the
+legacy 300-second retry. Manual requests and bounded retries for failed scans
+or accounting checks remain. The configured 15-minute observation timer remains
+the normal repair path.
+
+The exact source passed **301 Rust tests, 0 failures, 2 ignored**, formatting,
+strict Clippy, and diff checks. Static-musl DEB/RPM package revision 101 was
+built and installed on VPS2. During a 40,000-file create/delete burst, the
+candidate reported repeated userspace hint-ring and resolver loss, and zero
+kernel overflows. Its first observation had one coverage issue and correctly
+scheduled a bounded retry; the retry completed with zero coverage issues.
+There was no repeat scan at the old 300-second dirty-retry boundary or through
+11:41:34 UTC, and the daemon had zero restarts. A read-only SQLite quick check,
+row-type check, and Dux accounting predicate passed. The index remained
+visibly dirty after hint loss and `caught_up=false`, as scan-first mode promises
+only last-observed freshness.
+
+This is concrete improvement evidence, not a production sign-off. The test
+still produced sustained hint-ring overflows, the full-root scans used
+substantial CPU and disk I/O, and only a five-minute post-retry window was
+observed. The 15-minute freshness SLO, sustained/repeated high-rate churn,
+72-hour current-candidate soak, other filesystems/kernels, production canary,
+and release artifact built from a clean evidence-committed tree remain open.
+Full details and logs: [fixed-cadence qualification](docs/qualification/scan-first-fixed-cadence-20261108/README.md).
 
 ## Latest exact-candidate evidence (2026-11-08)
 
