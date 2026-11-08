@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 21:43 UTC
+**Updated:** 2026-11-08 21:47 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -20,21 +20,21 @@ revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
 DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
 only on the disposable VPS2 qualification VM, not production.
 
-## Corrected VPS2 canary checkpoint (2026-11-08 21:43 UTC)
+## Corrected VPS2 canary checkpoint (2026-11-08 21:47 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and is still active.
-Its first eight samples passed (21:07:13, 21:12:14, 21:17:10, 21:22:33,
-21:27:17, 21:32:04, 21:37:21, and 21:43:18 UTC) with no monitor errors.
+Its first nine samples passed (21:07:13, 21:12:14, 21:17:10, 21:22:33,
+21:27:17, 21:32:04, 21:37:21, 21:43:18, and 21:47:36 UTC) with no monitor errors.
 Candidate and unit hashes, SQLite/schema-v7 graph, and accounting checks passed
-in each sample. At sample 8, the service had zero restarts, kernel overflows,
-userspace drops, and OOM events. The latest full observation was 398 seconds
+in each sample. At sample 9, the service had zero restarts, kernel overflows,
+userspace drops, and OOM events. The latest full observation was 656 seconds
 old, with no scan in progress. The index remained dirty after filesystem hints. Use
 `last_scan_age_seconds` for scan-first freshness; `behind_seconds` is the
-legacy event-pipeline catch-up timer. Eight samples do not qualify a 24-hour
+legacy event-pipeline catch-up timer. Nine samples do not qualify a 24-hour
 soak. Peak Dux memory observed was about 1.51 GiB against the 4 GiB service
-limit. Sample 8's collection took 161 seconds, under its 300-second cadence.
-Across sample intervals 1→8, Dux used 984.4 CPU-seconds over 2,165.5
-wall-seconds (45.5% of one core on average); interval rates ranged from 16.5%
+limit. Sample 8's slowest collection took 161 seconds, under its 300-second
+cadence. Across sample intervals 1→9, Dux used 1,072.3 CPU-seconds over
+2,423.1 wall-seconds (44.3% of one core on average); interval rates ranged from 16.5%
 to 86.8%. A separate cgroup snapshot at 21:34 showed 1,458 CPU-seconds since
 service start, throttling in 8,240 of 31,374 CPU periods (26.3%), and 7,471,202,304
 bytes read plus 6,704,386,048 bytes written on the block device. The VM has six
@@ -42,7 +42,7 @@ vCPUs; the service hard limit is one core. These early figures include initial
 indexing and are not a steady-state extrapolation. The monitor records CPU
 usage but does not enforce a CPU or I/O budget, so the passing canary samples
 prove health/accounting/freshness gates, not a defined efficiency target. The
-append-only evidence through sample 8 is recorded in
+append-only evidence through sample 9 is recorded in
 [`canary-24h-5m-v2-progress.jsonl`](docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl).
 
 Latest current-source coverage from `cargo llvm-cov --locked --all-features
@@ -138,6 +138,14 @@ the last completed scan was 291,252 seconds old (about 80.9 hours). In the same
 interval the journal contained 169 slow-flush warnings. This short interval
 does not show recovery; the index remains severely stale. VPS1 was inspected
 only.
+
+### VPS1 backlog recheck (2026-11-08 21:45 UTC)
+
+The cumulative overflow counter remained at 295, but pending updates rose from
+466 at 21:43 to 48,124 at 21:45. The daemon remained dirty with
+`caught_up=false`, no reported userspace drops, and the last completed scan
+291,369 seconds old (about 80.9 hours). This is active backlog growth without a
+new overflow-counter increment, not recovery.
 
 The container writable-layer parser had a verified undercount for OverlayFS
 upperdir paths containing escaped comma, whitespace, or backslash bytes. The
