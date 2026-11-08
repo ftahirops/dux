@@ -1,0 +1,25 @@
+{
+  "binary_sha256": "8f6e8c14307058258b905d7e6b2530bc5465b66fd3d89784fcd55147add82ef4",
+  "command": "dux --db /var/lib/dux/dux.db --json containers",
+  "database": "VPS2 live schema-v7 index (read-only command)",
+  "exit_status": 0,
+  "result": "passed",
+  "containers": 29,
+  "runtimes": {
+    "docker": 29
+  },
+  "running": 20,
+  "stopped": 9,
+  "writable_bytes": 1581441024,
+  "log_bytes": 4255711232,
+  "volume_bytes": 11148197888,
+  "reclaimable": {
+    "build_cache_bytes": 26415104,
+    "orphan_volume_bytes": 429391872,
+    "orphan_volume_count": 2,
+    "stopped_bytes": 264675328,
+    "total_bytes": 720482304
+  },
+  "service_changed": false,
+  "package_installed": false
+}

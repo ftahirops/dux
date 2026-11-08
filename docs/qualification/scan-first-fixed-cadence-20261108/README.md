@@ -166,6 +166,46 @@ convergence. Full snapshot: `post-retry-runtime-snapshot-1230.log`.
   pre-upgrade database backup; the package rollback files from the preceding
   qualification remain in that directory.
 
+## Later full-root scan and canary retries — 2026-11-08 19:58 UTC
+
+On the VPS2 `d8ea72d` candidate, the 19:47:56 scheduled observation completed
+at 19:52:07 with 1,373,609 files and 164,740 directories and zero coverage
+issues. Independent accounting verification passed at 19:53:16 (68.5 s).
+The daemon had zero restarts, kernel overflows, OOM events, or reported
+userspace drops. A 19:54:11 monitor sample passed binary/unit identity, schema
+v7 path graph and accounting, SQLite quick-check, freshness, resources, and
+journal checks. The sample saw a last-scan age of 375 s and 1,538,349 indexed
+paths. Dux remained dirty because new filesystem hints had arrived since the
+observation; this is expected for scan-first mode and is not a caught-up
+claim. Sample evidence is preserved in `live-retry2-15m/canary.jsonl`.
+
+The 19:45 hourly retry's first sample also passed, but its 3,600 s interval was
+longer than its 1,200 s maximum observation-age gate. It was stopped after
+preserving that sample. The 15-minute retry passed one sample and was also
+stopped to improve the sampling margin. The current retry started at 19:56:11
+with 300 s sampling, a 1,200 s observation-age ceiling, a 20% CPU quota, and a
+1 GiB memory cap. Its output is being written on VPS2 to
+`/root/dux-canary-d8ea72d/scanfirst-canary-d8ea72d-retry4-5m.jsonl`; it must run
+for 24 hours with all required samples before this gate passes. First samples
+from the earlier retries are retained locally. None of these canaries uses the
+newly built package revision 105; VPS1 production remains unchanged.
+
+The 5-minute retry's first sample passed at 19:57:11. It matched the expected
+binary and unit SHA-256 values, had no critical journal events, and passed the
+schema-v7 graph, SQLite quick-check, root totals, and accounting checks. The
+sample reported last observation age 555 s, zero restarts, zero kernel
+overflows, zero OOM events, and zero reported userspace drops. The latest full
+scan still covered 1,373,609 files / 164,740 directories with zero coverage
+issues. This is one sample; the 24-hour gate remains open. Local copy:
+`live-retry4-5m/canary.jsonl` (SHA-256
+`cf5ef3afc438f0838998b37e7b1741100d50895fe243350b33947e6c03a3f9d0`).
+
+The observed candidate is still resource-expensive: the nearby service
+snapshot showed approximately 40 minutes CPU and 20.6 GiB read / 22.1 GiB
+written over roughly 88 minutes. These cumulative figures include all daemon
+work and are not an isolated benchmark, but they prevent calling overhead
+acceptable without a workload budget and longer measurement.
+
 ## Package 103 and static-release qualification — 2026-11-08
 
 Package revision 103 was built from clean source commit `e90f3c346b8b58883edf275c90a4d81c31c15656` with the official release script. The release manifest records `worktree_dirty=false`, source-tree SHA-256 `bf91e97343b3f95b83aa32aad6eeea00016e45abc90391724d25ac96b32c5b52`, and the static-musl executable SHA-256 `8c107f0ce62565ed5747e8f28c801b236c870cf5c52e652d7ef73d3bb259fe42`. The package lockfile audit found 0 vulnerabilities across 229 dependencies; the embedded binary audit recognized 202 dependencies. The advisory database snapshot was last updated 2026-11-06, so this is not a live audit of later advisories.

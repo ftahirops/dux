@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 19:46 UTC
+**Updated:** 2026-11-08 19:58 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -10,7 +10,9 @@ After adding two classification-rule tests, three fault-injection control
 tests, and four OverlayFS upperdir parsing/error tests, the default-feature
 Rust suite passes **316 tests, 0 failures, 2 ignored**; the all-features suite
 passes **319 tests, 0 failures, 2 ignored**. Formatting, strict Clippy, and
-`git diff --check` passed. The current static-musl release build is pending.
+`git diff --check` passed. Static-musl package revision 105 was built from
+clean commit `30bf32d`; its artifact checksums and package payload hashes
+verify. It has not been installed on VPS2 or production.
 Fault-injection tests compile only when that feature is enabled. The ignored
 tests require a separately qualified ext4 filesystem for handle behavior and
 a manual production-shaped scale profile. Python monitor/harness suite:
@@ -118,10 +120,49 @@ journal are preserved as
 [`canary-d8ea72d-failed-sample2-20261108.jsonl`](docs/qualification/scan-first-fixed-cadence-20261108/canary-d8ea72d-failed-sample2-20261108.jsonl)
 and
 [`canary-d8ea72d-failure-recovery-journal-20261108.log`](docs/qualification/scan-first-fixed-cadence-20261108/canary-d8ea72d-failure-recovery-journal-20261108.log).
-After verifying the 19:36 scan and accounting pass, a fresh, separately named
-24-hour retry canary started at 19:45 with the same exact Dux binary, 20% CPU
-quota, and 1 GiB memory cap. It has not yet produced a sample. The prior failed
-attempt remains preserved. Production VPS1 was not changed.
+After verifying the 19:36 scan and accounting pass, a separately named retry
+canary started at 19:45 with the same Dux binary, 20% CPU quota, and 1 GiB
+memory cap. Its first hourly sample passed. Because hourly sampling leaves a
+blind interval much longer than the 20-minute freshness gate, that collector
+was stopped after preserving its first sample. A 15-minute retry also passed
+its first sample and was stopped after preserving the record. The current
+collector, `dux-scanfirst-canary-d8ea72d-retry4-5m.service`, started at 19:56
+with a five-minute sample interval, a 20-minute observation-age ceiling, and
+the same resource caps. It had not yet emitted its first sample at the 19:57
+checkpoint. Its first sample passed at 19:57:11 with a 555-second last-scan
+age and valid schema-v7/accounting checks. The active 5-minute retry is still
+preliminary; none of these retries is a completed 24-hour canary. Production
+VPS1 was not changed. The sample is preserved at
+[`live-retry4-5m/canary.jsonl`](docs/qualification/scan-first-fixed-cadence-20261108/live-retry4-5m/canary.jsonl).
+
+The 15-minute retry's first sample at 19:54 matched the expected candidate and
+unit hashes and passed schema-v7 graph/accounting, SQLite quick-check, service
+health, and critical-journal checks. The completed observation immediately
+before it covered 1,373,609 files and 164,740 directories with zero coverage
+issues; independent accounting verification passed in 68.5 seconds. At sample
+time the last observation was 375 seconds old. The index correctly remained
+dirty because post-observation filesystem hints had arrived. The service had
+zero restarts, kernel overflows, OOM events, or reported userspace drops. This
+is one passing sample, not evidence of sustained convergence or bounded total
+overhead. A nearby systemd snapshot showed high cumulative read/write I/O and
+CPU use, so overhead remains a release gate.
+
+The release-105 artifact was built from clean source commit `30bf32d` with
+`worktree_dirty=false`. Its static binary SHA-256 is
+`8f6e8c14307058258b905d7e6b2530bc5465b66fd3d89784fcd55147add82ef4`; the DEB
+and RPM payload binary hashes match it. All eight release-artifact checksums
+passed, the static binary reports the expected source hash, and `dpkg-deb` and
+`rpm` recognize the packages. The lockfile audit found zero known advisories
+across 229 dependencies; embedded binary metadata identifies 202. Packages
+are retained under ignored `target/readiness/release-30bf32d/`; audit and
+manifest evidence is in
+[`docs/qualification/release-30bf32d-20261108/`](docs/qualification/release-30bf32d-20261108/).
+The exact standalone release binary also passed one read-only
+`containers --json` integration smoke on VPS2 against 29 real Docker records
+(20 running, 9 stopped). It was copied to a qualification path; no package or
+service was installed or changed. This does not qualify the daemon or parser
+handling of escaped paths end to end, and the release-105 artifact has not
+been used by the VPS2 daemon canary.
 
 ## Latest fixed-cadence implementation and VPS2 evidence (11:54 UTC)
 
