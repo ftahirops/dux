@@ -708,6 +708,38 @@ Rust tests now cover this behavior.
 No claim of 100% production readiness is made until those gates have direct,
 current evidence and all remaining limits are documented.
 
+## Incomplete-scan work reduction and VPS2 follow-up — 2026-11-08 12:46 UTC
+
+Current source now skips constructing the v6 compatibility projection and
+depth-by-depth compatibility rollups when an incremental observation has
+already failed its coverage checks. Those results cannot be published; the
+failure path only records `last_scan_attempt_ts` and returns the last
+published root total. A focused regression test verifies that no discarded
+projection tables are built and that the prior total is retained. This limits
+avoidable SQLite work on failed observations; it does not repair inode reuse
+or make the live index current. The change is local and has not been deployed
+to VPS2.
+
+Live VPS2 follow-up: the scheduled scan starting at 12:42:29 UTC completed at
+12:45:25 with zero coverage issues across 1,305,598 files and 156,800
+directories. Dux stayed active with zero restarts. At 12:45:59, status was
+already dirty again because the bounded fanotify hint ring had overflowed;
+the same loss reason and repeated overflow warnings were present through
+12:46:24. The reported last-scan age was 236 seconds at 12:46:25, while
+`caught_up=false` and `dirty=true`. Cumulative service counters at scan
+completion were about 1,469 CPU seconds, 13.7 GB read, and 20.7 GB written.
+This is evidence that a complete scan can finish under this workload, but
+the hint stream currently cannot keep the view fresh between scans. It does
+not demonstrate stable convergence or an acceptable I/O budget.
+
+The local change passed its focused incomplete-projection test and ext4
+inode-reuse regression; the complete suite passed (303 passed, 0 failed, 2
+ignored), strict all-target/all-feature Clippy, formatting, and the exact-source
+release build passed. Further release gates remain: reduce or redesign hint handling,
+prove bounded freshness under sustained churn, measure the optimization on a
+production-shaped workload, and perform a source-matched VPS2 canary with
+rollback. No production-readiness claim is made.
+
 ## Current-source package and live-root qualification — 2026-11-08 10:41 UTC
 
 Commit `43a7769` now has a successful exact-source static-musl release build:

@@ -958,8 +958,18 @@ fn scan_inner(
         params![stage_path.to_string_lossy()],
     )?;
     let build_result: Result<i64> = (|| {
-        store.conn.execute_batch(V6_SCAN_PROJECTION_SQL)?;
         if incremental {
+            let complete = n_errors.load(Ordering::Relaxed) == 0
+                && repeated_directory_identities == 0
+                && conflicting_inode_edges == 0
+                && conflicting_inode_allocations == 0
+                && conflicting_inode_incarnations == 0
+                && unknown_repeated_inode_identities == 0
+                && !opts.one_file_system
+                && opts.exclude.is_empty();
+            if complete {
+                store.conn.execute_batch(V6_SCAN_PROJECTION_SQL)?;
+            }
             return reconcile_staged_projection(
                 &mut store.conn,
                 root_dev,
@@ -968,16 +978,10 @@ fn scan_inner(
                 nonce,
                 &root,
                 &opts.cancel,
-                n_errors.load(Ordering::Relaxed) == 0
-                    && repeated_directory_identities == 0
-                    && conflicting_inode_edges == 0
-                    && conflicting_inode_allocations == 0
-                    && conflicting_inode_incarnations == 0
-                    && unknown_repeated_inode_identities == 0
-                    && !opts.one_file_system
-                    && opts.exclude.is_empty(),
+                complete,
             );
         }
+        store.conn.execute_batch(V6_SCAN_PROJECTION_SQL)?;
         store.conn.execute_batch(
             "BEGIN IMMEDIATE;
              INSERT INTO inodes
@@ -1711,6 +1715,30 @@ fn reconcile_staged_projection(
     cancel: &Option<Arc<AtomicBool>>,
     complete: bool,
 ) -> Result<i64> {
+    // An incomplete observation is deliberately not publishable. In that case
+    // building the compatibility rollups below only performs a full depth by
+    // depth SQLite reduction whose results must be discarded. On large trees
+    // this can dominate the cost of a failed reconciliation and add avoidable
+    // disk I/O exactly when the host is already under pressure. Record the
+    // attempt and return the last published total without materializing any
+    // scan projection tables.
+    if !complete {
+        ensure_not_cancelled(cancel)?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO meta(key,value) VALUES('last_scan_attempt_ts',?1)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [scan_time.to_string()],
+        )?;
+        tx.commit()?;
+        ensure_not_cancelled(cancel)?;
+        return Ok(conn.query_row(
+            "SELECT recursive_bytes FROM inodes WHERE dev_id=?1 AND inode=?2",
+            [root_dev, root_inode],
+            |r| r.get(0),
+        )?);
+    }
+
     conn.execute_batch(
         "CREATE TEMP TABLE scan_dirents AS
          SELECT parent_dev,parent_inode,name,dev,inode,
@@ -2264,6 +2292,55 @@ fn set_low_priority() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_projection_skips_discarded_rollups_and_keeps_published_total() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+             CREATE TABLE inodes(dev_id INTEGER NOT NULL,inode INTEGER NOT NULL,recursive_bytes INTEGER NOT NULL,
+               PRIMARY KEY(dev_id,inode));
+             INSERT INTO inodes VALUES(7,11,123456);",
+        )
+        .unwrap();
+
+        let total = reconcile_staged_projection(
+            &mut conn,
+            7,
+            11,
+            99,
+            123,
+            Path::new("/fixture"),
+            &None,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            total, 123456,
+            "an incomplete scan must report the last published total"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT value FROM meta WHERE key='last_scan_attempt_ts'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "99"
+        );
+        let discarded_projection_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_temp_master WHERE name IN ('scan_dirents','scan_inodes','scan_rollup')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            discarded_projection_tables, 0,
+            "incomplete scans must not build rollup tables that cannot be published"
+        );
+    }
 
     #[test]
     fn scan_priority_hints_map_only_rooted_child_names() {
