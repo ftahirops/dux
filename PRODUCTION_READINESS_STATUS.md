@@ -34,7 +34,8 @@ gate and the 24-hour soak is incomplete. The full scan covered 1,514,820 staged
 paths with zero coverage issues and passed accounting verification; its
 scan-plus-accounting interval used 87.6% of one core and about 1.75 GiB read /
 1.66 GiB written. No CPU/I/O SLO has been set. The scan optimization and
-canary-monitor diagnostic fix remain uncommitted; neither is installed on
+canary-monitor diagnostic fix are committed and pushed on
+`hardening/stale-dfid-classification-review`; neither is installed on
 production or the VPS2 service.
 
 Disk snapshot at 23:14 UTC: local workspace root is 60% used with 72 GiB free,
