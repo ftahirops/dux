@@ -1744,6 +1744,21 @@ read-only v3 JSONL is preserved through sample 5 in the release qualification
 directory. The 24-hour soak and remaining production qualification gates are
 still open.
 
+Docker reported a further 2.288 GiB of unused build cache and zero active
+cache records. `docker builder prune --force` reclaimed that cache; actual
+filesystem availability rose about 1 GiB, from 13 to 14 GiB. Post-prune
+Docker accounting still showed 6.402 GiB reclaimable images, 1.955 GiB of
+stopped containers, and 366.8 MiB of dangling volumes. These were retained:
+the VM runs unrelated application services, and image/container/volume roles
+and rollback value were not established. The systemd journal also uses 3.9
+GiB; it was retained to avoid discarding unrelated operational evidence.
+
+V3 sample 6 passed at 22:35:35 UTC after 170.0 seconds. The last completed
+scan was 743 seconds old, with no scan in progress. Dux still showed zero
+restarts, overflows, userspace drops, and OOM events. The JSONL is preserved
+through sample 6. This remains only about 28 minutes of canary operation, not
+a 24-hour or 72-hour soak.
+
 ## Workspace disk cleanup — 2026-11-08
 
 The local `/` filesystem was 61% used with 70 GiB free. The repository's

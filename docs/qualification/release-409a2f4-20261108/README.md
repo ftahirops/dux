@@ -159,7 +159,7 @@ and a last full scan 292,410 seconds old (about 81.2 hours). Its journal had
 increase confirms the brief backlog drain was not recovery. No production
 service or database changes were made.
 
-### Canary collector v3 progress (updated 2026-11-08 22:30 UTC)
+### Canary collector v3 progress (updated 2026-11-08 22:35 UTC)
 
 The v2 monitor was stopped after sample 13 so the canary could use the new
 collector with per-device cgroup-v2 I/O. The v2 run was partial: 13 samples
@@ -168,9 +168,9 @@ sample remains preserved in
 [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
 
 The replacement transient unit `dux-canary-409a2f4-v3.service` is active on
-VPS2. Samples 1–5 passed at 22:10:34, 22:14:58, 22:19:24, 22:25:10, and
-22:30:06 UTC. Collection took 169.6, 133.6, 99.1, 145.0, and 141.7 seconds,
-with no monitor errors. The expected binary, service unit, and monitor hashes
+VPS2. Samples 1–6 passed at 22:10:34, 22:14:58, 22:19:24, 22:25:10, 22:30:06,
+and 22:35:35 UTC. Collection took 169.6, 133.6, 99.1, 145.0, 141.7, and 170.0
+seconds, with no monitor errors. The expected binary, service unit, and monitor hashes
 were verified by the collector. Dux had zero restarts, kernel overflows,
 userspace drops, and OOM events across these samples. SQLite, schema-v7 graph,
 and accounting checks passed. The
@@ -181,20 +181,25 @@ not be summed as independent physical I/O.
 These samples are not a completed soak. At sample 1 the index was dirty and a
 periodic full observation was in progress; at sample 2 it was dirty with no
 scan in progress. The last completed observation was 1,042, 407, 672, 1,018,
-and 415 seconds old across samples 1–5. These readings met the monitor's
+415, and 743 seconds old across samples 1–6. These readings met the monitor's
 bounded scan-first freshness gate but do not establish real-time freshness.
 Dux remained below its 4 GiB memory cap; peak memory was about 1.51 GiB. There
 is no CPU or I/O efficiency budget defined yet, so these samples do not
 establish that overhead is low enough. Between samples 3–5, a cleanup removed
 about 6.9 GiB of stale Rust build outputs under `/var/tmp` while the daemon was
 active. The Dux event counter rose by about 12.7 million during those two
-intervals, with no reported kernel overflow or userspace drop. This was an
+intervals, with no reported kernel overflow or userspace drop. Afterwards,
+Docker's unused build cache was pruned: Docker reported 2.288 GiB reclaimable,
+while filesystem availability improved by about 1 GiB (13 to 14 GiB free).
+The remaining 6.402 GiB of reclaimable images, 1.955 GiB of stopped containers,
+and 366.8 MiB of dangling volumes were left untouched because their roles and
+rollback/data value are not established. This was an
 uncontrolled cleanup workload, not a repeatable event-rate stress test; the
 coincidence does not establish that all of the events came from the cleanup.
 
 The v3 collector focused suite passed 34/34 tests. Full Python discovery was
 rerun after this change at 22:14 UTC: **330 tests passed**. The v3 JSONL remains
 live on VPS2 at `/root/dux-canary-409a2f4/canary-24h-5m-v3.jsonl`; its captured
-progress through sample 5 is also preserved in
+progress through sample 6 is also preserved in
 [`live/canary-24h-5m-v3-progress.jsonl`](live/canary-24h-5m-v3-progress.jsonl).
 The v3 canary is still in progress.
