@@ -199,7 +199,7 @@ def caught_up(db, generation=None, tree=None):
             # Version 4 adds the kernel overflow counter after the fields this
             # check consumes; uncertainty and userspace-drop positions are
             # unchanged from versions 1-3.
-            trustworthy = record[0] in {"1", "2", "3", "4"} and record[11] != "1" and int(record[8]) == 0
+            trustworthy = record[0] in {"1", "2", "3", "4", "5"} and record[11] != "1" and int(record[8]) == 0
             if clean and new and int(record[3]) == 0 and record[4] == "1" and stored == raw:
                 try:
                     if tree is not None:
@@ -294,8 +294,12 @@ with tempfile.TemporaryDirectory(prefix="dux-live-test-") as workspace:
                 "the default scanner intentionally prunes nested pseudo-filesystem directories. "
                 "Use an isolated ext4, XFS, or Btrfs fixture for this exact-tree suite."
             )
+        # This harness asserts event-by-event convergence in its temporary
+        # fixture. The product default is reconciliation-first, so select the
+        # compatibility event-apply path explicitly rather than silently
+        # running a different mode and timing out its catch-up gate.
         daemon_args = [str(binary), "--db", str(db), "daemon", str(tree), "--flush-ms", "100",
-                       "--max-cpu", str(max_cpu_percent)]
+                       "--max-cpu", str(max_cpu_percent), "--event-apply"]
         if direct_daemon:
             # Share the caller's mount namespace so its private fixture mount contains
             # both the fixture and the filesystem-wide fanotify mark. This keeps

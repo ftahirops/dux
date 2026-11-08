@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 20:29 UTC
+**Updated:** 2026-11-08 21:03 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -10,15 +10,15 @@ On the current working tree, `cargo test --locked` passes **317 tests, 0
 failures, 2 ignored**; `cargo test --locked --all-features` passes **320 tests,
 0 failures, 2 ignored**. The all-features result was independently repeated
 under `cargo llvm-cov`; that run also passed 320 tests. Python discovery
-(`python3 -m unittest discover -s scripts -p 'test_*.py'`) passes **323 tests**
-(including 27 canary-monitor tests). `cargo fmt --check`, strict
+(`python3 -m unittest discover -s scripts -p 'test_*.py'`) passes **325 tests**
+(including 29 focused canary-monitor tests). `cargo fmt --check`, strict
 all-target/all-feature Clippy with warnings denied, and `git diff --check` pass.
 The two ignored Rust tests require a handle-capable ext4 qualification profile
 and a manual production-shaped scale profile. These are per-run counts, not
 unique tests to be summed across overlapping runs. Static-musl package
-revision 105 was built from clean commit `30bf32d`; its checksums verify, but
-it predates the current uncommitted inode-reuse fix and has not been installed
-as that fix on VPS2 or production.
+revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
+DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
+only on the disposable VPS2 qualification VM, not production.
 
 Latest current-source coverage from `cargo llvm-cov --locked --all-features
 --summary-only` (2026-11-08 20:28 UTC):
@@ -1380,7 +1380,7 @@ counted.
 Automated tests on the current Rust source passed **317 default-feature tests**
 and **320 all-feature tests**, with 0 failures and 2 ignored in each run. The
 ignored cases require the dedicated ext4 or manual scale profile. The complete
-Python script suite passed **323 tests**, including **27 focused canary-monitor
+Python script suite passed **325 tests**, including **29 focused canary-monitor
 tests**. Strict all-target/all-feature Clippy, formatting, and `git diff
 --check` passed. The
 lockfile audit found no known vulnerabilities in 229 dependencies; the static
@@ -1428,7 +1428,7 @@ All kernel/runtime observations are on one Ubuntu 24.04, Linux 6.8, KVM VPS2
 with ext4. Uncovered: other kernels/filesystems, repeated sustained-overflow
 convergence, 10M+ scale, RPM lifecycle, power-loss/media corruption, 72-hour
 soak, and a production-host canary. Test counts overlap (the focused canary
-tests are included in the 323 Python tests); do not add them as unique tests.
+tests are included in the 325 Python tests); do not add them as unique tests.
 
 ## Inode-reuse race diagnosis and bounded revalidation fix — 2026-11-08
 

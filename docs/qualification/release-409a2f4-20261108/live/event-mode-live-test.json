@@ -1,0 +1,105 @@
+{
+  "status": "passed",
+  "error": null,
+  "unit": "dux-validation-4036756",
+  "started_at_epoch": 1794171490.5405545,
+  "elapsed_seconds": 16.113,
+  "binary": "/root/dux-canary-409a2f4/dux-release-106",
+  "binary_sha256": "0f2c14df15cbcaec0c934d409703843fc03e35fd089287234653e01be250a556",
+  "harness_sha256": "e0ec9fb11099eaa2db3112765cd957f95ae9b16f3cb74b8e5ffdf418d9e88d85",
+  "cpu_quota_percent": 20,
+  "max_cpu_percent": 20,
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "fixture_filesystem": "ext4",
+  "test": "real fanotify exact-path, inode-allocation, directory-rollup and TUI regression",
+  "churn_operations": 5000,
+  "reused_directory_incarnation": {
+    "stale_child_count": 62,
+    "stale_child_allocated_bytes": 24518656,
+    "stale_directory_recorded_recursive_bytes": 5996544,
+    "stale_directory_recorded_recursive_inodes": 63,
+    "injected_rollup_deficit_bytes": 18526208
+  },
+  "large_deleted_subtree": {
+    "path": "tmp/xgs-coverage-db-20261022/go-build-live-shape",
+    "inodes": 799,
+    "allocated_bytes": 28934144
+  },
+  "ephemeral_sqlite_wal_cycles": 32,
+  "transient_temp_cleanup": {
+    "paths": [
+      "tmp/TestRecomposeHonoursTimeoutsAndReportsFailures1767114555",
+      "tmp/args4262786159",
+      "tmp/systemd-private-test-xgs-control-plane-watchdog.service-test"
+    ],
+    "inode_counts_before_delete": {
+      "go_test_directory": 11,
+      "args_file": 1,
+      "systemd_private_directory": 12
+    },
+    "all_paths_removed_from_index": true
+  },
+  "incident_temp_subtrees": {
+    "paths": [
+      "tmp/TestRCARemediatesResourceCapDriftAndRecordsTheAttempt4218169234",
+      "tmp/TestRestoreContainerReadyRequiresHealthyEvidence3538992269"
+    ],
+    "inodes": 19,
+    "allocated_bytes": 90112,
+    "all_paths_removed_from_index": true
+  },
+  "recursive_leaf_transition": {
+    "inode": [
+      1792,
+      16
+    ],
+    "empty_state": {
+      "allocated_bytes": 0,
+      "row": [
+        0,
+        0,
+        1
+      ]
+    },
+    "allocated_state": {
+      "allocated_bytes": 4096,
+      "row": [
+        4096,
+        4096,
+        1
+      ]
+    },
+    "exact_parent_rollups_passed": true
+  },
+  "go_build_churn": {
+    "rounds": 4,
+    "child_directories_per_round": 480,
+    "artifacts_per_directory": 2,
+    "created_inodes": 5764,
+    "all_trees_removed_before_catchup": true,
+    "stale_build_dirents_after_catchup": 0,
+    "directory_rollup_mismatches_after_catchup": 0,
+    "exact_filesystem_truth_passed": true
+  },
+  "checks": [
+    "exact parent/name to device/inode mapping",
+    "exact inode identity and allocated-byte map",
+    "root and all-directory recursive totals",
+    "allocated-size growth history follows inode incarnation across rename",
+    "real fanotify repairs a stale directory incarnation at a reused inode",
+    "real fanotify removes a 799-inode temporary build subtree with exact rollups",
+    "real fanotify converges after repeated 480-directory Go-build create/delete churn",
+    "real fanotify observes transient SQLite WAL and SHM lifecycle",
+    "real fanotify removes transient Go-test, args-file and systemd-private paths",
+    "real fanotify removes the exact two 19-inode production temp subtrees",
+    "hardlink alias survives source atomic replacement",
+    "write and unlink of an ephemeral hardlink refreshes surviving inode allocation",
+    "empty-file creation followed by allocation refreshes leaf recursive counters and parent rollups",
+    "concurrent nested parent-directory swaps and descendant writes",
+    "events during background reconciliation",
+    "index has no dirty/flush-error/uncertain state",
+    "TUI input handling and prompt quit"
+  ],
+  "tui_quit_ms": 1.139
+}

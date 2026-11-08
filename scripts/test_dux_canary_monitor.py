@@ -152,9 +152,23 @@ class CanaryMonitorTests(unittest.TestCase):
     def test_stale_watch_heartbeat_fails(self):
         value = sample()
         value["status_after"]["watch_status_updated_at_seconds"] = 800
+        value["status_after_observed_at_seconds"] = 1000
         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT,
                                          now_timestamp=1000)
         self.assertIn("status_after watch heartbeat is stale or in the future", errors)
+
+    def test_pre_snapshot_heartbeat_is_checked_at_its_own_read_time(self):
+        value = sample()
+        value["status_before"] = status(watch_status_updated_at_seconds=900)
+        value["status_after"] = status(watch_status_updated_at_seconds=1190)
+        value["status_before_observed_at_seconds"] = 950
+        value["status_after_observed_at_seconds"] = 1200
+        self.assertEqual(
+            MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT,
+                                    now_timestamp=1500),
+            [],
+            "slow accounting must not make the earlier status read look stale",
+        )
 
     def test_live_false_clean_status_cannot_override_exact_accounting_mismatch(self):
         value = sample()
@@ -317,6 +331,10 @@ class CanaryMonitorTests(unittest.TestCase):
     def test_24_hour_sample_floor_includes_start_and_finish(self):
         self.assertEqual(MONITOR.minimum_sample_count(3600), 25)
         self.assertEqual(MONITOR.minimum_sample_count(60), 1441)
+
+    def test_sample_deadlines_are_fixed_from_canary_start(self):
+        self.assertEqual(MONITOR.next_sample_delay(100, 2, 300, now_monotonic=650), 50)
+        self.assertEqual(MONITOR.next_sample_delay(100, 2, 300, now_monotonic=710), -10)
 
 
 if __name__ == "__main__":

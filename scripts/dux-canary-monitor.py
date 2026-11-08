@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -216,11 +217,18 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
             else:
                 errors.append(f"{key} is not versioned, live, and caught up")
         else:
+            observed_at = sample.get(f"{key}_observed_at_seconds")
             now = time.time() if now_timestamp is None else now_timestamp
+            if observed_at is not None:
+                try:
+                    now = float(observed_at)
+                except (TypeError, ValueError):
+                    errors.append(f"{key} observation timestamp is invalid")
+                    continue
             updated = status.get("watch_status_updated_at_seconds")
             try:
                 age = now - float(updated)
-                if age > 120 or age < -5:
+                if not math.isfinite(age) or age > 120 or age < -5:
                     errors.append(f"{key} watch heartbeat is stale or in the future")
             except (TypeError, ValueError):
                 errors.append(f"{key} watch heartbeat timestamp is missing or invalid")
@@ -288,6 +296,7 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
 
 def capture_sample(binary, service_binary, db, unit, journal_since):
     status_before = machine_status(binary, db)
+    status_before_observed_at = time.time()
     service = unit_properties(unit)
     candidate_hash = sha256_file(binary)
     service_hash = sha256_file(service_binary)
@@ -302,14 +311,17 @@ def capture_sample(binary, service_binary, db, unit, journal_since):
     accounting = OBSERVER.snapshot()
     history = history_state(db)
     status_after = machine_status(binary, db)
+    status_after_observed_at = time.time()
     journal = journal_state(unit, journal_since)
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"captured_at_utc": now, "binary_sha256": candidate_hash,
             "service_binary_sha256": service_hash, "process_binary_sha256": process_hash,
             "unit_path": fragment, "unit_sha256": unit_hash,
             "service": service, "memory_events": events, "status_before": status_before,
+            "status_before_observed_at_seconds": status_before_observed_at,
             "accounting": accounting, "history": history, "journal": journal,
-            "status_after": status_after}
+            "status_after": status_after,
+            "status_after_observed_at_seconds": status_after_observed_at}
 
 
 def append_record(fd, record):
@@ -322,6 +334,14 @@ def append_record(fd, record):
 
 def minimum_sample_count(interval_seconds):
     return (24 * 60 * 60 + interval_seconds - 1) // interval_seconds + 1
+
+
+def next_sample_delay(start_monotonic, completed_samples, interval_seconds,
+                      now_monotonic=None):
+    """Return time remaining until the fixed deadline after completed samples."""
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    deadline = start_monotonic + completed_samples * interval_seconds
+    return deadline - now
 
 
 def main():
@@ -374,9 +394,15 @@ def main():
         append_record(fd, {**common, "event": "canary_started",
                            "started_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()})
         while True:
+            delay = next_sample_delay(start, count, args.interval_seconds)
+            if delay > 0:
+                time.sleep(delay)
+            sample_started = time.monotonic()
             try:
                 sample = capture_sample(args.binary, args.service_binary, args.db, args.unit,
                                         previous_sample_at)
+                sample["collection_duration_seconds"] = round(
+                    time.monotonic() - sample_started, 3)
                 errors = evaluate_sample(sample, args.expected_binary_sha256,
                                          args.expected_unit_sha256, previous_restarts,
                                          previous_history_bucket, previous_memory_events,
@@ -422,7 +448,17 @@ def main():
                                    "minimum_samples": minimum_samples})
                 print(f"PASS 24-hour canary: {count} exact health/accounting samples; evidence {args.output}", flush=True)
                 return 0
-            time.sleep(min(args.interval_seconds, 24 * 60 * 60 - elapsed))
+            delay = next_sample_delay(start, count, args.interval_seconds)
+            if delay < 0:
+                errors = [
+                    f"sample collection exceeded the {args.interval_seconds}-second cadence "
+                    f"({-delay:.3f} seconds late)"
+                ]
+                append_record(fd, {**common, "event": "canary_failed",
+                                   "failed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                   "sample_number": count, "errors": errors})
+                return 1
+            time.sleep(delay)
     finally:
         os.close(fd)
 
