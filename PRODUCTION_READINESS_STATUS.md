@@ -1718,6 +1718,32 @@ Full Python discovery passed 330 tests after the v3 collector change. The
 canary remains active and is still far short of its 24-hour and 72-hour soak
 gates.
 
+## VPS2 disk and canary recheck — 2026-11-08 22:30 UTC
+
+The VPS2 test VM root filesystem reached 82 GiB used of 93 GiB (93%, 6.3 GiB
+free). A low-priority disk survey found 11 GiB under `/var/tmp`, including
+multiple old Rust build targets; other large consumers were `/var/lib`
+(50 GiB, including Docker/containerd data and the Dux DB), `/var/log` (4.3
+GiB, mostly the systemd journal), and `/root` (5.7 GiB, including preserved
+rollback and qualification material). No database, container data, logs,
+source snapshots, release outputs, or rollback evidence were deleted.
+
+There were no active Cargo/Rust build processes. Cargo dry-runs enumerated
+seven stale target directories, then `cargo clean --frozen` removed 19,497
+generated build files totalling about 6.9 GiB. VPS2 root usage fell to 76 GiB
+of 93 GiB (87%, 13 GiB free). The v3 canary stayed active throughout.
+
+V3 samples 4 and 5 passed at 22:25:10 and 22:30:06 UTC, taking 145.0 and
+141.7 seconds. Sample 4 saw a periodic observation in progress; sample 5 saw
+the completed scan 415 seconds old. Across both samples Dux had zero restarts,
+kernel overflows, userspace drops, and OOM events. The event counter rose from
+114,244,697 at sample 3 to 126,957,176 at sample 5 while temporary build
+outputs were cleaned. This temporal overlap is useful stress evidence but does
+not prove those deletions caused all 12.7 million observed events. The
+read-only v3 JSONL is preserved through sample 5 in the release qualification
+directory. The 24-hour soak and remaining production qualification gates are
+still open.
+
 ## Workspace disk cleanup — 2026-11-08
 
 The local `/` filesystem was 61% used with 70 GiB free. The repository's
