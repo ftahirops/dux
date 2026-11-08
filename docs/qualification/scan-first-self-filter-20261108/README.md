@@ -42,6 +42,24 @@ recovered to an exact comparison.
 
 Artifacts: [final churn report](final-churn-report.json), [progress report](final-churn-progress.json), [daemon log](final-daemon.log), [harness log](final-run.log), [Rust suite](rust-suite-final.log), [Clippy](clippy-final.log), and [release build](release-build-final.log).
 
+The same exact binary then passed the forced-overflow suite. The fixture
+overflowed a 16,384-event kernel queue after 18,432 creates; the kernel
+overflow counter advanced from 0 to 1. Dux reported uncertainty, started a
+full scan, completed accounting verification, advanced the scan generation,
+and matched the filesystem oracle with clean status in 7.147 seconds. See
+[the final overflow report](final-overflow-report.json). This qualifies one
+ext4 overflow-recovery scenario; it does not establish recovery across other
+kernels/filesystems or sustained repeated overflow.
+
+A second independent 100k/20k churn run with the same source, binary, seed,
+limits, and harness also passed all ten exact checkpoints. It completed in
+708.328 seconds; maximum batch convergence was 129.611 seconds, with zero
+dropped events and no uncertain checkpoint. See the
+[repeat churn report](repeat-churn-report.json). Across both runs, all twenty
+checkpoints matched the filesystem oracle; the first run exercised an
+incomplete midpoint observation and automatic recovery, while the repeat had
+no incomplete checkpoint.
+
 An unfiltered f5c84b3 control with the same harness and workload failed before
 mutations: it remained uncertain after 240 seconds, with 16 userspace ring
 overflow warnings in the captured tail and no kernel overflow notices. The

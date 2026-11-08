@@ -29,7 +29,26 @@
     "dropped_events": 0,
     "uncertain_at_checkpoints": false,
     "exact_paths_inodes_allocations_all_rollups": true,
-    "midpoint_retry_exercised": true
+    "midpoint_retry_exercised": true,
+    "forced_overflow": {
+      "status": "passed",
+      "queue_capacity": 16384,
+      "created": 18432,
+      "overflow_notifications_before": 0,
+      "overflow_notifications_after": 1,
+      "recovery_seconds": 7.147,
+      "exact_filesystem_match_and_clean_status": true
+    },
+    "repeat_churn": {
+      "status": "passed",
+      "elapsed_seconds": 708.328,
+      "batches": 10,
+      "max_batch_exact_convergence_ms": 129611,
+      "kernel_events_seen": 52478,
+      "dropped_events": 0,
+      "uncertain_at_checkpoints": false,
+      "exact_paths_inodes_allocations_all_rollups": true
+    }
   },
   "final_source_unit_tests": {
     "passed": 300,
@@ -63,7 +82,7 @@
     "wal"
   ],
   "artifacts": {
-    "README.md": "aaef8aa5dd96d41b154d32e2d3b8e3fecd9601df7909743d4efff517378ffe51",
+    "README.md": "e7ade1e1dcb0bd14db357f2a790acfc9d899f3c92a4041edad209aca82af3032",
     "final-churn-report.json": "2c555e2dbd9445dfab044b2b9a20c290deb68ab33ca60baca35d234cba1d4b04",
     "final-churn-progress.json": "0d393fbd3d7eafc11bbed0df10fe530835aef333bf9d786db60b4c56cb2f0474",
     "final-daemon.log": "2fcaf28d9a0b7d39d677d6b2689e3be5fc369898daff9cc720c82c812c303a58",
@@ -71,6 +90,8 @@
     "rust-suite-final.log": "8625cd7b91de3dbda3305df95a5d265b7287cad64d6b43ed728ccc58513dd0a9",
     "clippy-final.log": "f7ce0e67d23c0216a2aa24b82336027685973281823506ab8f0020cad86254ff",
     "release-build-final.log": "b3b1d414cd3b0d75fadb8bb5287023ec564f5ae9a28f55b7ae9047855ee49848",
-    "unfiltered-f5c84b3-retry240-report.json": "ab3d837d44109bbd907f118f0ff979afc5cb6f577e418554e8c35b7e308689b0"
+    "unfiltered-f5c84b3-retry240-report.json": "ab3d837d44109bbd907f118f0ff979afc5cb6f577e418554e8c35b7e308689b0",
+    "final-overflow-report.json": "522c6f184918f9a46ce5086f3389b677fc22ab8e6c10bddfd62415ba244abbe3",
+    "repeat-churn-report.json": "623e0cb9e08ed30f01e4a4538cb885d4ea2aff5b22d2aa38673e9579bf54eabf"
   }
 }

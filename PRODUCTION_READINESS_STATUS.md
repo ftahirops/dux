@@ -1,8 +1,36 @@
 # Production readiness status
 
-**Updated:** 2026-11-07 20:46 UTC
+**Updated:** 2026-11-08 10:05 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
+
+## Latest exact-candidate evidence (2026-11-08)
+
+Commit `ea642ed` filters well-formed fanotify records from Dux's own PID before
+they consume bounded hint-ring capacity. It preserves overflow records and
+passes malformed records unchanged to the canonical fail-closed parser. On
+VPS2, the exact optimized candidate (SHA-256
+`f5318e04ecbd7ca460c75a850e369b534ac9fdaa553d70812b1c003290da0d24`) passed
+the final-source Rust suite (300 passed, 2 ignored), strict Clippy, and an
+optimized build. Two 100k-file / 20k-mutation ext4 churn runs passed twenty
+independent path/inode/allocation/rollup exactness checkpoints at a 25% CPU
+quota. One concurrent scan was correctly marked incomplete and recovered
+through bounded retry; the repeat passed without an uncertain checkpoint.
+
+The exact same binary also passed a forced kernel-overflow test: 18,432 creates
+overflowed a 16,384-event queue, the overflow counter advanced from 0 to 1, and
+automatic full reconciliation returned an exact, clean result in 7.147 s.
+Machine-readable evidence and logs are in
+[`docs/qualification/scan-first-self-filter-20261108/`](docs/qualification/scan-first-self-filter-20261108/).
+
+This materially improves evidence for churn and overflow recovery on one VPS2
+ext4 fixture. It does not resolve the broader release blockers below: the false-clean
+failure observed on the older `c323aee` candidate still lacks a reproduced root
+cause; the current exact candidate has only two 100k churn runs; the 15-minute
+freshness SLO, 1.37M current-source workload, sustained/repeated overflow,
+other filesystems/kernels, 72-hour soak, package rollback/security review, and
+24-hour production canary remain unqualified. Production remains on its older
+installed daemon; nothing was deployed by this work.
 
 ## New source change after the exact-commit qualification
 
