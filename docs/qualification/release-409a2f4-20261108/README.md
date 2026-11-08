@@ -96,30 +96,31 @@ collector; the earlier failed evidence is preserved in
 [`live/failed-5m-canary-monitor-calibration.jsonl`](live/failed-5m-canary-monitor-calibration.jsonl)
 and does not count as a pass.
 
-### Corrected 24-hour canary progress (2026-11-08 21:58 UTC)
+### Corrected 24-hour canary progress (2026-11-08 22:02 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and remains active.
-Its first eleven samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
-21:32:04, 21:37:21, 21:43:18, 21:47:36, 21:52:26, and 21:58:42 UTC) passed
-with no monitor errors. All samples matched the release binary and unit hashes;
-SQLite quick-check, schema-v7 graph, and accounting checks passed. At sample 11
-the service had zero restarts, kernel overflows, userspace drops, and OOM events.
-The latest full observation was 330 seconds old, with no scan in progress. The index was dirty
+Its first twelve samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
+21:32:04, 21:37:21, 21:43:18, 21:47:36, 21:52:26, 21:58:42, and 22:02:06 UTC)
+passed with no monitor errors. All samples matched the release binary and unit
+hashes; SQLite quick-check, schema-v7 graph, and accounting checks passed. At
+sample 12 the service had zero restarts, kernel overflows, userspace drops, and
+OOM events. The latest full observation was 535 seconds old, with no scan in
+progress. The index was dirty
 after filesystem changes. The reported
 `behind_seconds` is the
 legacy event-pipeline catch-up timer; `last_scan_age_seconds` is the relevant
-scan-first freshness measure. Eleven samples are an early checkpoint only, not a
+scan-first freshness measure. Twelve samples are an early checkpoint only, not a
 soak pass. Peak Dux memory was about 1.51 GiB against the 4 GiB service limit.
 The slowest collection so far took 184.1 seconds, below the 300-second sample
-interval. Across sample intervals 1→11, Dux used 1,334.7 CPU-seconds over
-3,088.6 wall-seconds (43.2% of one core on average), with interval rates from 16.5% to
+interval. Across sample intervals 1→12, Dux used 1,517.8 CPU-seconds over
+3,293.4 wall-seconds (46.1% of one core on average), with interval rates from 16.5% to
 86.8%. A cgroup snapshot at 21:34 showed throttling in 8,240 of 31,374 CPU
 periods (26.3%) and cumulative service I/O of 7,471,202,304 bytes read and
 6,704,386,048 bytes written. These early totals include initial indexing and
 must not be projected as steady state. The monitor checks the one-core hard
 CPU ceiling and memory limit, but does not enforce a CPU or I/O budget; these
 passes therefore do not establish a defined efficiency target. The raw
-append-only snapshot through sample 11
+append-only snapshot through sample 12
 is [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
 
 The active collector was not changed during the soak. A newer collector source
@@ -130,6 +131,11 @@ raw per-device values and does not add them together. The active run's monitor
 hash is still the previous version and its records cannot establish per-device
 I/O rates. The last full Python discovery run (325 tests) predates the new
 collector tests; the focused suite was rerun, but full discovery was not.
+
+A fresh `cargo audit --json` at 22:01 UTC found zero known vulnerabilities and
+zero warnings across 229 dependencies. Its advisory database was last updated
+2026-11-06; the raw result is
+[`cargo-audit-20261108-2201.json`](cargo-audit-20261108-2201.json).
 
 This VPS2 qualification is not production sign-off. It covers one KVM guest,
 Ubuntu 24.04, Linux 6.8, and ext4. A completed 24-hour candidate canary,
@@ -143,3 +149,12 @@ cumulative kernel overflows and no userspace drops. Pending updates fell from
 23,807 at 21:50 to 181 at 21:58; however, the last full scan was 292,172 seconds
 old (about 81.2 hours). The recent queue drain is not recovery of the stale
 whole-filesystem view. No production service or database changes were made.
+
+### VPS1 read-only recheck (2026-11-08 22:02 UTC)
+
+The overflow counter rose from 295 to 312 (+17) since 21:58. The legacy daemon
+remains dirty and not caught up, with 78 pending updates, no userspace drops,
+and a last full scan 292,410 seconds old (about 81.2 hours). Its journal had
+248 slow-flush and 17 stale-handle warnings during that interval. The overflow
+increase confirms the brief backlog drain was not recovery. No production
+service or database changes were made.
