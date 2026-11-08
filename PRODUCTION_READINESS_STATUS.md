@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 23:14 UTC
+**Updated:** 2026-11-08 23:49 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -35,8 +35,9 @@ cancelled under memory pressure and retried. That retry's full scan completed
 at 23:13:39 with 1,522,965 staged paths and zero coverage issues. This does not
 pass the failed canary's freshness gate; that soak is incomplete. A fresh v4
 24-hour soak started at 23:27:17 with the corrected diagnostic monitor.
-Samples 1–4 passed through 23:43 UTC with zero restarts, overflows, userspace
-drops, or OOMs. V4 monitors the installed release-106 binary, not the newer
+Samples 1–5 passed through 23:48 UTC with zero restarts, overflows, userspace
+drops, or OOMs. The daemon remained dirty awaiting the next observation; the
+latest completed scan age was 435 seconds. V4 monitors the installed release-106 binary, not the newer
 source changes, and remains in progress. The latest VPS2 status is active,
 unpaused, with scan age 297 seconds and zero overflows, drops, or restarts.
 The earlier full scan covered 1,514,820 staged paths with zero coverage issues
@@ -1863,3 +1864,16 @@ regenerable Rust `target/` directory occupied about 3.3 GiB; `cargo clean`
 removed 8,653 build artifacts (3.6 GiB reported by Cargo). Afterwards `/` was
 60% used with 72 GiB free. Source, qualification logs, and the VPS2 test VM
 were not touched by this cleanup.
+
+## Service sandbox policy review — 2026-11-08 23:49 UTC
+
+`systemd-analyze security --offline=yes packaging/dux.service` scored the
+checked-in daemon unit **3.3 OK** on the local systemd 255 host. The unit
+retains root and `CAP_SYS_ADMIN`/`CAP_DAC_READ_SEARCH` for global fanotify and
+file-handle resolution, while denying unrelated capabilities and syscall
+groups. The offline score is not a runtime compatibility or complete security
+proof. VPS2 still runs the release-106 service and its older unit. VPS1
+production was last observed on Nov 3 with a 5.1 MEDIUM policy score and
+weaker core-dump/SecureBits/syscall-filter settings than this source unit.
+Package-based rollout and effective-policy verification on both environments
+remain open; neither live service was modified.

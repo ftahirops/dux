@@ -285,3 +285,22 @@ warnings across 229 locked dependencies. The advisory database snapshot was
 updated at 23:03 UTC. Raw result:
 [`cargo-audit-20261108-2329.json`](cargo-audit-20261108-2329.json). This is
 dependency audit evidence, not a full application security assessment.
+
+## VPS2 v4 canary refresh — 2026-11-08 23:49 UTC
+
+The live VPS2 v4 progress JSONL was refreshed from the active collector at
+23:49 UTC. Five samples passed, at 23:28:13, 23:33:07, 23:37:54, 23:43:21,
+and 23:48:03 UTC. Every sample reported zero service restarts, kernel
+queue-overflow notifications, userspace update drops, and OOM events. SQLite
+quick checks, schema-v7 path-graph checks, and accounting checks passed. The
+latest sample's completed scan was 435 seconds old and the index was dirty
+while awaiting its next periodic observation. The sample duration was 45.7
+seconds. The canary service is still active; the 24-hour gate remains open.
+
+A read-only `systemd-analyze security --offline=yes packaging/dux.service` on
+the local systemd 255 host scored the checked-in service unit **3.3 OK**. This
+is not the policy loaded on VPS2: the live canary verifies its installed unit
+hash `e12d1f4a…`, and it runs release 106. Production policy remains a separate
+open gate; the last production policy snapshot (Nov 3) was 5.1 MEDIUM and
+showed weaker core-dump, SecureBits, and syscall-filter settings than the
+checked-in unit. No service policy was changed in this qualification step.
