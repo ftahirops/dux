@@ -3,7 +3,9 @@ import importlib.util
 from pathlib import Path
 import sys
 import time
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("dux-canary-monitor.py")
@@ -22,6 +24,8 @@ def status(**overrides):
              "watch_status_available": True, "caught_up": True,
              "scan_in_progress": False, "dirty": False, "paused": False,
              "pending_updates": 0, "events_dropped": 0, "write_error": None,
+             "scan_first": False, "last_scan_age_seconds": 0,
+             "last_scan_timestamp_seconds": int(time.time()),
              "watch_status_updated_at_seconds": int(time.time())}
     value.update(overrides)
     return value
@@ -69,6 +73,81 @@ class CanaryMonitorTests(unittest.TestCase):
                                        watch_status_available=False)
         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
         self.assertIn("status_after is not versioned, live, and caught up", errors)
+
+    def test_scan_first_dirty_status_passes_with_a_recent_full_observation(self):
+        value = sample()
+        scan_status = status(caught_up=False, dirty=True, scan_first=True,
+                             last_scan_age_seconds=480,
+                             dirty_reason="filesystem changes await the next full observation")
+        value["status_before"] = dict(scan_status)
+        value["status_after"] = dict(scan_status)
+        value["journal"] = {
+            "critical_event_count": 1,
+            "critical_event_truncated": False,
+            "critical_events": ["fanotify queue overflow; next observation required"],
+        }
+        self.assertTrue(MONITOR.healthy_pipeline(scan_status))
+        self.assertEqual(MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT), [])
+
+    def test_scan_first_observation_older_than_freshness_budget_fails(self):
+        value = sample()
+        value["status_before"] = status(caught_up=False, dirty=True, scan_first=True,
+                                        last_scan_age_seconds=1201)
+        value["status_after"] = status(caught_up=False, dirty=True, scan_first=True,
+                                       last_scan_age_seconds=1201)
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn(
+            "status_after is not live or its last full observation exceeds 1200 seconds",
+            errors,
+        )
+
+    def test_scan_first_requires_a_completed_observation_timestamp(self):
+        value = sample()
+        value["status_before"] = status(caught_up=False, dirty=True, scan_first=True,
+                                        last_scan_timestamp_seconds=0)
+        value["status_after"] = dict(value["status_before"])
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("status_after is not live or its last full observation exceeds 1200 seconds",
+                      errors)
+
+    def test_scan_first_overflow_is_allowed_but_truncated_journal_evidence_fails(self):
+        value = sample()
+        scan_status = status(caught_up=False, dirty=True, scan_first=True,
+                             last_scan_age_seconds=300)
+        value["status_before"] = dict(scan_status)
+        value["status_after"] = dict(scan_status)
+        value["journal"] = {
+            "critical_event_count": 101,
+            "critical_event_truncated": True,
+            "critical_events": ["fanotify queue overflow"] * 100,
+        }
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("journal contains an accounting, overflow, scan, or write failure", errors)
+
+    def test_journal_parser_rejects_nonzero_scan_coverage_issues(self):
+        output = ("Nov 08 14:00:00 dux: rescan complete: 100 files, 2 coverage issues\n"
+                  "Nov 08 14:01:00 dux: rescan complete: 100 files (0 coverage issues)\n")
+        with mock.patch.object(MONITOR.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=0, stdout=output,
+                                                            stderr="")):
+            journal = MONITOR.journal_state("dux.service", "2026-11-08T14:00:00Z")
+        self.assertEqual(journal["critical_event_count"], 1)
+        self.assertIn("2 coverage issues", journal["critical_events"][0])
+
+    def test_journal_parser_rejects_incomplete_scan(self):
+        output = "Nov 08 14:00:00 dux: rescan incomplete: scan incomplete: unreadable paths\n"
+        with mock.patch.object(MONITOR.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=0, stdout=output,
+                                                            stderr="")):
+            journal = MONITOR.journal_state("dux.service", "2026-11-08T14:00:00Z")
+        self.assertEqual(journal["critical_event_count"], 1)
+
+    def test_unclassified_journal_marker_count_fails_closed(self):
+        self.assertEqual(
+            MONITOR.journal_failures({"critical_event_count": 1, "critical_events": []},
+                                     scan_first=False),
+            ["unclassified critical journal events"],
+        )
 
     def test_stale_watch_heartbeat_fails(self):
         value = sample()
@@ -155,6 +234,31 @@ class CanaryMonitorTests(unittest.TestCase):
                                         previous_restarts=0)
         self.assertIn("service restart count changed during canary", errors)
         self.assertIn("service MemoryCurrent exceeds MemoryMax", errors)
+
+    def test_systemd_reloading_is_allowed_only_for_a_fresh_scan_first_observation(self):
+        value = sample()
+        scan_status = status(caught_up=False, dirty=True, scan_first=True,
+                             scan_in_progress=True, last_scan_age_seconds=1100)
+        value["status_before"] = dict(scan_status)
+        value["status_after"] = dict(scan_status)
+        value["service"]["ActiveState"] = "reloading"
+        self.assertEqual(MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT), [])
+
+        legacy = sample()
+        legacy["service"]["ActiveState"] = "reloading"
+        errors = MONITOR.evaluate_sample(legacy, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("systemd service is not active or performing a scan-first observation",
+                      errors)
+
+    def test_reloading_without_an_active_scan_first_observation_fails(self):
+        value = sample()
+        value["status_before"] = status(caught_up=False, dirty=True, scan_first=True,
+                                        last_scan_age_seconds=600)
+        value["status_after"] = dict(value["status_before"])
+        value["service"]["ActiveState"] = "reloading"
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("systemd service is not active or performing a scan-first observation",
+                      errors)
 
     def test_unit_resource_or_dropin_drift_fails(self):
         value = sample()

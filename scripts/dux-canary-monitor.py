@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import subprocess
 import sys
@@ -100,6 +101,10 @@ CRITICAL_JOURNAL_MARKERS = (
     "inconsistent directory accounting",
     "could not verify accounting",
     "incomplete coverage",
+    "scan incomplete",
+    "rescan incomplete",
+    "scan failed",
+    "reconciliation failed",
     "pending backlog exceeded",
     "skip move-to (would cycle)",
     "rescan failed",
@@ -116,30 +121,80 @@ def journal_state(unit, since):
     if result.returncode:
         raise RuntimeError(f"journalctl failed: {result.stderr.strip()}")
     lines = result.stdout.splitlines()
-    relevant = [line for line in lines
-                if any(marker in line.lower() for marker in CRITICAL_JOURNAL_MARKERS)]
+    relevant = []
+    for line in lines:
+        lower = line.lower()
+        if any(marker in lower for marker in CRITICAL_JOURNAL_MARKERS):
+            relevant.append(line)
+            continue
+        if "coverage issues" in lower:
+            count = re.search(r"(\d+)\s+coverage issues?", lower)
+            if count is None or int(count.group(1)) > 0:
+                relevant.append(line)
     return {"since": since, "sha256": hashlib.sha256(result.stdout.encode()).hexdigest(),
             "line_count": len(lines), "critical_event_count": len(relevant),
+            "critical_event_truncated": len(relevant) > 100,
             "critical_events": relevant[:100]}
 
 
-def healthy_pipeline(status):
-    return (isinstance(status, dict)
+DEFAULT_MAX_OBSERVATION_AGE_SECONDS = 20 * 60
+
+
+def healthy_pipeline(status, max_observation_age_seconds=DEFAULT_MAX_OBSERVATION_AGE_SECONDS):
+    """Validate freshness according to the daemon's declared consistency model.
+
+    Event-apply mode must be caught up. Scan-first mode deliberately remains
+    dirty when hints arrive, so its guarantee is a recent full observation and
+    verified accounting, not a drained event queue.
+    """
+    if not (isinstance(status, dict)
             and status.get("status_version") == 1
             and status.get("daemon_live") is True
             and status.get("watch_status_available") is True
-            and status.get("caught_up") is True
+            and status.get("paused") is False
+            and status.get("write_error") is None):
+        return False
+    if status.get("scan_first") is True:
+        age = status.get("last_scan_age_seconds")
+        return (isinstance(age, (int, float)) and not isinstance(age, bool)
+                and 0 <= age <= max_observation_age_seconds
+                and isinstance(status.get("last_scan_timestamp_seconds"), int)
+                and status["last_scan_timestamp_seconds"] > 0)
+    return (status.get("caught_up") is True
             and status.get("scan_in_progress") is False
             and status.get("dirty") is False
-            and status.get("paused") is False
             and status.get("pending_updates") == 0
-            and status.get("events_dropped") == 0
-            and status.get("write_error") is None)
+            and status.get("events_dropped") == 0)
+
+
+def journal_failures(journal, scan_first):
+    """Return critical journal evidence, allowing scan-first hint loss only.
+
+    In scan-first mode fanotify overflow invalidates freshness until the next
+    observation; it does not invalidate the filesystem snapshot as a source of
+    truth. The observation-age gate and independent accounting snapshot still
+    apply. Truncated or unclassified critical journal records fail closed.
+    """
+    if not isinstance(journal, dict):
+        return None
+    lines = journal.get("critical_events", [])
+    count = journal.get("critical_event_count", 0)
+    if not isinstance(count, int) or count < 0:
+        return ["invalid critical journal event count"]
+    if not scan_first:
+        if count and (not lines or journal.get("critical_event_truncated", False)
+                      or count > len(lines)):
+            return lines or ["unclassified critical journal events"]
+        return lines if count else []
+    if journal.get("critical_event_truncated", False) or count > len(lines):
+        return lines or ["unclassified critical journal events"]
+    return [line for line in lines if "fanotify queue overflow" not in line.lower()]
 
 
 def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
                     previous_restarts=None, previous_history_bucket=None,
-                    previous_memory_events=None, now_timestamp=None):
+                    previous_memory_events=None, now_timestamp=None,
+                    max_observation_age_seconds=DEFAULT_MAX_OBSERVATION_AGE_SECONDS):
     """Return all fail-closed reasons for one captured canary sample."""
     errors = []
     for key in ("binary_sha256", "service_binary_sha256", "process_binary_sha256"):
@@ -147,10 +202,19 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
             errors.append(f"{key} differs from expected candidate")
     if sample.get("unit_sha256") != expected_unit_sha256:
         errors.append("unit_sha256 differs from expected candidate unit")
+    scan_first_status = any(
+        isinstance(sample.get(key), dict) and sample[key].get("scan_first") is True
+        for key in ("status_before", "status_after"))
     for key in ("status_before", "status_after"):
         status = sample.get(key)
-        if not healthy_pipeline(status):
-            errors.append(f"{key} is not versioned, live, and caught up")
+        if not healthy_pipeline(status, max_observation_age_seconds):
+            if isinstance(status, dict) and status.get("scan_first") is True:
+                errors.append(
+                    f"{key} is not live or its last full observation exceeds "
+                    f"{max_observation_age_seconds} seconds"
+                )
+            else:
+                errors.append(f"{key} is not versioned, live, and caught up")
         else:
             now = time.time() if now_timestamp is None else now_timestamp
             updated = status.get("watch_status_updated_at_seconds")
@@ -160,8 +224,14 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
                     errors.append(f"{key} watch heartbeat is stale or in the future")
             except (TypeError, ValueError):
                 errors.append(f"{key} watch heartbeat timestamp is missing or invalid")
-    if sample.get("service", {}).get("ActiveState") != "active":
-        errors.append("systemd service is not active")
+    service_state = sample.get("service", {}).get("ActiveState")
+    scan_running = any(
+        isinstance(sample.get(key), dict)
+        and sample[key].get("scan_first") is True
+        and sample[key].get("scan_in_progress") is True
+        for key in ("status_before", "status_after"))
+    if service_state != "active" and not (service_state == "reloading" and scan_running):
+        errors.append("systemd service is not active or performing a scan-first observation")
     try:
         restarts = int(sample["service"]["NRestarts"])
         main_pid = int(sample["service"]["MainPID"])
@@ -202,7 +272,7 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
     journal = sample.get("journal")
     if not isinstance(journal, dict):
         errors.append("journal sample is missing")
-    elif journal.get("critical_event_count", 0) > 0:
+    elif journal_failures(journal, scan_first_status):
         errors.append("journal contains an accounting, overflow, scan, or write failure")
     events = sample.get("memory_events")
     if not isinstance(events, dict):
@@ -262,6 +332,9 @@ def main():
     parser.add_argument("--expected-unit-sha256", required=True)
     parser.add_argument("--interval-seconds", type=int, default=3600,
                         help="sample interval, 60..3600 seconds")
+    parser.add_argument("--max-observation-age-seconds", type=int,
+                        default=DEFAULT_MAX_OBSERVATION_AGE_SECONDS,
+                        help="maximum age of the last full scan in scan-first mode")
     parser.add_argument("--output", type=Path, required=True,
                         help="new root-readable evidence file; must not already exist")
     args = parser.parse_args()
@@ -269,6 +342,8 @@ def main():
         parser.error("root is required to read the complete system index and process executable")
     if not 60 <= args.interval_seconds <= 3600:
         parser.error("interval must be 60..3600 seconds")
+    if not 900 <= args.max_observation_age_seconds <= 3600:
+        parser.error("maximum observation age must be 900..3600 seconds")
     for name, expected in (("binary", args.expected_binary_sha256),
                            ("unit", args.expected_unit_sha256)):
         if len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected):
@@ -289,6 +364,7 @@ def main():
     common = {"format_version": 1, "expected_binary_sha256": args.expected_binary_sha256,
               "expected_unit_sha256": args.expected_unit_sha256, "unit": args.unit,
               "db": str(args.db), "interval_seconds": args.interval_seconds,
+              "max_observation_age_seconds": args.max_observation_age_seconds,
               "duration_seconds": 86400,
               "monitor_sha256": sha256_file(__file__),
               "observer_sha256": sha256_file(OBSERVER_PATH)}
@@ -301,7 +377,8 @@ def main():
                                         previous_sample_at)
                 errors = evaluate_sample(sample, args.expected_binary_sha256,
                                          args.expected_unit_sha256, previous_restarts,
-                                         previous_history_bucket, previous_memory_events)
+                                         previous_history_bucket, previous_memory_events,
+                                         max_observation_age_seconds=args.max_observation_age_seconds)
                 restarts = int(sample["service"]["NRestarts"])
                 history_bucket = int(sample["history"]["max_bucket"])
                 events = sample["memory_events"]

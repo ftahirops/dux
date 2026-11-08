@@ -1076,9 +1076,56 @@ conservatively dirty because new filesystem hints arrived after the observed
 scan; `caught_up=false` is expected for this last-observed model. VPS2 had
 9.9 GiB available on `/` after the lifecycle run and state restoration.
 
-Remaining qualification gaps: 24-hour canary, 72-hour soak, repeated
-sustained overflow storms, continuous-churn freshness and scan-duration SLO,
+Remaining qualification gaps: 24-hour VPS2 candidate canary completion (now in
+progress), a separate production-host canary (not started), 72-hour soak,
+repeated sustained overflow storms, continuous-churn freshness and scan-duration SLO,
 large-scale performance budgets, clean-install exact full-tree comparison,
 other filesystems/kernels, RPM package lifecycle, and power-loss/media
 corruption tests. These results improve evidence but do not establish universal
 or 100% production readiness.
+
+## VPS2 scan-first candidate canary started — 2026-11-08 14:48 UTC
+
+The existing canary gate required `caught_up=true` and `dirty=false`, which is
+incompatible with scan-first's explicit last-observed semantics. Updated
+`scripts/dux-canary-monitor.py` to evaluate that mode against a bounded
+full-observation age (default 20 minutes), live/versioned watch state, schema
+v7 structural/accounting checks, service/package/unit identity, resource
+limits, restart/OOM counters, and journal errors. Scan-first dirty status and
+fanotify queue-overflow records are allowed only under that freshness bound;
+accounting/coverage/write errors and truncated/unclassified journal warnings
+still fail the monitor. Legacy event-apply mode keeps its strict clean/caught-up
+requirement.
+
+The monitor has **26 focused tests**; the complete Python script suite passed
+**322 tests**. Three short preflight attempts were not counted toward the soak.
+The first passed its sample but was stopped after review found the journal
+matcher missed nonzero scan-coverage counts. The second failed while systemd
+reported its normal scan-time `reloading` state as inactive. The third passed,
+but prompted a fail-closed fix for unclassified critical-event counts. All
+three findings are covered by regression tests. The final monitor, with
+coverage-count parsing, scan-aware systemd readiness, and fail-closed journal
+accounting, started as
+`dux-scanfirst-canary-20261108-v4.service` at 14:48:34 UTC. It samples hourly,
+allows no more than 1,200 seconds since the last full scan, and is capped at
+20% CPU and 1 GiB memory. Sample 1 passed at 14:49:46 UTC; last-scan age was
+288/360 seconds in the
+snapshot, it was correctly marked dirty, the v7 path/accounting graph passed,
+and the journal had no critical events. Candidate binary SHA-256 is
+`8c107f0ce62565ed5747e8f28c801b236c870cf5c52e652d7ef73d3bb259fe42`; systemd
+unit SHA-256 is
+`e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b`.
+Monitor SHA-256 is
+`ab23d162fa300016d567403a5cc2ddf5a34b254b060d1d8100fb9b32c397a755`; observer
+SHA-256 is `fdc693097afbd3d78861ded24a8515b2c52f8b5529c9e8d6a033f7f7997b0509`.
+The live append-only JSONL is on VPS2 at
+`/root/dux-canary-e96e708/scanfirst-canary-103-v4.jsonl`.
+
+This is an isolated VPS2 candidate canary, not the production-host canary. It
+remains **in progress** and has not passed its 24-hour gate. Its
+threshold checks recency of the latest full scan, not real-time freshness, and
+does not claim that every event hint was delivered. The one-hour sample
+interval will report service restarts and OOM counters at sample time; it does
+not provide sub-hour failure detection. All three preflight reports are
+preserved in the qualification directory and on VPS2; none counts toward the
+24-hour duration.
