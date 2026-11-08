@@ -262,3 +262,23 @@ qualification item. All four valid test invocations (two baseline and two
 candidate) passed and produced 79,859,712-byte databases. A first retry attempt
 with an incorrect exact-name filter ran zero tests and is excluded from these
 results.
+
+## Fresh VPS2 soak and dependency audit — 2026-11-08 23:29 UTC
+
+The previous v3 canary remains failed at sample 13 and is stopped. A separate
+v4 run started at 23:27:17 UTC with a new JSONL file and the corrected monitor
+(SHA-256 `6599d0227bd6ea9cbd5295530672bb35cacf8faea4bd71e67d8f7e76f811ec8d`).
+Sample 1 passed at 23:28:13 UTC in 56.0 seconds. It observed the release-106
+service binary and unchanged unit hashes, a 1,045-second-old full scan, dirty
+status awaiting the next observation, 2.03 GiB peak service memory under the
+4 GiB cap, and zero restarts, kernel overflows, userspace drops, or OOM events.
+This is the older installed service binary, so the v4 soak does not qualify the
+uninstalled scan optimization. It is still running; one sample does not
+qualify the 24-hour gate. Its initial record is preserved in
+[`live/canary-24h-5m-v4-progress.jsonl`](live/canary-24h-5m-v4-progress.jsonl).
+
+`cargo audit --json` passed at 23:29 UTC: zero known vulnerabilities and zero
+warnings across 229 locked dependencies. The advisory database snapshot was
+updated at 23:03 UTC. Raw result:
+[`cargo-audit-20261108-2329.json`](cargo-audit-20261108-2329.json). This is
+dependency audit evidence, not a full application security assessment.

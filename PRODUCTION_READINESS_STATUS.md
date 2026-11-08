@@ -31,9 +31,15 @@ coverage; stable llvm-cov reports no usable branch coverage. The v3 VPS2
 canary passed samples 1–12, then **sample 13 failed** because status-before
 reported the daemon paused under I/O pressure. The daemon stayed alive with no
 restart, overflow, or userspace drop, but a subsequent reconciliation was
-cancelled under memory pressure and retried. This does not pass the freshness
-gate and the 24-hour soak is incomplete. The full scan covered 1,514,820 staged
-paths with zero coverage issues and passed accounting verification; its
+cancelled under memory pressure and retried. That retry's full scan completed
+at 23:13:39 with 1,522,965 staged paths and zero coverage issues. This does not
+pass the failed canary's freshness gate; that soak is incomplete. A fresh v4
+24-hour soak started at 23:27:17 with the corrected diagnostic monitor. Sample
+1 passed in 56 seconds; observation age was 1,045 seconds, peak service memory
+2.03 GiB, and there were zero restarts, overflows, or userspace drops. V4
+monitors the installed release-106 binary, not the newer source changes, and
+is still in progress. The earlier full scan covered 1,514,820 staged paths
+with zero coverage issues and passed accounting verification; its
 scan-plus-accounting interval used 87.6% of one core and about 1.75 GiB read /
 1.66 GiB written. No CPU/I/O SLO has been set. The scan optimization and
 canary-monitor diagnostic fix are committed and pushed on
@@ -119,10 +125,10 @@ Latest exact-working-tree coverage from `cargo llvm-cov --locked --all-features
 Coverage is not a correctness probability. UI/CLI paths and watcher paths
 still have uncovered executable lines; filesystem-specific and failure-path
 qualification remains necessary.
-- Fresh `cargo audit --json` at 22:01 UTC exited successfully with zero known
+- Fresh `cargo audit --json` at 23:29 UTC exited successfully with zero known
   vulnerabilities and zero warnings across 229 dependencies. The advisory
-  database snapshot was last updated 2026-11-06; the raw report is
-  [`cargo-audit-20261108-2201.json`](docs/qualification/release-409a2f4-20261108/cargo-audit-20261108-2201.json).
+  database snapshot was updated at 23:03 UTC; the raw report is
+  [`cargo-audit-20261108-2329.json`](docs/qualification/release-409a2f4-20261108/cargo-audit-20261108-2329.json).
   This is dependency-vulnerability coverage, not a complete application
   security review.
 
