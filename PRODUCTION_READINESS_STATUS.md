@@ -931,3 +931,27 @@ userspace drops remained zero, and the service stayed active with
 probe. Like the smaller probe, this supports reader throughput only at the
 observed workload and is not a queue-capacity or reconciliation correctness
 proof.
+
+## Fixed-cadence VPS2 reconciliation result — 2026-11-08 13:28 UTC
+
+The `739113c` canary passed its first scheduled scan-first observation after
+startup. Despite the persisted retry backoff previously showing 1,920 seconds,
+the scheduler started a full-root in-place observation at 13:25:38.865 UTC.
+It completed at 13:27:59.660 UTC (140.795 seconds): 1,310,823 files, 157,518
+directories, 1,468,341 staged path instances, and **zero coverage issues**.
+The scan did not report conflicting inode incarnations and advanced the
+accepted scan timestamp. Reconciliation accounting verification then passed
+at 13:28:39 UTC after 39.541 seconds.
+
+At 13:28:55 UTC VPS2 reported `ActiveState=active`, `NRestarts=0`, zero kernel
+overflow notifications, zero userspace drops, and no pending updates. The
+service had seen 7,193,804 events since its counters began. Dux remained dirty
+because additional filesystem changes arrived after the observation
+(`filesystem changes await the next full observation`); this is expected for
+the advisory-event/periodic-scan model and means the view is not continuously
+current. This is direct evidence that the fixed-cadence retry gate now permits
+a successful complete scan and accounting verification on this VM under its
+observed load. It does not establish 24-hour stability, zero-lag freshness,
+correctness under every inode-reuse race, or behavior under a kernel queue
+overflow. Continue the canary through subsequent cadence(s) and test explicit
+overflow/recovery before treating the new architecture as production-ready.
