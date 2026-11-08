@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 21:12 UTC
+**Updated:** 2026-11-08 21:22 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -20,21 +20,20 @@ revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
 DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
 only on the disposable VPS2 qualification VM, not production.
 
-## Corrected VPS2 canary checkpoint (2026-11-08 21:17 UTC)
+## Corrected VPS2 canary checkpoint (2026-11-08 21:22 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and is still active.
-Its first three samples passed (21:07:13, 21:12:14, and 21:17:10) with no
-monitor errors.
-At sample 2 the candidate and unit hashes matched, SQLite/schema-v7 graph and
-accounting checks passed, and the service showed zero restarts, kernel
-overflows, userspace drops, and OOM events. The latest completed observation
-was 630 seconds old against the 1,200-second configured limit. The index was
-dirty and not caught up, as expected for scan-first after filesystem hints.
-The reported `behind_seconds` (~2,132) is the legacy event-pipeline catch-up
-timer; for scan-first freshness, use `last_scan_age_seconds` instead. Two
-samples do not qualify a 24-hour soak. Peak Dux memory observed was about
-1.51 GiB against the 4 GiB service limit. The append-only evidence through
-sample 3 is recorded in
+Its first four samples passed (21:07:13, 21:12:14, 21:17:10, and 21:22:33 UTC)
+with no monitor errors. The candidate and unit hashes, SQLite/schema-v7 graph,
+and accounting checks passed in each sample. At sample 4, the service had zero
+restarts, kernel overflows, userspace drops, and OOM events. A full observation
+was in progress; the last completed observation was 953 seconds old against
+the configured 1,200-second limit. The index was dirty, as expected for
+scan-first after filesystem hints. The reported `behind_seconds` is the legacy
+event-pipeline catch-up timer; use `last_scan_age_seconds` for scan-first
+freshness. Four samples do not qualify a 24-hour soak. Peak Dux memory observed
+was about 1.51 GiB against the 4 GiB service limit. The append-only evidence
+through sample 4 is recorded in
 [`canary-24h-5m-v2-progress.jsonl`](docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl).
 
 Latest current-source coverage from `cargo llvm-cov --locked --all-features
