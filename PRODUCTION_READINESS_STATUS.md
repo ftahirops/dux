@@ -912,3 +912,13 @@ conflicting inode incarnations; the new scheduler has not yet been observed
 through a due scan. This runtime is therefore an in-progress canary, not proof
 of convergence or production readiness. Rollback binaries remain in
 `/root/dux-canary-e96e708/` on VPS2.
+
+A bounded VPS2 churn probe at 13:19:40 UTC created and removed 20,000 files
+under `/tmp` in 1.202 seconds while the candidate remained active. Across the
+probe plus background host activity, Dux's `events_seen` rose from 1,965,567
+to 2,026,258; `kernel_overflow_notifications` and
+`userspace_updates_dropped` remained 0, and systemd reported `NRestarts=0`.
+The index correctly remained dirty pending a full observation. This supports
+burst draining under this specific 20k-file workload; it does not isolate the
+probe's exact event count, test queue-capacity saturation, or prove scan
+publication or accounting correctness.
