@@ -34,18 +34,29 @@ impl Drop for RawFdGuard {
 }
 
 /// Fanotify's kernel queue is drained by a dedicated thread in scan-first
-/// mode. The bounded channel is the userspace ring: if its capacity is
-/// exhausted, the reader keeps draining and records explicit loss so the
-/// coordinator schedules a full observation. `try_send` never waits for queue
-/// capacity; the std channel's short internal lock is still a small reader cost.
+/// mode. Event mode forwards bounded chunks; scan-first mode only counts valid
+/// metadata and discards chunks because the fixed-cadence full walk is the
+/// source of truth. The latter avoids a second lossy queue and handle resolver.
 struct FanotifyHintReader {
     rx: Receiver<Vec<u8>>,
     notify: RawFdGuard,
     kernel_empty: Arc<AtomicBool>,
     queued_chunks: Arc<std::sync::atomic::AtomicUsize>,
     dropped: Arc<AtomicBool>,
+    observed_events: Arc<AtomicU64>,
+    kernel_overflows: Arc<AtomicU64>,
+    discard_chunks: bool,
     stop: Arc<AtomicBool>,
     join: Option<std::thread::JoinHandle<()>>,
+}
+
+struct FanotifyReaderState {
+    kernel_empty: Arc<AtomicBool>,
+    queued_chunks: Arc<std::sync::atomic::AtomicUsize>,
+    dropped: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    observed_events: Arc<AtomicU64>,
+    kernel_overflows: Arc<AtomicU64>,
 }
 
 const HINT_READER_CHANNEL_CAPACITY: usize = 128;
@@ -168,7 +179,7 @@ impl Drop for FanotifyHintResolver {
 }
 
 impl FanotifyHintReader {
-    fn start(fan: RawFd) -> Result<Self> {
+    fn start(fan: RawFd, discard_chunks: bool) -> Result<Self> {
         let reader_fan = unsafe { libc::fcntl(fan, libc::F_DUPFD_CLOEXEC, 0) };
         if reader_fan < 0 {
             return Err(std::io::Error::last_os_error()).context("duplicating fanotify fd");
@@ -183,12 +194,17 @@ impl FanotifyHintReader {
         let kernel_empty = Arc::new(AtomicBool::new(true));
         let queued_chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let dropped = Arc::new(AtomicBool::new(false));
+        let observed_events = Arc::new(AtomicU64::new(0));
+        let kernel_overflows = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let reader_fan_guard = RawFdGuard(reader_fan);
         let thread_empty = Arc::clone(&kernel_empty);
         let thread_queued = Arc::clone(&queued_chunks);
         let thread_dropped = Arc::clone(&dropped);
+        let thread_observed_events = Arc::clone(&observed_events);
+        let thread_kernel_overflows = Arc::clone(&kernel_overflows);
         let thread_stop = Arc::clone(&stop);
+        let thread_discard_chunks = discard_chunks;
         let join = std::thread::Builder::new()
             .name("dux-fanotify-reader".into())
             .spawn(move || {
@@ -197,10 +213,15 @@ impl FanotifyHintReader {
                     reader_fd,
                     notify_fd,
                     tx,
-                    thread_empty,
-                    thread_queued,
-                    thread_dropped,
-                    thread_stop,
+                    FanotifyReaderState {
+                        kernel_empty: thread_empty,
+                        queued_chunks: thread_queued,
+                        dropped: thread_dropped,
+                        stop: thread_stop,
+                        observed_events: thread_observed_events,
+                        kernel_overflows: thread_kernel_overflows,
+                    },
+                    thread_discard_chunks,
                 );
                 drop(reader_fan_guard);
             })
@@ -211,6 +232,9 @@ impl FanotifyHintReader {
             kernel_empty,
             queued_chunks,
             dropped,
+            observed_events,
+            kernel_overflows,
+            discard_chunks,
             stop,
             join: Some(join),
         })
@@ -284,18 +308,17 @@ fn fanotify_reader_loop(
     fan: RawFd,
     notify: RawFd,
     tx: SyncSender<Vec<u8>>,
-    kernel_empty: Arc<AtomicBool>,
-    queued_chunks: Arc<std::sync::atomic::AtomicUsize>,
-    dropped: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
+    state: FanotifyReaderState,
+    discard_chunks: bool,
 ) {
     let mut buf = [0u8; 1 << 15];
+    let mut partial_record = Vec::with_capacity(FAN_EVENT_METADATA_LEN);
     let mut pfd = libc::pollfd {
         fd: fan,
         events: libc::POLLIN,
         revents: 0,
     };
-    while !stop.load(Ordering::Acquire) {
+    while !state.stop.load(Ordering::Acquire) {
         pfd.revents = 0;
         let polled = unsafe { libc::poll(&mut pfd, 1, HINT_READER_POLL_MS) };
         if polled == 0 {
@@ -304,7 +327,7 @@ fn fanotify_reader_loop(
             // full interval, publish that the kernel queue is now drained;
             // otherwise reconciliation and accounting checks can remain
             // blocked forever after a burst that ended between reader ticks.
-            if !kernel_empty.swap(true, Ordering::AcqRel) {
+            if !state.kernel_empty.swap(true, Ordering::AcqRel) {
                 notify_hint_reader(notify);
             }
             continue;
@@ -315,7 +338,7 @@ fn fanotify_reader_loop(
                 Some(libc::EINTR) | Some(libc::EAGAIN) => continue,
                 _ => {
                     tracing::error!(%error, "fanotify hint reader poll failed");
-                    dropped.store(true, Ordering::Release);
+                    state.dropped.store(true, Ordering::Release);
                     notify_hint_reader(notify);
                     break;
                 }
@@ -324,18 +347,42 @@ fn fanotify_reader_loop(
         let drain_deadline = Instant::now() + HINT_READER_DRAIN_SLICE;
         let mut reads = 0usize;
         loop {
-            if stop.load(Ordering::Acquire)
+            if state.stop.load(Ordering::Acquire)
                 || reads >= HINT_READER_MAX_READS_PER_TICK
                 || Instant::now() >= drain_deadline
             {
-                kernel_empty.store(false, Ordering::Release);
+                state.kernel_empty.store(false, Ordering::Release);
                 notify_hint_reader(notify);
                 break;
             }
             let n = unsafe { libc::read(fan, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
             if n > 0 {
-                kernel_empty.store(false, Ordering::Release);
+                state.kernel_empty.store(false, Ordering::Release);
                 reads += 1;
+                if discard_chunks {
+                    partial_record.extend_from_slice(&buf[..n as usize]);
+                    let (seen, overflows, consumed, malformed) =
+                        count_fanotify_records_available(&partial_record);
+                    state.observed_events.fetch_add(seen, Ordering::Relaxed);
+                    state
+                        .kernel_overflows
+                        .fetch_add(overflows, Ordering::Relaxed);
+                    if consumed > 0 {
+                        partial_record.drain(..consumed);
+                    }
+                    if malformed {
+                        // Hints are advisory in scan-first mode. A malformed
+                        // record is counted as a reader fault for diagnostics;
+                        // the fixed-cadence full walk remains the recovery path.
+                        state.dropped.store(true, Ordering::Release);
+                        partial_record.clear();
+                    }
+                    if partial_record.len() > 4096 {
+                        state.dropped.store(true, Ordering::Release);
+                        partial_record.clear();
+                    }
+                    continue;
+                }
                 // Dux can generate a large share of filesystem-wide events
                 // itself (SQLite/WAL and reconciliation metadata). Drop valid
                 // self-originated records before the bounded userspace ring;
@@ -349,28 +396,30 @@ fn fanotify_reader_loop(
                 // Full and disconnected are both unrecoverable hint loss;
                 // keep draining the kernel and force a full observation.
                 if !bytes.is_empty() {
-                    queue_hint_chunk(&tx, bytes, &queued_chunks, &dropped);
+                    queue_hint_chunk(&tx, bytes, &state.queued_chunks, &state.dropped);
                 }
-                notify_hint_reader(notify);
+                if !discard_chunks {
+                    notify_hint_reader(notify);
+                }
                 continue;
             }
             if n == 0 {
-                kernel_empty.store(true, Ordering::Release);
+                state.kernel_empty.store(true, Ordering::Release);
                 notify_hint_reader(notify);
                 break;
             }
             match std::io::Error::last_os_error().raw_os_error() {
                 Some(libc::EINTR) => continue,
                 Some(libc::EAGAIN) => {
-                    kernel_empty.store(true, Ordering::Release);
+                    state.kernel_empty.store(true, Ordering::Release);
                     notify_hint_reader(notify);
                     break;
                 }
                 _ => {
                     let error = std::io::Error::last_os_error();
                     tracing::error!(%error, "fanotify hint reader read failed");
-                    dropped.store(true, Ordering::Release);
-                    kernel_empty.store(false, Ordering::Release);
+                    state.dropped.store(true, Ordering::Release);
+                    state.kernel_empty.store(false, Ordering::Release);
                     notify_hint_reader(notify);
                     return;
                 }
@@ -1378,6 +1427,47 @@ fn filter_self_fanotify_records(buf: &[u8]) -> Option<Vec<u8>> {
     Some(kept)
 }
 
+/// Count event metadata in scan-first mode without allocating a user-space
+/// event queue or decoding file handles. The periodic full walk is the source
+/// of truth; fanotify is retained only to expose event rate and kernel loss.
+#[cfg(test)]
+fn count_fanotify_records(buf: &[u8]) -> (u64, u64, bool) {
+    let (seen, overflows, consumed, malformed) = count_fanotify_records_available(buf);
+    (seen, overflows, malformed || consumed != buf.len())
+}
+
+fn count_fanotify_records_available(buf: &[u8]) -> (u64, u64, usize, bool) {
+    let mut offset = 0usize;
+    let mut seen = 0u64;
+    let mut overflows = 0u64;
+    while offset < buf.len() {
+        if buf.len().saturating_sub(offset) < FAN_EVENT_METADATA_LEN {
+            return (seen, overflows, offset, false);
+        }
+        let meta: FanotifyEventMetadata = unsafe {
+            std::ptr::read_unaligned(buf[offset..].as_ptr().cast::<FanotifyEventMetadata>())
+        };
+        let event_len = meta.event_len as usize;
+        let metadata_len = meta.metadata_len as usize;
+        if meta.vers != FANOTIFY_METADATA_VERSION
+            || metadata_len < FAN_EVENT_METADATA_LEN
+            || event_len < metadata_len
+        {
+            return (seen, overflows, buf.len(), true);
+        }
+        if event_len > buf.len().saturating_sub(offset) {
+            return (seen, overflows, offset, false);
+        }
+        if meta.mask & FAN_Q_OVERFLOW != 0 {
+            overflows = overflows.saturating_add(1);
+        } else if meta.pid != std::process::id() as i32 {
+            seen = seen.saturating_add(1);
+        }
+        offset += event_len;
+    }
+    (seen, overflows, offset, false)
+}
+
 /// Validate fanotify records and coalesce parent handles without resolving
 /// paths or touching SQLite. One unresolved record or saturated handle set
 /// widens recovery to a full observation.
@@ -2218,19 +2308,27 @@ pub fn run_daemon(
         );
     }
     let mut hint_reader = if reconcile_first {
-        Some(FanotifyHintReader::start(fan)?)
+        // Full-root walks do not need resolved event paths. Keep a dedicated
+        // reader to drain fanotify promptly and count events/overflows, but
+        // do not send raw chunks through bounded queues that cannot affect
+        // the scheduled walk's coverage or completeness.
+        Some(FanotifyHintReader::start(fan, true)?)
     } else {
         None
     };
     let mut hint_resolver = if let Some(reader) = hint_reader.as_ref() {
-        Some(FanotifyHintResolver::start(
-            fsfds.clone(),
-            handle_capable_fsids.clone(),
-            ambiguous_hint_fsids.clone(),
-            root_canon.clone(),
-            reader.notify.0,
-            Arc::clone(&reader.queued_chunks),
-        )?)
+        (!reader.discard_chunks)
+            .then(|| {
+                FanotifyHintResolver::start(
+                    fsfds.clone(),
+                    handle_capable_fsids.clone(),
+                    ambiguous_hint_fsids.clone(),
+                    root_canon.clone(),
+                    reader.notify.0,
+                    Arc::clone(&reader.queued_chunks),
+                )
+            })
+            .transpose()?
     } else {
         None
     };
@@ -2333,6 +2431,8 @@ pub fn run_daemon(
     let (mut ev_seen, mut ev_resolved) = (0u64, 0u64); // capability self-check (C3)
     let (mut updates_committed, mut updates_dropped) = (0u64, 0u64);
     let mut kernel_overflow_notifications = 0u64;
+    let mut sampled_hint_events = 0u64;
+    let mut sampled_hint_overflows = 0u64;
     let mut last_commit_at = 0i64;
     let mut resolve_warned = false;
     // "Throttled/behind" tracking for the UI. We're "caught up" only when BOTH the
@@ -2387,6 +2487,39 @@ pub fn run_daemon(
     crate::util::write_watch_status(db, 0, true, 0, 0, 0, 0, 0, 0, MAX_PENDING, index_uncertain);
 
     loop {
+        if let Some(reader) = hint_reader.as_ref() {
+            let observed = reader.observed_events.load(Ordering::Relaxed);
+            if observed > sampled_hint_events {
+                ev_seen = ev_seen.saturating_add(observed - sampled_hint_events);
+                sampled_hint_events = observed;
+                if !index_uncertain {
+                    persist_dirty_marker_best_effort(
+                        &store,
+                        "filesystem changes await the next full observation",
+                    );
+                }
+                index_uncertain = true;
+                if scan_job.is_some() {
+                    lost_events = true;
+                }
+            }
+            let overflows = reader.kernel_overflows.load(Ordering::Relaxed);
+            if overflows > sampled_hint_overflows {
+                kernel_overflow_notifications = kernel_overflow_notifications
+                    .saturating_add(overflows - sampled_hint_overflows);
+                sampled_hint_overflows = overflows;
+                if !index_uncertain {
+                    persist_dirty_marker_best_effort(
+                        &store,
+                        "fanotify overflow; next full observation will reconcile state",
+                    );
+                }
+                index_uncertain = true;
+                if scan_job.is_some() {
+                    lost_events = true;
+                }
+            }
+        }
         if let (Some(reader), Some(resolver)) = (hint_reader.as_ref(), hint_resolver.as_ref()) {
             while let Ok(result) = resolver.rx.try_recv() {
                 reader.queued_chunks.fetch_sub(1, Ordering::AcqRel);
@@ -3428,13 +3561,13 @@ pub fn run_daemon(
                                     index_uncertain = true;
                                     persist_dirty_marker_best_effort(
                                         &store,
-                                        "fanotify hint ring capacity was exceeded",
+                                        "fanotify hint reader could not account for an event chunk",
                                     );
                                     if hint_loss_requests_immediate_scan(reconcile_first) {
                                         RESCAN.store(true, Ordering::SeqCst);
                                     }
                                     tracing::warn!(
-                                        "fanotify hint ring overflowed; discarded hints leave the index stale until its next observation"
+                                        "fanotify hint reader could not account for input; the next full observation remains authoritative"
                                     );
                                 }
                                 break;
@@ -7234,6 +7367,120 @@ mod tests {
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
 
+    #[test]
+    fn scan_first_event_counter_validates_metadata_and_skips_self_events() {
+        let mut records = Vec::new();
+        for (pid, mask) in [
+            (42i32, FAN_CREATE),
+            (std::process::id() as i32, FAN_MODIFY),
+            (42, FAN_Q_OVERFLOW),
+        ] {
+            let mut record = [0u8; FAN_EVENT_METADATA_LEN];
+            record[0..4].copy_from_slice(&(FAN_EVENT_METADATA_LEN as u32).to_ne_bytes());
+            record[4] = FANOTIFY_METADATA_VERSION;
+            record[6..8].copy_from_slice(&(FAN_EVENT_METADATA_LEN as u16).to_ne_bytes());
+            record[8..16].copy_from_slice(&mask.to_ne_bytes());
+            record[16..20].copy_from_slice(&(-1i32).to_ne_bytes());
+            record[20..24].copy_from_slice(&pid.to_ne_bytes());
+            records.extend_from_slice(&record);
+        }
+
+        assert_eq!(count_fanotify_records(&records), (1, 1, false));
+        assert_eq!(
+            count_fanotify_records(&records[..records.len() - 1]),
+            (1, 0, true)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn scan_first_reader_drains_events_without_a_bounded_payload_queue() {
+        let mut pipe = [-1; 2];
+        assert_eq!(
+            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) },
+            0
+        );
+        let read_guard = RawFdGuard(pipe[0]);
+        let write_guard = RawFdGuard(pipe[1]);
+        let notify = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        assert!(notify >= 0);
+        let notify_guard = RawFdGuard(notify);
+        let (tx, rx) = mpsc::sync_channel(1);
+        let kernel_empty = Arc::new(AtomicBool::new(true));
+        let queued_chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let observed_events = Arc::new(AtomicU64::new(0));
+        let kernel_overflows = Arc::new(AtomicU64::new(0));
+        let thread_empty = Arc::clone(&kernel_empty);
+        let thread_queued = Arc::clone(&queued_chunks);
+        let thread_dropped = Arc::clone(&dropped);
+        let thread_stop = Arc::clone(&stop);
+        let thread_seen = Arc::clone(&observed_events);
+        let thread_overflows = Arc::clone(&kernel_overflows);
+        let join = std::thread::spawn(move || {
+            fanotify_reader_loop(
+                read_guard.0,
+                notify,
+                tx,
+                FanotifyReaderState {
+                    kernel_empty: thread_empty,
+                    queued_chunks: thread_queued,
+                    dropped: thread_dropped,
+                    stop: thread_stop,
+                    observed_events: thread_seen,
+                    kernel_overflows: thread_overflows,
+                },
+                true,
+            );
+        });
+
+        let mut event = [0u8; FAN_EVENT_METADATA_LEN];
+        event[0..4].copy_from_slice(&(FAN_EVENT_METADATA_LEN as u32).to_ne_bytes());
+        event[4] = FANOTIFY_METADATA_VERSION;
+        event[6..8].copy_from_slice(&(FAN_EVENT_METADATA_LEN as u16).to_ne_bytes());
+        event[8..16].copy_from_slice(&FAN_CREATE.to_ne_bytes());
+        event[16..20].copy_from_slice(&(-1i32).to_ne_bytes());
+        event[20..24].copy_from_slice(&42i32.to_ne_bytes());
+        const BURST_EVENTS: u64 = 10_000;
+        for _ in 0..BURST_EVENTS {
+            loop {
+                let written = unsafe {
+                    libc::write(
+                        write_guard.0,
+                        event.as_ptr().cast::<libc::c_void>(),
+                        event.len(),
+                    )
+                };
+                if written == event.len() as isize {
+                    break;
+                }
+                assert!(
+                    written < 0
+                        && matches!(
+                            std::io::Error::last_os_error().raw_os_error(),
+                            Some(libc::EAGAIN) | Some(libc::EINTR)
+                        ),
+                    "unexpected partial/failed pipe write: {written}"
+                );
+                std::thread::yield_now();
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while observed_events.load(Ordering::Acquire) < BURST_EVENTS && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(observed_events.load(Ordering::Acquire), BURST_EVENTS);
+        assert_eq!(kernel_overflows.load(Ordering::Acquire), 0);
+        assert_eq!(queued_chunks.load(Ordering::Acquire), 0);
+        assert!(!dropped.load(Ordering::Acquire));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+
+        stop.store(true, Ordering::Release);
+        join.join().unwrap();
+        drop(notify_guard);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn dedicated_hint_reader_drains_fd_into_bounded_channel() {
@@ -7262,10 +7509,15 @@ mod tests {
                 read_fd,
                 notify,
                 tx,
-                thread_empty,
-                thread_queued,
-                thread_dropped,
-                thread_stop,
+                FanotifyReaderState {
+                    kernel_empty: thread_empty,
+                    queued_chunks: thread_queued,
+                    dropped: thread_dropped,
+                    stop: thread_stop,
+                    observed_events: Arc::new(AtomicU64::new(0)),
+                    kernel_overflows: Arc::new(AtomicU64::new(0)),
+                },
+                false,
             );
             drop(read_guard);
         });
@@ -7323,10 +7575,15 @@ mod tests {
                 read_fd,
                 notify,
                 tx,
-                thread_empty,
-                thread_queued,
-                thread_dropped,
-                thread_stop,
+                FanotifyReaderState {
+                    kernel_empty: thread_empty,
+                    queued_chunks: thread_queued,
+                    dropped: thread_dropped,
+                    stop: thread_stop,
+                    observed_events: Arc::new(AtomicU64::new(0)),
+                    kernel_overflows: Arc::new(AtomicU64::new(0)),
+                },
+                false,
             );
             drop(read_guard);
         });

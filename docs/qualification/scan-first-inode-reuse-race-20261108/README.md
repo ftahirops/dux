@@ -64,3 +64,23 @@ loss. The change has not been installed on VPS2, so no live performance gain
 is claimed. Current-source verification passed: 303 Rust tests passed, 0
 failed, 2 ignored; strict all-target/all-feature Clippy, formatting, and the
 locked release build passed.
+
+## Scan-first reader burst test — 2026-11-08
+
+The scan-first reader now counts validated event metadata and kernel overflow
+records, then discards the raw chunks. It no longer forwards scan-first events
+through the bounded userspace payload ring or file-handle resolver. The full
+root walk remains authoritative and visits all paths; event activity still
+marks freshness as stale, and kernel overflow remains observable. The
+event-applied mode retains path resolution.
+
+A local nonblocking-pipe test delivered 10,000 valid synthetic event records;
+the reader counted all records, queued zero payload chunks, and recorded no
+drops. A parser test covered self-event filtering and truncated-record
+rejection. This validates framing and queue-free behavior under the test input,
+not real fanotify throughput or kernel-queue behavior. This revision is not
+installed on VPS2; its effect on the prior repeated hint-ring overflow remains
+unverified. Production-scale CPU/I/O, kernel overflow, scan freshness under
+steady churn, and inode-reuse repair remain open gates. The final local source
+passed 305 tests, 0 failed, 2 ignored; strict Clippy, formatting, and locked
+release build passed.

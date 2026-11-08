@@ -740,6 +740,29 @@ prove bounded freshness under sustained churn, measure the optimization on a
 production-shaped workload, and perform a source-matched VPS2 canary with
 rollback. No production-readiness claim is made.
 
+## Scan-first hint-path simplification — 2026-11-08
+
+The scan-first watcher no longer needs the raw event ring and file-handle
+resolver: they were processing every event only to prioritize a walk that still
+visits the entire root. The dedicated reader now validates/counts event
+metadata and kernel-overflow notifications, then discards each chunk. It uses
+a bounded carry buffer for records split across reads and never blocks on a
+userspace queue. Event activity still marks the indexed view stale, while
+kernel queue loss remains visible in the overflow counter; the next full walk
+is the reconciliation mechanism. This is specific to scan-first mode; the
+event-applied mode retains its existing path-resolution behavior.
+
+The reader test passed a 10,000-event synthetic burst without queueing payloads
+or recording drops. The metadata parser test covers malformed/truncated input
+and self-generated events. These are local pipe-based tests, not a fanotify
+kernel throughput benchmark. The full suite passed (305 passed, 0 failed, 2
+ignored); strict Clippy, formatting, and release build passed. It has not yet
+been deployed to VPS2. That host's previous binary continued to overflow the userspace hint
+ring while the kernel queue reported zero overflows; a source-matched canary
+must verify that this change removes that specific failure without creating
+kernel queue loss or hurting scan latency. The inode-reuse race, bounded
+freshness under sustained churn, and production-scale I/O budget remain open.
+
 ## Current-source package and live-root qualification — 2026-11-08 10:41 UTC
 
 Commit `43a7769` now has a successful exact-source static-musl release build:
