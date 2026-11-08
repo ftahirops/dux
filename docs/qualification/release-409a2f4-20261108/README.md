@@ -96,20 +96,20 @@ collector; the earlier failed evidence is preserved in
 [`live/failed-5m-canary-monitor-calibration.jsonl`](live/failed-5m-canary-monitor-calibration.jsonl)
 and does not count as a pass.
 
-### Corrected 24-hour canary progress (2026-11-08 21:29 UTC)
+### Corrected 24-hour canary progress (2026-11-08 21:32 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and remains active.
-Its first five samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, and 21:27:17
-UTC) passed with no monitor errors. All samples matched the release binary and
+Its first six samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
+and 21:32:04 UTC) passed with no monitor errors. All samples matched the release binary and
 unit hashes; SQLite quick-check, schema-v7 graph, and accounting checks passed.
-At sample 5 the service had zero restarts, kernel overflows, userspace drops,
-and OOM events. The latest full observation was 337 seconds old, with no scan
+At sample 6 the service had zero restarts, kernel overflows, userspace drops,
+and OOM events. The latest full observation was 623 seconds old, with no scan
 in progress. The index was dirty after filesystem changes. The reported
 `behind_seconds` is the
 legacy event-pipeline catch-up timer; `last_scan_age_seconds` is the relevant
-scan-first freshness measure. Five samples are an early checkpoint only, not a
+scan-first freshness measure. Six samples are an early checkpoint only, not a
 soak pass. Peak Dux memory was about 1.51 GiB against the 4 GiB service limit.
-The raw append-only snapshot through sample 5
+The raw append-only snapshot through sample 6
 is [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
 
 This VPS2 qualification is not production sign-off. It covers one KVM guest,
