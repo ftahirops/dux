@@ -221,6 +221,25 @@ reuse, and forced-hint-loss variants remain to be implemented before changing
 the conflict policy. See
 [`scan-first-inode-reuse-race-20261108/`](qualification/scan-first-inode-reuse-race-20261108/).
 
+Follow-up to the 20:05 VPS2 conflict (2026-11-08): the working tree now
+revalidates a still-present non-directory leaf after confirming its staged
+ancestor chain and current file type. It refreshes that leaf's current
+identity/allocation in scan staging. A deterministic ext4 test recreates the
+old name with a different inode while reusing the old inode under another
+name; a direct filesystem oracle checks every fixture path plus root totals,
+and the case passed 10/10 runs. This is a narrow, fail-closed convergence
+improvement, not the full incarnation-keyed allocation/schema design above.
+The VPS2 daemon remains on the prior binary; its subsequent retry also found
+one conflict and the 5-minute canary failed the 20-minute observation-age
+limit. An additional regression test now verifies that an ambiguous directory
+replacement remains a coverage error even if revalidating a sibling file
+removes the SQL conflict group; unresolved candidates are counted separately
+so that clearing one conflict cannot create a false-clean scan. The latest
+local source passes 317 default-feature and 320 all-feature Rust tests (2
+ignored in each), plus 323 Python tests. Current llvm-cov line coverage is
+61.58% overall and 48.61% for the scanner. Runtime proof of this code change
+is still required.
+
 ## Explicitly deferred
 
 The default scan-first design does not include a durable event journal, a

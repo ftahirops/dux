@@ -182,23 +182,28 @@ claim. Sample evidence is preserved in `live-retry2-15m/canary.jsonl`.
 The 19:45 hourly retry's first sample also passed, but its 3,600 s interval was
 longer than its 1,200 s maximum observation-age gate. It was stopped after
 preserving that sample. The 15-minute retry passed one sample and was also
-stopped to improve the sampling margin. The current retry started at 19:56:11
-with 300 s sampling, a 1,200 s observation-age ceiling, a 20% CPU quota, and a
-1 GiB memory cap. Its output is being written on VPS2 to
-`/root/dux-canary-d8ea72d/scanfirst-canary-d8ea72d-retry4-5m.jsonl`; it must run
-for 24 hours with all required samples before this gate passes. First samples
-from the earlier retries are retained locally. None of these canaries uses the
-newly built package revision 105; VPS1 production remains unchanged.
+stopped to improve the sampling margin. Retry4 started at 19:56:11 with 300 s
+sampling, a 1,200 s observation-age ceiling, a 20% CPU quota, and a 1 GiB
+memory cap. Its complete log is preserved on VPS2 and locally in
+`live-retry4-5m/`. None of these canaries used release revision 105; VPS1
+production remains unchanged.
 
-The 5-minute retry's first sample passed at 19:57:11. It matched the expected
-binary and unit SHA-256 values, had no critical journal events, and passed the
-schema-v7 graph, SQLite quick-check, root totals, and accounting checks. The
-sample reported last observation age 555 s, zero restarts, zero kernel
-overflows, zero OOM events, and zero reported userspace drops. The latest full
-scan still covered 1,373,609 files / 164,740 directories with zero coverage
-issues. This is one sample; the 24-hour gate remains open. Local copy:
-`live-retry4-5m/canary.jsonl` (SHA-256
-`cf5ef3afc438f0838998b37e7b1741100d50895fe243350b33947e6c03a3f9d0`).
+The 5-minute retry passed samples 1 and 2 at 19:57:11 and 20:02:55. Both had
+matching candidate/unit hashes, clean schema-v7 graph and accounting checks,
+SQLite `quick_check=ok`, and no restarts, OOMs, kernel overflows, or reported
+userspace drops. Their last accepted scan ages were 555 s and 899 s. Sample 3
+failed at 20:09:44: age was 1,308 s (the 1,200 s ceiling was exceeded), a scan
+was in progress, and the journal showed a coverage failure. The observation
+started at 20:02:56 and ended at 20:05:10 with 1,376,464 files / 165,037
+directories, 48 vanished paths pruned, and one conflicting inode incarnation
+remaining. Its bounded retry ended at 20:10:57 with one conflict again. At
+20:15:25 another retry was still running and age had reached 1,649 s. That
+retry completed at 20:18:42 with zero coverage issues after pruning 60 vanished
+paths; accounting verification was still pending at 20:19:14. Dux remained
+active with zero restarts and zero kernel overflows. Cumulative I/O by then was
+31.0 GB read / 31.8 GB written, with a 2.0 GiB peak under a 4 GiB cap. The
+eventual recovery did not erase the age breach or the canary failure. Full
+failed JSONL, journal, and status are in `live-retry4-5m/`.
 
 The observed candidate is still resource-expensive: the nearby service
 snapshot showed approximately 40 minutes CPU and 20.6 GiB read / 22.1 GiB

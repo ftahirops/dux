@@ -3238,7 +3238,7 @@ pub fn run_daemon(
                             );
                             }
                         }
-                        tracing::info!(vanished_reuse_paths = stats.vanished_reuse_paths, "rescan complete: {} files, {} dirs, {} staged path instances ({} directory alias paths), visible {} bytes/{} entries, unique {} bytes/{} inodes, {} ({} coverage issues); replaying {} pending paths",
+                        tracing::info!(vanished_reuse_paths = stats.vanished_reuse_paths, revalidated_reuse_paths = stats.revalidated_reuse_paths, unresolved_reuse_paths = stats.unresolved_reuse_paths, "rescan complete: {} files, {} dirs, {} staged path instances ({} directory alias paths), visible {} bytes/{} entries, unique {} bytes/{} inodes, {} ({} coverage issues); replaying {} pending paths",
                         stats.files, stats.dirs, stats.staged_path_instances, stats.staged_directory_alias_paths,
                         stats.staged_root_visible_bytes, stats.staged_root_visible_entries,
                         stats.staged_root_unique_bytes, stats.staged_root_unique_inodes,

@@ -43,6 +43,51 @@ that conflicting staged paths are simultaneously valid. A future fix must add
 incarnation-aware allocation identity and revalidate affected paths before
 publishing. Do not remove the conflict guard based on this test alone.
 
+## Present-path replacement fix under test — 2026-11-08
+
+The VPS2 failure showed a narrower case than a vanished path: after the scan
+staged a file, it disappeared and its inode was reused elsewhere, but the
+original filename had already been recreated with a different inode. The old
+revalidation pruned paths returning `ENOENT` but retained this present,
+mismatched leaf, so the scan stayed incomplete.
+
+The current working tree extends revalidation for a non-directory leaf only
+when every ancestor still matches its staged identity and the leaf's current
+file type matches. It restats the path and refreshes the staged device, inode,
+birth time, mount ID, allocation, owner, and mtime. Directory replacements,
+ancestor changes, unrepresentable identities, and permission/I/O errors remain
+fail-closed; the code does not infer that a still-present ambiguous subtree is
+safe to publish.
+
+The deterministic ext4 test now forces inode reuse at a second path and
+recreates the original filename with a different inode. An independent fixture
+oracle checks that the index contains exactly the five current paths, each
+path's device/inode/birth tuple matches `symlink_metadata`/statx, and root
+allocated bytes and unique-inode count match direct filesystem metadata. It
+passed 10/10 in the latest repeated run (and 10/10 in the earlier qualification
+run). A guard test verifies that an unresolved directory mismatch still marks
+the scan incomplete even when refreshing a sibling leaf clears the SQL
+conflict group; otherwise the conflict counter alone could give a false-clean
+result. The current all-features Rust suite passed 320/320 runnable tests
+(2 ignored), the default-feature suite passed 317/317 runnable tests (2
+ignored), Python discovery passed 323/323, strict Clippy passed, and format
+checks passed. Current-source llvm-cov line coverage is 61.58% overall and
+48.61% for `scan.rs`; it must not be treated as complete scanner-path coverage.
+
+This is not yet a fix proven against VPS2: the live `d8ea72d` binary predates
+it. The 20:02 scheduled scan failed with one conflict after pruning 48
+vanished paths; its next bounded retry also failed. A third retry on the old
+binary completed at 20:18:42 with zero coverage issues after pruning 60
+vanished paths, but the 5-minute canary had already failed its 1,200-second
+freshness limit and accounting verification was still pending at 20:19:14.
+At 20:26:34 the old daemon was active with zero restarts and no current scan,
+but status remained dirty and not caught up; `behind_seconds` was 7,383. The
+new code still needs a clean release build, installation on the disposable
+VPS2 with rollback evidence, and exact-oracle runtime checks under the same
+workload before this issue can be called resolved. The schema still uses
+`(dev,inode)` in the compatibility allocation table, so conflicts that are
+not provably refreshable leaf paths must remain incomplete.
+
 ## Later live follow-up and incomplete-scan optimization — 2026-11-08 12:46 UTC
 
 The VPS2 scan beginning at 12:42:29 completed at 12:45:25 with zero coverage

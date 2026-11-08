@@ -1,37 +1,40 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 19:58 UTC
+**Updated:** 2026-11-08 20:29 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
 ## Test and coverage update (2026-11-08, latest local run)
 
-After adding two classification-rule tests, three fault-injection control
-tests, and four OverlayFS upperdir parsing/error tests, the default-feature
-Rust suite passes **316 tests, 0 failures, 2 ignored**; the all-features suite
-passes **319 tests, 0 failures, 2 ignored**. Formatting, strict Clippy, and
-`git diff --check` passed. Static-musl package revision 105 was built from
-clean commit `30bf32d`; its artifact checksums and package payload hashes
-verify. It has not been installed on VPS2 or production.
-Fault-injection tests compile only when that feature is enabled. The ignored
-tests require a separately qualified ext4 filesystem for handle behavior and
-a manual production-shaped scale profile. Python monitor/harness suite:
-**323 passed** (27 focused canary-monitor tests), recorded in the qualification
-README. These are test counts per suite/run, not unique test cases summed over
-repeated coverage and qualification runs.
+On the current working tree, `cargo test --locked` passes **317 tests, 0
+failures, 2 ignored**; `cargo test --locked --all-features` passes **320 tests,
+0 failures, 2 ignored**. The all-features result was independently repeated
+under `cargo llvm-cov`; that run also passed 320 tests. Python discovery
+(`python3 -m unittest discover -s scripts -p 'test_*.py'`) passes **323 tests**
+(including 27 canary-monitor tests). `cargo fmt --check`, strict
+all-target/all-feature Clippy with warnings denied, and `git diff --check` pass.
+The two ignored Rust tests require a handle-capable ext4 qualification profile
+and a manual production-shaped scale profile. These are per-run counts, not
+unique tests to be summed across overlapping runs. Static-musl package
+revision 105 was built from clean commit `30bf32d`; its checksums verify, but
+it predates the current uncommitted inode-reuse fix and has not been installed
+as that fix on VPS2 or production.
 
-Coverage from the latest coverage-instrumented Rust run:
+Latest current-source coverage from `cargo llvm-cov --locked --all-features
+--summary-only` (2026-11-08 20:28 UTC):
 
-- Stable line coverage: **69.33%** overall (26,009 instrumented lines,
-  7,976 missed).
-- Nightly branch coverage: **67.35%** overall; region coverage **49.77%**,
-  function coverage **75.61%**. Branch coverage is measured separately with
-  nightly because LLVM's branch instrumentation option is unstable on stable
-  Rust.
-- `classify.rs`: **99.30% line / 91.35% branch**; `fault.rs`:
-  **88.03% line / 68.75% branch**; `containers.rs`: **63.30% line / 58.97%
-  branch**. Other lower branch coverage remains in `tui.rs` (47.54%) and
-  `emit.rs` (50.00%).
+- Line coverage: **61.58%** (18,179 of 29,523 executable lines covered).
+- Region coverage: **63.74%**; function coverage: **65.20%**.
+- Higher line coverage includes `store.rs` 94.35%, `deleted.rs` 89.62%, and
+  `query.rs` 85.39%. Lower areas include `tui.rs` 37.88%, `main.rs` 42.45%,
+  and `scan.rs` 48.61%.
+- This stable llvm-cov run does not provide usable branch coverage: its report
+  lists every branch as missed. The earlier nightly 67.35% branch result was
+  from another source/report run and is not a current-source branch result.
+
+Coverage is not a correctness probability. In particular, scanner line
+coverage is only 48.61% in the current report, so additional failure-path and
+filesystem-specific scanner tests remain important.
 - Security dependency audit: `cargo audit --json` exited successfully with
   zero known vulnerabilities across 229 locked dependencies; the advisory
   database was last updated 2026-11-06. This is dependency-vulnerability
@@ -128,12 +131,38 @@ was stopped after preserving its first sample. A 15-minute retry also passed
 its first sample and was stopped after preserving the record. The current
 collector, `dux-scanfirst-canary-d8ea72d-retry4-5m.service`, started at 19:56
 with a five-minute sample interval, a 20-minute observation-age ceiling, and
-the same resource caps. It had not yet emitted its first sample at the 19:57
-checkpoint. Its first sample passed at 19:57:11 with a 555-second last-scan
-age and valid schema-v7/accounting checks. The active 5-minute retry is still
-preliminary; none of these retries is a completed 24-hour canary. Production
-VPS1 was not changed. The sample is preserved at
-[`live-retry4-5m/canary.jsonl`](docs/qualification/scan-first-fixed-cadence-20261108/live-retry4-5m/canary.jsonl).
+the same resource caps. Its first two samples passed at 19:57:11 and 20:02:55. Sample 3
+failed at 20:09:44: the last accepted observation was 1,308 seconds old (over
+the 1,200-second limit), a full observation was still in progress, and the
+journal contained a scan-coverage failure. That scan (20:02:56–20:05:10)
+pruned 48 vanished paths but retained one inode-incarnation conflict. Its
+bounded retry also failed at 20:10:57 with one conflict and scheduled another
+retry. At 20:15:25 that retry was still scanning and last observation age was
+1,649 seconds. It finally completed at 20:18:42 with zero coverage issues
+after pruning 60 vanished paths; at 20:19:14 independent accounting was still
+pending and last-scan age was 377 seconds. The service remained active with
+zero restarts and zero kernel overflows. Cumulative I/O by 20:19 was about
+31.0 GB read / 31.8 GB written; peak memory was 2.0 GiB of a 4 GiB cap. The
+eventual recovery does not undo the canary failure or 20-minute freshness
+breach. At 20:26:34 a fresh VPS2 status check still showed the service active
+with zero restarts, zero kernel overflow notifications, and no scan currently
+in progress, but the index remained dirty and `caught_up=false`; its reported
+`behind_seconds` was 7,383. This is a later runtime snapshot, not a canary pass.
+The monitor and journal are preserved in
+[`live-retry4-5m/`](docs/qualification/scan-first-fixed-cadence-20261108/live-retry4-5m/).
+None of the 24-hour attempts completed; production VPS1 was not changed.
+
+The current working tree now revalidates a still-present non-directory leaf
+when every ancestor is stable and `symlink_metadata` proves the path now names
+a different current inode incarnation. It refreshes identity, birth time,
+mount ID, allocation, owner, and mtime in the staging database; ambiguous
+directory replacements still fail closed. A deterministic ext4 test forces
+inode reuse under a second name and recreates the original name with a
+different inode; the test compares all five paths and their identities plus
+root allocation/inode totals with a direct filesystem oracle. It passed 10/10
+repeated runs, the three focused inode-reuse tests passed, and the full
+all-features suite passed. This fix is not yet built into a release, installed
+on VPS2, or validated against the observed live failure.
 
 The 15-minute retry's first sample at 19:54 matched the expected candidate and
 unit hashes and passed schema-v7 graph/accounting, SQLite quick-check, service
@@ -1348,11 +1377,12 @@ counted.
 
 ## Test inventory and coverage summary — current evidence
 
-Automated tests on the current Rust source passed **310 tests, 0 failed, 2
-ignored** (`cargo test --locked --all-features`); the ignored cases require
-the dedicated ext4 or manual scale profile. The complete Python script suite
-passed **323 tests**, including **27 focused canary-monitor tests**. Strict
-all-target/all-feature Clippy, formatting, and `git diff --check` passed. The
+Automated tests on the current Rust source passed **317 default-feature tests**
+and **320 all-feature tests**, with 0 failures and 2 ignored in each run. The
+ignored cases require the dedicated ext4 or manual scale profile. The complete
+Python script suite passed **323 tests**, including **27 focused canary-monitor
+tests**. Strict all-target/all-feature Clippy, formatting, and `git diff
+--check` passed. The
 lockfile audit found no known vulnerabilities in 229 dependencies; the static
 binary contains auditable metadata for 202 dependencies. Audit limitations and
 the advisory database date are documented above. These are automated code and
@@ -1360,14 +1390,13 @@ artifact checks, not proofs of universal runtime correctness.
 The Python command was rerun on this worktree; its result is preserved in
 `docs/qualification/scan-first-fixed-cadence-20261108/python-suite-final-20261108.log`.
 
-`cargo llvm-cov --locked --all-features --summary-only` measured **71.29% Rust
-line coverage overall**, 70.28% region coverage, and 75.08% function coverage.
-Key line coverage: scan 92.34%, store 96.10%, query 90.56%, deleted-open
-handling 90.57%, JSON emitters 85.08%, watch 72.07%, main/CLI 43.20%, and TUI
-39.51%. `fault.rs` remains at 32.65%. Branch coverage was not emitted by this
-run. The report is preserved at
-`docs/qualification/scan-first-fixed-cadence-20261108/llvm-cov-summary.log`.
-Coverage measures executed lines, not whether every behavior was asserted.
+The latest current-source `cargo llvm-cov --locked --all-features --summary-only`
+run measured **61.58% line, 63.74% region, and 65.20% function coverage**.
+Per-file line coverage: scan 48.61%, store 94.35%, query 85.39%, deleted-open
+handling 89.62%, JSON emitters 83.49%, watch 69.49%, main/CLI 42.45%, and TUI
+37.88%. This run's branch column is uninstrumented/unusable (all listed
+branches appear missed); do not interpret it as measured 0% branch coverage.
+Coverage measures execution, not whether each behavior was asserted.
 
 Runtime and integration coverage completed so far:
 
