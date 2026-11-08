@@ -8858,6 +8858,20 @@ non-integer recursive-byte values, but neither it nor the completed walk proves
 currentness while new loss continues. Full snapshot:
 [`post-retry-runtime-snapshot-1202.log`](qualification/scan-first-fixed-cadence-20261108/post-retry-runtime-snapshot-1202.log).
 
+At 12:12:14 the next scheduled scan started, 15 minutes after the 11:57 retry
+began. It completed at 12:15:03 with 45 inode-incarnation conflicts across
+1,300,583 files and 156,239 directories. The prior successful observation
+remained the latest accepted scan; Dux stayed dirty and scheduled another
+bounded retry with an 8-minute backoff. At 12:15:12, service restart count was
+still zero; cumulative systemd counters were 939.9 CPU seconds, 8.8 GiB read,
+and 13.5 GiB written. This confirms the cadence timer fires and again shows
+that scans fail on inode reuse under current host churn. The fail-closed check
+is necessary with today's `(dev_id,inode)` allocation key; the source-level
+analysis and required deterministic regression gate are in
+[`ARCHITECTURE_EVOLUTION.md`](ARCHITECTURE_EVOLUTION.md#additional-inode-reuse-requirement-from-vps2-2026-11-08).
+Full snapshot:
+[`post-cadence-runtime-snapshot-1215.log`](qualification/scan-first-fixed-cadence-20261108/post-cadence-runtime-snapshot-1215.log).
+
 This validates the changed scheduler under this bounded VPS2 ext4 burst and
 demonstrates that failed scans retain bounded retries without a daemon restart.
 It does not establish zero hint loss, convergence under continuous churn, the

@@ -117,6 +117,22 @@ bounded retry completed with zero coverage issues, but the index remained
 stale due to continuing hint loss, so convergence during ongoing churn is
 still unproven.
 
+The next scheduled observation started at 12:12:14, exactly 15 minutes after
+the 11:57 retry began. It completed at 12:15:03 with **45 inode-incarnation
+conflicts** across 1,300,583 files and 156,239 directories. The prior successful
+scan remains the latest accepted observation; Dux stayed dirty and scheduled
+another retry with an 8-minute backoff. At 12:15:12, systemd still showed zero
+restarts, while cumulative service I/O had grown to 8.8 GiB read and 13.5 GiB
+written (939.9 CPU seconds). This second cadence sample confirms the timer
+fires but also reproduces incomplete scans on a busy ext4 VM. The current
+scanner deliberately counts any `(device,inode)` group with different birth
+times as a coverage error (`count_conflicting_inode_incarnations` in
+`src/scan.rs`); suppressing that check would risk publishing stale path or
+allocation data because `inodes` is keyed by `(dev_id,inode)`. A safe fix needs
+to validate and repair affected paths/scopes or use a stable filesystem
+snapshot, not simply ignore the conflict. Snapshot:
+`post-cadence-runtime-snapshot-1215.log`.
+
 ## Artifacts
 
 - `build-manifest-101.json`, `SHA256SUMS-101`, and the two Cargo audit outputs
@@ -128,6 +144,8 @@ still unproven.
   `candidate-fifteen-minute-cadence-101.log` preserve package 101's runtime.
 - `post-retry-runtime-snapshot-1202.log` records the completed bounded retry,
   stale status, service counters, and runtime binary identity.
+- `post-cadence-runtime-snapshot-1215.log` records the next scheduled scan,
+  its 45 inode-incarnation coverage errors, retry state, and service counters.
 - `post-fifteen-minute-scan-db-check.json` records the structural SQLite
   check during the later retry; it explicitly does not claim index freshness.
 - On VPS2, `/root/dux-qualification-43a7769/pre-5590978.sqlite` is the verified

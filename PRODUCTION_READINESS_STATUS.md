@@ -53,6 +53,18 @@ candidate can complete a retry, but cannot presently converge while hint loss
 keeps recurring; the freshness SLO and acceptable overhead remain unproven.
 See [the captured runtime snapshot](docs/qualification/scan-first-fixed-cadence-20261108/post-retry-runtime-snapshot-1202.log).
 
+At the next interval, the scheduled scan started at 12:12:14 and completed at
+12:15:03 with 45 inode-incarnation coverage errors across about 1.46M staged
+paths. It remained dirty and scheduled a bounded retry after 8 minutes; service
+restart count stayed zero. Cumulative service counters reached 939.9 CPU
+seconds, 8.8 GiB read, and 13.5 GiB written. This repeats the live convergence
+failure, while confirming the cadence timer itself fires. Source inspection
+traces the fail-closed condition to concurrent `(device,inode)` reuse: v7
+paths store birth time, but the compatibility `inodes` table is keyed only by
+`(dev_id,inode)`. Do not suppress this check without incarnation-aware
+allocation and path revalidation. The reproducible regression gate and design
+constraints are recorded in [the architecture decision](docs/ARCHITECTURE_EVOLUTION.md#additional-inode-reuse-requirement-from-vps2-2026-11-08).
+
 ## Latest exact-candidate evidence (2026-11-08)
 
 Commit `ea642ed` filters well-formed fanotify records from Dux's own PID before

@@ -178,6 +178,36 @@ root requires an offline maintenance operation in the documented procedure
 | 5. Add build-tree quota/volume adapters | On disposable ext4 and XFS fixtures, compare project quota block/inode counters against independent tree totals, including creation, deletion, rename, hardlinks, and project-boundary operations. | Exact documented counters under supported operations; clear behavior for unsupported filesystems and paths. No production filesystem feature or mount change is part of this stage. | Deferred; no quota adapter is implemented. |
 | 6. Integrate and qualify release | Preserve package/security gates, disk limits, service rollback, and the existing fault/scale matrix. Run the exact release artifact. | P0, 100k/1m/10m, overflow/recovery, low-disk, security/package lifecycle, 72-hour endurance, and 24-hour canary pass with source/binary/config/fixture identities recorded. | Not release-qualified. The current GNU release binary passed one 1M and one 1.37M scale profile plus one ext4 overflow fixture; the packaged static-musl artifact has not been tested with these current-source workloads. 10M, the complete P0/fault matrix, 72-hour soak, package rollback, and production canary remain open. |
 
+### Additional inode-reuse requirement from VPS2 (2026-11-08)
+
+The package-101 live run exposed a remaining reconciliation failure mode under
+real host churn. A 1.44M-entry ext4 walk at 12:12:14 completed at 12:15:03 but
+reported 45 conflicting inode incarnations; the preceding cadence scan had
+reported 155. In both cases, Dux correctly retained the previous accepted
+index and marked it dirty. The scheduler is functioning, but the scan does not
+converge while this host continues reusing inode numbers during walks.
+
+The current compatibility `inodes` table has primary key `(dev_id,inode)`,
+while v7 `paths` also store `birth_ns`. The scanner's
+`count_conflicting_inode_incarnations` groups by `(dev,inode)` and rejects a
+walk if birth times differ. Removing this check alone is unsafe: a scan may
+have observed a path before unlink and a later path after inode reuse, leaving
+a stale path in the staged graph, and the compatibility allocation row cannot
+represent both incarnations. A correctness fix must both key allocation and
+hardlink identity by incarnation and revalidate/rescan affected parent paths
+after a detected race. If the affected paths cannot be proven stable within a
+bounded retry, the scan must remain incomplete. Snapshot-backed scans are the
+alternative when a point-in-time tree is required.
+
+Required regression gate before changing this behavior: a deterministic ext4
+fixture must force unlink/reuse of one inode number at a different path during
+a scan, then compare every published path, incarnation, allocation, and
+recursive total with an independent post-scan filesystem oracle. Add the same
+case under repeated reuse and forced userspace hint loss. The candidate must
+either converge safely or remain explicitly stale; it may never publish the
+stale first path as current. VPS2 runtime evidence is in
+[`qualification/scan-first-fixed-cadence-20261108/`](qualification/scan-first-fixed-cadence-20261108/).
+
 ## Explicitly deferred
 
 The default scan-first design does not include a durable event journal, a
