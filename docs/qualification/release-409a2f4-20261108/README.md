@@ -105,9 +105,10 @@ schema-v7 graph, and accounting checks passed. At sample 2 the service had zero
 restarts, kernel overflows, userspace drops, and OOM events. Its latest full
 observation was 334 seconds old, below the configured 1,200-second observation
 age limit. The index was dirty and not caught up, as filesystem changes had
-arrived since that observation; reported `behind_seconds` was about 2,132, so
-this canary does not establish low-latency freshness. Two samples are an early
-checkpoint only, not a soak pass. The raw append-only snapshot through sample 2
+arrived since that observation. The reported `behind_seconds` (~2,132) is the
+legacy event-pipeline catch-up timer; `last_scan_age_seconds` is the relevant
+scan-first freshness measure. Two samples are an early checkpoint only, not a
+soak pass. The raw append-only snapshot through sample 2
 is [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
 
 This VPS2 qualification is not production sign-off. It covers one KVM guest,

@@ -28,8 +28,10 @@ At sample 2 the candidate and unit hashes matched, SQLite/schema-v7 graph and
 accounting checks passed, and the service showed zero restarts, kernel
 overflows, userspace drops, and OOM events. The latest completed observation
 was 334 seconds old against the 1,200-second configured limit. The index was
-dirty and not caught up, with `behind_seconds` about 2,132; this is not proof
-of low-latency freshness. Two samples do not qualify a 24-hour soak. The
+dirty and not caught up, as expected for scan-first after filesystem hints.
+The reported `behind_seconds` (~2,132) is the legacy event-pipeline catch-up
+timer; for scan-first freshness, use `last_scan_age_seconds` instead. Two
+samples do not qualify a 24-hour soak. The
 append-only evidence through sample 2 is recorded in
 [`canary-24h-5m-v2-progress.jsonl`](docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl).
 
