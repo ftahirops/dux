@@ -228,7 +228,9 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
     scan_running = any(
         isinstance(sample.get(key), dict)
         and sample[key].get("scan_first") is True
-        and sample[key].get("scan_in_progress") is True
+        and (sample[key].get("scan_in_progress") is True
+             or sample[key].get("dirty_reason") ==
+             "reconciliation accounting verification pending")
         for key in ("status_before", "status_after"))
     if service_state != "active" and not (service_state == "reloading" and scan_running):
         errors.append("systemd service is not active or performing a scan-first observation")

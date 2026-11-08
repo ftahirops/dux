@@ -250,6 +250,16 @@ class CanaryMonitorTests(unittest.TestCase):
         self.assertIn("systemd service is not active or performing a scan-first observation",
                       errors)
 
+    def test_reloading_is_allowed_while_post_scan_accounting_verification_is_pending(self):
+        value = sample()
+        verify_status = status(caught_up=False, dirty=True, scan_first=True,
+                               scan_in_progress=False, last_scan_age_seconds=950,
+                               dirty_reason="reconciliation accounting verification pending")
+        value["status_before"] = dict(verify_status)
+        value["status_after"] = dict(verify_status)
+        value["service"]["ActiveState"] = "reloading"
+        self.assertEqual(MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT), [])
+
     def test_reloading_without_an_active_scan_first_observation_fails(self):
         value = sample()
         value["status_before"] = status(caught_up=False, dirty=True, scan_first=True,
