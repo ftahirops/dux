@@ -955,3 +955,12 @@ observed load. It does not establish 24-hour stability, zero-lag freshness,
 correctness under every inode-reuse race, or behavior under a kernel queue
 overflow. Continue the canary through subsequent cadence(s) and test explicit
 overflow/recovery before treating the new architecture as production-ready.
+
+A concurrent burst at 13:30:02 UTC used eight producers, each creating 10,000
+files before a barrier and then deleting them (80,000 pairs total). It completed
+in 7.945 seconds. The Dux event counter rose from 7,946,328 to 8,721,074
+including other host activity. After a 15-second drain period, the service was
+active with zero restarts, zero reported kernel overflows, and zero userspace
+drops. This raises confidence in burst draining with concurrent producers but
+still did not force an actual kernel overflow; overflow/recovery remains an
+explicit qualification gap.
