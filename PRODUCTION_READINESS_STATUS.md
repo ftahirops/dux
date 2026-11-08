@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 11:42 UTC
+**Updated:** 2026-11-08 12:02 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Latest fixed-cadence implementation and VPS2 evidence (11:42 UTC)
+## Latest fixed-cadence implementation and VPS2 evidence (11:54 UTC)
 
 Commit `559097852ac5333bf575299394758af7b7a9cb3d` removes two causes of
 unnecessary full-root scans in scan-first mode: hint-ring/resolver loss no
@@ -19,22 +19,39 @@ built and installed on VPS2. During a 40,000-file create/delete burst, the
 candidate reported repeated userspace hint-ring and resolver loss, and zero
 kernel overflows. Its first observation had one coverage issue and correctly
 scheduled a bounded retry; the retry completed with zero coverage issues.
-There was no repeat scan at the old 300-second dirty-retry boundary or through
-11:41:34 UTC, and the daemon had zero restarts. A read-only SQLite quick check,
-row-type check, and Dux accounting predicate passed. The index remained
-visibly dirty after hint loss and `caught_up=false`, as scan-first mode promises
-only last-observed freshness.
+There was no repeat scan at the old 300-second dirty-retry boundary. The
+15-minute observation started at 11:50:07, exactly 15 minutes after the retry
+scan began, but finished with 155 inode-incarnation conflicts. Dux kept the
+index dirty and scheduled another bounded retry; eventual recovery from those
+conflicts remains unverified. The daemon had zero restarts. Before that
+scheduled pass, read-only SQLite quick-check, row-type, and recursive-accounting
+checks passed. The status remained `caught_up=false` after hint loss.
 
 This is concrete improvement evidence, not a production sign-off. The test
-still produced sustained hint-ring overflows, the full-root scans used
-substantial CPU and disk I/O, and only a five-minute post-retry window was
-observed. The 15-minute freshness SLO, sustained/repeated high-rate churn,
+still produced sustained hint-ring overflows, and a full-root scan found 155
+inode-reuse conflicts while ClickHouse and Docker were active. The service used
+substantial CPU and disk I/O. The 15-minute freshness SLO, sustained/repeated high-rate churn,
 72-hour current-candidate soak, other filesystems/kernels, and production
 canary remain open. A clean-tree static-musl package 102 is built and audited
 from commit `59f846c`; its Rust sources are identical to tested commit
 `5590978`, but package 102 has not been installed on VPS2. The live runtime
 test used package 101 built from that exact implementation commit.
 Full details and logs: [fixed-cadence qualification](docs/qualification/scan-first-fixed-cadence-20261108/README.md).
+
+### VPS2 follow-up snapshot (12:02 UTC)
+
+Recovered the 11:57:14 bounded retry outcome: it completed at 12:00:09 with
+zero coverage issues across 1.44M indexed inodes, after the preceding scheduled
+scan failed on 155 inode-incarnation conflicts. This confirms retry completion
+for that particular conflict sample. However, the scan log says filesystem or
+fanotify hints changed during the pass. At 12:02:23, the daemon was active with
+zero restarts but remained dirty and not caught up; the status reported 6.27M
+events seen, zero resolved events, repeated userspace hint-ring overflow, and
+no kernel overflow. Since package 101 started, systemd counters were 739.7s
+CPU, 7.2 GiB read, and 10.8 GiB written. This is continuing evidence that the
+candidate can complete a retry, but cannot presently converge while hint loss
+keeps recurring; the freshness SLO and acceptable overhead remain unproven.
+See [the captured runtime snapshot](docs/qualification/scan-first-fixed-cadence-20261108/post-retry-runtime-snapshot-1202.log).
 
 ## Latest exact-candidate evidence (2026-11-08)
 

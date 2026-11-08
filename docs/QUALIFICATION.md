@@ -8822,7 +8822,7 @@ package-lifecycle tests**. The exact release package and runtime policy are
 still unqualified. Logs are `fix-cargo-test.log` and `fix-lint-test.log` in the
 evidence directory.
 
-## Fixed-cadence scan-first runtime qualification — 2026-11-08 11:42 UTC
+## Fixed-cadence scan-first runtime qualification — 2026-11-08 11:54 UTC
 
 Follow-up commit `559097852ac5333bf575299394758af7b7a9cb3d` addressed a
 verified scheduler mismatch: scan-first hint loss and dirty state were still
@@ -8842,12 +8842,27 @@ more than five minutes after the successful retry began. The daemon had zero
 restarts. `PRAGMA quick_check`, the integer storage-class check, and the exact
 Dux recursive-accounting SQL predicate all passed read-only after the scan.
 
+The 15-minute timer fired at 11:50:07 UTC, exactly 15 minutes after the retry
+scan began, and did not run on the old 300-second dirty retry. However, this
+scheduled scan ended at 11:53:14 with 155 inode-incarnation conflicts while
+the VM ran ClickHouse and Docker workloads. The index remained dirty and Dux
+scheduled another retry after 240 seconds. That retry began at 11:57:14 and
+completed at 12:00:09 with zero coverage issues across 1,298,114 files and
+155,970 directories. However, Dux logged filesystem or fanotify changes during
+the scan and remained dirty. At 12:02:23 it was active with zero restarts, but
+had seen 6,274,821 events, resolved zero, and continued reporting userspace
+hint-ring overflow; kernel overflow remained zero. The service had accumulated
+739.7 CPU seconds, 7.2 GiB read, and 10.8 GiB written since package 101 start.
+A read-only SQLite check during the retry reported `quick_check=ok` and zero
+non-integer recursive-byte values, but neither it nor the completed walk proves
+currentness while new loss continues. Full snapshot:
+[`post-retry-runtime-snapshot-1202.log`](qualification/scan-first-fixed-cadence-20261108/post-retry-runtime-snapshot-1202.log).
+
 This validates the changed scheduler under this bounded VPS2 ext4 burst and
-documents recovery from one incomplete scan. It does not establish zero hint
-loss, convergence under continuous churn, the full 15-minute age SLO, or low
-scan I/O: the service used 311 seconds CPU, read 3.1 GiB, and wrote 5.8 GiB
-during the roughly 11-minute candidate window containing its baseline and
-bounded retry. The prior package-100 run recorded repeated five-minute scans
-and 12m43s CPU / 15.7 GiB writes over about 21 minutes. These are individual
-runs, not a controlled benchmark. Full source/build/runtime evidence is in
+demonstrates that failed scans retain bounded retries without a daemon restart.
+It does not establish zero hint loss, convergence under continuous churn, the
+full 15-minute age SLO, or low scan I/O: by 11:53:40 the service had used 541
+seconds CPU, read 4.4 GiB, and written 7.7 GiB. The prior package-100 run
+recorded repeated five-minute scans and 12m43s CPU / 15.7 GiB writes over about
+21 minutes. These are individual runs, not a controlled benchmark. Full source/build/runtime evidence is in
 [`qualification/scan-first-fixed-cadence-20261108/`](qualification/scan-first-fixed-cadence-20261108/).

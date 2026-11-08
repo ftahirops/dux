@@ -68,12 +68,34 @@ continued after the successful pass. The status remained honestly dirty with
 `fanotify hint ring capacity was exceeded`; it did not claim `caught_up`.
 
 There was no new scan at the old 300-second dirty-retry boundary (11:40:07),
-or through 11:41:34, over five minutes after the successful scan began. The
-daemon had zero restarts. At the end of that observation window, service
-counters were 311 seconds CPU, 3.1 GiB read, and 5.8 GiB written. Those totals
-include the initial incomplete scan and its required retry; they show that
-this is still substantial I/O even after removing the unnecessary repeated
-scan trigger.
+or through 11:49:30, despite continued hint-ring warnings. The 15-minute
+observation then started at 11:50:07, exactly 15 minutes after the retry scan
+started. It completed at 11:53:14 with **155 conflicting inode incarnations**
+(inode numbers observed with different birth times), retained dirty status,
+and scheduled a bounded retry after 240 seconds. This avoided a false-clean
+result, but shows that the current full walk still fails to converge under
+the VM's continuing churn. The VM runs ClickHouse and Docker workloads; Dux's
+sampled event rate briefly reached about 10,900 events/sec. That identifies a
+high-churn environment, but does not prove which workload caused each inode
+reuse.
+
+The daemon had zero restarts throughout. At 11:53:40, systemd reported 541
+seconds CPU, 4.4 GiB read, and 7.7 GiB written since package 101 started.
+These totals cover the initial incomplete observation, its successful retry,
+and the scheduled 15-minute observation; I/O remains substantial. The retry
+after the 15-minute pass began at 11:57:14 and completed at 12:00:09 with zero
+coverage issues across 1,298,114 files and 155,970 directories (1,444,084
+indexed inodes). The completion log says filesystem or fanotify hints changed
+during the observation, so the index correctly remained stale. At 12:02:23,
+Dux was active with zero restarts, but still dirty and not caught up; it
+reported 6,274,821 events seen, zero resolved events, zero kernel overflows,
+and frequent userspace hint-ring overflow warnings. This confirms the retry
+can finish after the inode-incarnation conflicts, but does not prove
+convergence while churn continues. Cumulative service counters at that point
+were 739.7 CPU seconds, 7.2 GiB read, and 10.8 GiB written since package 101
+started. These counters include all scans and runtime work and are not an
+isolated performance benchmark. The full snapshot and completion lines are in
+`post-retry-runtime-snapshot-1202.log`.
 
 Independent read-only index checks after the successful retry reported:
 
@@ -81,13 +103,19 @@ Independent read-only index checks after the successful retry reported:
 - Indexed inode rows: 1,444,711; non-integer `recursive_bytes` rows: 0.
 - The same recursive accounting predicate used by Dux: `true`.
 
+Those read-only checks were taken after the successful 11:35 retry and before
+the 11:50 scheduled scan; they do not validate the later incomplete scan's
+published view.
+
 The daemon's status freshness intentionally remains stale after hint loss. This
-test proves the old 300-second dirty retry was removed for this workload; it
-does not prove zero queue loss, a 15-minute freshness SLO, recovery under
-continuous churn, or production readiness. The 40k burst caused a real scan
-coverage issue, and the bounded retry was necessary. The current high event
-rate still overflows the userspace hint queues, and a five-minute no-rescan
-window does not qualify the full 15-minute cadence or long-term behavior.
+test proves the old 300-second dirty retry was removed for this workload and
+that the 15-minute timer fired on schedule. It does not prove zero hint loss,
+the 15-minute scope-age SLO, recovery under continuous churn, or production
+readiness. The 40k burst caused a real scan error; the scheduled scan later
+found 155 inode-incarnation conflicts under continuing VM activity. The
+bounded retry completed with zero coverage issues, but the index remained
+stale due to continuing hint loss, so convergence during ongoing churn is
+still unproven.
 
 ## Artifacts
 
@@ -95,8 +123,13 @@ window does not qualify the full 15-minute cadence or long-term behavior.
   identify the release artifacts.
 - `prepatch-journal.log` and `prepatch-status.log` preserve package 100's
   repeated-scan run.
-- `candidate-journal-101.log`, `candidate-status-samples-101.log`, and
-  `candidate-five-minute-boundary-101.log` preserve package 101's fault run.
+- `candidate-journal-101.log`, `candidate-status-samples-101.log`,
+  `candidate-five-minute-boundary-101.log`, and
+  `candidate-fifteen-minute-cadence-101.log` preserve package 101's runtime.
+- `post-retry-runtime-snapshot-1202.log` records the completed bounded retry,
+  stale status, service counters, and runtime binary identity.
+- `post-fifteen-minute-scan-db-check.json` records the structural SQLite
+  check during the later retry; it explicitly does not claim index freshness.
 - On VPS2, `/root/dux-qualification-43a7769/pre-5590978.sqlite` is the verified
   pre-upgrade database backup; the package rollback files from the preceding
   qualification remain in that directory.

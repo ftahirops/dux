@@ -1,0 +1,26 @@
+VPS2 runtime snapshot captured 2026-11-08T12:02:23Z.
+
+Connection: direct root SSH to 192.168.5.106:22 with /root/.ssh/id_ed25519
+Binary: /usr/bin/dux
+Binary SHA-256: 8f9a6f631f6c08b9df2fad7516d0fe8808ce76d5cb1c5371aee23f0d67e533c1
+Version: dux 0.6.3 (559097852ac5+modified) [production]
+Embedded source SHA-256: 8b58ae2192ba42777a404e0d7a3578ef623ce324cb2385ec684c981bc25355f8
+
+systemd: ActiveState=active, NRestarts=0, MainPID=2573561
+CPUUsageNSec=739685809000
+IOReadBytes=7744602112
+IOWriteBytes=11579031552
+
+dux status at capture:
+{"automatic_reconciliation_paused":false,"behind_seconds":1890.645,"caught_up":false,"daemon_live":true,"dirty":true,"dirty_reason":"fanotify hint ring capacity was exceeded","dirty_since_timestamp_seconds":1794139334,"events_dropped":0,"events_resolved":0,"events_seen":6274821,"failed_reconciliation_attempts":3,"index_bytes":83296313344,"index_bytes_on_disk":558563328,"index_nodes":1448886,"kernel_overflow_notifications":0,"last_event_commit_timestamp_seconds":0,"last_scan_age_seconds":309,"last_scan_timestamp_seconds":1794139034,"max_automatic_reconciliation_retries":1,"max_pending_updates":500000,"pause_reason":null,"paused":false,"paused_since_timestamp_seconds":null,"pending_updates":0,"reconciliation_retry_backoff_seconds":240,"reconciliation_retry_due":false,"reconciliation_retry_remaining_seconds":0,"reconciliation_retry_state_corrupt":false,"root":"/","scan_first":true,"scan_in_progress":false,"scan_progress":null,"status_version":1,"throttled_since_timestamp_seconds":1794137452,"updates_committed":0,"userspace_updates_dropped":0,"wal_bytes":15520072,"watch_status_available":true,"watch_status_updated_at_seconds":1794139343,"write_error":null}
+
+Relevant journal outcome:
+2026-11-08T12:00:09Z INFO dux::watch: filesystem or fanotify hints changed during scan-first observation; next full observation is scheduled
+2026-11-08T12:00:09Z INFO dux::watch: rescan complete: 1298114 files, 155970 dirs, 1454084 staged path instances (0 directory alias paths), visible 84505026560 bytes/1454084 entries, unique 83296313344 bytes/1448886 inodes, 77.58 GiB (0 coverage issues); replaying 0 pending paths
+
+The scan started at 11:57:14Z and completed at 12:00:09Z with zero coverage
+issues. It did not clear stale status because filesystem/fanotify hints changed
+during the observation. At capture, the daemon was again reporting frequent
+userspace hint-ring overflow warnings, zero kernel overflow notifications,
+and 0 resolved events out of 6,274,821 seen. This is evidence of successful
+walk completion, not proof of convergence or freshness under ongoing churn.
