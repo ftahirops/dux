@@ -308,6 +308,15 @@ fn daemon_uses_reconciliation_first(event_apply: bool, compatibility_alias: bool
     compatibility_alias || !event_apply
 }
 
+fn ensure_scan_complete(stats: &scan::ScanStats) -> Result<()> {
+    anyhow::ensure!(
+        stats.errors == 0,
+        "scan is incomplete: {} coverage issues; index remains marked incomplete",
+        stats.errors
+    );
+    Ok(())
+}
+
 fn real_main() -> Result<()> {
     let matches = cli_command().get_matches();
     let cli = Cli::from_arg_matches(&matches)?;
@@ -396,6 +405,10 @@ fn real_main() -> Result<()> {
                 start.elapsed().as_secs_f64(),
                 s.errors
             );
+            // Keep the coverage count visible in the summary above, and make
+            // the process status agree with it so scripts cannot mistake an
+            // incomplete observation for a successful exact scan.
+            ensure_scan_complete(&s)?;
         }
         Some(Cmd::Overview { path, since, limit }) => {
             let store = Store::open_ro(&db)?;
@@ -1474,6 +1487,21 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
     use std::os::unix::fs::MetadataExt;
+
+    #[test]
+    fn direct_scan_exit_status_rejects_coverage_issues() {
+        assert!(ensure_scan_complete(&scan::ScanStats::default()).is_ok());
+
+        let incomplete = scan::ScanStats {
+            errors: 1,
+            ..Default::default()
+        };
+        let error = ensure_scan_complete(&incomplete).unwrap_err();
+        assert!(error.to_string().contains("1 coverage issues"));
+        assert!(error
+            .to_string()
+            .contains("index remains marked incomplete"));
+    }
 
     #[test]
     fn max_cpu_help_distinguishes_event_thread_target_from_process_limit() {

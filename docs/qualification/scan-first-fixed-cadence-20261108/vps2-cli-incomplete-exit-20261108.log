@@ -1,0 +1,20 @@
+VPS2 CLI exit-status regression check
+Date: 2026-11-08 UTC
+Host: vps2, Ubuntu 24.04, Linux 6.8, ext4
+Candidate: dux 0.6.3 (b417b4758e11+modified) [production]
+Candidate binary SHA-256: 627d82be4e035038d23f7503337b7f24bef1c79e8d1e6263491c5e1283b4ed02
+Embedded source SHA-256: bdfd711d1a4f4b3d678cfa66fa6509afd0eab0c5d98a1853230644ede4c7118d
+Binary: static-pie, statically linked x86-64 musl
+Service handling: candidate ran standalone against a temporary fixture and separate index; systemd dux was not replaced or restarted.
+
+Fixture: 40 directories and 40,000 seeded files. Four concurrent producers performed 10,168 atomic replacements and ephemeral create/delete operations during the scan, with no producer errors.
+
+Concurrent scan: exit code 1; summary reported 221 coverage issues and stderr stated that the scan was incomplete and the index remains marked incomplete. This verifies callers can no longer treat a coverage-uncertain scan as successful.
+
+After producers stopped, stable scan: exit code 0; 40,000 files, 41 directories including root, 40,041 staged paths, 165,335,040 allocated bytes, 0 coverage issues, 4.15 seconds.
+
+Independent filesystem oracle included allocated blocks for directories and root: 40,000 files, 41 directories including root, 40,041 expected paths, 165,335,040 allocated bytes. The index matched path count, visible/unique bytes, and visible/unique entries/inodes exactly. SQLite PRAGMA integrity_check returned ok. Stable exactness: PASS.
+
+Post-test service status: MainPID 3025728 remained alive, NRestarts=0. systemd reported ActiveState=reloading/SubState=reload-notify (the pre-existing state had been reported reloading for 3h52m); this qualification run did not issue reload/restart commands. Service state is not evidence that the candidate was installed.
+
+Temporary fixture, DB, and transferred candidate were removed after evidence capture.

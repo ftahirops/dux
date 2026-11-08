@@ -1188,7 +1188,7 @@ counted.
 
 ## Test inventory and coverage summary — current evidence
 
-Automated tests on the current Rust source passed **309 tests, 0 failed, 2
+Automated tests on the current Rust source passed **310 tests, 0 failed, 2
 ignored** (`cargo test --locked --all-features`); the ignored cases require
 the dedicated ext4 or manual scale profile. The complete Python script suite
 passed **323 tests**, including **27 focused canary-monitor tests**. Strict
@@ -1201,9 +1201,9 @@ The Python command was rerun on this worktree; its result is preserved in
 `docs/qualification/scan-first-fixed-cadence-20261108/python-suite-final-20261108.log`.
 
 `cargo llvm-cov --locked --all-features --summary-only` measured **71.29% Rust
-line coverage overall**, 70.28% region coverage, and 75.05% function coverage.
-Key line coverage: scan 92.42%, store 96.19%, query 90.56%, deleted-open
-handling 89.62%, JSON emitters 85.08%, watch 72.06%, main/CLI 42.48%, and TUI
+line coverage overall**, 70.28% region coverage, and 75.08% function coverage.
+Key line coverage: scan 92.34%, store 96.10%, query 90.56%, deleted-open
+handling 90.57%, JSON emitters 85.08%, watch 72.07%, main/CLI 43.20%, and TUI
 39.51%. `fault.rs` remains at 32.65%. Branch coverage was not emitted by this
 run. The report is preserved at
 `docs/qualification/scan-first-fixed-cadence-20261108/llvm-cov-summary.log`.
@@ -1259,14 +1259,14 @@ and paths that remain present with a replacement or ambiguous identity still
 fail closed. Clean scans do not pay the revalidation walk. The scan result now
 reports how many staged paths were pruned.
 
-Verification on the current source: the full Rust suite passed **309 tests, 0
+Verification before the CLI exit-status guard: the Rust suite passed **309 tests, 0
 failed, 2 ignored**; strict Clippy and formatting passed. The real ext4
 inode-reuse regression passed **10 consecutive runs**. Two focused helper tests
 prove that a vanished ancestor's subtree is pruned and that present ambiguous
 paths remain untouched and fail-closed. The ignored 100,000-entry scale test
 was also run explicitly: baseline scan 7.609 s, unchanged in-place
 reconciliation 8.298 s, and a 31,629,312-byte index. Rust line coverage was
-71.29% overall (70.28% regions, 75.05% functions; no branch coverage reported).
+71.29% overall (70.28% regions, 75.08% functions; no branch coverage reported).
 
 The patched static-musl binary (`3372527b…1a55990a`, embedded source digest
 `4aa45d3a…8eb5082`) was also run on VPS2 in a
@@ -1307,3 +1307,28 @@ exact stable fixture after churn. It also confirms that an observation overlappe
 with atomic replacements can remain incomplete. It does not establish clean
 scans under continuous production churn, full-root convergence, freshness SLO,
 long-duration soak, or universal filesystem correctness.
+
+## Direct scan exit status hardening — 2026-11-08
+
+The current-source VPS2 churn test exposed that `dux scan` printed a nonzero
+coverage-issue count but returned exit status 0. This could let automation treat
+an incomplete observation as successful. Direct scans now return an error when
+`ScanStats.errors` is nonzero, after printing the coverage summary; the
+incomplete index remains visibly marked. A unit regression test covers clean
+and incomplete scan statuses. This does not alter daemon reconciliation or
+intentional scoped scans with no detected coverage issues.
+
+The current static-musl candidate passed a VPS2 ext4 confirmation: during four
+producers' 10,168 atomic replacements and ephemeral file operations, its scan
+reported 221 coverage issues and exited 1. After churn stopped, a stable scan
+reported zero issues and exited 0 in 4.15 seconds, with exact independent path,
+allocated-byte, and entry totals plus SQLite integrity `ok`. Candidate SHA-256
+`627d82be4e035038d23f7503337b7f24bef1c79e8d1e6263491c5e1283b4ed02`; embedded
+source SHA-256 `bdfd711d1a4f4b3d678cfa66fa6509afd0eab0c5d98a1853230644ede4c7118d`.
+Full evidence: `docs/qualification/scan-first-fixed-cadence-20261108/vps2-cli-incomplete-exit-20261108.log`.
+
+The VPS2 daemon was left untouched. Its main process was alive with zero
+restarts, while systemd continued to show `reloading/reload-notify` for nearly
+four hours and logs continued to show full-root reconciliation activity. The
+candidate has not been installed there. Full-root convergence remains
+unverified.
