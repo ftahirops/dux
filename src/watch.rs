@@ -653,6 +653,14 @@ fn reconciliation_scan_ready(
     requested && retry_backoff_elapsed && (queues_drained || behind >= RECONCILE_BACKLOG_GRACE)
 }
 
+fn reconciliation_retry_gate_elapsed(
+    reconcile_first: bool,
+    periodic_observation_due: bool,
+    backoff_elapsed: bool,
+) -> bool {
+    backoff_elapsed || (reconcile_first && periodic_observation_due)
+}
+
 fn scan_first_observation_due(last_started: Instant, now: Instant) -> bool {
     now.saturating_duration_since(last_started) >= SCAN_FIRST_INTERVAL
 }
@@ -3355,7 +3363,9 @@ pub fn run_daemon(
                 }
             }
         }
-        if reconcile_first && scan_first_observation_due(last_reconcile, Instant::now()) {
+        let periodic_observation_due =
+            reconcile_first && scan_first_observation_due(last_reconcile, Instant::now());
+        if periodic_observation_due {
             RESCAN.store(true, Ordering::SeqCst);
         }
         let rescan_requested = RESCAN.load(Ordering::SeqCst);
@@ -3363,8 +3373,22 @@ pub fn run_daemon(
             && pending.is_empty()
             && deferred_from.is_empty()
             && target_refreshes.is_empty();
-        let retry_backoff_elapsed =
+        let backoff_elapsed =
             rescan_retry_after.is_none_or(|retry_after| Instant::now() >= retry_after);
+        let retry_backoff_elapsed = reconciliation_retry_gate_elapsed(
+            reconcile_first,
+            periodic_observation_due,
+            backoff_elapsed,
+        );
+        if periodic_observation_due && !backoff_elapsed {
+            // A fixed-cadence observation is scan-first mode's recovery path.
+            // Do not let exponential retry backoff stretch the freshness
+            // interval beyond the next scheduled full observation. Publish the
+            // adjusted due time so `dux status` agrees with the scheduler.
+            let due = now_secs();
+            store.set_meta("reconciliation_retry_after_unix", &due.to_string())?;
+            rescan_retry_after = Some(Instant::now());
+        }
         // Recompute after reaping completed workers: a failed scan may have
         // opened the circuit and scheduled its cooldown earlier in this loop.
         let retry_circuit_blocks_request = reconciliation_retry_circuit_blocks_request(
@@ -8380,6 +8404,10 @@ mod tests {
             false, false, started, retry_time
         ));
         assert!(scan_first_observation_due(started, cadence_time));
+        assert!(reconciliation_retry_gate_elapsed(true, true, false));
+        assert!(reconciliation_retry_gate_elapsed(true, false, true));
+        assert!(!reconciliation_retry_gate_elapsed(true, false, false));
+        assert!(!reconciliation_retry_gate_elapsed(false, true, false));
     }
 
     #[test]

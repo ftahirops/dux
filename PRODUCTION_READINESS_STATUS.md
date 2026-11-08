@@ -782,6 +782,30 @@ comparison those counters are a single-run cost, not an improvement claim.
 Evidence and rollback location are recorded in
 [`runtime-canary-e96e708-1303.log`](docs/qualification/scan-first-fixed-cadence-20261108/runtime-canary-e96e708-1303.log).
 
+## Fixed-cadence retry gate and refreshed disk sample — 2026-11-08
+
+Code review of that canary found that `scan_first_observation_due` requested a
+15-minute scan, but `reconciliation_scan_ready` still required the exponential
+retry deadline. After the canary's 36-conflict failure the deadline was 1,920
+seconds, so the next 900-second observation could be blocked. The scheduler
+now permits a periodic scan-first observation to satisfy the retry gate when
+that cadence is due; an operator-requested retry before cadence still respects
+backoff. It also advances the persisted retry deadline at the cadence boundary
+so `dux status` reports the same due time as the scheduler. The regression
+asserts periodic-due, backoff-not-due admission and confirms event-applied mode
+does not inherit this exception. Current-source full suite passed (305 passed,
+0 failed, 2 ignored), strict Clippy, formatting, and locked release build passed.
+This scheduler change has not been installed on VPS2; its next-cadence behavior
+is verified by the deterministic helper test, not by runtime observation.
+
+Read-only disk sample at 13:09:56 UTC: local host root had 39 GiB available
+(185 GiB total, 138 GiB used, 79%); `/home/dux/target` used 2.0 GiB. VPS2 root
+had 12 GiB available (93 GiB total, 77 GiB used, 87%); `/var/lib/dux` used
+538 MiB, and its LVM volume group had 4 GiB free. The scan stage had been
+cleaned by the time of this sample. No cleanup was performed. The VM has room
+for the canary, but its 4 GiB LVM free space is not evidence that a COW
+snapshot will survive ongoing root-filesystem churn.
+
 ## Current-source package and live-root qualification — 2026-11-08 10:41 UTC
 
 Commit `43a7769` now has a successful exact-source static-musl release build:
