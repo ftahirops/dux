@@ -213,6 +213,40 @@ def pipeline_records_drained(record):
     return not record["pending"] and (record["scan_first"] or record["drained"])
 
 
+def daemon_uses_scan_first(record, daemon_log):
+    """Prefer the daemon's startup mode log over a stale/legacy status record."""
+    return bool(record.get("scan_first")) or "experimental reconciliation-first mode:" in daemon_log
+
+
+def request_scan_first_observation(case, daemon, previous_generation, log_path, timeout=600):
+    """Request and wait for one complete, independently accounted observation."""
+    def scan_active():
+        result = command(
+            case.binary, "--db", case.db, "status", "--json", env=case.env,
+        )
+        return json.loads(result.stdout).get("scan_in_progress", False)
+
+    daemon.wait(lambda: not scan_active(), "prior scan-first observation to finish", timeout)
+    before_meta, _ = check_index(case.db)
+    previous_generation = before_meta.get("scan_generation", previous_generation)
+    previous_attempt = before_meta.get("last_reconcile_attempt_id")
+    log_offset = log_path.stat().st_size
+    daemon.process.send_signal(signal.SIGHUP)
+
+    def complete():
+        meta, _ = check_index(case.db)
+        if meta.get("scan_generation") == previous_generation:
+            return False
+        if meta.get("last_reconcile_attempt_id") == previous_attempt:
+            return False
+        if meta.get("last_reconcile_attempt_result") != "complete":
+            return False
+        log = log_path.read_text(errors="replace")
+        return meta if "reconciliation accounting verification passed" in log[log_offset:] else False
+
+    return daemon.wait(complete, "full scan-first observation and accounting verification", timeout)
+
+
 class Daemon:
     def __init__(self, case, binary=None, pause=None, prefix=None, max_cpu_percent=50):
         self.case, self.binary = case, binary or case.binary
@@ -625,9 +659,9 @@ def overflow_reconciliation_evidence(daemon_log):
 
 def scan_first_overflow_recovery_evidence(
     daemon_log, overflow_before, overflow_after, generation_before,
-    generation_after, exact_index,
+    generation_after, exact_index, clean_status=True,
 ):
-    """Prove scan-first repairs a real queue overflow without event replay."""
+    """Prove a complete observation repairs overflowed state without replay."""
     overflow_observed = overflow_after > overflow_before
     start_at = daemon_log.find("starting background reconciliation of ")
     scan_at = daemon_log.find("rescan complete:", start_at) if start_at >= 0 else -1
@@ -647,7 +681,8 @@ def scan_first_overflow_recovery_evidence(
         "scan_completed_after_reconciliation": scan_completed,
         "accounting_verified_after_reconciliation": accounting_verified,
         "scan_generation_advanced": generation_advanced,
-        "exact_filesystem_match_and_clean_status": exact_index,
+        "exact_filesystem_match": exact_index,
+        "clean_status_after_recovery": clean_status,
         "passed": (
             overflow_observed and start_at >= 0 and scan_completed
             and accounting_verified and generation_advanced and exact_index
@@ -661,14 +696,42 @@ def overflow_test(case, _args, evidence):
     statvfs = os.statvfs(case.tree)
     validate_overflow_recovery_headroom(statvfs.f_bavail * statvfs.f_frsize)
     daemon = Daemon(case)
-    before_meta = daemon.exact()
+    status_path = runtime_path(case.db, case.runtime, "watch.status")
+    initial_record = daemon.wait(
+        lambda: daemon.record() if status_path.exists() else False,
+        "daemon publishes initial watcher status",
+    )
+    log_path = case.base / "daemon.log"
+    scan_first = daemon_uses_scan_first(
+        initial_record, log_path.read_text(errors="replace")
+    )
+    if scan_first:
+        # A scan-first daemon can remain conservatively dirty after any
+        # in-scope hint, even when indexed rows still match the tree. Establish
+        # and independently verify a completed observation before measuring
+        # the subsequent kernel-overflow recovery.
+        before_generation = check_index(case.db)[0].get("scan_generation")
+        print("PROGRESS requesting and validating the scan-first baseline", flush=True)
+        before_meta, _ = check_index(case.db, case.tree)
+        if before_meta.get("scan_generation") == before_generation:
+            before_meta = request_scan_first_observation(
+                case, daemon, before_generation, log_path,
+            )
+            before_meta, _ = check_index(case.db, case.tree)
+        assert before_meta.get("scan_generation") != before_generation, before_meta
+        assert before_meta.get("last_reconcile_attempt_result") == "complete", before_meta
+    else:
+        before_meta = daemon.exact()
     before = before_meta["scan_generation"]
     before_record = daemon.record()
-    log_path = case.base / "daemon.log"
     log_offset = log_path.stat().st_size
+    print(
+        f"PROGRESS baseline ready: generation={before} overflows={before_record['kernel_overflow_notifications']} uncertain={before_record['uncertain']}",
+        flush=True,
+    )
     daemon.process.send_signal(signal.SIGSTOP)
     try:
-        if not before_record["scan_first"]:
+        if not scan_first:
             # Keep the legacy-mode metadata fault injection. Scan-first has a
             # separate reconciliation/accounting contract and its forced-
             # overflow suite should not mix a SQLite write fault into the
@@ -681,7 +744,8 @@ def overflow_test(case, _args, evidence):
             (storm / f"queued-{i}").touch()
     finally:
         daemon.process.send_signal(signal.SIGCONT)
-    if before_record["scan_first"]:
+    print("PROGRESS overflow storm created; waiting for kernel notification", flush=True)
+    if scan_first:
         overflow_record = daemon.wait(
             lambda: (
                 (record := daemon.record())["kernel_overflow_notifications"]
@@ -693,25 +757,42 @@ def overflow_test(case, _args, evidence):
             "kernel overflow counter advanced without exposing uncertainty: "
             f"{overflow_record}"
         )
+        print(
+            f"PROGRESS kernel overflow observed: count={overflow_record['kernel_overflow_notifications']}; requesting recovery observation",
+            flush=True,
+        )
         started = time.monotonic()
-        recovered_meta = daemon.exact(before, timeout=600)
+        # Scan-first mode deliberately leaves ordinary hint loss to the fixed
+        # cadence. Trigger the same full observation explicitly here so the
+        # bounded test verifies real overflow detection and recovery without
+        # waiting fifteen minutes; cadence is exercised separately.
+        recovered_meta = request_scan_first_observation(
+            case, daemon, before, log_path,
+        )
+        recovered_meta, _ = check_index(case.db, case.tree)
+        assert recovered_meta.get("scan_generation") != before, recovered_meta
+        assert recovered_meta.get("last_reconcile_attempt_result") == "complete", recovered_meta
         recovery_seconds = round(time.monotonic() - started, 3)
         log = log_path.read_text(errors="replace")[log_offset:]
         after_record = daemon.record()
+        clean_status = (
+            not after_record["uncertain"]
+            and not any(key in recovered_meta for key in ("dirty_since", "flush_error"))
+        )
         reconciliation_evidence = scan_first_overflow_recovery_evidence(
             log,
             before_record["kernel_overflow_notifications"],
             overflow_record["kernel_overflow_notifications"],
             before,
             recovered_meta.get("scan_generation"),
-            not after_record["uncertain"]
-            and not any(key in recovered_meta for key in ("dirty_since", "flush_error")),
+            True,
+            clean_status,
         )
         evidence.update(
             queue_capacity=maximum,
             created=maximum + 2048,
             recovery_seconds=recovery_seconds,
-            automatic_scan_first_overflow_recovery=reconciliation_evidence,
+            scan_first_overflow_recovery=reconciliation_evidence,
         )
         assert reconciliation_evidence["passed"], (
             "scan-first overflow recovery did not complete a full, accounted, exact scan: "
@@ -757,16 +838,19 @@ def overflow_test(case, _args, evidence):
             daemon.exact(timeout=180)
             case.history()
     storm.rmdir()
-    if before_record["scan_first"]:
+    if scan_first:
         # Ordinary scan-first hints do not mutate rows; request one complete
         # observation after the bulk cleanup instead of forcing a full-tree
         # scan after every small delete batch.
-        daemon.process.send_signal(signal.SIGHUP)
-    daemon.exact(timeout=600)
+        cleanup_generation = check_index(case.db)[0].get("scan_generation")
+        request_scan_first_observation(case, daemon, cleanup_generation, log_path)
+        check_index(case.db, case.tree)
+    else:
+        daemon.exact(timeout=600)
     case.history()
     daemon.stop()
     integrity(case.db)
-    print("PASS real queue overflow, failed dirty-metadata write, visible uncertainty and reconciliation", flush=True)
+    print("PASS real queue overflow, visible uncertainty, exact observation recovery, and cleanup", flush=True)
 
 
 def process_cpu_seconds(pid):

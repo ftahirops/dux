@@ -22,6 +22,15 @@ READINESS_SPEC.loader.exec_module(READINESS)
 
 
 class ReadinessHarnessTests(unittest.TestCase):
+    def test_scan_first_mode_uses_startup_log_if_status_record_is_legacy(self):
+        self.assertTrue(READINESS.daemon_uses_scan_first(
+            {"scan_first": False},
+            "experimental reconciliation-first mode: full-root observations",
+        ))
+        self.assertFalse(READINESS.daemon_uses_scan_first(
+            {"scan_first": False}, "event-apply watcher started",
+        ))
+
     def test_incomplete_root_coverage_does_not_pass_qualification(self):
         self.assertEqual(
             READINESS.suite_result_status("root", {"coverage_complete": False}),
@@ -161,7 +170,21 @@ class ReadinessHarnessTests(unittest.TestCase):
         )
         self.assertTrue(evidence["passed"])
         self.assertEqual(evidence["mode"], "scan_first")
-        self.assertTrue(evidence["exact_filesystem_match_and_clean_status"])
+        self.assertTrue(evidence["exact_filesystem_match"])
+        self.assertTrue(evidence["clean_status_after_recovery"])
+
+    def test_scan_first_exact_observation_is_valid_even_if_new_hints_keep_status_dirty(self):
+        log = "\n".join((
+            "starting background reconciliation of /fixture; event ingestion remains active",
+            "rescan complete: 118443 files, 10 dirs, 118454 staged path instances (0 coverage issues)",
+            "reconciliation accounting verification passed",
+        ))
+        evidence = READINESS.scan_first_overflow_recovery_evidence(
+            log, 2, 3, "7", "8", True, False,
+        )
+        self.assertTrue(evidence["passed"])
+        self.assertTrue(evidence["exact_filesystem_match"])
+        self.assertFalse(evidence["clean_status_after_recovery"])
 
     def test_scan_first_overflow_rejects_incomplete_or_nonexact_recovery(self):
         log = "\n".join((

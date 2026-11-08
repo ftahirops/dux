@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 12:30 UTC
+**Updated:** 2026-11-08 13:54 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -964,3 +964,44 @@ active with zero restarts, zero reported kernel overflows, and zero userspace
 drops. This raises confidence in burst draining with concurrent producers but
 still did not force an actual kernel overflow; overflow/recovery remains an
 explicit qualification gap.
+
+## Repeat root observation and forced-overflow qualification — 2026-11-08 13:54 UTC
+
+The same installed `739113c` candidate completed a second scheduled root
+observation. It started at 13:40:39.005 UTC and completed at 13:43:40.402 UTC
+(181.397 seconds): 1,313,256 files, 157,802 directories, 1,471,058 staged path
+instances, and zero coverage issues. Independent reconciliation accounting
+verification passed 48.736 seconds later. At 13:47:20 UTC the service was
+active with zero restarts, zero reported kernel overflows, and zero userspace
+drops. The index was again dirty because additional filesystem changes arrived
+after the observation; no clean/fresh claim is made between scans.
+
+The exact installed binary then passed the isolated forced-kernel-overflow
+suite on a disposable ext4 loop filesystem: binary SHA-256
+`fa7aca762c7aa7e90965c9df449dcce229bb5f7c4cadd8aefd183284c8a3f0c6`, harness
+SHA-256 `65c6ed92de65625cc14b4b66e2a5cf0c85d09d3769aa0aaa7ba1c9b66c95ec10`.
+The test paused the isolated daemon, generated 18,432 file creates against a
+16,384-event queue, observed the kernel overflow counter advance from 0 to 1,
+then explicitly requested a full observation so the bounded test did not wait
+for the 15-minute cadence. The scan completed, accounting verification passed,
+and an independent path/inode/allocation/rollup oracle matched the filesystem.
+Recovery took 11.98 seconds. Status remained conservatively dirty because
+post-observation hints arrived; the test records this as
+`clean_status_after_recovery=false`, while the exact tree comparison passed.
+The test then requested an observation after removing the storm and completed
+cleanup. This proves manual full-observation recovery after real kernel loss on
+this ext4 fixture; fixed-cadence observations of the dirty live root were
+separately observed at 13:25 and 13:40. It does not cover other kernels/filesystems,
+repeated overflow storms, or long-duration production freshness.
+
+The first forced-overflow harness attempt timed out before injecting an
+overflow because its precondition required the event-apply meaning of a clean
+pipeline. Scan-first correctly reports a stale last-observed view when hints
+arrive. The harness now establishes a complete accounted baseline, verifies
+the filesystem independently, forces the overflow, explicitly requests the
+bounded recovery scan, and reports index exactness separately from clean
+status. The final Python readiness-harness suite passed **39 tests**. The
+initial attempt report and final successful machine-readable report are
+[`forced-overflow-attempt-739113c.json`](docs/qualification/scan-first-fixed-cadence-20261108/forced-overflow-attempt-739113c.json)
+and
+[`forced-overflow-739113c.json`](docs/qualification/scan-first-fixed-cadence-20261108/forced-overflow-739113c.json).
