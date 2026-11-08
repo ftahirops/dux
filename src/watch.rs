@@ -823,7 +823,7 @@ const MAX_THROTTLE_SLEEP_SECS: f64 = 30.0;
 const DEFAULT_FANOTIFY_MAX_QUEUED_EVENTS: u64 = 16_384;
 const FANOTIFY_QUEUE_HIGH_WATERMARK_PERCENT: u64 = 75;
 const FANOTIFY_QUEUE_LOW_WATERMARK_PERCENT: u64 = 50;
-const FANOTIFY_FIONREAD: libc::c_ulong = 0x541B;
+const FANOTIFY_FIONREAD: libc::Ioctl = 0x541B;
 
 /// Request lower scheduling priority: IDLE I/O class and a low CPU nice. These
 /// are best-effort hints; they reduce priority but do not eliminate contention.
