@@ -1,0 +1,39 @@
+PROGRESS fixture creation start: 100000 baseline files
+PROGRESS seed start: 100000 files
+PROGRESS seed 10000/100000 files
+PROGRESS seed 20000/100000 files
+PROGRESS seed 30000/100000 files
+PROGRESS seed 40000/100000 files
+PROGRESS seed 50000/100000 files
+PROGRESS seed 60000/100000 files
+PROGRESS seed 70000/100000 files
+PROGRESS seed 80000/100000 files
+PROGRESS seed 90000/100000 files
+PROGRESS seed 100000/100000 files
+PROGRESS seed complete; starting baseline scan of 100000 files
+PROGRESS baseline scan complete
+PROGRESS churn baseline scan start: 100000 files
+PROGRESS churn baseline scan complete; starting event watcher
+PROGRESS initial exact validation passed; beginning churn batches
+PROGRESS churn batch 1/10: mutations complete; checking exact state
+PASS production-shaped churn batch 1/10
+PROGRESS churn batch 2/10: mutations complete; checking exact state
+PASS production-shaped churn batch 2/10
+PROGRESS churn batch 3/10: mutations complete; checking exact state
+PASS production-shaped churn batch 3/10
+PROGRESS churn batch 4/10: mutations complete; checking exact state
+PASS production-shaped churn batch 4/10
+PROGRESS churn batch 5/10: mutations complete; checking exact state
+PASS production-shaped churn batch 5/10
+PROGRESS churn batch 6/10: mutations complete; checking exact state
+PASS production-shaped churn batch 6/10
+PROGRESS churn batch 7/10: mutations complete; checking exact state
+PASS production-shaped churn batch 7/10
+PROGRESS churn batch 8/10: mutations complete; checking exact state
+PASS production-shaped churn batch 8/10
+PROGRESS churn batch 9/10: mutations complete; checking exact state
+PASS production-shaped churn batch 9/10
+PROGRESS churn batch 10/10: mutations complete; checking exact state
+PASS production-shaped churn batch 10/10
+PASS 20000 operations over 100000 baseline files with exact reconciliation
+Evidence: /var/tmp/dux-qualification-self-filter-20261108/report.json

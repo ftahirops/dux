@@ -883,7 +883,11 @@ def production_churn_test(case, args, evidence):
     print("PROGRESS churn baseline scan complete; starting event watcher", flush=True)
     daemon = Daemon(case)
     try:
-        daemon.exact()
+        # A startup overflow can invalidate the first full observation and
+        # require one automatic follow-up. Allow both complete walks at the
+        # 25% qualification quota; 90 seconds was shorter than two 100k scans
+        # on a loaded VPS and failed before any churn mutation began.
+        daemon.exact(timeout=240)
         print("PROGRESS initial exact validation passed; beginning churn batches", flush=True)
         case.history()
         total_batches = (args.churn_operations + args.churn_batch_size - 1) // args.churn_batch_size

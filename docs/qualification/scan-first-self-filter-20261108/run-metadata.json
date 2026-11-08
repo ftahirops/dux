@@ -1,0 +1,76 @@
+{
+  "created_at_utc": "2026-11-08",
+  "base_commit": "f5c84b3c4ea78d125375526e84d2f198f305210a",
+  "branch": "hardening/stale-dfid-classification-review",
+  "candidate_binary_sha256": "f5318e04ecbd7ca460c75a850e369b534ac9fdaa553d70812b1c003290da0d24",
+  "candidate_version": "dux 0.6.3 (f5c84b3c4ea7+modified) [production]",
+  "source_sha256": "351d2df5afbeb8b706abb4eed5c779eaba4aebed344b708543cbffa477b808a8",
+  "harness_sha256": "c36e898f229861c529bcdf7de4961ed17c9b53acff3e1bf1bf8a067a5d7f58e5",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39; ext4 disposable loop image; VPS2",
+  "limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "fixture": {
+    "seed_files": 100000,
+    "operations": 20000,
+    "batch_size": 2000,
+    "filesystem_image_mib": 2048,
+    "seed": 20261022
+  },
+  "qualification": {
+    "status": "passed",
+    "started_at": "2026-11-08T09:14:54Z",
+    "finished_at": "2026-11-08T09:28:10Z",
+    "elapsed_seconds": 747.388,
+    "batches": 10,
+    "max_batch_exact_convergence_ms": 141997,
+    "kernel_events_seen": 50498,
+    "dropped_events": 0,
+    "uncertain_at_checkpoints": false,
+    "exact_paths_inodes_allocations_all_rollups": true,
+    "midpoint_retry_exercised": true
+  },
+  "final_source_unit_tests": {
+    "passed": 300,
+    "failed": 0,
+    "ignored": 2
+  },
+  "strict_clippy": "passed --all-targets --all-features -- -D warnings",
+  "not_qualified": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "capability",
+    "coverage",
+    "cpu",
+    "crash",
+    "disk",
+    "mount",
+    "oom",
+    "overflow",
+    "pressure",
+    "retry",
+    "root",
+    "soak",
+    "startup",
+    "wal"
+  ],
+  "artifacts": {
+    "README.md": "aaef8aa5dd96d41b154d32e2d3b8e3fecd9601df7909743d4efff517378ffe51",
+    "final-churn-report.json": "2c555e2dbd9445dfab044b2b9a20c290deb68ab33ca60baca35d234cba1d4b04",
+    "final-churn-progress.json": "0d393fbd3d7eafc11bbed0df10fe530835aef333bf9d786db60b4c56cb2f0474",
+    "final-daemon.log": "2fcaf28d9a0b7d39d677d6b2689e3be5fc369898daff9cc720c82c812c303a58",
+    "final-run.log": "e49514715daede34dfc3b5ee8fdc94b795296762d023f98ff57d3ca181b906ca",
+    "rust-suite-final.log": "8625cd7b91de3dbda3305df95a5d265b7287cad64d6b43ed728ccc58513dd0a9",
+    "clippy-final.log": "f7ce0e67d23c0216a2aa24b82336027685973281823506ab8f0020cad86254ff",
+    "release-build-final.log": "b3b1d414cd3b0d75fadb8bb5287023ec564f5ae9a28f55b7ae9047855ee49848",
+    "unfiltered-f5c84b3-retry240-report.json": "ab3d837d44109bbd907f118f0ff979afc5cb6f577e418554e8c35b7e308689b0"
+  }
+}
