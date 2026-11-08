@@ -6,27 +6,30 @@
 
 ## Test and coverage update (2026-11-08, latest local run)
 
-After adding two classification-rule regression tests, the current Rust suite
-passes **312 tests, 0 failures, 2 ignored** (`cargo test --locked
---all-features`). Formatting (`cargo fmt --check`), strict Clippy,
-`git diff --check`, stable line coverage, and nightly branch coverage also
-passed. The ignored test requires a separately qualified ext4 filesystem that
-supports the required file-handle behavior. Python monitor/harness suite:
-**323 passed** (27 focused canary-monitor tests), recorded in the qualification
-README. These are test counts per suite/run, not unique test cases summed over
-repeated coverage and qualification runs.
+After adding two classification-rule regression tests and three
+fault-injection control tests, the default-feature Rust suite passes **312
+tests, 0 failures, 2 ignored**; the all-features suite passes **315 tests, 0
+failures, 2 ignored**. Formatting, strict Clippy, `git diff --check`, and an
+optimized all-features release build passed. The fault-injection tests are
+compiled only when that feature is enabled. The ignored tests require a
+separately qualified ext4 filesystem for handle behavior and a manual
+production-shaped scale profile. Python monitor/harness suite: **323 passed**
+(27 focused canary-monitor tests), recorded in the qualification README. These
+are test counts per suite/run, not unique test cases summed over repeated
+coverage and qualification runs.
 
 Coverage from the latest coverage-instrumented Rust run:
 
-- Stable line coverage: **69.02%** overall (25,836 instrumented lines,
-  8,004 missed).
-- Nightly branch coverage: **66.87%** overall; region coverage **69.55%**,
-  function coverage **74.96%**. Branch coverage is measured separately with
+- Stable line coverage: **69.25%** overall (25,929 instrumented lines,
+  7,973 missed).
+- Nightly branch coverage: **67.18%** overall; region coverage **49.75%**,
+  function coverage **75.49%**. Branch coverage is measured separately with
   nightly because LLVM's branch instrumentation option is unstable on stable
   Rust.
-- `classify.rs`, following the new safety-rule tests: **99.30% line / 91.35%
-  branch**. Lower branch coverage remains in `fault.rs` (21.43%),
-  `containers.rs` (51.47%), `tui.rs` (47.54%), and `emit.rs` (50.00%).
+- `classify.rs`, following the safety-rule tests: **99.30% line / 91.35%
+  branch**. The fault-injection controls now have **91.91% line / 68.75%
+  branch** coverage. Lower branch coverage remains in `containers.rs`
+  (51.47%), `tui.rs` (47.54%), and `emit.rs` (50.00%).
 - Security dependency audit: `cargo audit --json` exited successfully with
   zero known vulnerabilities across 229 locked dependencies; the advisory
   database was last updated 2026-11-06. This is dependency-vulnerability
@@ -40,18 +43,21 @@ line, function, and branch totals. No claim of 100% test coverage is made.
 
 ### Current live candidate checkpoint
 
-The VPS2 full-root scan-first candidate is still under its 24-hour monitored
-canary; only the initial sample has been recorded in the latest checkpoint.
+The VPS2 full-root scan-first candidate is under its 24-hour monitored
+canary; its first sample was recorded at 18:35 UTC. A live check at 18:49 UTC
+confirmed both the canary monitor and Dux active with zero restarts.
 That sample passed binary/service identity, schema-v7 path/accounting,
 SQLite quick-check, freshness, resource, and critical-journal checks. The
 candidate completed an automatic retry after its first full-root attempt
 failed closed on an inode-incarnation conflict plus concurrent hint loss. The
 retry scanned 1,361,780 files and 163,202 directories with zero coverage
 issues, and the accounting verifier passed. Hints arrived during the scan, so
-the view remained dirty as designed. This is one successful retry, not proof
-of continuous convergence; the 24-hour canary, longer soak, production-host
-canary, and other release gates remain open. The production host was not
-changed.
+the view remained dirty as designed. At 18:49 UTC Dux had seen 34.1M events,
+with zero kernel overflows and zero userspace drops; the last full observation
+was 455 seconds old, within the canary's 1,200-second freshness bound. This is
+one passing canary sample plus a live health check, not proof of continuous
+convergence. The 24-hour canary, longer soak, production-host canary, and other
+release gates remain open. The production host was not changed.
 
 ## Latest fixed-cadence implementation and VPS2 evidence (11:54 UTC)
 
