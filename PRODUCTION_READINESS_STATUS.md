@@ -889,3 +889,26 @@ The broader read-only inventory measured `/var` at **38 GiB**, `/home` at
 `/var/backups` **3.3 GiB**, and `/var/log` **2.1 GiB**. These totals are not
 proof that the contents are disposable. No broader inventory files were removed. The detailed
 inventory and cleanup rationale are in the audit.
+
+## Current scan-first runtime candidate — 2026-11-08 13:17 UTC
+
+Commit `739113c` (`Keep scan-first retries on fixed cadence`) is pushed on
+`hardening/stale-dfid-classification-review` and is installed on VPS2 as
+`/usr/bin/dux`. Its binary SHA-256 is
+`fa7aca762c7aa7e90965c9df449dcce229bb5f7c4cadd8aefd183284c8a3f0c6`; the
+embedded source revision is `739113c5c1ac`. Local reruns against this source
+passed 305 tests (0 failed, 2 ignored), `cargo fmt --check`, and strict
+all-target/all-feature Clippy with `-D warnings`.
+
+VPS2 service was active with zero restarts at 13:17:49 UTC. Dux reported
+`scan_first=true`, 0 kernel overflow notifications, 0 userspace update drops,
+and 935,979 events seen. It remained dirty with 1,458,363 indexed nodes and
+the accepted scan timestamp unchanged. There had been no new scan since the
+13:15:38 service restart. The scheduler initializes `last_reconcile` to five
+minutes before startup, so this instance's first periodic observation is due
+around 13:25:38 UTC, subject to pressure admission and queue-drain readiness.
+The earlier 188-second scan on e96e708 rejected publication after finding 36
+conflicting inode incarnations; the new scheduler has not yet been observed
+through a due scan. This runtime is therefore an in-progress canary, not proof
+of convergence or production readiness. Rollback binaries remain in
+`/root/dux-canary-e96e708/` on VPS2.
