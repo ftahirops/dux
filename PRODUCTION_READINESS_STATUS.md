@@ -1131,3 +1131,179 @@ interval will report service restarts and OOM counters at sample time; it does
 not provide sub-hour failure detection. All four preflight reports are
 preserved in the qualification directory and on VPS2; none counts toward the
 24-hour duration.
+
+## Canary failure and retry convergence result — 2026-11-08 (updated 17:48 UTC)
+
+The v5 VPS2 candidate canary **failed** on sample 2 at 15:55:14 UTC, after
+sample 1 passed. Its fail-closed reasons were both status reads exceeding the
+1,200-second last-observation limit and critical accounting/overflow/scan
+journal evidence. It is not a completed or passing 24-hour canary.
+
+Live Dux evidence explains the failure. The 14:38:30 observation completed at
+14:42:22 with zero coverage issues and accounting verification passed at
+14:43:00. Subsequent scheduled/retry observations did not qualify:
+
+| Completion (UTC) | Coverage issues | Reported failure category | Next delay |
+| --- | ---: | --- | ---: |
+| 14:58:55 | 5 | conflicting inode incarnations | 59 s |
+| 15:04:24 | 27 | conflicting inode incarnations | 119 s |
+| 15:10:38 | 55 | conflicting inode incarnations | 239 s |
+| 15:18:47 | 109 | conflicting inode incarnations | 479 s |
+| 15:30:46 | 27 | conflicting inode incarnations | 959 s |
+| 15:45:45 | 15 | conflicting inode incarnations | 1,919 s |
+| 16:01:03 | 72 | conflicting inode incarnations | 3,839 s |
+| 16:17:41 | 0 | scan accepted; accounting verifier passed | cadence reset |
+| 16:31:38 | 32 | conflicting inode incarnations | 59 s |
+| 16:37:20 | 23 | 13 conflicting incarnations and 10 conflicting edges | 119 s |
+| 16:43:35 | 1 | conflicting inode incarnations | 239 s |
+| 16:51:46 | 1 | conflicting inode incarnations | 479 s |
+| 17:04:01 | 18 | conflicting inode incarnations | 959 s |
+| 17:19:23 | 64 | conflicting inode incarnations | 1,919 s |
+| 17:32:02 | 13 | conflicting inode incarnations | 3,839 s |
+| 17:46:56 | 11 | conflicting inode incarnations | 7,679 s |
+
+The retained VPS2 journal identifies the dominant failure: emitted scan error
+records in this window were `conflicting_inode_incarnations` (up to 109 inode
+numbers in one pass), with one separate scan also reporting 10 conflicting
+inode-parent/name edges. This is a concurrent inode-reuse race during a
+non-snapshot filesystem walk. One scan at 16:17 converged with zero issues, but
+subsequent scans reproduced the race. Failed attempts reported
+`lost_events=true`; the kernel overflow counter was 1 and userspace update
+drops remained 0. Host recovery admission also deferred some scans at elevated
+pressure (six vCPUs, load around 2.6–5.6 in later samples, CPU PSI around 19%).
+At 17:48 UTC the daemon was active with zero restarts, no cgroup OOM events,
+and about 8.6 GiB free on `/`. Its last accepted observation was 5,968 seconds
+old; failed attempts had reached 8, retry backoff was 7,680 seconds, and the
+next retry was about 7,421 seconds away. The view
+correctly remained dirty. This is a freshness/convergence failure, not a
+daemon crash.
+
+The sample-2 report and journal excerpt are preserved in
+`docs/qualification/scan-first-fixed-cadence-20261108/canary-v5-failed.jsonl`
+and `live-retry-failure-20261108.log`; later retries are in
+`live-retry-failure-late-20261108.log`. This result contradicts a claim that the
+scan-first design has already demonstrated reliable recovery under sustained
+VPS2 churn. The retry/coverage path needs diagnosis before another canary is
+counted.
+
+## Test inventory and coverage summary — current evidence
+
+Automated tests on the current Rust source passed **309 tests, 0 failed, 2
+ignored** (`cargo test --locked --all-features`); the ignored cases require
+the dedicated ext4 or manual scale profile. The complete Python script suite
+passed **323 tests**, including **27 focused canary-monitor tests**. Strict
+all-target/all-feature Clippy, formatting, and `git diff --check` passed. The
+lockfile audit found no known vulnerabilities in 229 dependencies; the static
+binary contains auditable metadata for 202 dependencies. Audit limitations and
+the advisory database date are documented above. These are automated code and
+artifact checks, not proofs of universal runtime correctness.
+The Python command was rerun on this worktree; its result is preserved in
+`docs/qualification/scan-first-fixed-cadence-20261108/python-suite-final-20261108.log`.
+
+`cargo llvm-cov --locked --all-features --summary-only` measured **71.29% Rust
+line coverage overall**, 70.28% region coverage, and 75.05% function coverage.
+Key line coverage: scan 92.42%, store 96.19%, query 90.56%, deleted-open
+handling 89.62%, JSON emitters 85.08%, watch 72.06%, main/CLI 42.48%, and TUI
+39.51%. `fault.rs` remains at 32.65%. Branch coverage was not emitted by this
+run. The report is preserved at
+`docs/qualification/scan-first-fixed-cadence-20261108/llvm-cov-summary.log`.
+Coverage measures executed lines, not whether every behavior was asserted.
+
+Runtime and integration coverage completed so far:
+
+- Four accepted full-root observations of roughly 1.31–1.32 million files on
+  VPS2/ext4 completed with zero coverage issues and passed independent
+  accounting verification. Later high-churn observations produced 1–109
+  coverage issues per failed scan, with one later zero-issue pass before the
+  failures recurred and retry backoff escalated; see the table above.
+- The static package passed one forced real kernel-overflow integration test:
+  one overflow on a 16,384-event queue after 18,432 creates, exact independent
+  path/inode/allocation/rollup match, accounting verification, and recovery in
+  7.494 seconds. The dirty status after later hints was correctly retained.
+- DEB package lifecycle passed upgrade 102→103, rollback with verified index
+  restore, re-upgrade, purge, and clean install. Clean install completed a
+  scan; its in-daemon accounting verifier was still pending at report capture,
+  while a separate structural SQLite/accounting verifier passed. No independent
+  full-tree path comparison was made for that clean-install database.
+- Bursts of 20,000 and 100,000 create/delete pairs and eight concurrent
+  producers performing 80,000 pairs completed with zero observed kernel
+  overflows, userspace drops, or restarts in those bounded runs. A 10,000-event
+  synthetic pipe-reader test passed; it is not a kernel fanotify throughput
+  benchmark.
+- Earlier self-event-filter qualification (different binary/source revision)
+  passed two 100k/20k churn runs, a 1M fixture, a 1.37M fixture, and one isolated
+  forced-overflow fixture. These establish bounded results for that revision,
+  not the current package under the live retry failure described above.
+
+All kernel/runtime observations are on one Ubuntu 24.04, Linux 6.8, KVM VPS2
+with ext4. Uncovered: other kernels/filesystems, repeated sustained-overflow
+convergence, 10M+ scale, RPM lifecycle, power-loss/media corruption, 72-hour
+soak, and a production-host canary. Test counts overlap (the focused canary
+tests are included in the 323 Python tests); do not add them as unique tests.
+
+## Inode-reuse race diagnosis and bounded revalidation fix — 2026-11-08
+
+The repeated canary failures were traced to concurrent inode-number reuse
+during the scan. A path could be staged before an unlink, then ext4 could reuse
+that inode number for another path before the walk ended. The candidate then
+contained incompatible birth-time incarnations and correctly failed the
+compatibility projection. The retained VPS2 journal recorded up to 109 such
+conflicts in one pass, plus one scan with 10 conflicting inode-parent/name
+edges.
+
+The scanner now revalidates paths only when it detects an inode-incarnation
+conflict. It checks the conflicting paths and their staged ancestors. If a
+component is demonstrably gone, it removes that absent path and its staged
+descendants before recomputing the consistency checks. Permission/I/O errors
+and paths that remain present with a replacement or ambiguous identity still
+fail closed. Clean scans do not pay the revalidation walk. The scan result now
+reports how many staged paths were pruned.
+
+Verification on the current source: the full Rust suite passed **309 tests, 0
+failed, 2 ignored**; strict Clippy and formatting passed. The real ext4
+inode-reuse regression passed **10 consecutive runs**. Two focused helper tests
+prove that a vanished ancestor's subtree is pruned and that present ambiguous
+paths remain untouched and fail-closed. The ignored 100,000-entry scale test
+was also run explicitly: baseline scan 7.609 s, unchanged in-place
+reconciliation 8.298 s, and a 31,629,312-byte index. Rust line coverage was
+71.29% overall (70.28% regions, 75.05% functions; no branch coverage reported).
+
+The patched static-musl binary (`3372527b…1a55990a`, embedded source digest
+`4aa45d3a…8eb5082`) was also run on VPS2 in a
+bounded ext4 test using a separate temporary index. Four concurrent producers
+performed create/replace/delete churn while a 40,000-file scan ran; that scan
+finished in 2.1 seconds with zero coverage issues. After churn stopped, a
+second scan finished in 2.1 seconds and matched an independent filesystem
+oracle exactly: 40,041 indexed paths, 1,490,944 allocated bytes, and 40,041
+visible entries. The active VPS2 service remained running with zero restarts;
+its existing kernel overflow counter remained 1 and userspace update drops 0.
+The fixture and temporary index were removed. Evidence is
+`docs/qualification/scan-first-fixed-cadence-20261108/vps2-inode-reuse-churn-20261108.log`.
+
+This is a targeted fix supported by the VPS2 failure signature plus a bounded
+VPS2 churn run. It is not proof that the live 1.3-million-file workload now
+converges: the 24-hour candidate canary has failed, the patched daemon has not
+replaced the test host's running service, and sustained high-churn full-root
+recovery remains the next runtime gate.
+
+## Current-source VPS2 churn recheck — 2026-11-08
+
+A static-musl candidate built from the current worktree (binary SHA-256
+`590b5638770957ce9c0821423b4d5888a91a2bb396484b1e10a49585cc5dacf6`, embedded
+source SHA-256 `dfa9ece4c84376c0254e5513e986baa7f12d01e86938a91118c79249fc8f72a5`)
+was tested standalone on VPS2 against a 40,000-file ext4 fixture. Four
+producers performed 8,796 atomic replacements and ephemeral create/delete
+operations during the first scan. That scan reported 180 inode-incarnation
+coverage issues; it must be treated as incomplete, despite the command exit
+status being successful. After churn stopped, a stable scan completed with 0
+coverage issues in 4.95 seconds. An independent oracle that included directory
+and root allocated blocks matched exactly: 40,041 paths and 165,363,712
+allocated bytes; SQLite integrity check passed. The VPS2 systemd service stayed
+active with zero restarts and was not replaced by the candidate. Full evidence:
+`docs/qualification/scan-first-fixed-cadence-20261108/vps2-current-source-churn-20261108.log`.
+
+This improves evidence that the current source can recover and reconcile an
+exact stable fixture after churn. It also confirms that an observation overlapped
+with atomic replacements can remain incomplete. It does not establish clean
+scans under continuous production churn, full-root convergence, freshness SLO,
+long-duration soak, or universal filesystem correctness.

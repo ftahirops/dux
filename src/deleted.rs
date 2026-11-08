@@ -99,3 +99,58 @@ fn read_comm(pid: i32) -> String {
 fn read_uid(proc_path: &PathBuf) -> u32 {
     fs::metadata(proc_path).map(|m| m.uid()).unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::os::fd::{AsRawFd, FromRawFd};
+
+    #[test]
+    fn deleted_open_deduplicates_fds_and_keeps_a_literal_deleted_suffix() {
+        let root = std::env::temp_dir().join(format!(
+            "dux-deleted-open-{}-{}",
+            std::process::id(),
+            crate::util::now_secs()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let removed = root.join("actually-removed (deleted)");
+        let literal = root.join("still-present (deleted)");
+        let mut file = fs::File::create(&removed).unwrap();
+        file.write_all(&vec![0x5a; 64 * 1024]).unwrap();
+        drop(file);
+        fs::write(&literal, b"still present").unwrap();
+        let removed_fd = fs::File::open(&removed).unwrap();
+        let literal_fd = fs::File::open(&literal).unwrap();
+        // A duplicated descriptor must not duplicate the reclaimed byte count.
+        let duplicate_fd = unsafe { libc::dup(removed_fd.as_raw_fd()) };
+        assert!(duplicate_fd >= 0);
+        let _duplicate = unsafe { fs::File::from_raw_fd(duplicate_fd) };
+        fs::remove_file(&removed).unwrap();
+
+        let rows = deleted_open().unwrap();
+        let own_pid = std::process::id() as i32;
+        let removed_display = removed.to_string_lossy().into_owned();
+        let literal_display = literal.to_string_lossy().into_owned();
+        let removed_rows: Vec<_> = rows
+            .iter()
+            .filter(|row| row.pid == own_pid && row.path == removed_display)
+            .collect();
+        assert_eq!(removed_rows.len(), 1, "dup fds count as one unlinked inode");
+        assert!(removed_rows[0].size >= 64 * 1024);
+        assert!(
+            rows.iter()
+                .all(|row| row.pid != own_pid || row.path != literal_display),
+            "a live path whose name ends in the kernel's deleted suffix is not unlinked"
+        );
+        assert!(!removed.exists());
+        assert!(literal.exists());
+
+        drop(literal_fd);
+        drop(removed_fd);
+        drop(_duplicate);
+        let _ = fs::remove_dir_all(root);
+    }
+}

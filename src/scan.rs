@@ -234,6 +234,9 @@ pub struct ScanStats {
     pub conflicting_inode_allocations: u64,
     pub conflicting_inode_incarnations: u64,
     pub unknown_repeated_inode_identities: u64,
+    /// Staged path entries that disappeared before an inode-reuse conflict
+    /// could be validated. These are discarded with their staged subtrees.
+    pub vanished_reuse_paths: u64,
 }
 
 /// Atomic full rebuild: scan beside `db`, then install through a SQLite backup
@@ -901,6 +904,30 @@ fn scan_inner(
         "CREATE INDEX scan_nodes_target ON scan_nodes(dev,inode,parent_dev,parent_inode,name);",
     )?;
 
+    // A long walk can observe a file, then see its inode number reused for a
+    // different file later in the same walk. The older path is no longer in
+    // the tree, so it must not poison the entire candidate forever. Revalidate
+    // only paths participating in inode-incarnation conflicts and discard
+    // entries that have vanished, together with their descendants. Any path
+    // still present with an ambiguous identity remains fail-closed below.
+    let mut conflicting_inode_incarnations = count_conflicting_inode_incarnations(&stage)?;
+    let vanished_reuse_paths = if conflicting_inode_incarnations > 0 {
+        let removed = discard_vanished_inode_reuse_paths(&stage, &root)
+            .context("validating inode-reuse races")?;
+        if removed > 0 {
+            conflicting_inode_incarnations = count_conflicting_inode_incarnations(&stage)?;
+        }
+        removed
+    } else {
+        0
+    };
+    if vanished_reuse_paths > 0 {
+        tracing::warn!(
+            vanished_reuse_paths,
+            "discarded staged paths that vanished during inode-reuse races"
+        );
+    }
+
     let repeated_directory_identities = count_repeated_directory_identities(&stage)?;
     if repeated_directory_identities > 0 {
         tracing::error!(
@@ -922,7 +949,6 @@ fn scan_inner(
             "the same inode had different allocated sizes during the scan"
         );
     }
-    let conflicting_inode_incarnations = count_conflicting_inode_incarnations(&stage)?;
     if conflicting_inode_incarnations > 0 {
         tracing::error!(
             conflicting_inode_incarnations,
@@ -949,6 +975,16 @@ fn scan_inner(
         staged_root_unique_bytes,
         staged_root_unique_inodes,
     ) = build_staged_path_totals(&mut stage)?;
+    let staged_files = stage.query_row(
+        "SELECT COUNT(*) FROM scan_nodes WHERE path_id<>1 AND kind<>'d'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? as u64;
+    let staged_dirs = stage.query_row(
+        "SELECT COUNT(*) FROM scan_nodes WHERE kind='d'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? as u64;
 
     // ---- phase 2: deterministic hardlinks + bottom-up totals in SQLite ----
     indexing.store(true, Ordering::Relaxed);
@@ -1076,8 +1112,8 @@ fn scan_inner(
     store.conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
 
     let stats = ScanStats {
-        files: n_files.load(Ordering::Relaxed),
-        dirs: n_dirs.load(Ordering::Relaxed),
+        files: staged_files,
+        dirs: staged_dirs,
         staged_path_instances: staged_path_instances as u64,
         staged_directory_alias_paths: staged_directory_alias_paths as u64,
         staged_root_visible_bytes,
@@ -1092,6 +1128,7 @@ fn scan_inner(
         conflicting_inode_allocations: conflicting_inode_allocations as u64,
         conflicting_inode_incarnations: conflicting_inode_incarnations as u64,
         unknown_repeated_inode_identities: unknown_repeated_inode_identities as u64,
+        vanished_reuse_paths,
         errors: n_errors.load(Ordering::Relaxed)
             + repeated_directory_identities as u64
             + conflicting_inode_edges as u64
@@ -1498,6 +1535,128 @@ fn count_conflicting_inode_incarnations(stage: &Connection) -> Result<i64> {
             |row| row.get(0),
         )
         .context("checking inode-number reuse during scan")
+}
+
+/// Remove staged entries that vanished after being observed when their inode
+/// number was later reused during the same walk. All candidates are checked
+/// before deletion so a vanished directory can be pruned with its subtree.
+/// Present candidates are retained and will still make the scan incomplete if
+/// their conflicting incarnation cannot be reconciled conservatively.
+fn discard_vanished_inode_reuse_paths(stage: &Connection, root: &Path) -> Result<u64> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let mut stmt = stage.prepare(
+        "SELECT n.path_id FROM scan_nodes n
+         JOIN (SELECT dev,inode FROM scan_nodes GROUP BY dev,inode
+              HAVING MIN(birth_ns)!=MAX(birth_ns)) c
+           ON c.dev=n.dev AND c.inode=n.inode
+         WHERE n.path_id<>1 ORDER BY n.depth,n.path_id",
+    )?;
+    let candidates = stmt
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+
+    let mut vanished = Vec::new();
+    for path_id in candidates {
+        // An earlier vanished ancestor may already have removed this row.
+        let exists: bool = stage.query_row(
+            "SELECT EXISTS(SELECT 1 FROM scan_nodes WHERE path_id=?1)",
+            [path_id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            continue;
+        }
+        let mut ancestry = Vec::new();
+        let mut current = path_id;
+        let mut depth_guard = 0usize;
+        while current != 1 {
+            let (parent, name, dev, inode, birth_ns, kind):
+                (i64, Vec<u8>, i64, i64, i64, String) = stage.query_row(
+                "SELECT parent_path_id,name,dev,inode,birth_ns,kind FROM scan_nodes WHERE path_id=?1",
+                [current],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )?;
+            anyhow::ensure!(
+                parent > 0 && parent < current,
+                "invalid staged ancestry for path {path_id}"
+            );
+            ancestry.push((
+                current,
+                std::ffi::OsString::from_vec(name),
+                dev,
+                inode,
+                birth_ns,
+                kind,
+            ));
+            current = parent;
+            depth_guard += 1;
+            anyhow::ensure!(
+                depth_guard <= 1_000_000,
+                "staged path ancestry is unreasonably deep"
+            );
+        }
+        let mut path = root.to_path_buf();
+        for (ancestor_id, component, expected_dev, expected_inode, expected_birth, expected_kind) in
+            ancestry.into_iter().rev()
+        {
+            path.push(component);
+            match fs::symlink_metadata(&path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    // A parent directory may have vanished after its child was
+                    // staged. Prune from the first absent path component so no
+                    // stale ancestor or sibling subtree is retained.
+                    vanished.push(ancestor_id);
+                    break;
+                }
+                Ok(metadata) => {
+                    let identity = crate::util::indexed_identity(&metadata).ok();
+                    let current_birth = crate::util::inode_path_metadata_at(&metadata, &path).0;
+                    let kind_matches = match expected_kind.as_str() {
+                        "d" => metadata.is_dir(),
+                        "l" => metadata.file_type().is_symlink(),
+                        "f" => metadata.is_file(),
+                        _ => true,
+                    };
+                    if identity != Some((expected_dev, expected_inode))
+                        || !kind_matches
+                        || current_birth != expected_birth
+                    {
+                        // A replacement or symlinked ancestor is ambiguous; do
+                        // not follow it or discard rows on that evidence alone.
+                        break;
+                    }
+                }
+                // Permission, I/O, and other failures are not proof that the
+                // path disappeared. Preserve it so validators fail closed.
+                Err(_) => break,
+            }
+        }
+    }
+
+    let mut removed_paths = 0u64;
+    for path_id in &vanished {
+        removed_paths = removed_paths.saturating_add(stage.execute(
+            "WITH RECURSIVE stale(path_id) AS (
+                 SELECT ?1 UNION ALL
+                 SELECT child.path_id FROM scan_nodes child
+                 JOIN stale parent ON child.parent_path_id=parent.path_id
+             )
+             DELETE FROM scan_nodes WHERE path_id IN (SELECT path_id FROM stale)",
+            [path_id],
+        )? as u64);
+    }
+    Ok(removed_paths)
 }
 
 fn count_unknown_repeated_inode_identities(stage: &Connection) -> Result<i64> {
@@ -2728,7 +2887,150 @@ mod tests {
     }
 
     #[test]
-    fn in_place_scan_keeps_previous_index_when_ext4_reuses_inode_mid_walk() {
+    fn inode_reuse_revalidation_prunes_missing_ancestor_subtree() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = tmp("reuse-prune-ancestor");
+        let dead_dir = root.join("dead");
+        let nested_dir = dead_dir.join("nested");
+        let stale_path = nested_dir.join("old");
+        let live_path = root.join("live");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::write(&stale_path, b"hard-linked inode").unwrap();
+        fs::hard_link(&stale_path, &live_path).unwrap();
+
+        let root_meta = fs::symlink_metadata(&root).unwrap();
+        let dead_meta = fs::symlink_metadata(&dead_dir).unwrap();
+        let nested_meta = fs::symlink_metadata(&nested_dir).unwrap();
+        let stale_meta = fs::symlink_metadata(&stale_path).unwrap();
+        let live_meta = fs::symlink_metadata(&live_path).unwrap();
+        let (root_dev, root_ino) = crate::util::indexed_identity(&root_meta).unwrap();
+        let (dead_dev, dead_ino) = crate::util::indexed_identity(&dead_meta).unwrap();
+        let (nested_dev, nested_ino) = crate::util::indexed_identity(&nested_meta).unwrap();
+        let (file_dev, file_ino) = crate::util::indexed_identity(&live_meta).unwrap();
+        assert_eq!(
+            crate::util::indexed_identity(&stale_meta).unwrap(),
+            (file_dev, file_ino)
+        );
+        let (live_birth, _) = crate::util::inode_path_metadata_at(&live_meta, &live_path);
+        let (stale_birth, _) = crate::util::inode_path_metadata_at(&stale_meta, &stale_path);
+        let (root_birth, _) = crate::util::inode_path_metadata_at(&root_meta, &root);
+        let (dead_birth, _) = crate::util::inode_path_metadata_at(&dead_meta, &dead_dir);
+        let (nested_birth, _) = crate::util::inode_path_metadata_at(&nested_meta, &nested_dir);
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(
+               path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,depth INTEGER,name BLOB,
+               dev INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(1,-1,0,?1,?2,?3,?4,'d')",
+            params![root.as_os_str().as_bytes(), root_dev, root_ino, root_birth],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(2,1,1,?1,?2,?3,?4,'d')",
+            params![b"dead".as_slice(), dead_dev, dead_ino, dead_birth],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(3,2,2,?1,?2,?3,?4,'d')",
+            params![b"nested".as_slice(), nested_dev, nested_ino, nested_birth],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(4,3,3,?1,?2,?3,?4,'f')",
+            params![
+                b"old".as_slice(),
+                file_dev,
+                file_ino,
+                stale_birth.saturating_add(1)
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(5,1,1,?1,?2,?3,?4,'f')",
+            params![b"live".as_slice(), file_dev, file_ino, live_birth],
+        )
+        .unwrap();
+
+        fs::remove_dir_all(&dead_dir).unwrap();
+        let removed = discard_vanished_inode_reuse_paths(&conn, &root).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM scan_nodes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            removed, 3,
+            "missing directory and its descendants are pruned"
+        );
+        assert_eq!(rows, 2, "root and surviving hardlink remain staged");
+        assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 0);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inode_reuse_revalidation_keeps_present_ambiguous_paths_fail_closed() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = tmp("reuse-ambiguous-present");
+        let first = root.join("first");
+        let second = root.join("second");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&first, b"same inode").unwrap();
+        fs::hard_link(&first, &second).unwrap();
+        let root_meta = fs::symlink_metadata(&root).unwrap();
+        let file_meta = fs::symlink_metadata(&first).unwrap();
+        let (root_dev, root_ino) = crate::util::indexed_identity(&root_meta).unwrap();
+        let (file_dev, file_ino) = crate::util::indexed_identity(&file_meta).unwrap();
+        let (birth, _) = crate::util::inode_path_metadata_at(&file_meta, &first);
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(
+               path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,depth INTEGER,name BLOB,
+               dev INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(1,-1,0,?1,?2,?3,?4,'d')",
+            params![root.as_os_str().as_bytes(), root_dev, root_ino, 1],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(2,1,1,?1,?2,?3,?4,'f')",
+            params![b"first".as_slice(), file_dev, file_ino, birth],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes VALUES(3,1,1,?1,?2,?3,?4,'f')",
+            params![
+                b"second".as_slice(),
+                file_dev,
+                file_ino,
+                birth.saturating_add(1)
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(discard_vanished_inode_reuse_paths(&conn, &root).unwrap(), 0);
+        assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 1);
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM scan_nodes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 3, "present conflicting paths are never discarded");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn in_place_scan_discards_vanished_path_after_ext4_inode_reuse_mid_walk() {
         let root = tmp("live-inode-reuse-root");
         let db = tmp("live-inode-reuse-db");
         rm_db(&db);
@@ -2821,15 +3123,16 @@ mod tests {
         let _ = resume_tx.send(());
         let stats = scan_thread.join().unwrap().unwrap();
 
-        // An incomplete in-place scan must leave the prior published rows
-        // intact, visibly stale, until a complete reconciliation is possible.
+        // The walk captured old-entry before the unlink and the reused inode
+        // under new-entry afterwards. Revalidation should discard the vanished
+        // old path and allow this now-consistent observation to publish.
         let prior = Store::open_ro(&db).unwrap();
         let old_path_retained = crate::store::path_graph_lookup(&prior.conn, &old_path)
             .unwrap()
             .is_some();
-        let new_path_absent = crate::store::path_graph_lookup(&prior.conn, &new_path)
+        let new_path_indexed = crate::store::path_graph_lookup(&prior.conn, &new_path)
             .unwrap()
-            .is_none();
+            .is_some();
         let dirty_marker_present = prior.get_meta("dirty_since").unwrap().is_some();
         drop(prior);
         rm_db(&db);
@@ -2843,22 +3146,23 @@ mod tests {
             reused,
             "ext4 did not reuse inode {old_inode} with a new birth time"
         );
-        assert_eq!(stats.conflicting_inode_incarnations, 1);
+        assert_eq!(stats.conflicting_inode_incarnations, 0);
+        assert_eq!(stats.vanished_reuse_paths, 1);
         assert!(
-            stats.errors > 0,
-            "inode reuse must make the scan incomplete"
+            stats.errors == 0,
+            "a vanished path proven stale by revalidation should not poison the scan"
         );
         assert!(
-            old_path_retained,
-            "incomplete scan changed prior indexed path"
+            !old_path_retained,
+            "the vanished path remained in the published index"
         );
         assert!(
-            new_path_absent,
-            "incomplete scan published an unverified path"
+            new_path_indexed,
+            "the replacement incarnation was not published"
         );
         assert!(
-            dirty_marker_present,
-            "incomplete scan did not mark the index stale"
+            !dirty_marker_present,
+            "a complete revalidated scan left a dirty marker behind"
         );
     }
 
