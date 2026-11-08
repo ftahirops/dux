@@ -922,3 +922,12 @@ The index correctly remained dirty pending a full observation. This supports
 burst draining under this specific 20k-file workload; it does not isolate the
 probe's exact event count, test queue-capacity saturation, or prove scan
 publication or accounting correctness.
+
+A second bounded probe at 13:21:51 UTC used 100,000 create/delete pairs under
+`/tmp` and completed in 6.979 seconds. The event counter rose from 2,915,692 to
+3,456,877 (including background activity); kernel overflow notifications and
+userspace drops remained zero, and the service stayed active with
+`NRestarts=0`. The index remained dirty and no scan was active during this
+probe. Like the smaller probe, this supports reader throughput only at the
+observed workload and is not a queue-capacity or reconciliation correctness
+proof.
