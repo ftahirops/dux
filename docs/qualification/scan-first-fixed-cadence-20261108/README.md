@@ -35,6 +35,17 @@ behavior. Legacy event-apply mode keeps its immediate repair behavior.
   evidence files were untracked during this build; the compiled source commit
   and complete source file digests are recorded in the manifest.
 
+After committing all evidence, a second official static-musl build produced
+package revision 102 from commit `59f846c616f2a8e5ee6e9de9e5de26de34f2b2f3`
+with `worktree_dirty=false`. Its binary SHA-256 is
+`7a914d9464229f11b69635e8401bc0f183472f6d6a3e744fa77aeba7baea9000`, and its
+DEB SHA-256 is
+`fdb978491b1e8cde584bd6cafd384f625717a9c63d55c6369aae528f8856481a`.
+The Rust source is identical to commit `5590978` used by the live runtime
+test (`git diff 5590978 59f846c -- src` is empty); the later commit records
+qualification documentation and artifacts. Package 102 itself has not been
+installed on VPS2; the runtime evidence below is from package 101.
+
 ## Before/after runtime evidence
 
 The earlier package 100 run was observed from 11:09:08 to 11:30:09 UTC. The

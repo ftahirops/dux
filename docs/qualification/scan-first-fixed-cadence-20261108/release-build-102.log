@@ -1,0 +1,55 @@
+>> building auditable static musl binary (v0.6.3) with cargo-auditable 0.7.7
+   Compiling dux v0.6.3 (/home/dux)
+    Finished `release` profile [optimized + debuginfo] target(s) in 2m 15s
+>> splitting Build-ID-matched debug symbols
+>> auditing Cargo.lock with cargo-audit-audit 0.22.2
+>> auditing exact release binary
+>> .deb
+dpkg-deb: building package 'dux' in '/tmp/tmp.wyIP56RWRE/output/dux_0.6.3-102_amd64.deb'.
+>> .rpm
+Executing(%install): /bin/sh -e /var/tmp/rpm-tmp.dmQjWa
++ umask 022
++ cd /tmp/tmp.wyIP56RWRE/rpm/BUILD
++ /bin/rm -rf /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64
++ /bin/mkdir -p /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT
++ /bin/mkdir /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64
++ rm -rf /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64
++ mkdir -p /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/bin /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/lib/dux /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/lib/systemd/system /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/share/doc/dux
++ mkdir -p /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/var/lib/dux
++ install -m0755 /tmp/tmp.wyIP56RWRE/rpm/SOURCES/dux /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/bin/dux
++ install -m0755 /tmp/tmp.wyIP56RWRE/rpm/SOURCES/secure-index-permissions.sh /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/lib/dux/secure-index-permissions.sh
++ install -m0755 /tmp/tmp.wyIP56RWRE/rpm/SOURCES/dux-backup-index.py /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/lib/dux/dux-backup-index.py
++ install -m0644 /tmp/tmp.wyIP56RWRE/rpm/SOURCES/dux.service /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/lib/systemd/system/dux.service
++ install -m0644 /tmp/tmp.wyIP56RWRE/rpm/SOURCES/dux-tunnel.service /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/lib/systemd/system/dux-tunnel.service
++ install -m0644 /tmp/tmp.wyIP56RWRE/rpm/SOURCES/README.md /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64/usr/share/doc/dux/README.md
+Processing files: dux-0.6.3-102.x86_64
+Provides: dux = 0.6.3-102 dux(x86-64) = 0.6.3-102
+Requires(interp): /bin/sh /bin/sh /bin/sh /bin/sh
+Requires(rpmlib): rpmlib(CompressedFileNames) <= 3.0.4-1 rpmlib(FileDigests) <= 4.6.0-1 rpmlib(PayloadFilesHavePrefix) <= 4.0-1
+Requires(pre): /bin/sh shadow-utils
+Requires(post): /bin/sh
+Requires(preun): /bin/sh
+Requires(postun): /bin/sh
+Checking for unpackaged file(s): /usr/lib/rpm/check-files /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64
+Wrote: /tmp/tmp.wyIP56RWRE/rpm/RPMS/x86_64/dux-0.6.3-102.x86_64.rpm
+Executing(%clean): /bin/sh -e /var/tmp/rpm-tmp.IxacjM
++ umask 022
++ cd /tmp/tmp.wyIP56RWRE/rpm/BUILD
++ /bin/rm -rf /tmp/tmp.wyIP56RWRE/rpm/BUILDROOT/dux-0.6.3-102.x86_64
++ RPM_EC=0
++ jobs -p
++ exit 0
+Executing(rmbuild): /bin/sh -e /var/tmp/rpm-tmp.zqBNsG
++ umask 022
++ cd /tmp/tmp.wyIP56RWRE/rpm/BUILD
++ RPM_EC=0
++ jobs -p
++ exit 0
+>> done — artifacts in /var/tmp/dux-release-output-59f846c/:
+SHA256SUMS
+build-manifest.json
+dux-0.6.3-102.x86_64.rpm
+dux-0.6.3-x86_64-linux-static
+dux.debug
+dux_0.6.3-102_amd64.deb
+source.tar.gz

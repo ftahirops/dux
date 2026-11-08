@@ -29,8 +29,11 @@ This is concrete improvement evidence, not a production sign-off. The test
 still produced sustained hint-ring overflows, the full-root scans used
 substantial CPU and disk I/O, and only a five-minute post-retry window was
 observed. The 15-minute freshness SLO, sustained/repeated high-rate churn,
-72-hour current-candidate soak, other filesystems/kernels, production canary,
-and release artifact built from a clean evidence-committed tree remain open.
+72-hour current-candidate soak, other filesystems/kernels, and production
+canary remain open. A clean-tree static-musl package 102 is built and audited
+from commit `59f846c`; its Rust sources are identical to tested commit
+`5590978`, but package 102 has not been installed on VPS2. The live runtime
+test used package 101 built from that exact implementation commit.
 Full details and logs: [fixed-cadence qualification](docs/qualification/scan-first-fixed-cadence-20261108/README.md).
 
 ## Latest exact-candidate evidence (2026-11-08)
