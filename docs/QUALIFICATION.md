@@ -8880,3 +8880,35 @@ seconds CPU, read 4.4 GiB, and written 7.7 GiB. The prior package-100 run
 recorded repeated five-minute scans and 12m43s CPU / 15.7 GiB writes over about
 21 minutes. These are individual runs, not a controlled benchmark. Full source/build/runtime evidence is in
 [`qualification/scan-first-fixed-cadence-20261108/`](qualification/scan-first-fixed-cadence-20261108/).
+
+**12:30 UTC live follow-up:** the bounded retry started at 12:23:03 and
+completed at 12:26:29 with 35 inode-incarnation conflicts. Dux retained dirty
+status and increased retry backoff to 16 minutes. At 12:30:53 the service had
+zero restarts but remained dirty, with 12.28M events seen, zero resolved, and
+userspace hint-ring loss. One hour of service counters showed 1,213 CPU
+seconds, 11.2 GB read, and 17.5 GB written. This confirms bounded retry
+execution but not convergence; the ongoing work and I/O are substantial.
+Snapshot:
+[`post-retry-runtime-snapshot-1230.log`](qualification/scan-first-fixed-cadence-20261108/post-retry-runtime-snapshot-1230.log).
+
+## Deterministic inode-reuse scan regression — 2026-11-08 12:30 UTC
+
+Added an ext4 race test that pauses after statting a file, unlinks it, retains
+candidate inodes until ext4 reuses the same `(device,inode)` with a new birth
+time, and places the replacement at a second path before resuming the scan.
+The test passed ten consecutive runs. Every run detected the conflict, kept
+the prior published path rows, withheld the unverified replacement, and
+retained a dirty marker. Its injection hook is compiled only for tests.
+
+Verification on the current source: **302 Rust tests passed, 0 failed, 2
+ignored**; `cargo fmt --check`, strict all-target/all-feature Clippy, and
+`cargo build --release --locked` passed. One earlier test setup failed because
+it deleted every candidate immediately and ext4 repeatedly allocated a
+different temporary inode. The fixture now keeps bounded candidates allocated
+to advance through the inode group; the final version passed 10/10.
+
+This proves the current fail-closed guard for one real ext4 race. It is not a
+production fix: sustained live VPS2 scans still fail with inode-incarnation
+conflicts. Repeated reuse, forced hint loss, and an independent complete
+post-scan oracle remain open. Full test details:
+[`scan-first-inode-reuse-race-20261108/`](qualification/scan-first-inode-reuse-race-20261108/).

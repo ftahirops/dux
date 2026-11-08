@@ -133,6 +133,18 @@ to validate and repair affected paths/scopes or use a stable filesystem
 snapshot, not simply ignore the conflict. Snapshot:
 `post-cadence-runtime-snapshot-1215.log`.
 
+The bounded retry started at 12:23:03 and completed at 12:26:29 with **35
+inode-incarnation conflicts** across 1,302,352 files and 156,451 directories.
+Dux kept the previous accepted index dirty and raised the retry backoff to 16
+minutes. At 12:30:53, the daemon remained active with zero restarts, but had
+seen 12.28M events with zero resolved and continued userspace hint-ring loss;
+kernel overflows remained zero. Cumulative service counters since 11:30:52
+were 1,213.2 CPU seconds, 11.2 GB read, and 17.5 GB written. This makes three
+incomplete scans out of the four observations/retries since 11:50; only the
+11:57 retry completed without coverage errors, and it still remained stale
+because changes raced with the walk. It does not demonstrate stable
+convergence. Full snapshot: `post-retry-runtime-snapshot-1230.log`.
+
 ## Artifacts
 
 - `build-manifest-101.json`, `SHA256SUMS-101`, and the two Cargo audit outputs
@@ -146,6 +158,8 @@ snapshot, not simply ignore the conflict. Snapshot:
   stale status, service counters, and runtime binary identity.
 - `post-cadence-runtime-snapshot-1215.log` records the next scheduled scan,
   its 45 inode-incarnation coverage errors, retry state, and service counters.
+- `post-retry-runtime-snapshot-1230.log` records the subsequent retry with 35
+  conflicts and the daemon's one-hour cumulative CPU and I/O counters.
 - `post-fifteen-minute-scan-db-check.json` records the structural SQLite
   check during the later retry; it explicitly does not claim index freshness.
 - On VPS2, `/root/dux-qualification-43a7769/pre-5590978.sqlite` is the verified

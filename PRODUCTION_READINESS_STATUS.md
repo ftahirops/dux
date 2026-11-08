@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 12:02 UTC
+**Updated:** 2026-11-08 12:30 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -64,6 +64,32 @@ paths store birth time, but the compatibility `inodes` table is keyed only by
 `(dev_id,inode)`. Do not suppress this check without incarnation-aware
 allocation and path revalidation. The reproducible regression gate and design
 constraints are recorded in [the architecture decision](docs/ARCHITECTURE_EVOLUTION.md#additional-inode-reuse-requirement-from-vps2-2026-11-08).
+
+The 12:23 bounded retry completed at 12:26:29 with another 35 incarnation
+conflicts across 1.30M files and 156k directories. At 12:30:53, the daemon was
+still active with zero restarts, but had 12.28M events seen, zero resolved,
+and remained dirty with retry backoff raised to 16 minutes. One hour after
+package start, service counters were 1,213 CPU seconds, 11.2 GB read, and
+17.5 GB written. This is repeated scan non-convergence and substantial
+overhead on VPS2; it blocks any production-readiness claim. See the
+[12:30 runtime snapshot](docs/qualification/scan-first-fixed-cadence-20261108/post-retry-runtime-snapshot-1230.log).
+
+## Deterministic inode-reuse race regression (12:30 UTC)
+
+Added an ext4-only scan test with a `cfg(test)` pause hook after the old
+incarnation has been statted. The test unlinks that file, retains candidate
+inodes until ext4 reuses the exact number with a different birth time at a
+second path, and resumes the scan. It passed **10/10 consecutive runs** on the
+local ext4 host. Every run reported the conflicting incarnation and kept the
+prior database rows plus dirty marker; it did not publish the unverified new
+path. The full suite now passes **302 tests (2 ignored)**; formatting, strict
+Clippy, and an optimized release build also pass.
+
+This gives a deterministic reproduction and confirms the current fail-closed
+guard prevents a false clean update for this case. It does **not** fix live
+convergence, establish repeated-reuse or forced-hint-loss behavior, or alter
+the production binary. Details:
+[`inode reuse race qualification`](docs/qualification/scan-first-inode-reuse-race-20261108/README.md).
 
 ## Latest exact-candidate evidence (2026-11-08)
 

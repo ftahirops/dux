@@ -1,0 +1,20 @@
+VPS2 runtime snapshot captured 2026-11-08T12:30:53Z.
+
+systemd: ActiveState=active, NRestarts=0
+CPUUsageNSec=1213160013000
+IOReadBytes=11220111360
+IOWriteBytes=17461657600
+
+The retry started at 12:23:03Z and completed at 12:26:29Z. The scan logged
+`conflicting_inode_incarnations=35` and ended with 35 coverage issues across
+1,302,352 files and 156,451 directories.
+
+Status at capture:
+{"automatic_reconciliation_paused":false,"behind_seconds":3600.315,"caught_up":false,"daemon_live":true,"dirty":true,"dirty_reason":"fanotify hint ring capacity was exceeded","dirty_since_timestamp_seconds":1794141050,"events_dropped":0,"events_resolved":0,"events_seen":12284467,"failed_reconciliation_attempts":5,"index_bytes":83296313344,"index_bytes_on_disk":558563328,"index_nodes":1448886,"kernel_overflow_notifications":0,"last_event_commit_timestamp_seconds":0,"last_scan_age_seconds":2019,"last_scan_timestamp_seconds":1794139034,"max_automatic_reconciliation_retries":1,"max_pending_updates":500000,"pause_reason":null,"paused":false,"paused_since_timestamp_seconds":null,"pending_updates":0,"reconciliation_retry_backoff_seconds":960,"reconciliation_retry_due":false,"reconciliation_retry_remaining_seconds":696,"reconciliation_retry_state_corrupt":false,"root":"/","scan_first":true,"scan_in_progress":false,"scan_progress":null,"status_version":1,"throttled_since_timestamp_seconds":1794137453,"updates_committed":0,"userspace_updates_dropped":0,"wal_bytes":15520072,"watch_status_available":true,"watch_status_updated_at_seconds":1794141053,"write_error":null}
+
+Since package 101 started at 11:30:52Z, systemd accumulated 1,213.2 CPU
+seconds, 11.2 GB read, and 17.5 GB written. This is roughly one hour of one
+service run, not an isolated scan benchmark. The service had 12,284,467 events
+seen, zero resolved events, zero kernel overflows, and was again dirty from
+userspace hint-ring loss. The failure scheduled another bounded retry with a
+16-minute backoff; the daemon did not restart.

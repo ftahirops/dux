@@ -11,6 +11,9 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+type ScanTestHook = Arc<dyn Fn(&Path) + Send + Sync>;
+
 /// A directory or child can disappear after `jwalk` enumerates its parent.
 /// The resulting `NotFound` means there is no current subtree to index; other
 /// traversal failures remain coverage errors and must keep the index dirty.
@@ -36,6 +39,10 @@ pub struct ScanOptions {
     /// Directories observed as changed. The full walk remains authoritative;
     /// these paths only bias jwalk's directory queue toward affected branches.
     pub priority_paths: Vec<PathBuf>,
+    /// Deterministic race injection for scanner tests; never compiled into
+    /// production builds.
+    #[cfg(test)]
+    pub(crate) test_after_entry_stat: Option<ScanTestHook>,
 }
 
 fn priority_child_names(
@@ -1897,6 +1904,8 @@ fn parallel_stage(
     let scan_root = root.to_path_buf();
     let priority_children = Arc::new(priority_child_names(root, &opts.priority_paths));
     let callback_priority_children = Arc::clone(&priority_children);
+    #[cfg(test)]
+    let callback_test_after_entry_stat = opts.test_after_entry_stat.clone();
 
     std::thread::scope(|scope| -> Result<()> {
         let producer = scope.spawn(move || {
@@ -2073,6 +2082,10 @@ fn parallel_stage(
                             };
                             let (birth_ns, mount_id) =
                                 crate::util::inode_path_metadata_at(&m, &path);
+                            #[cfg(test)]
+                            if let Some(hook) = callback_test_after_entry_stat.as_ref() {
+                                hook(&path);
+                            }
                             let is_cycle = is_dir && has_ancestor(&child_ancestors, (dev, ino));
                             entry.client_state = ScanPathInfo {
                                 path_id,
@@ -2635,6 +2648,141 @@ mod tests {
         .unwrap();
         assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 1);
         assert_eq!(count_conflicting_inode_allocations(&conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn in_place_scan_keeps_previous_index_when_ext4_reuses_inode_mid_walk() {
+        let root = tmp("live-inode-reuse-root");
+        let db = tmp("live-inode-reuse-db");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        let parent = root.join("a");
+        let child = parent.join("child");
+        fs::create_dir_all(&child).unwrap();
+        let old_path = parent.join("old-entry");
+        fs::write(&old_path, b"same allocation size").unwrap();
+
+        // This test depends on ext4 exposing stable birth-time identity and
+        // promptly reusing freed inode numbers. Exercise it where those kernel
+        // semantics exist; the VPS2 qualification image also uses ext4.
+        if fs_magic(&root) != Some(0xef53) {
+            eprintln!("skipping live inode-reuse scan fixture: test root is not ext4");
+            let _ = fs::remove_dir_all(&root);
+            rm_db(&db);
+            return;
+        }
+        let old_meta = fs::symlink_metadata(&old_path).unwrap();
+        let old_inode = old_meta.ino() as i64;
+        let (old_birth_ns, _) = crate::util::inode_path_metadata_at(&old_meta, &old_path);
+        if old_birth_ns == 0 {
+            eprintln!("skipping live inode-reuse scan fixture: ext4 birth time unavailable");
+            let _ = fs::remove_dir_all(&root);
+            rm_db(&db);
+            return;
+        }
+
+        let baseline_opts = ScanOptions {
+            include_pseudo: true,
+            ..Default::default()
+        };
+        rebuild_atomic(&db, &root, &baseline_opts).unwrap();
+
+        // Pause immediately after the walker stats old-entry, while the read
+        // directory result already contains that name but has not descended
+        // into child/. The test then unlinks it and allocates the exact inode
+        // number for child/new-entry with a different ext4 birth time.
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let resume_rx = Arc::new(std::sync::Mutex::new(resume_rx));
+        let fired = Arc::new(AtomicBool::new(false));
+        let hook_path = old_path.clone();
+        let hook_resume = Arc::clone(&resume_rx);
+        let hook_fired = Arc::clone(&fired);
+        let hook = Arc::new(move |path: &Path| {
+            if path == hook_path && !hook_fired.swap(true, Ordering::SeqCst) {
+                let _ = entered_tx.send(());
+                let _ = hook_resume
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(30));
+            }
+        });
+        let scan_opts = ScanOptions {
+            include_pseudo: true,
+            jobs: Some(2),
+            test_after_entry_stat: Some(hook),
+            ..Default::default()
+        };
+        let scan_root = root.clone();
+        let scan_db = db.clone();
+        let scan_thread = std::thread::spawn(move || {
+            let mut store = Store::open_rw(&scan_db).unwrap();
+            reconcile_in_place(&mut store, &scan_root, &scan_opts)
+        });
+
+        let reached_hook = entered_rx.recv_timeout(Duration::from_secs(30)).is_ok();
+        let new_path = child.join("new-entry");
+        let mut reused = false;
+        if reached_hook {
+            fs::remove_file(&old_path).unwrap();
+            // Keep nonmatching candidates allocated so ext4 advances through
+            // the parent inode group's free bitmap instead of repeatedly
+            // reusing the same temporary inode. This private test tree is
+            // removed below; the candidate count remains bounded.
+            for attempt in 0..20_000 {
+                let candidate = parent.join(format!("reuse-candidate-{attempt}"));
+                fs::write(&candidate, b"same allocation size").unwrap();
+                let metadata = fs::symlink_metadata(&candidate).unwrap();
+                let (birth_ns, _) = crate::util::inode_path_metadata_at(&metadata, &candidate);
+                if metadata.ino() as i64 == old_inode && birth_ns != 0 && birth_ns != old_birth_ns {
+                    fs::rename(&candidate, &new_path).unwrap();
+                    reused = true;
+                    break;
+                }
+            }
+        }
+        let _ = resume_tx.send(());
+        let stats = scan_thread.join().unwrap().unwrap();
+
+        // An incomplete in-place scan must leave the prior published rows
+        // intact, visibly stale, until a complete reconciliation is possible.
+        let prior = Store::open_ro(&db).unwrap();
+        let old_path_retained = crate::store::path_graph_lookup(&prior.conn, &old_path)
+            .unwrap()
+            .is_some();
+        let new_path_absent = crate::store::path_graph_lookup(&prior.conn, &new_path)
+            .unwrap()
+            .is_none();
+        let dirty_marker_present = prior.get_meta("dirty_since").unwrap().is_some();
+        drop(prior);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+
+        assert!(
+            reached_hook,
+            "scanner did not reach the deterministic race hook"
+        );
+        assert!(
+            reused,
+            "ext4 did not reuse inode {old_inode} with a new birth time"
+        );
+        assert_eq!(stats.conflicting_inode_incarnations, 1);
+        assert!(
+            stats.errors > 0,
+            "inode reuse must make the scan incomplete"
+        );
+        assert!(
+            old_path_retained,
+            "incomplete scan changed prior indexed path"
+        );
+        assert!(
+            new_path_absent,
+            "incomplete scan published an unverified path"
+        );
+        assert!(
+            dirty_marker_present,
+            "incomplete scan did not mark the index stale"
+        );
     }
 
     #[test]

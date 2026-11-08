@@ -182,10 +182,13 @@ root requires an offline maintenance operation in the documented procedure
 
 The package-101 live run exposed a remaining reconciliation failure mode under
 real host churn. A 1.44M-entry ext4 walk at 12:12:14 completed at 12:15:03 but
-reported 45 conflicting inode incarnations; the preceding cadence scan had
-reported 155. In both cases, Dux correctly retained the previous accepted
-index and marked it dirty. The scheduler is functioning, but the scan does not
-converge while this host continues reusing inode numbers during walks.
+reported 45 conflicting inode incarnations; its retry at 12:23:03 completed at
+12:26:29 with another 35. The preceding 11:50 cadence scan had reported 155.
+In all incomplete cases, Dux correctly retained the previous accepted index
+and marked it dirty. The scheduler is functioning, but the scan does not
+converge while this host continues reusing inode numbers during walks. At
+12:30 the service had accumulated 1,213 CPU seconds, 11.2 GB read, and 17.5 GB
+written in one hour, so scan overhead is also a release blocker.
 
 The current compatibility `inodes` table has primary key `(dev_id,inode)`,
 while v7 `paths` also store `birth_ns`. The scanner's
@@ -207,6 +210,16 @@ case under repeated reuse and forced userspace hint loss. The candidate must
 either converge safely or remain explicitly stale; it may never publish the
 stale first path as current. VPS2 runtime evidence is in
 [`qualification/scan-first-fixed-cadence-20261108/`](qualification/scan-first-fixed-cadence-20261108/).
+
+The first deterministic fail-closed regression now exists in
+`scan::tests::in_place_scan_keeps_previous_index_when_ext4_reuses_inode_mid_walk`.
+It injects the race after stat and passed ten consecutive runs on the local
+ext4 host; the test proves the previous index remains published and dirty, and
+that the unverified replacement path is withheld. It is a test-only seam and
+does not change release behavior. The independent post-scan oracle, repeated
+reuse, and forced-hint-loss variants remain to be implemented before changing
+the conflict policy. See
+[`scan-first-inode-reuse-race-20261108/`](qualification/scan-first-inode-reuse-race-20261108/).
 
 ## Explicitly deferred
 
