@@ -1,0 +1,42 @@
+{
+  "captured_at_utc": "2026-11-08T23:42:35Z",
+  "candidate": {
+    "commit": "d27d3b7ccdaebc31060c57b3425baed25cb5739c",
+    "version": "0.6.3-107",
+    "target": "x86_64-unknown-linux-musl",
+    "binary_sha256": "c301574f148be8ac42caf1800b21a9d0b66441ce38d25844d7f4ea203add0475"
+  },
+  "environment": {
+    "filesystem": "ext4",
+    "mode": "isolated local test daemon with a private database and fixture root"
+  },
+  "initial_observation": {
+    "files": 100,
+    "directories": 5,
+    "staged_paths": 105,
+    "coverage_issues": 0,
+    "accounting_verification": "passed"
+  },
+  "modified_observation": {
+    "files": 102,
+    "directories": 5,
+    "staged_paths": 107,
+    "coverage_issues": 0,
+    "in_place_observation_confirmed": true,
+    "accounting_verification": "passed",
+    "scan_timestamp_advanced": true,
+    "last_scan_age_seconds": 0,
+    "path_assertions": {
+      "new_path_found": true,
+      "renamed_path_found": true,
+      "deleted_path_absent": true,
+      "old_rename_path_absent": true
+    }
+  },
+  "final_status": {
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "scan_command_message": "observation completed in 1s, but the index remains stale or uncertain due to concurrent changes"
+  },
+  "result": "functional path and accounting checks passed; freshness remained marked dirty due to concurrent filesystem hints"
+}

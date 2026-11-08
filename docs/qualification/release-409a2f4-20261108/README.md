@@ -268,13 +268,16 @@ results.
 The previous v3 canary remains failed at sample 13 and is stopped. A separate
 v4 run started at 23:27:17 UTC with a new JSONL file and the corrected monitor
 (SHA-256 `6599d0227bd6ea9cbd5295530672bb35cacf8faea4bd71e67d8f7e76f811ec8d`).
-Sample 1 passed at 23:28:13 UTC in 56.0 seconds. It observed the release-106
-service binary and unchanged unit hashes, a 1,045-second-old full scan, dirty
-status awaiting the next observation, 2.03 GiB peak service memory under the
-4 GiB cap, and zero restarts, kernel overflows, userspace drops, or OOM events.
-This is the older installed service binary, so the v4 soak does not qualify the
-uninstalled scan optimization. It is still running; one sample does not
-qualify the 24-hour gate. Its initial record is preserved in
+Samples 1–4 passed at 23:28:13, 23:33:07, 23:37:54, and 23:43:21 UTC. Each
+sample verified the release-106 service binary and unchanged unit hashes,
+SQLite/schema-v7 graph, and accounting. The observation ages were 1,045, 439,
+727, and 1,054 seconds; all samples had zero restarts, kernel overflows,
+userspace drops, and OOM events. The daemon remained dirty awaiting the next
+observation. The service's cumulative memory peak was 2.03 GiB under its 4 GiB
+limit. Sample collection took 36.8–64.5 seconds. This is the older installed
+service binary, so v4 does not qualify the uninstalled scan optimization. The
+24-hour soak is still in progress; four samples do not qualify its gate. The
+captured progress is preserved in
 [`live/canary-24h-5m-v4-progress.jsonl`](live/canary-24h-5m-v4-progress.jsonl).
 
 `cargo audit --json` passed at 23:29 UTC: zero known vulnerabilities and zero

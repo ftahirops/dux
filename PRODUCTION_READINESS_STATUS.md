@@ -34,23 +34,35 @@ restart, overflow, or userspace drop, but a subsequent reconciliation was
 cancelled under memory pressure and retried. That retry's full scan completed
 at 23:13:39 with 1,522,965 staged paths and zero coverage issues. This does not
 pass the failed canary's freshness gate; that soak is incomplete. A fresh v4
-24-hour soak started at 23:27:17 with the corrected diagnostic monitor. Sample
-1 passed in 56 seconds; observation age was 1,045 seconds, peak service memory
-2.03 GiB, and there were zero restarts, overflows, or userspace drops. V4
-monitors the installed release-106 binary, not the newer source changes, and
-is still in progress. The earlier full scan covered 1,514,820 staged paths
-with zero coverage issues and passed accounting verification; its
-scan-plus-accounting interval used 87.6% of one core and about 1.75 GiB read /
-1.66 GiB written. No CPU/I/O SLO has been set. The scan optimization and
-canary-monitor diagnostic fix are committed and pushed on
-`hardening/stale-dfid-classification-review`; neither is installed on
-production or the VPS2 service.
+24-hour soak started at 23:27:17 with the corrected diagnostic monitor.
+Samples 1–4 passed through 23:43 UTC with zero restarts, overflows, userspace
+drops, or OOMs. V4 monitors the installed release-106 binary, not the newer
+source changes, and remains in progress. The latest VPS2 status is active,
+unpaused, with scan age 297 seconds and zero overflows, drops, or restarts.
+The earlier full scan covered 1,514,820 staged paths with zero coverage issues
+and passed accounting verification; its scan-plus-accounting interval used
+87.6% of one core and about 1.75 GiB read / 1.66 GiB written. No CPU/I/O SLO
+has been set.
 
-Disk snapshot: local workspace root is 60% used with 72 GiB free and regenerable
-`target/` is 1.6 GiB. VPS2 root was 87% used with 13 GiB free after the repeated
-benchmark; `/var/tmp` was 4.7 GiB and `/var/lib/dux` 660 MiB at the earlier
-23:14 snapshot. No further cleanup was performed because the contents may
-include active build and rollback evidence.
+A clean static-musl release candidate 0.6.3-107 was built from commit
+`d27d3b7`. Package checksums, embedded dependency metadata, DEB/RPM payloads,
+and audits verified. The candidate binary passed an isolated ext4 daemon smoke
+test: the in-place path updated a 105-node fixture to 107 nodes, accounting
+verification passed, and indexed lookups matched the new, renamed, and deleted
+paths. The status remained dirty due to filesystem hints during the test, and
+the scan command did not claim a clean index. The package was not installed.
+
+The fresh Cargo.lock audit reported zero vulnerabilities and warnings across
+229 dependencies; the release builder also audited the exact candidate binary's
+202 dependency records. These are dependency checks, not a complete application
+security assessment. The scan optimization and canary-monitor diagnostic fix
+are committed and pushed on `hardening/stale-dfid-classification-review`;
+neither is installed on production or the VPS2 service.
+
+Disk snapshot: local root is 62% used with 68 GiB free; the release package set
+is 44 MiB and its auditable Rust target is 579 MiB. VPS2 root is 86% used with
+13 GiB free. No further cleanup was performed because temporary and rollback
+data may still be active or valuable.
 
 ## Test and coverage update (2026-11-08, latest local run)
 
