@@ -17,7 +17,9 @@ use crate::query;
 use crate::store::Store;
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::ffi::OsString;
 use std::fs;
+use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
@@ -128,39 +130,79 @@ fn overlay_upperdir(pid: i64) -> Result<Option<PathBuf>> {
         return Ok(None);
     }
     let path = PathBuf::from(format!("/proc/{pid}/mountinfo"));
-    let mi = match fs::read_to_string(&path) {
+    let mi = match fs::read(&path) {
         Ok(mountinfo) => mountinfo,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
-    Ok(parse_upperdir(&mi).map(PathBuf::from))
+    Ok(parse_upperdir(&mi))
 }
 
 /// Parse the container-root overlay `upperdir` out of a /proc/<pid>/mountinfo
 /// blob. Pure (no I/O) so it's unit-testable across driver layouts.
-fn parse_upperdir(mountinfo: &str) -> Option<String> {
-    for line in mountinfo.lines() {
+fn parse_upperdir(mountinfo: &[u8]) -> Option<PathBuf> {
+    for line in mountinfo.split(|byte| *byte == b'\n') {
         // mountinfo line: "... <mountpoint> ... - <fstype> <source> <superopts>"
-        let Some((pre, post)) = line.split_once(" - ") else {
+        let Some(separator) = line.windows(3).position(|window| window == b" - ") else {
             continue;
         };
-        if pre.split_whitespace().nth(4) != Some("/") {
+        let pre = &line[..separator];
+        let post = &line[separator + 3..];
+        if pre
+            .split(u8::is_ascii_whitespace)
+            .filter(|field| !field.is_empty())
+            .nth(4)
+            != Some(b"/".as_slice())
+        {
             continue; // want the container root mount
         }
-        let mut it = post.split_whitespace();
-        if it.next() != Some("overlay") {
+        let mut it = post
+            .split(u8::is_ascii_whitespace)
+            .filter(|field| !field.is_empty());
+        if it.next() != Some(b"overlay".as_slice()) {
             continue;
         }
         // remaining: <source> <superopts>
         if let Some(superopts) = it.nth(1) {
-            for opt in superopts.split(',') {
-                if let Some(u) = opt.strip_prefix("upperdir=") {
-                    return Some(u.to_string());
+            for opt in superopts.split(|byte| *byte == b',') {
+                if let Some(u) = opt.strip_prefix(b"upperdir=") {
+                    return unescape_mount_option_path(u);
                 }
             }
         }
     }
     None
+}
+
+/// OverlayFS prints mount-option values through the kernel's `seq_escape`,
+/// which represents comma, whitespace, and backslash bytes as three-digit
+/// octal escapes. Decode those before treating upperdir as a filesystem path.
+/// Malformed escapes fail closed so a bogus path cannot silently report zero.
+fn unescape_mount_option_path(value: &[u8]) -> Option<PathBuf> {
+    let bytes = value;
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        let escape = bytes.get(index + 1..index + 4)?;
+        if !escape.iter().all(|digit| (b'0'..=b'7').contains(digit)) {
+            return None;
+        }
+        let byte = (u16::from(escape[0] - b'0') << 6)
+            | (u16::from(escape[1] - b'0') << 3)
+            | u16::from(escape[2] - b'0');
+        if byte == 0 || byte > u16::from(u8::MAX) {
+            return None;
+        }
+        decoded.push(byte as u8);
+        index += 4;
+    }
+    Some(PathBuf::from(OsString::from_vec(decoded)))
 }
 
 #[cfg(test)]
@@ -171,7 +213,8 @@ mod tests {
         orphan_volumes, overlay_upperdir, parse_upperdir, ContainerRow, Waste,
     };
     use std::collections::HashSet;
-    use std::path::PathBuf;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
 
     fn temp(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!("dux-containers-{tag}-{}", std::process::id()))
@@ -330,8 +373,10 @@ mod tests {
 2338 2337 0:220 / /proc rw - proc proc rw
 ";
         assert_eq!(
-            parse_upperdir(mi).as_deref(),
-            Some("/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/795/fs")
+            parse_upperdir(mi.as_bytes()).as_deref(),
+            Some(Path::new(
+                "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/795/fs",
+            ))
         );
     }
 
@@ -339,8 +384,47 @@ mod tests {
     fn upperdir_classic_overlay2() {
         let mi = "1 0 0:1 / / rw - overlay overlay rw,lowerdir=/l,upperdir=/var/lib/docker/overlay2/abc/diff,workdir=/w\n";
         assert_eq!(
-            parse_upperdir(mi).as_deref(),
-            Some("/var/lib/docker/overlay2/abc/diff")
+            parse_upperdir(mi.as_bytes()).as_deref(),
+            Some(Path::new("/var/lib/docker/overlay2/abc/diff"))
+        );
+    }
+
+    #[test]
+    fn upperdir_decodes_kernel_escaped_mount_option_path() {
+        let mi = r"1 0 0:1 / / rw - overlay overlay rw,lowerdir=/l,upperdir=/var/lib/docker/upper\054\040dir\134name,workdir=/w";
+        assert_eq!(
+            parse_upperdir(mi.as_bytes()).as_deref(),
+            Some(Path::new("/var/lib/docker/upper, dir\\name"))
+        );
+    }
+
+    #[test]
+    fn upperdir_rejects_malformed_mount_option_escapes() {
+        for escaped in [
+            "/upper\\04",
+            "/upper\\0xz",
+            "/upper\\000",
+            "/upper\\400",
+            "/upper\\777",
+        ] {
+            let mi = format!("1 0 0:1 / / rw - overlay overlay rw,upperdir={escaped},workdir=/w");
+            assert_eq!(
+                parse_upperdir(mi.as_bytes()),
+                None,
+                "accepted malformed {escaped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn upperdir_preserves_non_utf8_path_bytes() {
+        let mut mi = b"1 0 0:1 / / rw - overlay overlay rw,upperdir=/var/lib/docker/upper".to_vec();
+        mi.push(0xff);
+        mi.extend_from_slice(b",workdir=/w\n");
+        let upperdir = parse_upperdir(&mi).unwrap();
+        assert_eq!(
+            upperdir.as_os_str().as_bytes(),
+            b"/var/lib/docker/upper\xff"
         );
     }
 
@@ -349,7 +433,7 @@ mod tests {
         // only a non-root overlay + a root that isn't overlay -> nothing to size.
         let mi = "1 0 0:1 / /data rw - overlay overlay rw,upperdir=/some/diff\n\
                   2 0 0:2 / / rw - ext4 /dev/sda1 rw\n";
-        assert_eq!(parse_upperdir(mi), None);
+        assert_eq!(parse_upperdir(mi.as_bytes()), None);
     }
 }
 

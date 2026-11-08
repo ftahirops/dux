@@ -1,35 +1,35 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 18:53 UTC
+**Updated:** 2026-11-08 19:17 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
 ## Test and coverage update (2026-11-08, latest local run)
 
-After adding two classification-rule regression tests and three
-fault-injection control tests, the default-feature Rust suite passes **312
-tests, 0 failures, 2 ignored**; the all-features suite passes **315 tests, 0
-failures, 2 ignored**. Formatting, strict Clippy, `git diff --check`, and an
-optimized all-features release build passed. The fault-injection tests are
-compiled only when that feature is enabled. The ignored tests require a
-separately qualified ext4 filesystem for handle behavior and a manual
-production-shaped scale profile. Python monitor/harness suite: **323 passed**
-(27 focused canary-monitor tests), recorded in the qualification README. These
-are test counts per suite/run, not unique test cases summed over repeated
-coverage and qualification runs.
+After adding two classification-rule tests, three fault-injection control
+tests, and two OverlayFS path-decoding tests, the default-feature Rust suite
+passes **315 tests, 0 failures, 2 ignored**; the all-features suite passes
+**318 tests, 0 failures, 2 ignored**. Formatting, strict Clippy,
+`git diff --check`, and an optimized default-feature release build passed.
+Fault-injection tests compile only when that feature is enabled. The ignored
+tests require a separately qualified ext4 filesystem for handle behavior and
+a manual production-shaped scale profile. Python monitor/harness suite:
+**323 passed** (27 focused canary-monitor tests), recorded in the qualification
+README. These are test counts per suite/run, not unique test cases summed over
+repeated coverage and qualification runs.
 
 Coverage from the latest coverage-instrumented Rust run:
 
-- Stable line coverage: **69.25%** overall (25,929 instrumented lines,
-  7,973 missed).
-- Nightly branch coverage: **67.18%** overall; region coverage **49.75%**,
-  function coverage **75.49%**. Branch coverage is measured separately with
+- Stable line coverage: **71.94%** overall (25,050 instrumented lines,
+  7,028 missed).
+- Nightly branch coverage: **67.51%** overall; region coverage **49.78%**,
+  function coverage **75.63%**. Branch coverage is measured separately with
   nightly because LLVM's branch instrumentation option is unstable on stable
   Rust.
-- `classify.rs`, following the safety-rule tests: **99.30% line / 91.35%
-  branch**. The fault-injection controls now have **91.91% line / 68.75%
-  branch** coverage. Lower branch coverage remains in `containers.rs`
-  (51.47%), `tui.rs` (47.54%), and `emit.rs` (50.00%).
+- `classify.rs`: **99.30% line / 91.35% branch**; `fault.rs`:
+  **88.03% line / 68.75% branch**; `containers.rs`: **62.76% line / 58.97%
+  branch**. Other lower branch coverage remains in `tui.rs` (47.54%) and
+  `emit.rs` (50.00%).
 - Security dependency audit: `cargo audit --json` exited successfully with
   zero known vulnerabilities across 229 locked dependencies; the advisory
   database was last updated 2026-11-06. This is dependency-vulnerability
@@ -41,34 +41,60 @@ The run logs and raw audit result are in
 `cargo-audit-20261108.json`. The branch-coverage report shows all per-module
 line, function, and branch totals. No claim of 100% test coverage is made.
 
-The default-feature production-profile binary was built with
-`cargo build --locked --release` at commit `b3831ae`; SHA-256:
-`f631019a87073498a49c1ae4ffdcb5bac47adfc8541d95b5acd654630553f9ac`. It
-reports version `0.6.3` with the expected source hash, and inspection confirms
-the test-only `DUX_TEST_*` injection controls are absent. This is a local host
-release build, not the static-musl package and it was not installed on either
-server.
+## Disk and temporary-cache cleanup (19:03 UTC)
+
+The workspace filesystem now has **72 GiB free (60% used)**. `/tmp` fell from
+41 GiB to 8.5 GiB after removing 3.6 GiB of Dux build output and about 32 GiB
+of verified inactive Go build caches and old Go build temporary directories.
+The current running Go test uses `/tmp/x.7RB3d/go-cache`; that active cache was
+preserved. An active PostgreSQL test cluster under `/tmp/pg_virtualenv.*` and
+remaining qualification/source artifacts were also preserved. `/tmp` is not
+empty; those live or potentially valuable artifacts need a separate cleanup
+after their owners finish.
+
+The container writable-layer parser had a verified undercount for OverlayFS
+upperdir paths containing escaped comma, whitespace, or backslash bytes. The
+kernel emits these through octal `seq_escape` values; Dux previously used the
+encoded spelling as a path and could report zero bytes. Source now decodes the
+kernel format and rejects malformed escapes. Focused tests pass. This change
+is not in the live canary binary and still needs a real mounted-container
+qualification. Details: [OverlayFS path-escape regression](docs/qualification/container-overlay-upperdir-escapes-20261108.md).
+
+The current default-feature production-profile binary was built with
+`cargo build --locked --release`; SHA-256:
+`a0f4221cbfd206af5dd8e5484036f97f079e8e1549f9bcf0faf22b3c6d0b9981`. It
+reports version `0.6.3` with source hash
+`8dcda3835f25e6e8a3dc2524c649013cf40db6af3a6d8afee87946fb805ae6ea`, and
+inspection confirms the test-only `DUX_TEST_*` injection controls are absent.
+This is a local host release build, not the static-musl package and it was not
+installed on either server.
 
 ### Current live candidate checkpoint
 
 The VPS2 full-root scan-first candidate is under its 24-hour monitored
-canary; its first sample was recorded at 18:35 UTC. A live check at 18:53 UTC
-confirmed both the canary monitor and Dux active with zero restarts.
+canary; its first sample was recorded at 18:35 UTC. A live check at 19:20 UTC
+confirmed the canary monitor and Dux main process present with zero restarts.
 That sample passed binary/service identity, schema-v7 path/accounting,
 SQLite quick-check, freshness, resource, and critical-journal checks. The
 candidate completed an automatic retry after its first full-root attempt
 failed closed on an inode-incarnation conflict plus concurrent hint loss. The
 retry scanned 1,361,780 files and 163,202 directories with zero coverage
 issues, and the accounting verifier passed. Hints arrived during the scan, so
-the view remained dirty as designed. At 18:53 UTC Dux had seen 37.7M events,
+the view remained dirty as designed. At 19:03 UTC Dux had seen 50.0M events,
 with zero kernel overflows and zero userspace drops; the last full observation
-was 632 seconds old, within the canary's 1,200-second freshness bound. The
-legacy `behind_seconds` value was 1,771 seconds; in scan-first mode this is
+was 376 seconds old, within the canary's 1,200-second freshness bound. The
+legacy `behind_seconds` value was 2,415 seconds; in scan-first mode this is
 not the observation-age SLO and can continue increasing while the UI correctly
-labels the view as non-real-time. This is one passing canary sample plus live
-health checks, not proof of continuous convergence. The 24-hour canary, longer
-soak, production-host canary, and other release gates remain open. The
-production host was not changed.
+labels the view as non-real-time. The JSONL still contains only one passing
+hourly canary sample; live checks are not additional qualification samples.
+At 19:20 UTC the next periodic observation was in progress at about 1.37M files
+and 164k directories; 68.3M events had been seen, with zero kernel overflows
+and zero userspace drops. Its last completed observation was 1,364 seconds old
+at that instant, so the 1,200-second maximum observation-age gate was not
+satisfied while the new pass was still running.
+This does not prove continuous convergence. The 24-hour canary, longer soak,
+production-host canary, and other release gates remain open. The production
+host was not changed.
 
 ## Latest fixed-cadence implementation and VPS2 evidence (11:54 UTC)
 
