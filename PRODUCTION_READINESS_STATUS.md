@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 21:03 UTC
+**Updated:** 2026-11-08 21:12 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -19,6 +19,19 @@ unique tests to be summed across overlapping runs. Static-musl package
 revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
 DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
 only on the disposable VPS2 qualification VM, not production.
+
+## Corrected VPS2 canary checkpoint (2026-11-08 21:12 UTC)
+
+The corrected five-minute canary started at 21:05:37 UTC and is still active.
+Its first two samples passed (21:07:13 and 21:12:14) with no monitor errors.
+At sample 2 the candidate and unit hashes matched, SQLite/schema-v7 graph and
+accounting checks passed, and the service showed zero restarts, kernel
+overflows, userspace drops, and OOM events. The latest completed observation
+was 334 seconds old against the 1,200-second configured limit. The index was
+dirty and not caught up, with `behind_seconds` about 2,132; this is not proof
+of low-latency freshness. Two samples do not qualify a 24-hour soak. The
+append-only evidence through sample 2 is recorded in
+[`canary-24h-5m-v2-progress.jsonl`](docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl).
 
 Latest current-source coverage from `cargo llvm-cov --locked --all-features
 --summary-only` (2026-11-08 20:28 UTC):
