@@ -1701,11 +1701,27 @@ The last read-only production snapshot in this record (22:02 UTC) showed it
 dirty and not caught up, with 312 cumulative kernel overflows and a last full
 scan about 81.2 hours old. A production-host candidate canary, a 24-hour VPS2
 canary using v3, a longer soak, sustained overflow-storm qualification, and
+full-root independent live comparison remain release blockers.
 
 At 22:14:58 UTC, v3 sample 2 also passed after 133.6 seconds. The completed
 scan age was 407 seconds, with no scan running at the sample; the index was
 dirty because filesystem changes awaited the next observation. The sample
 again showed zero Dux restarts, kernel overflows, userspace drops, or OOM
-events. The latest preserved JSONL now contains both v3 samples. This extends
+events. The latest preserved JSONL then contained both v3 samples. This extends
 the canary evidence by one interval only; it does not change the open soak,
 freshness-SLO, production-host, or full-root qualification gates.
+
+At 22:19:24 UTC, v3 sample 3 passed after 99.1 seconds. Its last completed
+scan was 672 seconds old; Dux had zero restarts, kernel overflows, userspace
+drops, or OOM events. The read-only VPS2 JSONL is preserved through sample 3.
+Full Python discovery passed 330 tests after the v3 collector change. The
+canary remains active and is still far short of its 24-hour and 72-hour soak
+gates.
+
+## Workspace disk cleanup — 2026-11-08
+
+The local `/` filesystem was 61% used with 70 GiB free. The repository's
+regenerable Rust `target/` directory occupied about 3.3 GiB; `cargo clean`
+removed 8,653 build artifacts (3.6 GiB reported by Cargo). Afterwards `/` was
+60% used with 72 GiB free. Source, qualification logs, and the VPS2 test VM
+were not touched by this cleanup.
