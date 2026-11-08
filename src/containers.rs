@@ -135,12 +135,12 @@ fn overlay_upperdir(pid: i64) -> Result<Option<PathBuf>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
-    Ok(parse_upperdir(&mi))
+    parse_upperdir(&mi).with_context(|| format!("parsing OverlayFS upperdir in {}", path.display()))
 }
 
 /// Parse the container-root overlay `upperdir` out of a /proc/<pid>/mountinfo
 /// blob. Pure (no I/O) so it's unit-testable across driver layouts.
-fn parse_upperdir(mountinfo: &[u8]) -> Option<PathBuf> {
+fn parse_upperdir(mountinfo: &[u8]) -> Result<Option<PathBuf>> {
     for line in mountinfo.split(|byte| *byte == b'\n') {
         // mountinfo line: "... <mountpoint> ... - <fstype> <source> <superopts>"
         let Some(separator) = line.windows(3).position(|window| window == b" - ") else {
@@ -166,19 +166,19 @@ fn parse_upperdir(mountinfo: &[u8]) -> Option<PathBuf> {
         if let Some(superopts) = it.nth(1) {
             for opt in superopts.split(|byte| *byte == b',') {
                 if let Some(u) = opt.strip_prefix(b"upperdir=") {
-                    return unescape_mount_option_path(u);
+                    return unescape_mount_option_path(u).map(Some);
                 }
             }
         }
     }
-    None
+    Ok(None)
 }
 
 /// OverlayFS prints mount-option values through the kernel's `seq_escape`,
 /// which represents comma, whitespace, and backslash bytes as three-digit
 /// octal escapes. Decode those before treating upperdir as a filesystem path.
 /// Malformed escapes fail closed so a bogus path cannot silently report zero.
-fn unescape_mount_option_path(value: &[u8]) -> Option<PathBuf> {
+fn unescape_mount_option_path(value: &[u8]) -> Result<PathBuf> {
     let bytes = value;
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -189,20 +189,25 @@ fn unescape_mount_option_path(value: &[u8]) -> Option<PathBuf> {
             continue;
         }
 
-        let escape = bytes.get(index + 1..index + 4)?;
+        let escape = bytes
+            .get(index + 1..index + 4)
+            .ok_or_else(|| anyhow::anyhow!("truncated octal escape at byte {index}"))?;
         if !escape.iter().all(|digit| (b'0'..=b'7').contains(digit)) {
-            return None;
+            anyhow::bail!("invalid octal escape at byte {index}");
         }
         let byte = (u16::from(escape[0] - b'0') << 6)
             | (u16::from(escape[1] - b'0') << 3)
             | u16::from(escape[2] - b'0');
         if byte == 0 || byte > u16::from(u8::MAX) {
-            return None;
+            anyhow::bail!("invalid escaped path byte at byte {index}");
         }
         decoded.push(byte as u8);
         index += 4;
     }
-    Some(PathBuf::from(OsString::from_vec(decoded)))
+    let path = PathBuf::from(OsString::from_vec(decoded));
+    anyhow::ensure!(!path.as_os_str().is_empty(), "empty OverlayFS upperdir");
+    anyhow::ensure!(path.is_absolute(), "OverlayFS upperdir is not absolute");
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -373,7 +378,7 @@ mod tests {
 2338 2337 0:220 / /proc rw - proc proc rw
 ";
         assert_eq!(
-            parse_upperdir(mi.as_bytes()).as_deref(),
+            parse_upperdir(mi.as_bytes()).unwrap().as_deref(),
             Some(Path::new(
                 "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/795/fs",
             ))
@@ -384,7 +389,7 @@ mod tests {
     fn upperdir_classic_overlay2() {
         let mi = "1 0 0:1 / / rw - overlay overlay rw,lowerdir=/l,upperdir=/var/lib/docker/overlay2/abc/diff,workdir=/w\n";
         assert_eq!(
-            parse_upperdir(mi.as_bytes()).as_deref(),
+            parse_upperdir(mi.as_bytes()).unwrap().as_deref(),
             Some(Path::new("/var/lib/docker/overlay2/abc/diff"))
         );
     }
@@ -393,7 +398,7 @@ mod tests {
     fn upperdir_decodes_kernel_escaped_mount_option_path() {
         let mi = r"1 0 0:1 / / rw - overlay overlay rw,lowerdir=/l,upperdir=/var/lib/docker/upper\054\040dir\134name,workdir=/w";
         assert_eq!(
-            parse_upperdir(mi.as_bytes()).as_deref(),
+            parse_upperdir(mi.as_bytes()).unwrap().as_deref(),
             Some(Path::new("/var/lib/docker/upper, dir\\name"))
         );
     }
@@ -408,10 +413,20 @@ mod tests {
             "/upper\\777",
         ] {
             let mi = format!("1 0 0:1 / / rw - overlay overlay rw,upperdir={escaped},workdir=/w");
-            assert_eq!(
-                parse_upperdir(mi.as_bytes()),
-                None,
+            assert!(
+                parse_upperdir(mi.as_bytes()).is_err(),
                 "accepted malformed {escaped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn upperdir_rejects_empty_or_relative_paths() {
+        for value in ["", "relative/path"] {
+            let mi = format!("1 0 0:1 / / rw - overlay overlay rw,upperdir={value},workdir=/w");
+            assert!(
+                parse_upperdir(mi.as_bytes()).is_err(),
+                "accepted invalid upperdir {value:?}"
             );
         }
     }
@@ -421,7 +436,7 @@ mod tests {
         let mut mi = b"1 0 0:1 / / rw - overlay overlay rw,upperdir=/var/lib/docker/upper".to_vec();
         mi.push(0xff);
         mi.extend_from_slice(b",workdir=/w\n");
-        let upperdir = parse_upperdir(&mi).unwrap();
+        let upperdir = parse_upperdir(&mi).unwrap().unwrap();
         assert_eq!(
             upperdir.as_os_str().as_bytes(),
             b"/var/lib/docker/upper\xff"
@@ -433,7 +448,7 @@ mod tests {
         // only a non-root overlay + a root that isn't overlay -> nothing to size.
         let mi = "1 0 0:1 / /data rw - overlay overlay rw,upperdir=/some/diff\n\
                   2 0 0:2 / / rw - ext4 /dev/sda1 rw\n";
-        assert_eq!(parse_upperdir(mi.as_bytes()), None);
+        assert_eq!(parse_upperdir(mi.as_bytes()).unwrap(), None);
     }
 }
 

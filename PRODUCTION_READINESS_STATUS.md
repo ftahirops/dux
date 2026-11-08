@@ -1,16 +1,16 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 19:17 UTC
+**Updated:** 2026-11-08 19:46 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
 ## Test and coverage update (2026-11-08, latest local run)
 
 After adding two classification-rule tests, three fault-injection control
-tests, and two OverlayFS path-decoding tests, the default-feature Rust suite
-passes **315 tests, 0 failures, 2 ignored**; the all-features suite passes
-**318 tests, 0 failures, 2 ignored**. Formatting, strict Clippy,
-`git diff --check`, and an optimized default-feature release build passed.
+tests, and four OverlayFS upperdir parsing/error tests, the default-feature
+Rust suite passes **316 tests, 0 failures, 2 ignored**; the all-features suite
+passes **319 tests, 0 failures, 2 ignored**. Formatting, strict Clippy, and
+`git diff --check` passed. The current static-musl release build is pending.
 Fault-injection tests compile only when that feature is enabled. The ignored
 tests require a separately qualified ext4 filesystem for handle behavior and
 a manual production-shaped scale profile. Python monitor/harness suite:
@@ -20,14 +20,14 @@ repeated coverage and qualification runs.
 
 Coverage from the latest coverage-instrumented Rust run:
 
-- Stable line coverage: **71.94%** overall (25,050 instrumented lines,
-  7,028 missed).
-- Nightly branch coverage: **67.51%** overall; region coverage **49.78%**,
-  function coverage **75.63%**. Branch coverage is measured separately with
+- Stable line coverage: **69.33%** overall (26,009 instrumented lines,
+  7,976 missed).
+- Nightly branch coverage: **67.35%** overall; region coverage **49.77%**,
+  function coverage **75.61%**. Branch coverage is measured separately with
   nightly because LLVM's branch instrumentation option is unstable on stable
   Rust.
 - `classify.rs`: **99.30% line / 91.35% branch**; `fault.rs`:
-  **88.03% line / 68.75% branch**; `containers.rs`: **62.76% line / 58.97%
+  **88.03% line / 68.75% branch**; `containers.rs`: **63.30% line / 58.97%
   branch**. Other lower branch coverage remains in `tui.rs` (47.54%) and
   `emit.rs` (50.00%).
 - Security dependency audit: `cargo audit --json` exited successfully with
@@ -35,7 +35,10 @@ Coverage from the latest coverage-instrumented Rust run:
   database was last updated 2026-11-06. This is dependency-vulnerability
   coverage, not a complete application security review.
 
-The run logs and raw audit result are in
+Coverage is reported with the exact stable and nightly commands recorded in
+the run logs. Percentages depend on the compiler/instrumentation mode; compare
+results only within the same command and toolchain. The run logs and raw audit
+result are in
 [`docs/qualification/scan-first-fixed-cadence-20261108/`](docs/qualification/scan-first-fixed-cadence-20261108/):
 `llvm-cov-summary.log`, `llvm-cov-branch-summary.log`, and
 `cargo-audit-20261108.json`. The branch-coverage report shows all per-module
@@ -52,49 +55,73 @@ remaining qualification/source artifacts were also preserved. `/tmp` is not
 empty; those live or potentially valuable artifacts need a separate cleanup
 after their owners finish.
 
+## Live VPS1 production snapshot (2026-11-08 19:29 UTC)
+
+Read-only inspection of the production host found the installed binary is
+`dux 0.6.3` from revision `e0cc915f8f37`, still on legacy event-apply mode.
+`dux status --json` reports `dirty=true`, reason `fanotify queue overflow`,
+235 kernel overflow notifications, 62.88M events seen versus 37.31M resolved,
+and the last completed scan 283,218 seconds (78.7 hours) old. The index is not
+caught up. The host has seen no userspace update drops in the current status
+sample.
+
+Systemd reports the service active, with four restarts in its current manager
+counter and `Restart=always`. The journal records each observed exit as
+`filesystem mounts changed; restart daemon to refresh watch coverage and
+reconcile` followed by exit status 1, then systemd restart. It also repeatedly
+logs that automatic reconciliation remains paused after two failed attempts.
+This is intentional mount-topology restart behavior, not evidence of a panic;
+it still means restarts are part of the live service behavior, and the old
+daemon has not repaired the stale index. VPS1 was inspected only; no service,
+binary, or database changes were made.
+
 The container writable-layer parser had a verified undercount for OverlayFS
 upperdir paths containing escaped comma, whitespace, or backslash bytes. The
 kernel emits these through octal `seq_escape` values; Dux previously used the
 encoded spelling as a path and could report zero bytes. Source now decodes the
-kernel format and rejects malformed escapes. Focused tests pass. This change
-is not in the live canary binary and still needs a real mounted-container
+kernel format and returns an error for malformed, empty, or relative upperdir
+values, so the caller cannot silently fall back to zero bytes. Focused tests
+pass. This change is not in the live VPS2 Dux binary and still needs a real mounted-container
 qualification. Details: [OverlayFS path-escape regression](docs/qualification/container-overlay-upperdir-escapes-20261108.md).
 
-The current default-feature production-profile binary was built with
-`cargo build --locked --release`; SHA-256:
-`a0f4221cbfd206af5dd8e5484036f97f079e8e1549f9bcf0faf22b3c6d0b9981`. It
-reports version `0.6.3` with source hash
-`8dcda3835f25e6e8a3dc2524c649013cf40db6af3a6d8afee87946fb805ae6ea`, and
-inspection confirms the test-only `DUX_TEST_*` injection controls are absent.
-This is a local host release build, not the static-musl package and it was not
-installed on either server.
+The preceding default-feature host binary predates explicit error propagation
+for malformed OverlayFS upperdirs and is not the current candidate. A clean,
+source-matched static-musl package build and embedded binary audit are pending;
+the earlier package attempt was discarded because the source tree changed
+during the build and the provenance check correctly rejected it.
 
 ### Current live candidate checkpoint
 
-The VPS2 full-root scan-first candidate is under its 24-hour monitored
-canary; its first sample was recorded at 18:35 UTC. A live check at 19:20 UTC
-confirmed the canary monitor and Dux main process present with zero restarts.
-That sample passed binary/service identity, schema-v7 path/accounting,
-SQLite quick-check, freshness, resource, and critical-journal checks. The
-candidate completed an automatic retry after its first full-root attempt
-failed closed on an inode-incarnation conflict plus concurrent hint loss. The
-retry scanned 1,361,780 files and 163,202 directories with zero coverage
-issues, and the accounting verifier passed. Hints arrived during the scan, so
-the view remained dirty as designed. At 19:03 UTC Dux had seen 50.0M events,
-with zero kernel overflows and zero userspace drops; the last full observation
-was 376 seconds old, within the canary's 1,200-second freshness bound. The
-legacy `behind_seconds` value was 2,415 seconds; in scan-first mode this is
-not the observation-age SLO and can continue increasing while the UI correctly
-labels the view as non-real-time. The JSONL still contains only one passing
-hourly canary sample; live checks are not additional qualification samples.
-At 19:20 UTC the next periodic observation was in progress at about 1.37M files
-and 164k directories; 68.3M events had been seen, with zero kernel overflows
-and zero userspace drops. Its last completed observation was 1,364 seconds old
-at that instant, so the 1,200-second maximum observation-age gate was not
-satisfied while the new pass was still running.
-This does not prove continuous convergence. The 24-hour canary, longer soak,
-production-host canary, and other release gates remain open. The production
-host was not changed.
+The VPS2 full-root scan-first candidate's first monitored canary attempt ran
+from 18:34 UTC until the fail-closed monitor stopped after sample 2 at 19:36.
+Sample 1 at 18:35 passed binary/service identity, schema-v7 path/accounting,
+SQLite quick-check, freshness, resource, and critical-journal checks. Sample 2
+failed because the journal contained a 19:16 full-root scan with one
+inode-incarnation coverage issue and a bounded retry scheduled. Dux itself
+remained running with zero restarts.
+
+At 19:20 UTC a periodic observation was in progress at about 1.37M files and
+164k directories; the prior completed observation was 1,364 seconds old, over
+the 1,200-second age bound while the new pass ran. It completed at 19:22:05
+with 1,368,963 files, 164,146 directories, and zero coverage issues after
+pruning 60 vanished paths; accounting verification passed at 19:22:55.
+
+The retry after the 19:16 conflict completed at 19:36:10 with zero coverage
+issues across 1,370,983 files and 164,433 directories; accounting verification
+passed at 19:36:52. However, the monitor had already failed at 19:36:12 because
+its strict journal gate found the earlier conflict. At that sample the last
+completed scan was 196 seconds old; SQLite/path-graph accounting passed, and
+there was no service restart/OOM, kernel overflow, or userspace drop. This
+demonstrates bounded recovery from this incident but does not erase the failed
+canary result or prove 24-hour stability. The failed run's JSONL and filtered
+journal are preserved as
+[`canary-d8ea72d-failed-sample2-20261108.jsonl`](docs/qualification/scan-first-fixed-cadence-20261108/canary-d8ea72d-failed-sample2-20261108.jsonl)
+and
+[`canary-d8ea72d-failure-recovery-journal-20261108.log`](docs/qualification/scan-first-fixed-cadence-20261108/canary-d8ea72d-failure-recovery-journal-20261108.log).
+After verifying the 19:36 scan and accounting pass, a fresh, separately named
+24-hour retry canary started at 19:45 with the same exact Dux binary, 20% CPU
+quota, and 1 GiB memory cap. It has not yet produced a sample. The prior failed
+attempt remains preserved. Production VPS1 was not changed.
 
 ## Latest fixed-cadence implementation and VPS2 evidence (11:54 UTC)
 

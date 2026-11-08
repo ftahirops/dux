@@ -24,34 +24,38 @@ in octal ([seq_file documentation](https://kernel.googlesource.com/pub/scm/linux
 
 `src/containers.rs` now decodes three-digit octal bytes in the `upperdir`
 option before constructing the path. It rejects truncated/non-octal escapes,
-NUL, and values above one byte rather than returning a misleading path.
-Escaping is decoded after comma-delimited option parsing, so an escaped comma
-inside a path is not mistaken for a separator. Tests cover an upperdir
-containing an escaped comma, space, and literal backslash, plus malformed
-escape cases.
+NUL, values above one byte, empty paths, and relative paths. Malformed values
+return an explicit error propagated to the caller; they cannot fall through to
+the container inventory's zero-byte fallback. Escaping is decoded after
+comma-delimited option parsing, so an escaped comma inside a path is not
+mistaken for a separator. Tests cover an upperdir containing an escaped comma,
+space, and literal backslash, non-UTF8 path bytes, and invalid values.
 
 Results on this source:
 
-- Focused container module: **13 passed, 0 failed**.
-- Full default-feature Rust suite: **315 passed, 0 failed, 2 ignored**.
-- Full all-features Rust suite: **318 passed, 0 failed, 2 ignored**.
-- Formatting, strict all-target/all-features Clippy, diff checks, stable and
-  nightly coverage runs, and a default-feature optimized release build passed.
-- The local default-feature release binary reported SHA-256
-  `a0f4221cbfd206af5dd8e5484036f97f079e8e1549f9bcf0faf22b3c6d0b9981`; its
-  version output included source hash
-  `8dcda3835f25e6e8a3dc2524c649013cf40db6af3a6d8afee87946fb805ae6ea`. A
-  strings check found no `DUX_TEST_*` fault-injection controls in this
-  production-profile binary.
+- Focused container module: **14 passed, 0 failed**.
+- Full default-feature Rust suite: **316 passed, 0 failed, 2 ignored**.
+- Full all-features Rust suite: **319 passed, 0 failed, 2 ignored**.
+- Formatting, strict all-target/all-features Clippy, diff checks, and stable
+  and nightly coverage runs passed. The previous host release binary predates
+  explicit malformed-input error propagation and is not the current candidate.
 
-Coverage after this change is **71.94% stable line** and **67.51% nightly
-branch** overall. `containers.rs` is **62.76% line / 58.97% branch**. These
+Coverage after this change is **69.33% stable line** and **67.35% nightly
+branch** overall. `containers.rs` is **63.30% line / 58.97% branch**. These
 percentages are not a complete proof of the container accounting path.
 
-The live VPS2 service and its d8ea72d canary were not changed. The fix has not
-yet been packaged or exercised against a real container whose storage path
-contains these escaped characters. The parser regression tests use
-kernel-format mountinfo fixtures.
+An initial package revision 104 build completed its static-musl link, then the
+release script rejected the artifact because the source tree changed while
+that build was running (qualification notes had been updated). The provenance
+check worked as intended; no package was published from that attempt. A clean
+build from the finalized source commit is still required.
+
+The live VPS2 Dux service and its d8ea72d binary were not changed by this fix.
+The first monitor attempt for that binary subsequently failed on a separate
+inode-incarnation scan issue; a separately named retry monitor is active. The
+OverlayFS parser fix has not yet been packaged or exercised against a real
+container whose storage path contains these escaped characters. The parser
+regression tests use kernel-format mountinfo fixtures.
 
 ### Kernel-format smoke check
 
