@@ -47,6 +47,8 @@ def sample():
                         "MemoryCurrent": "100", "MemoryMax": "1000",
                         "CPUQuotaPerSecUSec": "1s", "Restart": "always",
                         "WatchdogUSec": "45s", "DropInPaths": ""},
+            "block_io": {"8:0": {"rbytes": 4096, "wbytes": 2048,
+                                  "rios": 2, "wios": 1}},
             "accounting": accounting,
             "history": {"rows": 40, "max_bucket": 500},
             "journal": {"critical_event_count": 0, "critical_events": []},
@@ -55,6 +57,46 @@ def sample():
 
 
 class CanaryMonitorTests(unittest.TestCase):
+    def test_io_stat_preserves_per_device_counters_without_summing(self):
+        parsed = MONITOR.parse_io_stats(
+            "8:0 rbytes=100 wbytes=40 rios=3 wios=2 dbytes=0 dios=0\n"
+            "252:0 rbytes=100 wbytes=40 rios=3 wios=2 dbytes=0 dios=0\n"
+        )
+        self.assertEqual(parsed["8:0"]["rbytes"], 100)
+        self.assertEqual(parsed["252:0"]["rbytes"], 100)
+        self.assertEqual(len(parsed), 2)
+
+    def test_io_stat_rejects_bad_rows_counters_and_duplicate_devices(self):
+        for contents in (
+            "bad rbytes=1 wbytes=1 rios=1 wios=1",
+            "8:0 rbytes=x wbytes=1 rios=1 wios=1",
+            "8:0 rbytes=-1 wbytes=1 rios=1 wios=1",
+            "8:0 rbytes=1 rbytes=2 wbytes=1 rios=1 wios=1",
+            "8:0 rbytes=1 wbytes=1 rios=1",
+            "8:0 rbytes=1 wbytes=1 rios=1 wios=1\n8:0 rbytes=2 wbytes=2 rios=2 wios=2",
+            "",
+        ):
+            with self.subTest(contents=contents), self.assertRaises(RuntimeError):
+                MONITOR.parse_io_stats(contents)
+
+    def test_cgroup_file_rejects_traversal_and_unlisted_files(self):
+        with self.assertRaises(RuntimeError):
+            MONITOR.cgroup_file("/system.slice/../other", "io.stat")
+        with self.assertRaises(RuntimeError):
+            MONITOR.cgroup_file("/system.slice/dux.service", "cpu.stat")
+
+    def test_sample_without_block_io_counters_fails_closed(self):
+        value = sample()
+        del value["block_io"]
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("cgroup per-device I/O counters are missing", errors)
+
+    def test_sample_with_invalid_block_io_counter_fails_closed(self):
+        value = sample()
+        value["block_io"]["8:0"]["rbytes"] = True
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("cgroup per-device I/O counters are invalid", errors)
+
     def test_healthy_sample_passes(self):
         self.assertEqual(MONITOR.evaluate_sample(sample(), EXPECTED_BINARY,
                                                   EXPECTED_UNIT), [])

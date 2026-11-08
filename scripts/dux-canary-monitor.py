@@ -52,9 +52,7 @@ def unit_properties(unit):
 
 
 def memory_events(control_group):
-    if not control_group.startswith("/") or ".." in Path(control_group).parts:
-        raise RuntimeError(f"invalid systemd ControlGroup path {control_group!r}")
-    path = Path("/sys/fs/cgroup") / control_group.lstrip("/") / "memory.events"
+    path = cgroup_file(control_group, "memory.events")
     fields = {}
     for line in path.read_text().splitlines():
         key, value = line.split(maxsplit=1)
@@ -63,6 +61,51 @@ def memory_events(control_group):
     if not required.issubset(fields):
         raise RuntimeError(f"memory.events lacks required counters: {sorted(required - fields.keys())}")
     return fields
+
+
+def cgroup_file(control_group, filename):
+    if (not control_group.startswith("/") or ".." in Path(control_group).parts
+            or filename not in {"memory.events", "io.stat"}):
+        raise RuntimeError(f"invalid systemd cgroup file {control_group!r}/{filename!r}")
+    return Path("/sys/fs/cgroup") / control_group.lstrip("/") / filename
+
+
+def parse_io_stats(contents):
+    """Parse cgroup-v2 io.stat without summing stacked device counters."""
+    devices = {}
+    required = {"rbytes", "wbytes", "rios", "wios"}
+    for line in contents.splitlines():
+        fields = line.split()
+        if not fields or not re.fullmatch(r"[0-9]+:[0-9]+", fields[0]):
+            raise RuntimeError("malformed cgroup io.stat device row")
+        device = fields[0]
+        if device in devices:
+            raise RuntimeError(f"duplicate cgroup io.stat device {device}")
+        counters = {}
+        for field in fields[1:]:
+            key, separator, raw_value = field.partition("=")
+            if not separator or not key or key in counters:
+                raise RuntimeError(f"malformed cgroup io.stat counter {field!r}")
+            try:
+                value = int(raw_value)
+            except ValueError as error:
+                raise RuntimeError(f"invalid cgroup io.stat counter {field!r}") from error
+            if value < 0:
+                raise RuntimeError(f"negative cgroup io.stat counter {field!r}")
+            counters[key] = value
+        if not required.issubset(counters):
+            raise RuntimeError(
+                f"cgroup io.stat device {device} lacks required counters: "
+                f"{sorted(required - counters.keys())}"
+            )
+        devices[device] = counters
+    if not devices:
+        raise RuntimeError("cgroup io.stat has no device counters")
+    return devices
+
+
+def io_stats(control_group):
+    return parse_io_stats(cgroup_file(control_group, "io.stat").read_text())
 
 
 def machine_status(binary, db):
@@ -267,6 +310,22 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
     except (KeyError, TypeError, ValueError):
         errors.append("systemd service properties are incomplete or invalid")
 
+    block_io = sample.get("block_io")
+    required_io_counters = {"rbytes", "wbytes", "rios", "wios"}
+    if not isinstance(block_io, dict) or not block_io:
+        errors.append("cgroup per-device I/O counters are missing")
+    else:
+        for device, counters in block_io.items():
+            if (not re.fullmatch(r"[0-9]+:[0-9]+", str(device))
+                    or not isinstance(counters, dict)
+                    or not required_io_counters.issubset(counters)):
+                errors.append("cgroup per-device I/O counters are malformed")
+                break
+            if any(not isinstance(counters[key], int) or isinstance(counters[key], bool)
+                   or counters[key] < 0 for key in required_io_counters):
+                errors.append("cgroup per-device I/O counters are invalid")
+                break
+
     if not isinstance(sample.get("accounting"), dict) or not OBSERVER.invariant_passed(sample["accounting"]):
         errors.append("exact accounting snapshot failed")
     elif sample["accounting"].get("schema_version") != EXPECTED_SCHEMA_VERSION:
@@ -298,6 +357,9 @@ def capture_sample(binary, service_binary, db, unit, journal_since):
     status_before = machine_status(binary, db)
     status_before_observed_at = time.time()
     service = unit_properties(unit)
+    service_observed_at = time.time()
+    block_io = io_stats(service.get("ControlGroup", ""))
+    block_io_observed_at = time.time()
     candidate_hash = sha256_file(binary)
     service_hash = sha256_file(service_binary)
     process_hash = running_binary_hash(service.get("MainPID", "0"))
@@ -317,7 +379,9 @@ def capture_sample(binary, service_binary, db, unit, journal_since):
     return {"captured_at_utc": now, "binary_sha256": candidate_hash,
             "service_binary_sha256": service_hash, "process_binary_sha256": process_hash,
             "unit_path": fragment, "unit_sha256": unit_hash,
-            "service": service, "memory_events": events, "status_before": status_before,
+            "service": service, "service_observed_at_seconds": service_observed_at,
+            "block_io": block_io, "block_io_observed_at_seconds": block_io_observed_at,
+            "memory_events": events, "status_before": status_before,
             "status_before_observed_at_seconds": status_before_observed_at,
             "accounting": accounting, "history": history, "journal": journal,
             "status_after": status_after,

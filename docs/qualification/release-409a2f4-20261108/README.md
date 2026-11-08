@@ -96,31 +96,40 @@ collector; the earlier failed evidence is preserved in
 [`live/failed-5m-canary-monitor-calibration.jsonl`](live/failed-5m-canary-monitor-calibration.jsonl)
 and does not count as a pass.
 
-### Corrected 24-hour canary progress (2026-11-08 21:47 UTC)
+### Corrected 24-hour canary progress (2026-11-08 21:54 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and remains active.
-Its first nine samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
-21:32:04, 21:37:21, 21:43:18, and 21:47:36 UTC) passed with no monitor errors. All
-samples matched the release binary and unit hashes; SQLite quick-check,
-schema-v7 graph, and accounting checks passed. At sample 9 the service had zero
-restarts, kernel overflows, userspace drops, and OOM events. The latest full
-observation was 656 seconds old, with no scan in progress. The index was dirty
+Its first ten samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
+21:32:04, 21:37:21, 21:43:18, 21:47:36, and 21:52:26 UTC) passed with no monitor
+errors. All samples matched the release binary and unit hashes; SQLite
+quick-check, schema-v7 graph, and accounting checks passed. At sample 10 the
+service had zero restarts, kernel overflows, userspace drops, and OOM events.
+The latest full observation was 946 seconds old, with no scan in progress. The index was dirty
 after filesystem changes. The reported
 `behind_seconds` is the
 legacy event-pipeline catch-up timer; `last_scan_age_seconds` is the relevant
-scan-first freshness measure. Nine samples are an early checkpoint only, not a
+scan-first freshness measure. Ten samples are an early checkpoint only, not a
 soak pass. Peak Dux memory was about 1.51 GiB against the 4 GiB service limit.
 The slowest collection so far took 161 seconds, below the 300-second sample
-interval. Across sample intervals 1→9, Dux used 1,072.3 CPU-seconds over
-2,423.1 wall-seconds (44.3% of one core on average), with interval rates from 16.5% to
+interval. Across sample intervals 1→10, Dux used 1,140.0 CPU-seconds over
+2,712.9 wall-seconds (42.0% of one core on average), with interval rates from 16.5% to
 86.8%. A cgroup snapshot at 21:34 showed throttling in 8,240 of 31,374 CPU
 periods (26.3%) and cumulative service I/O of 7,471,202,304 bytes read and
 6,704,386,048 bytes written. These early totals include initial indexing and
 must not be projected as steady state. The monitor checks the one-core hard
 CPU ceiling and memory limit, but does not enforce a CPU or I/O budget; these
 passes therefore do not establish a defined efficiency target. The raw
-append-only snapshot through sample 9
+append-only snapshot through sample 10
 is [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
+
+The active collector was not changed during the soak. A newer collector source
+now records cgroup-v2 I/O counters separately per device and rejects malformed
+or missing counters; its focused tests pass 34/34. A read-only live cgroup check
+shows that the same I/O can appear on stacked device rows, so the report keeps
+raw per-device values and does not add them together. The active run's monitor
+hash is still the previous version and its records cannot establish per-device
+I/O rates. The last full Python discovery run (325 tests) predates the new
+collector tests; the focused suite was rerun, but full discovery was not.
 
 This VPS2 qualification is not production sign-off. It covers one KVM guest,
 Ubuntu 24.04, Linux 6.8, and ext4. A completed 24-hour candidate canary,

@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 21:47 UTC
+**Updated:** 2026-11-08 21:54 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -9,9 +9,10 @@
 On the current working tree, `cargo test --locked` passes **317 tests, 0
 failures, 2 ignored**; `cargo test --locked --all-features` passes **320 tests,
 0 failures, 2 ignored**. The all-features result was independently repeated
-under `cargo llvm-cov`; that run also passed 320 tests. Python discovery
-(`python3 -m unittest discover -s scripts -p 'test_*.py'`) passes **325 tests**
-(including 29 focused canary-monitor tests). `cargo fmt --check`, strict
+under `cargo llvm-cov`; that run also passed 320 tests. The last full Python
+discovery passed **325 tests**, including 29 canary-monitor tests. After adding
+per-device I/O collection, the focused canary-monitor suite passes **34 tests**;
+full Python discovery has not been rerun. `cargo fmt --check`, strict
 all-target/all-feature Clippy with warnings denied, and `git diff --check` pass.
 The two ignored Rust tests require a handle-capable ext4 qualification profile
 and a manual production-shaped scale profile. These are per-run counts, not
@@ -20,21 +21,22 @@ revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
 DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
 only on the disposable VPS2 qualification VM, not production.
 
-## Corrected VPS2 canary checkpoint (2026-11-08 21:47 UTC)
+## Corrected VPS2 canary checkpoint (2026-11-08 21:54 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and is still active.
-Its first nine samples passed (21:07:13, 21:12:14, 21:17:10, 21:22:33,
-21:27:17, 21:32:04, 21:37:21, 21:43:18, and 21:47:36 UTC) with no monitor errors.
+Its first ten samples passed (21:07:13, 21:12:14, 21:17:10, 21:22:33,
+21:27:17, 21:32:04, 21:37:21, 21:43:18, 21:47:36, and 21:52:26 UTC) with no
+monitor errors.
 Candidate and unit hashes, SQLite/schema-v7 graph, and accounting checks passed
-in each sample. At sample 9, the service had zero restarts, kernel overflows,
-userspace drops, and OOM events. The latest full observation was 656 seconds
+in each sample. At sample 10, the service had zero restarts, kernel overflows,
+userspace drops, and OOM events. The latest full observation was 946 seconds
 old, with no scan in progress. The index remained dirty after filesystem hints. Use
 `last_scan_age_seconds` for scan-first freshness; `behind_seconds` is the
-legacy event-pipeline catch-up timer. Nine samples do not qualify a 24-hour
+legacy event-pipeline catch-up timer. Ten samples do not qualify a 24-hour
 soak. Peak Dux memory observed was about 1.51 GiB against the 4 GiB service
 limit. Sample 8's slowest collection took 161 seconds, under its 300-second
-cadence. Across sample intervals 1→9, Dux used 1,072.3 CPU-seconds over
-2,423.1 wall-seconds (44.3% of one core on average); interval rates ranged from 16.5%
+cadence. Across sample intervals 1→10, Dux used 1,140.0 CPU-seconds over
+2,712.9 wall-seconds (42.0% of one core on average); interval rates ranged from 16.5%
 to 86.8%. A separate cgroup snapshot at 21:34 showed 1,458 CPU-seconds since
 service start, throttling in 8,240 of 31,374 CPU periods (26.3%), and 7,471,202,304
 bytes read plus 6,704,386,048 bytes written on the block device. The VM has six
@@ -42,8 +44,25 @@ vCPUs; the service hard limit is one core. These early figures include initial
 indexing and are not a steady-state extrapolation. The monitor records CPU
 usage but does not enforce a CPU or I/O budget, so the passing canary samples
 prove health/accounting/freshness gates, not a defined efficiency target. The
-append-only evidence through sample 9 is recorded in
+append-only evidence through sample 10 is recorded in
 [`canary-24h-5m-v2-progress.jsonl`](docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl).
+
+## Canary I/O instrumentation improvement (2026-11-08)
+
+The source-matched canary collector now captures cgroup-v2 `io.stat` as raw
+per-device counters and fails closed on missing or malformed rows. It retains
+device identities instead of summing them: a live read-only check found the
+same root I/O represented at both `8:0` and `252:0`, so summing rows would
+double-count layered block I/O. The monitor source hash is now
+`3a32bec1136692e57e7471764f05ce786ddf05d31d909277c9a26ee377d1e77b`; its
+focused test file passes **34 tests**.
+
+This telemetry change is not loaded by the active VPS2 canary. Its installed
+collector still hashes to `60fd032d34d1deaafd1b686e40357257dafc5eca3c9efe7935eb3d4a32134954`,
+and its records do not contain per-device I/O. The existing soak therefore
+remains valid for its original health/accounting/freshness gates, but I/O rates
+must be measured in a follow-up run. No numeric CPU or I/O acceptance budget is
+defined yet.
 
 Latest current-source coverage from `cargo llvm-cov --locked --all-features
 --summary-only` (2026-11-08 20:28 UTC):
