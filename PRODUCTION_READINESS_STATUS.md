@@ -1024,3 +1024,61 @@ available (87%); `/var/lib/dux` was 560 MiB. The disposable `/dev/shm`
 qualification workspace had returned to 647 MiB used with 2.4 GiB available,
 and no `dux-readiness-*` units remained. No production index or broad host
 cache cleanup was performed.
+
+## Package 103 qualification addendum — 2026-11-08
+
+Built package revision 103 from clean commit `e90f3c3` using the official
+static-musl release path. The reproducibility manifest records a clean
+worktree and source-tree SHA-256
+`bf91e97343b3f95b83aa32aad6eeea00016e45abc90391724d25ac96b32c5b52`.
+Static executable SHA-256 is
+`8c107f0ce62565ed5747e8f28c801b236c870cf5c52e652d7ef73d3bb259fe42`.
+The lockfile audit found no known vulnerabilities across 229 dependencies;
+the advisory database snapshot was updated 2026-11-06. The binary audit
+recognized embedded metadata for 202 dependencies.
+
+On VPS2 (KVM, Ubuntu 24.04, Linux 6.8, ext4), the exact static binary passed a
+forced real kernel overflow test: a 16,384-event queue overflowed once after
+18,432 creates; the recovery observation completed; accounting verification
+passed; and an independent path/inode/allocation/rollup oracle matched. The
+recovery took 7.494 seconds. The view remained marked stale due to later hints,
+which is expected in scan-first mode. See
+`docs/qualification/scan-first-fixed-cadence-20261108/forced-overflow-e90f3c3.json`.
+
+The DEB lifecycle test passed upgrade 102→103, rollback 103→102 with a
+verified database restore, re-upgrade, purge, and clean install (831.819 s).
+Clean install completed a root observation and met the package/service sandbox
+checks, but daemon status at capture was still dirty with
+`reconciliation accounting verification pending`; `caught_up` was false by
+design for a last-observed scan. A separate read-only verifier then checked
+the preserved clean-install database: SQLite integrity was `ok`, root
+accounting was 82,852,466,688 allocated bytes over 1,474,954 inodes, and
+orphan entries, bad prime attribution, and directory rollup errors were all
+zero. No independent full-root path listing was compared for that clean
+install. Full evidence is in
+`docs/qualification/scan-first-fixed-cadence-20261108/package103-lifecycle.json`
+and `clean-install-103-independent-db-check.json`.
+
+The lifecycle harness intentionally stops and disables the service. After
+saving its report, I restored the pre-test index backup, retained package 103,
+and re-enabled/restarted the VPS2 service. At the latest check the service
+had zero restarts and zero kernel/userspace queue drops, but it was still in a
+post-start full observation; its completed post-restore verification is not
+claimed here.
+
+Follow-up at 14:27 UTC: the restored package 103 service completed that
+post-start root observation from 14:23:30 to 14:26:12 (162 seconds), covering
+1,322,840 files and 158,662 directories with zero coverage issues. Its
+independent accounting verification passed at 14:26:52 (40.6 seconds after
+the scan). The service was `active/running`, with `NRestarts=0`, zero kernel
+overflows, and zero userspace update drops. At the status sample, it was
+conservatively dirty because new filesystem hints arrived after the observed
+scan; `caught_up=false` is expected for this last-observed model. VPS2 had
+9.9 GiB available on `/` after the lifecycle run and state restoration.
+
+Remaining qualification gaps: 24-hour canary, 72-hour soak, repeated
+sustained overflow storms, continuous-churn freshness and scan-duration SLO,
+large-scale performance budgets, clean-install exact full-tree comparison,
+other filesystems/kernels, RPM package lifecycle, and power-loss/media
+corruption tests. These results improve evidence but do not establish universal
+or 100% production readiness.

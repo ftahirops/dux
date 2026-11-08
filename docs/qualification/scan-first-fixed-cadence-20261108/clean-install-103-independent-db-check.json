@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "checked_at_utc": "2026-11-08T14:25Z",
+  "source": "VPS2 clean-install database preserved from package revision 103 lifecycle test",
+  "database_path_on_vps2": "/root/dux-canary-e96e708/index-clean-install-103.db",
+  "database_sha256": "045ac20abbe5961236745983bd667ad6b892aaf416b9e140fe1dc43bbc003841",
+  "database_bytes": 564527104,
+  "verifier": "scripts/dux-readiness.py snapshot(), check_index()",
+  "sqlite_integrity_check": "ok",
+  "root_accounting": {
+    "recursive_allocated_bytes": 82852466688,
+    "recursive_inode_count": 1474954
+  },
+  "structural_checks": {
+    "orphan_directory_entries": 0,
+    "inodes_without_unique_prime_attribution": 0,
+    "incorrect_directory_rollups": 0
+  },
+  "scan_generation": "3012036-1794147519007143265",
+  "last_reconcile_attempt_result_at_capture": null,
+  "scope_limit": "No independent full-root path/inode/allocation comparison was run on this clean-install database."
+}
