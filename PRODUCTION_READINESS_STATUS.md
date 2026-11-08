@@ -4,6 +4,55 @@
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
+## Test and coverage update (2026-11-08, latest local run)
+
+After adding two classification-rule regression tests, the current Rust suite
+passes **312 tests, 0 failures, 2 ignored** (`cargo test --locked
+--all-features`). Formatting (`cargo fmt --check`), strict Clippy,
+`git diff --check`, stable line coverage, and nightly branch coverage also
+passed. The ignored test requires a separately qualified ext4 filesystem that
+supports the required file-handle behavior. Python monitor/harness suite:
+**323 passed** (27 focused canary-monitor tests), recorded in the qualification
+README. These are test counts per suite/run, not unique test cases summed over
+repeated coverage and qualification runs.
+
+Coverage from the latest coverage-instrumented Rust run:
+
+- Stable line coverage: **69.02%** overall (25,836 instrumented lines,
+  8,004 missed).
+- Nightly branch coverage: **66.87%** overall; region coverage **69.55%**,
+  function coverage **74.96%**. Branch coverage is measured separately with
+  nightly because LLVM's branch instrumentation option is unstable on stable
+  Rust.
+- `classify.rs`, following the new safety-rule tests: **99.30% line / 91.35%
+  branch**. Lower branch coverage remains in `fault.rs` (21.43%),
+  `containers.rs` (51.47%), `tui.rs` (47.54%), and `emit.rs` (50.00%).
+- Security dependency audit: `cargo audit --json` exited successfully with
+  zero known vulnerabilities across 229 locked dependencies; the advisory
+  database was last updated 2026-11-06. This is dependency-vulnerability
+  coverage, not a complete application security review.
+
+The run logs and raw audit result are in
+[`docs/qualification/scan-first-fixed-cadence-20261108/`](docs/qualification/scan-first-fixed-cadence-20261108/):
+`llvm-cov-summary.log`, `llvm-cov-branch-summary.log`, and
+`cargo-audit-20261108.json`. The branch-coverage report shows all per-module
+line, function, and branch totals. No claim of 100% test coverage is made.
+
+### Current live candidate checkpoint
+
+The VPS2 full-root scan-first candidate is still under its 24-hour monitored
+canary; only the initial sample has been recorded in the latest checkpoint.
+That sample passed binary/service identity, schema-v7 path/accounting,
+SQLite quick-check, freshness, resource, and critical-journal checks. The
+candidate completed an automatic retry after its first full-root attempt
+failed closed on an inode-incarnation conflict plus concurrent hint loss. The
+retry scanned 1,361,780 files and 163,202 directories with zero coverage
+issues, and the accounting verifier passed. Hints arrived during the scan, so
+the view remained dirty as designed. This is one successful retry, not proof
+of continuous convergence; the 24-hour canary, longer soak, production-host
+canary, and other release gates remain open. The production host was not
+changed.
+
 ## Latest fixed-cadence implementation and VPS2 evidence (11:54 UTC)
 
 Commit `559097852ac5333bf575299394758af7b7a9cb3d` removes two causes of

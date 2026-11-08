@@ -371,4 +371,123 @@ mod tests {
         let cargo = classify(&row("/work/target/debug/deps/app-123"));
         assert_eq!(cargo.belongs_to, "Cargo / Rust build output");
     }
+
+    #[test]
+    fn safety_rules_cover_known_owners_and_keep_unknown_data_review_only() {
+        let cases = [
+            ("/swapfile", 'f', Safety::DoNotDelete),
+            (
+                "/var/lib/postgresql/16/main/base/1/2",
+                'f',
+                Safety::DoNotDelete,
+            ),
+            (
+                "/var/lib/postgresql/16/main/base/1/test.db",
+                'f',
+                Safety::DoNotDelete,
+            ),
+            ("/var/lib/mysql/ibdata1", 'f', Safety::DoNotDelete),
+            ("/var/lib/mariadb/ib_logfile0", 'f', Safety::DoNotDelete),
+            (
+                "/var/lib/containerd/snapshots/1/fs/x",
+                'f',
+                Safety::ManagedOnly,
+            ),
+            (
+                "/var/lib/docker/overlay2/layer/diff/x",
+                'f',
+                Safety::ManagedOnly,
+            ),
+            (
+                "/var/lib/containers/storage/overlay/x",
+                'f',
+                Safety::ManagedOnly,
+            ),
+            (
+                "/repo/.git/objects/pack/pack-a.pack",
+                'f',
+                Safety::DoNotDelete,
+            ),
+            ("/work/.terraform/providers/example", 'f', Safety::Safeish),
+            ("/work/target/debug/deps/app-123", 'f', Safety::Safeish),
+            ("/work/target/release/app", 'f', Safety::Safeish),
+            ("/srv/.venv/lib/python/site.py", 'f', Safety::ManagedOnly),
+            ("/srv/venv/lib/python/site.py", 'f', Safety::ManagedOnly),
+            (
+                "/root/.cache/ms-playwright/chromium/chrome",
+                'f',
+                Safety::Safeish,
+            ),
+            (
+                "/root/.codex/packages/standalone/releases/old",
+                'f',
+                Safety::Review,
+            ),
+            (
+                "/home/user/.local/share/rtk/history.db",
+                'f',
+                Safety::Review,
+            ),
+            (
+                "/home/user/.local/share/opencode/state.db",
+                'f',
+                Safety::Review,
+            ),
+            ("/backup/weekly/archive", 'f', Safety::Review),
+            ("/srv/backup.tgz", 'f', Safety::Review),
+            ("/srv/export.tar", 'f', Safety::Review),
+            ("/srv/archive.tar.gz", 'f', Safety::Review),
+            ("/var/log/audit/security.log", 'f', Safety::Review),
+            ("/var/log/xhelix/service.log", 'f', Safety::ManagedOnly),
+            ("/var/log/syslog.1", 'f', Safety::Safeish),
+            ("/var/log/syslog", 'f', Safety::ManagedOnly),
+            ("/srv/application.db", 'f', Safety::Review),
+            ("/srv/application.sqlite", 'f', Safety::Review),
+            ("/srv/application.sqlite3", 'f', Safety::Review),
+            ("/usr/bin/vault", 'f', Safety::ManagedOnly),
+            ("/usr/sbin/alloy", 'f', Safety::ManagedOnly),
+            ("/usr/local/bin/openobserve", 'f', Safety::ManagedOnly),
+            ("/usr/bin/other-tool", 'f', Safety::ManagedOnly),
+            ("/tmp/build-output", 'f', Safety::Review),
+            ("/var/tmp/migration-state", 'f', Safety::Review),
+            ("/opt/libexample.so", 'f', Safety::Review),
+            ("/opt/libexample.so.1", 'f', Safety::Review),
+            ("/images/disk.img", 'f', Safety::Review),
+            ("/images/disk.iso", 'f', Safety::Review),
+            ("/downloads/archive.zip", 'f', Safety::Review),
+            ("/downloads/archive.xz", 'f', Safety::Review),
+            ("/srv/unrecognized-state", 'f', Safety::Review),
+            ("/srv/unrecognized-directory", 'd', Safety::Review),
+        ];
+
+        for (path, kind, expected_safety) in cases {
+            let result = classify_path(path, kind);
+            assert_eq!(
+                result.safety, expected_safety,
+                "unexpected safety classification for {path}"
+            );
+            assert!(!result.file_type.is_empty(), "missing type for {path}");
+            assert!(!result.belongs_to.is_empty(), "missing owner for {path}");
+            assert!(
+                !result.reason.is_empty(),
+                "missing safety reason for {path}"
+            );
+            assert!(!result.action.is_empty(), "missing action for {path}");
+        }
+    }
+
+    #[test]
+    fn specific_data_rules_win_before_generic_extension_rules() {
+        let postgres = classify_path("/var/lib/postgresql/16/main/data.sqlite", 'f');
+        assert_eq!(postgres.safety, Safety::DoNotDelete);
+        assert_eq!(postgres.belongs_to, "PostgreSQL");
+
+        let audit = classify_path("/var/log/audit/events.db", 'f');
+        assert_eq!(audit.safety, Safety::Review);
+        assert_eq!(audit.file_type, "audit log");
+
+        let active_log = classify_path("/var/log/postgresql/data.db", 'f');
+        assert_eq!(active_log.file_type, "active log");
+        assert_eq!(active_log.safety, Safety::ManagedOnly);
+    }
 }
