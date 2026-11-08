@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 23:49 UTC
+**Updated:** 2026-11-08 23:58 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -35,11 +35,12 @@ cancelled under memory pressure and retried. That retry's full scan completed
 at 23:13:39 with 1,522,965 staged paths and zero coverage issues. This does not
 pass the failed canary's freshness gate; that soak is incomplete. A fresh v4
 24-hour soak started at 23:27:17 with the corrected diagnostic monitor.
-Samples 1–5 passed through 23:48 UTC with zero restarts, overflows, userspace
-drops, or OOMs. The daemon remained dirty awaiting the next observation; the
-latest completed scan age was 435 seconds. V4 monitors the installed release-106 binary, not the newer
-source changes, and remains in progress. The latest VPS2 status is active,
-unpaused, with scan age 297 seconds and zero overflows, drops, or restarts.
+Samples 1–7 passed through 23:58:22 UTC with zero restarts, overflows,
+userspace drops, or OOMs. The daemon remained dirty awaiting the next
+observation; the latest completed scan age was 1,055 seconds. V4 monitors the
+installed release-106 binary, not the newer source changes, and remains in
+progress. At sample 6 the service was active and unpaused with zero overflows,
+drops, or restarts.
 The earlier full scan covered 1,514,820 staged paths with zero coverage issues
 and passed accounting verification; its scan-plus-accounting interval used
 87.6% of one core and about 1.75 GiB read / 1.66 GiB written. No CPU/I/O SLO
@@ -1872,8 +1873,71 @@ checked-in daemon unit **3.3 OK** on the local systemd 255 host. The unit
 retains root and `CAP_SYS_ADMIN`/`CAP_DAC_READ_SEARCH` for global fanotify and
 file-handle resolution, while denying unrelated capabilities and syscall
 groups. The offline score is not a runtime compatibility or complete security
-proof. VPS2 still runs the release-106 service and its older unit. VPS1
-production was last observed on Nov 3 with a 5.1 MEDIUM policy score and
-weaker core-dump/SecureBits/syscall-filter settings than this source unit.
-Package-based rollout and effective-policy verification on both environments
-remain open; neither live service was modified.
+proof. VPS2 still runs the release-106 service and its older unit. The Nov 3
+production result of 5.1 MEDIUM is historical and superseded by the Nov 8
+effective-unit observation below. Package-based rollout and complete
+effective-policy verification remain open.
+
+## Fresh read-only production host snapshot — 2026-11-08 23:51 UTC
+
+The production host (`vps1`) is now running an effective unit with
+`LimitCORE=0`, `SecureBits=noroot noroot-locked`, `NoNewPrivileges=yes`, only
+`CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`, and a broad syscall deny filter.
+`systemd-analyze security dux.service` reports **3.3 OK**. The loaded unit hash
+is `dd34d308…`; it is not byte-identical to this worktree's packaged unit
+(`e12d1f4a…`). The source package also explicitly denies the `bpf` syscall;
+the loaded production unit's filter does not. The systemd version supports
+that filter, but the package/config drift must be reconciled and tested before
+claiming the production policy matches the candidate.
+
+The active daemon is still **dux 0.6.3, commit `e0cc915f8f37`**, binary SHA-256
+`e148692f…`, not the qualified source candidate. Its read-only status at this
+sample showed: live and unpaused, 4 lifetime systemd restarts, **326 cumulative
+kernel overflow notifications**, zero reported userspace drops, a dirty index
+(`fanotify queue overflow`), **3,046 pending updates**, and a completed scan
+298,907 seconds (about 3.46 days) old. The index reports 1,289,547 nodes and
+125,473,435,648 logical bytes; the on-disk database is about 2.8 GB with a
+128 MiB WAL. These values show that the production freshness/overflow issue
+persists despite the unit-policy improvement. No production daemon, package,
+database, or systemd state was changed during this snapshot.
+
+## Production policy gate, health, and disk recheck — 2026-11-08 23:54 UTC
+
+The package lifecycle's read-only `assert_service_security_policy()` check was
+run against the effective production unit and **failed** because `bpf` is not
+in its explicit syscall deny list. This is a concrete config drift gate; the
+checked-in `packaging/dux.service` denies it. The focused lifecycle policy test
+module passed **70/70** tests, including a regression case that rejects a
+missing BPF denial with `CAP_SYS_ADMIN`. The live failure was observed without
+changing systemd or restarting Dux. `systemd-analyze verify` passed for both
+checked-in units.
+
+A second read-only Dux status at 23:54 UTC still showed a live, unpaused
+production daemon, zero new reported drops, and no write error, but the index
+was dirty from fanotify overflow. The cumulative overflow count remained 326;
+pending updates increased from 3,046 to 9,086, and `behind_seconds` from
+109,218 to 109,398. The last completed full scan was 299,087 seconds old. The
+SQLite main DB was 2,802,872,320 bytes, with a 128 MiB WAL. `/` had 66 GiB
+available (63% used). This is no longer just a historic snapshot: the main
+freshness failure is still live.
+
+Disk survey at the same time: local `/` was 185 GiB total, 111 GiB used, 66
+GiB free; `target/readiness` was 44 MiB, `target/dux-auditable` 579 MiB, the
+qualification records 7.9 MiB, and `.git` 395 MiB. VPS2 `/` was 93 GiB total,
+76 GiB used, 13 GiB free; its Dux state occupied 660 MiB and the canary
+evidence/rollback directory 589 MiB. No cleanup was warranted while the soak
+and rollback evidence remain active.
+
+## Production event-rate sample — 2026-11-08 23:56:09–23:56:39 UTC
+
+Two read-only status snapshots 30.0 seconds apart recorded 478,955 more events
+seen (**15,964/s**) and 250,093 more resolved (**8,336/s**). The kernel
+overflow counter rose by **5** during those same 30 seconds (335→340), while
+pending updates fell by 3,916. Main DB and WAL file sizes did not change during
+the interval. `/proc/sys/fs/fanotify/max_queued_events` is 65,536. This directly
+confirms burst overflow is still occurring on production under a workload with
+high event volume, even while the pending-update count can fall. It does not by
+itself isolate whether the limiting factor is CPU throttling, a short producer
+burst, event-resolution I/O, or queue telemetry error; the installed service is
+the older `e0cc915` binary, and queue bytes were not captured in these two
+samples.

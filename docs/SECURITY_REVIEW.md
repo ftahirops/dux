@@ -721,3 +721,26 @@ failure is specific to this test server and does not establish compatibility
 or incompatibility of the local Dropbear child. The SSH harness now includes
 captured command output in raised errors to make future failures diagnosable.
 The live production service and its policy were not changed.
+
+## Production unit policy recheck — 2026-11-08 23:51 UTC
+
+The 2026-11-03 live-policy snapshot above is historical and no longer
+describes the loaded production unit. A fresh read-only check on `vps1` found
+`LimitCORE=0`, `SecureBits=noroot noroot-locked`, `NoNewPrivileges=yes`,
+`CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH`, and the broad
+syscall deny filter. `systemd-analyze security dux.service` now reports **3.3
+OK** (previously 5.1 MEDIUM). The loaded unit hash is
+`dd34d3086af76117b18b06a23c5c70ace4353ff6a33ae9b3fa3c10f13c04d920`; the
+checked-in `packaging/dux.service` hash is
+`e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b`. Review
+of the loaded filter found it does not explicitly deny `bpf`, while the
+checked-in unit does. This is a remaining config drift item, not a claim that
+the production service is otherwise unprotected.
+
+This update is policy evidence only. The running production binary remains
+`dux 0.6.3 (e0cc915f8f37)` with SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`. Its
+read-only status still showed 326 kernel overflow notifications, a dirty
+index, and a last completed scan about 3.46 days old. It does not qualify the
+new candidate or close correctness/freshness gates. No service or database
+state was changed.
