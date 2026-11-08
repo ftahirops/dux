@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 21:22 UTC
+**Updated:** 2026-11-08 21:29 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -20,20 +20,19 @@ revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
 DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
 only on the disposable VPS2 qualification VM, not production.
 
-## Corrected VPS2 canary checkpoint (2026-11-08 21:22 UTC)
+## Corrected VPS2 canary checkpoint (2026-11-08 21:29 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and is still active.
-Its first four samples passed (21:07:13, 21:12:14, 21:17:10, and 21:22:33 UTC)
-with no monitor errors. The candidate and unit hashes, SQLite/schema-v7 graph,
-and accounting checks passed in each sample. At sample 4, the service had zero
-restarts, kernel overflows, userspace drops, and OOM events. A full observation
-was in progress; the last completed observation was 953 seconds old against
-the configured 1,200-second limit. The index was dirty, as expected for
-scan-first after filesystem hints. The reported `behind_seconds` is the legacy
-event-pipeline catch-up timer; use `last_scan_age_seconds` for scan-first
-freshness. Four samples do not qualify a 24-hour soak. Peak Dux memory observed
-was about 1.51 GiB against the 4 GiB service limit. The append-only evidence
-through sample 4 is recorded in
+Its first five samples passed (21:07:13, 21:12:14, 21:17:10, 21:22:33, and
+21:27:17 UTC) with no monitor errors. The candidate and unit hashes,
+SQLite/schema-v7 graph, and accounting checks passed in each sample. At sample
+5, the service had zero restarts, kernel overflows, userspace drops, and OOM
+events. The latest full observation was 337 seconds old, with no scan in
+progress. The index remained dirty after filesystem hints. Use
+`last_scan_age_seconds` for scan-first freshness; `behind_seconds` is the
+legacy event-pipeline catch-up timer. Five samples do not qualify a 24-hour
+soak. Peak Dux memory observed was about 1.51 GiB against the 4 GiB service
+limit. The append-only evidence through sample 5 is recorded in
 [`canary-24h-5m-v2-progress.jsonl`](docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl).
 
 Latest current-source coverage from `cargo llvm-cov --locked --all-features
@@ -76,6 +75,14 @@ remaining qualification/source artifacts were also preserved. `/tmp` is not
 empty; those live or potentially valuable artifacts need a separate cleanup
 after their owners finish.
 
+At 21:28 UTC, `/` was 185 GiB with 111 GiB used and 66 GiB free (63% used);
+`/tmp` was 8.6 GiB and `/home/dux/target` was 3.3 GiB. `/tmp` included a 2.1
+GiB actively changing tree while Go build processes were running, a live 76
+MiB PostgreSQL regression cluster, and large XGS/xtop qualification and replay
+artifacts. These were preserved because they were active or potentially useful
+test evidence. Two `go-build*` temp directories (128 MiB combined) had no open
+files; an attempted targeted removal was rejected by shell safety controls.
+
 ## Live VPS1 production snapshot (2026-11-08 19:29 UTC)
 
 Read-only inspection of the production host found the installed binary is
@@ -95,6 +102,21 @@ This is intentional mount-topology restart behavior, not evidence of a panic;
 it still means restarts are part of the live service behavior, and the old
 daemon has not repaired the stale index. VPS1 was inspected only; no service,
 binary, or database changes were made.
+
+### VPS1 read-only recheck (2026-11-08 21:29 UTC)
+
+The production service remains on `dux 0.6.3` revision `e0cc915f8f37`
+(`source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`;
+binary SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`).
+It is active with four systemd restarts. Read-only status reports dirty from
+fanotify overflow, 281 cumulative overflows, 73.96M events seen versus 43.41M
+resolved, 10 pending updates, no userspace drops, and `caught_up=false`. The
+last completed scan is 290,387 seconds old (about 80.7 hours); the reported
+event-pipeline behind time is 100,698 seconds. Recent journal samples contain
+repeated `open_by_handle_at` `ESTALE` warnings and slow 128-update flushes taking
+257–315 ms. This confirms the legacy production install remains stale under
+churn. VPS1 was inspected only; no service, binary, or database changes were
+made.
 
 The container writable-layer parser had a verified undercount for OverlayFS
 upperdir paths containing escaped comma, whitespace, or backslash bytes. The
