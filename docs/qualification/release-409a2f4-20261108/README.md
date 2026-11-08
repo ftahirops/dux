@@ -96,7 +96,7 @@ collector; the earlier failed evidence is preserved in
 [`live/failed-5m-canary-monitor-calibration.jsonl`](live/failed-5m-canary-monitor-calibration.jsonl)
 and does not count as a pass.
 
-### Corrected 24-hour canary progress (2026-11-08 21:32 UTC)
+### Corrected 24-hour canary progress (2026-11-08 21:35 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and remains active.
 Its first six samples (21:07:13, 21:12:14, 21:17:10, 21:22:33, 21:27:17,
@@ -109,7 +109,15 @@ in progress. The index was dirty after filesystem changes. The reported
 legacy event-pipeline catch-up timer; `last_scan_age_seconds` is the relevant
 scan-first freshness measure. Six samples are an early checkpoint only, not a
 soak pass. Peak Dux memory was about 1.51 GiB against the 4 GiB service limit.
-The raw append-only snapshot through sample 6
+Across sample intervals 1→6, Dux used 689.1 CPU-seconds over 1,490.8
+wall-seconds (46.2% of one core on average), with interval rates from 19.5% to
+86.8%. A cgroup snapshot at 21:34 showed throttling in 8,240 of 31,374 CPU
+periods (26.3%) and cumulative service I/O of 7,471,202,304 bytes read and
+6,704,386,048 bytes written. These early totals include initial indexing and
+must not be projected as steady state. The monitor checks the one-core hard
+CPU ceiling and memory limit, but does not enforce a CPU or I/O budget; these
+passes therefore do not establish a defined efficiency target. The raw
+append-only snapshot through sample 6
 is [`live/canary-24h-5m-v2-progress.jsonl`](live/canary-24h-5m-v2-progress.jsonl).
 
 This VPS2 qualification is not production sign-off. It covers one KVM guest,

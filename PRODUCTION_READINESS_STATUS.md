@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 21:32 UTC
+**Updated:** 2026-11-08 21:35 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -20,7 +20,7 @@ revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
 DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
 only on the disposable VPS2 qualification VM, not production.
 
-## Corrected VPS2 canary checkpoint (2026-11-08 21:32 UTC)
+## Corrected VPS2 canary checkpoint (2026-11-08 21:35 UTC)
 
 The corrected five-minute canary started at 21:05:37 UTC and is still active.
 Its first six samples passed (21:07:13, 21:12:14, 21:17:10, 21:22:33,
@@ -32,7 +32,16 @@ progress. The index remained dirty after filesystem hints. Use
 `last_scan_age_seconds` for scan-first freshness; `behind_seconds` is the
 legacy event-pipeline catch-up timer. Six samples do not qualify a 24-hour
 soak. Peak Dux memory observed was about 1.51 GiB against the 4 GiB service
-limit. The append-only evidence through sample 6 is recorded in
+limit. Across sample intervals 1→6, Dux used 689.1 CPU-seconds over 1,490.8
+wall-seconds (46.2% of one core on average); interval rates ranged from 19.5%
+to 86.8%. A separate cgroup snapshot at 21:34 showed 1,458 CPU-seconds since
+service start, throttling in 8,240 of 31,374 CPU periods (26.3%), and 7,471,202,304
+bytes read plus 6,704,386,048 bytes written on the block device. The VM has six
+vCPUs; the service hard limit is one core. These early figures include initial
+indexing and are not a steady-state extrapolation. The monitor records CPU
+usage but does not enforce a CPU or I/O budget, so the passing canary samples
+prove health/accounting/freshness gates, not a defined efficiency target. The
+append-only evidence through sample 6 is recorded in
 [`canary-24h-5m-v2-progress.jsonl`](docs/qualification/release-409a2f4-20261108/live/canary-24h-5m-v2-progress.jsonl).
 
 Latest current-source coverage from `cargo llvm-cov --locked --all-features
