@@ -8759,3 +8759,65 @@ This evidence still does not establish the 15-minute observation-age SLO,
 endurance, packaged release lifecycle, privilege acceptance, or production
 canary. The earlier `c323aee` false-clean failure still has no reproduced root
 cause; it remains a release blocker.
+
+### Static-musl package and real-root lifecycle attempt — 2026-11-08 10:41 UTC
+
+Commit `43a7769` built successfully with the official static-musl release
+script and emitted an auditable binary plus DEB/RPM packages. The binary
+inventory contains 202 dependencies; the lockfile audit found zero known
+advisories/warnings across 229 dependencies using RustSec DB commit
+`309392b18f6b17022f82c701f300433126901068` (2026-11-06). VPS2 had no DNS, so
+the local cargo-audit shim skipped the yanked-crate check. The exact musl build
+caught an ioctl argument type mismatch and passed after it was fixed to
+`libc::Ioctl`.
+
+The package lifecycle unit suite passed 70 tests. A real DEB lifecycle run
+timed out at the harness's 300-second baseline readiness limit because the
+service remained in systemd `reloading`; upgrade, rollback, purge, and clean
+install were not reached. The unit itself allows one hour for startup, and
+the scan continued after the harness exited, so this is not evidence that the
+daemon could never become ready. Package revisions 98 and 99 contained the
+same candidate binary, so this attempt would only test package transitions,
+not an old-code upgrade.
+
+VPS2's existing 2.4-GiB database had 233 REAL `recursive_bytes` values among
+1,974,271 rows, some outside i64 range; status failed with a typed-column
+error. A candidate full observation replaced the unreadable index and
+`status` then reported 1,431,666 nodes, but the result was dirty. The reader
+reported bounded fanotify hint-ring and resolver-backlog overflow. At the
+last snapshot it had seen 842,240 events, with zero kernel-overflow notices
+and zero userspace update drops; a second scan was underway (815,390 files,
+116,331 directories) when the 300-second readiness limit expired. The old
+index was read-only during atomic reconciliation, and the daemon logged that
+it could not persist the dirty marker there. The test service was stopped and
+disabled after evidence capture to avoid sustained load.
+
+This narrows the passing fixture claims: bounded ext4 churn/overflow tests do
+not demonstrate readiness under the VPS2 event stream. The live run shows
+ring/backlog saturation, a dirty index, and repeated observations, but the
+300-second harness cutoff is too short to establish eventual convergence. A
+longer runtime observation is underway. Investigate ring/backlog saturation;
+add a regression for legacy out-of-range numeric totals; and run an actual
+source-distinct upgrade/rollback. Detailed report, manifest, audit, and logs:
+[`docs/qualification/package-lifecycle-20261108/`](qualification/package-lifecycle-20261108/).
+
+That extended runtime observation completed at 10:56:01 UTC. One full
+observation finished in about 4.5 minutes, but accounting verification stayed
+pending. At 301 seconds of backlog the daemon started another full scan; that
+pass overflowed the hint ring twice at 10:53:20 and caused an immediate third
+scan. The third scan was still indexing at shutdown, after seeing 52,965
+events (zero kernel overflow notices; zero reported userspace update drops).
+This demonstrates scan retry amplification, not permanent non-convergence.
+The runtime snapshots are in `runtime-long-observation.log` in the evidence
+directory.
+
+The source now changes scan-first handling so hint loss during a completed
+full walk waits for the next fixed observation interval rather than triggering
+an immediate scan loop. Package lifecycle readiness now uses the systemd
+one-hour startup allowance and requires a completed last-observed scan rather
+than the scan-first `caught_up` signal, which remains false by design. Updated
+source on VPS2 passed **300 Rust tests (0 failed, 2 ignored)**, strict
+all-target/all-feature Clippy with `-D warnings`, formatting, and **70 Python
+package-lifecycle tests**. The exact release package and runtime policy are
+still unqualified. Logs are `fix-cargo-test.log` and `fix-lint-test.log` in the
+evidence directory.

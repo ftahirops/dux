@@ -295,10 +295,11 @@ def assert_index_access_policy(directory=Path("/var/lib/dux"), expected_uid=0, g
 
 
 # A status read every two seconds avoids turning qualification polling into a
-# source of database load. Five minutes gives slow guest boot/scan runs time to
-# finish one baseline scan while bounding nonconverging qualification work.
+# source of database load. Match the service's 3600-second startup allowance:
+# production-sized root scans can exceed five minutes on an idle-I/O, low-share
+# qualification guest. A timeout must still bound nonconverging runs.
 DAEMON_READINESS_POLL_SECONDS = 2.0
-LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS = 300
+LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS = 3600
 
 
 def wait_service_active(timeout, stage):
@@ -644,7 +645,9 @@ def main():
         if service_after_baseline_install["active"] == "failed":
             command("systemctl", "reset-failed", "dux.service", check=False)
         command("systemctl", "start", "--no-block", "dux.service", check=False)
-        legacy_running = wait_service_active(300, "legacy_baseline_runtime")
+        legacy_running = wait_service_active(
+            LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "legacy_baseline_runtime"
+        )
         legacy_baseline = wait_initial_scan_complete(
             LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS,
             "legacy_baseline_initial_scan",
@@ -719,7 +722,9 @@ def main():
         if rollback_service_after_install["active"] == "failed":
             command("systemctl", "reset-failed", "dux.service", check=False)
         command("systemctl", "start", "--no-block", "dux.service", check=False)
-        legacy_rollback_service = wait_service_active(300, "rollback_runtime")
+        legacy_rollback_service = wait_service_active(
+            LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "rollback_runtime"
+        )
         record("rollback", {"version": rolled_back,
                              "binary_sha256": _sha256_file(rollback_binary),
                              "package_payload_binary_sha256": old_payload_hash,
@@ -780,14 +785,26 @@ def main():
         # not create remote-access identities by default.
         shutil.rmtree("/etc/dux", ignore_errors=True)
         progress("clean_install", target_version=upgraded)
+        clean_scan_started_at = int(time.time())
         install(args.kind, new_package)
         clean_version = installed_version(args.kind)
         assert clean_version == upgraded, clean_version
         # Type=notify stays in systemd's "reloading" state while dux builds the
         # initial index. Wait for that real readiness transition instead of
         # treating the first scan as a package startup failure.
-        clean_service = wait_service_active(300, "clean_install_runtime")
-        clean_daemon = wait_daemon_caught_up(180, "clean_install_reconciliation")
+        clean_service = wait_service_active(
+            LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "clean_install_runtime"
+        )
+        # In scan-first mode caught_up intentionally remains false: fanotify
+        # events are hints and the index is a last-observed snapshot. Package
+        # readiness therefore requires a completed post-install observation;
+        # record dirty/caught_up separately instead of waiting for an
+        # impossible real-time exactness state.
+        clean_daemon = wait_initial_scan_complete(
+            LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS,
+            "clean_install_reconciliation",
+            clean_scan_started_at,
+        )
         assert clean_service["enabled"] == "enabled" and clean_service["active"] == "active", clean_service
         assert clean_service["tunnel_enabled"] in {"disabled", "not-found"}, clean_service
         assert clean_service["tunnel_active"] != "active", clean_service
@@ -817,7 +834,8 @@ def main():
                                  "package_payload_binary_sha256": new_payload_hash,
                                  "backup_helper_sha256": clean_backup_helper_hash,
                                  "service": clean_service,
-                                 "daemon_caught_up": clean_daemon,
+                                 "daemon_observation": clean_daemon,
+                                 "daemon_caught_up": clean_daemon.get("caught_up") is True,
                                  "service_security_policy": unit_security,
                                  "index_access_policy": index_access,
                                  "tunnel_identity_created": Path("/etc/dux/ed25519").exists()})

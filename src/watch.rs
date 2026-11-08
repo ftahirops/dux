@@ -625,22 +625,7 @@ fn scan_first_event_race_only(
     scan_errors: u64,
 ) -> bool {
     reconcile_first
-        && lost_events
-        && !forced_reconciliation
-        && !coverage_incomplete
-        && !resolve_warned
-        && scan_errors == 0
-}
-
-fn scan_first_forced_followup(
-    reconcile_first: bool,
-    forced_reconciliation: bool,
-    coverage_incomplete: bool,
-    resolve_warned: bool,
-    scan_errors: u64,
-) -> bool {
-    reconcile_first
-        && forced_reconciliation
+        && (lost_events || forced_reconciliation)
         && !coverage_incomplete
         && !resolve_warned
         && scan_errors == 0
@@ -2994,13 +2979,6 @@ pub fn run_daemon(
                             resolve_warned,
                             stats.errors,
                         );
-                        let forced_followup = scan_first_forced_followup(
-                            reconcile_first,
-                            forced_reconciliation_after_scan,
-                            coverage_incomplete,
-                            resolve_warned,
-                            stats.errors,
-                        );
                         index_uncertain = true;
                         pending_reconciliation_check = safe_to_clear.then_some(true);
                         store.set_meta("dirty_since", &now_secs().to_string())?;
@@ -3009,21 +2987,20 @@ pub fn run_daemon(
                             if safe_to_clear {
                                 RECONCILIATION_ACCOUNTING_PENDING
                             } else if event_race_only {
-                                "filesystem changed during observation; next periodic scan scheduled"
-                            } else if forced_followup {
-                                "fanotify loss during observation; immediate follow-up scheduled"
+                                "filesystem or fanotify hints changed during observation; next periodic scan scheduled"
                             } else {
                                 "incomplete coverage or changes lost during reconciliation"
                             },
                         )?;
                         if event_race_only {
                             // A complete walk remains the source of truth even
-                            // when its lossy hint stream overflows. Keep the
-                            // next observation on the fixed cadence instead of
-                            // creating an immediate full-scan loop. The
-                            // post-scan accounting check can still clear dirty
-                            // state; scan-first freshness never claims real-time
-                            // caught-up status.
+                            // when its lossy hint stream overflows during that
+                            // walk. Do not immediately repeat a full scan: a
+                            // sustained event stream can overflow every pass
+                            // and otherwise create an unbounded scan loop. Keep
+                            // the next observation on the fixed cadence, while
+                            // the freshness timestamp and scan-first status
+                            // make the last-observed view explicit.
                             // Keep the cadence anchored to observation start.
                             // Resetting here would add the full scan duration to
                             // the configured maximum interval on every raced scan.
@@ -3039,18 +3016,12 @@ pub fn run_daemon(
                                 RESCAN.store(false, Ordering::SeqCst);
                             }
                             lost_events = false;
+                            forced_reconciliation_after_scan = false;
                             if !manual_rescan_pending {
                                 tracing::info!(
-                                    "filesystem changed during scan-first observation; next full observation is scheduled"
+                                    "filesystem or fanotify hints changed during scan-first observation; next full observation is scheduled"
                                 );
                             }
-                        } else if forced_followup {
-                            RESCAN.store(true, Ordering::SeqCst);
-                            lost_events = false;
-                            forced_reconciliation_after_scan = false;
-                            tracing::warn!(
-                                "fanotify loss overlapped the observation; scheduling immediate follow-up"
-                            );
                         } else if !safe_to_clear {
                             failed_reconciliation_attempts =
                                 failed_reconciliation_attempts.saturating_add(1);
@@ -8115,8 +8086,11 @@ mod tests {
         assert!(scan_first_event_race_only(
             true, true, false, false, false, 0
         ));
-        assert!(!scan_first_event_race_only(
+        assert!(scan_first_event_race_only(
             true, true, true, false, false, 0
+        ));
+        assert!(scan_first_event_race_only(
+            true, false, true, false, false, 0
         ));
         assert!(!scan_first_event_race_only(
             true, true, false, true, false, 0
@@ -8130,9 +8104,6 @@ mod tests {
         assert!(!scan_first_event_race_only(
             false, true, false, false, false, 0
         ));
-        assert!(scan_first_forced_followup(true, true, false, false, 0));
-        assert!(!scan_first_forced_followup(true, true, true, false, 0));
-        assert!(!scan_first_forced_followup(false, true, false, false, 0));
     }
 
     #[test]

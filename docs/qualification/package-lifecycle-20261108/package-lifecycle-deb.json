@@ -1,0 +1,34 @@
+{
+  "status": "failed",
+  "kind": "deb",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "kernel": "6.8.0-147-generic",
+  "started_at_epoch": 1794134047.798297,
+  "steps": [],
+  "sandbox": {
+    "virtualization": "kvm",
+    "marker": "/etc/dux-qualification-sandbox",
+    "marker_mode": "0o400"
+  },
+  "old_package_sha256": "5303a87ed55c1ebe19c000a5f3cff33590c4fa87a9f07e47695a68f49ab1a2c3",
+  "new_package_sha256": "673c4fc4720c26e4709ee224e7b25bf77294d7065a8af067290e5a7abf3f9a93",
+  "error": "AssertionError({'stage': 'legacy_baseline_runtime', 'service_start_timeout': {'enabled': 'disabled', 'active': 'reloading', 'tunnel_enabled': 'disabled', 'tunnel_active': 'inactive'}, 'timeout_seconds': 300})",
+  "failure_evidence": {
+    "stage": "legacy_baseline_runtime",
+    "service_start_timeout": {
+      "enabled": "disabled",
+      "active": "reloading",
+      "tunnel_enabled": "disabled",
+      "tunnel_active": "inactive"
+    },
+    "timeout_seconds": 300
+  },
+  "installed_version_at_failure": "0.6.3-98",
+  "service_at_failure": {
+    "enabled": "disabled",
+    "active": "reloading",
+    "tunnel_enabled": "disabled",
+    "tunnel_active": "inactive"
+  },
+  "elapsed_seconds": 302.753
+}

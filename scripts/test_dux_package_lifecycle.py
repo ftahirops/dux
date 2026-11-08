@@ -871,9 +871,9 @@ class RollbackIndexBackupTests(unittest.TestCase):
 
 
 class DaemonReadinessTests(unittest.TestCase):
-    def test_legacy_baseline_timeout_is_bounded_for_nonconverging_coverage(self):
+    def test_legacy_baseline_timeout_matches_systemd_start_allowance(self):
         self.assertEqual(
-            LIFECYCLE.LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, 300
+            LIFECYCLE.LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, 3600
         )
         self.assertEqual(LIFECYCLE.DAEMON_READINESS_POLL_SECONDS, 2.0)
 
@@ -903,6 +903,7 @@ class DaemonReadinessTests(unittest.TestCase):
             "daemon_live": True, "watch_status_available": True,
             "dirty": True, "dirty_reason": "incomplete coverage",
             "paused": False, "scan_in_progress": False, "caught_up": False,
+            "scan_first": True,
             "last_scan_timestamp_seconds": 123,
         }
         with patch.object(LIFECYCLE, "command", return_value=SimpleNamespace(

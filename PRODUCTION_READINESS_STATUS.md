@@ -621,6 +621,74 @@ Rust tests now cover this behavior.
 No claim of 100% production readiness is made until those gates have direct,
 current evidence and all remaining limits are documented.
 
+## Current-source package and live-root qualification — 2026-11-08 10:41 UTC
+
+Commit `43a7769` now has a successful exact-source static-musl release build:
+the auditable binary and DEB/RPM payloads were produced, with zero known
+RustSec advisories for 229 locked dependencies and embedded binary inventory
+for 202 dependencies. VPS2 lacked DNS, so its local audit shim skipped the
+network-dependent yanked-crate check; this is not a complete online release
+audit. The static-musl build also caught and drove a fix for the ioctl request
+type mismatch (`libc::Ioctl`).
+
+The next real Debian lifecycle run **failed** before upgrade/rollback/purge:
+the package service remained `reloading` after the harness's 300-second
+baseline readiness limit. The legacy index on VPS2 contained 233 REAL-valued
+`recursive_bytes` totals among 1,974,271 rows, including values beyond i64;
+`dux status --json` errored on that index. A candidate full observation
+replaced it and restored status output (1,431,666 indexed nodes), but the index
+became dirty from fanotify hint-ring/resolver-backlog saturation during the
+root walk and required another observation. At the timeout, the second scan
+had visited 815,390 files and 116,331 directories. The daemon had seen 842,240
+events with zero kernel-overflow notifications and zero reported userspace
+update drops; nevertheless the hint ring overflowed and the index was not
+caught up. The daemon also logged failure to persist a dirty marker while its
+old index was read-only during reconciliation.
+
+This live-root result overrides any broad inference from bounded fixture
+tests, but the 300-second harness cutoff was too short to prove failure to
+converge: the unit itself allows up to one hour for startup, and the first
+replacement index appeared shortly after the harness exited. At that point
+the index was dirty and another full scan was running under VPS2's actual
+event stream. A longer runtime observation is underway. The lifecycle attempt
+used package revisions 98 and 99 with the same candidate
+binary, so no real old-code-to-new-code upgrade was tested. The test service
+was stopped and disabled after capturing evidence; its test package and index
+remain on the marked VM. Full logs, report, and manifest are in
+[`docs/qualification/package-lifecycle-20261108/`](docs/qualification/package-lifecycle-20261108/).
+
+After stopping the daemon, read-only checks of the replacement database found
+all 1,431,666 `recursive_bytes` values stored as integers and
+`PRAGMA integrity_check=ok`. This confirms that the full observation repaired
+the malformed stored totals structurally; it does not establish freshness or
+that the daemon reached caught-up state.
+
+An extended VPS2 observation (10:45:30–10:56:01 UTC) then confirmed the
+retry-amplification path. The first post-shutdown observation finished in
+about 4.5 minutes with no ring/kernel overflow; accounting verification stayed
+pending and a new scan began after 301 seconds of backlog. That scan hit the
+hint-ring overflow twice at 10:53:20 and immediately launched a third
+observation. At 10:56:01 the third scan was still indexing, with 52,965 events
+seen and zero kernel-overflow notices or reported userspace update drops.
+This was not eventual-convergence evidence; the test was stopped to avoid
+continued repeated scans.
+
+Working tree now changes scan-first handling so loss during a completed full
+observation defers the next check to the fixed scan cadence instead of
+immediately repeating the full walk. It also aligns package lifecycle
+readiness with the systemd one-hour startup limit and waits for a completed
+last-observed scan instead of `caught_up`, which scan-first mode intentionally
+never asserts. The updated source passed **300 Rust tests (0 failed, 2
+ignored)**, strict all-target/all-feature Clippy with `-D warnings`, formatting,
+and **70 package-lifecycle Python tests** on VPS2. The updated source has not
+yet been release-built or runtime-qualified; do not rely on the policy change
+until the exact package is installed and observed on VPS2.
+
+Immediate open work: explain and reduce live ring/resolver saturation, prove
+convergence or define a bounded non-converged state under sustained events,
+test repair of legacy numeric overflow/corruption, and complete an actual
+source-distinct package upgrade/rollback before any production canary.
+
 ## Disk and active temporary data
 
 Read-only sample at 13:12 UTC: root was **185 GiB total / 116 GiB used / 62 GiB
