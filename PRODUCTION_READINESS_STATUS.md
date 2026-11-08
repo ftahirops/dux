@@ -1,29 +1,66 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 22:02 UTC
+**Updated:** 2026-11-08 23:14 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
+## Latest optimization and test checkpoint (2026-11-08, VPS2)
+
+The current working tree adds a persistent-path-ID assignment pass that also
+establishes deterministic breadth-first scan order during in-place
+reconciliation. This removes a separate staging pass for that mode; the
+atomic rebuild path still uses the existing ordering implementation. The
+focused regression test passed. A 250,000-entry release A/B benchmark on VPS2
+measured 11.127 s baseline versus 10.915 s candidate for unchanged in-place
+reconciliation (about 1.9% faster in this single pair); this is inconclusive,
+not evidence of a reliable speedup. Baseline scan times were 11.926 s and
+11.976 s respectively, with databases about 79.9 MB.
+
+The candidate then passed the full release all-features Rust binary suite on
+VPS2: **321 passed, 0 failed, 2 ignored**, in 52.8 seconds (systemd-bounded at
+150% CPU, 3 GiB memory, 30-minute runtime; observed peak memory 771.7 MiB).
+The ignored tests need a handle-capable ext4 profile and a separately invoked
+production-shaped scale profile. Focused monitor tests pass 35/35 and full
+Python discovery passes 331/331 after a diagnostic fix described below. Do not
+add test-run totals together because focused tests overlap full suites.
+
+Exact-working-tree coverage is 72.17% line, 70.99% region, and 76.00% function
+coverage; stable llvm-cov reports no usable branch coverage. The v3 VPS2
+canary passed samples 1–12, then **sample 13 failed** because status-before
+reported the daemon paused under I/O pressure. The daemon stayed alive with no
+restart, overflow, or userspace drop, but a subsequent reconciliation was
+cancelled under memory pressure and retried. This does not pass the freshness
+gate and the 24-hour soak is incomplete. The full scan covered 1,514,820 staged
+paths with zero coverage issues and passed accounting verification; its
+scan-plus-accounting interval used 87.6% of one core and about 1.75 GiB read /
+1.66 GiB written. No CPU/I/O SLO has been set. The scan optimization and
+canary-monitor diagnostic fix remain uncommitted; neither is installed on
+production or the VPS2 service.
+
+Disk snapshot at 23:14 UTC: local workspace root is 60% used with 72 GiB free,
+and regenerable `target/` is 1.6 GiB. VPS2 root is 86% used with 14 GiB free;
+`/var/tmp` is 4.7 GiB and `/var/lib/dux` is 660 MiB. No further cleanup was
+performed because the contents may include active build and rollback evidence.
+
 ## Test and coverage update (2026-11-08, latest local run)
 
-On the current working tree, `cargo test --locked` passes **317 tests, 0
-failures, 2 ignored**; `cargo test --locked --all-features` passes **320 tests,
-0 failures, 2 ignored**. The all-features result was independently repeated
-under `cargo llvm-cov`; that run also passed 320 tests. The last full Python
-discovery passed **325 tests**, including 29 canary-monitor tests. After adding
-per-device I/O collection, the focused canary-monitor suite passes **34 tests**;
-full Python discovery has not been rerun. `cargo fmt --check`, strict
-all-target/all-feature Clippy with warnings denied, and `git diff --check` pass.
-The two ignored Rust tests require a handle-capable ext4 qualification profile
-and a manual production-shaped scale profile. These are per-run counts, not
-unique tests to be summed across overlapping runs. Static-musl package
+On the current working tree, `cargo llvm-cov --locked --all-features
+--summary-only --bin dux` ran the full suite and passed **321 tests, 0 failures,
+2 ignored**; the release all-features run on VPS2 passed the same count.
+Strict all-target/all-feature Clippy with warnings denied and `git diff --check`
+pass on the current tree; `cargo fmt --all` has been run. The latest full
+Python discovery passed **331 tests**, including 35 canary-monitor tests.
+These per-run counts overlap and must not be summed as unique tests. The two
+ignored Rust tests require a
+handle-capable ext4 qualification profile and a manual production-shaped scale
+profile. Static-musl package
 revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
 DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
 only on the disposable VPS2 qualification VM, not production.
 
-## Corrected VPS2 canary checkpoint (2026-11-08 22:02 UTC)
+## VPS2 canary checkpoint at 22:02 UTC (historical; superseded by sample 13)
 
-The corrected five-minute canary started at 21:05:37 UTC and is still active.
+The corrected five-minute canary started at 21:05:37 UTC. At this checkpoint,
 Its first twelve samples passed (21:07:13, 21:12:14, 21:17:10, 21:22:33,
 21:27:17, 21:32:04, 21:37:21, 21:43:18, 21:47:36, 21:52:26, 21:58:42, and
 22:02:06 UTC) with no monitor errors.
@@ -64,21 +101,20 @@ remains valid for its original health/accounting/freshness gates, but I/O rates
 must be measured in a follow-up run. No numeric CPU or I/O acceptance budget is
 defined yet.
 
-Latest current-source coverage from `cargo llvm-cov --locked --all-features
---summary-only` (2026-11-08 20:28 UTC):
+Latest exact-working-tree coverage from `cargo llvm-cov --locked --all-features
+--summary-only --bin dux` (2026-11-08, after the scan-order optimization):
 
-- Line coverage: **61.58%** (18,179 of 29,523 executable lines covered).
-- Region coverage: **63.74%**; function coverage: **65.20%**.
-- Higher line coverage includes `store.rs` 94.35%, `deleted.rs` 89.62%, and
-  `query.rs` 85.39%. Lower areas include `tui.rs` 37.88%, `main.rs` 42.45%,
-  and `scan.rs` 48.61%.
-- This stable llvm-cov run does not provide usable branch coverage: its report
-  lists every branch as missed. The earlier nightly 67.35% branch result was
-  from another source/report run and is not a current-source branch result.
+- Line coverage: **72.17%** (18,256 of 25,295 executable lines covered).
+- Region coverage: **70.99%**; function coverage: **76.00%**.
+- Per-file line coverage: `scan.rs` 92.59%, `store.rs` 96.10%, `query.rs`
+  90.56%, `watch.rs` 72.05%, `main.rs` 43.20%, `tui.rs` 39.51%.
+- Stable llvm-cov reports zero instrumented branches for these files, so it
+  provides no usable branch-coverage measurement; this is not evidence of 0%
+  branch coverage.
 
-Coverage is not a correctness probability. In particular, scanner line
-coverage is only 48.61% in the current report, so additional failure-path and
-filesystem-specific scanner tests remain important.
+Coverage is not a correctness probability. UI/CLI paths and watcher paths
+still have uncovered executable lines; filesystem-specific and failure-path
+qualification remains necessary.
 - Fresh `cargo audit --json` at 22:01 UTC exited successfully with zero known
   vulnerabilities and zero warnings across 229 dependencies. The advisory
   database snapshot was last updated 2026-11-06; the raw report is

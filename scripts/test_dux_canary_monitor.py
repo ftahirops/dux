@@ -114,7 +114,21 @@ class CanaryMonitorTests(unittest.TestCase):
         value["status_after"] = status(dirty=True, events_dropped=3,
                                        watch_status_available=False)
         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
-        self.assertIn("status_after is not versioned, live, and caught up", errors)
+        self.assertIn("status_after: watch status is unavailable", errors)
+
+    def test_scan_first_pause_reports_pressure_reason_instead_of_stale_scan(self):
+        value = sample()
+        paused = status(caught_up=False, dirty=True, scan_first=True,
+                        paused=True, pause_reason="io pressure",
+                        last_scan_age_seconds=874)
+        value["status_before"] = dict(paused)
+        value["status_after"] = dict(paused)
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn("status_before: daemon is paused (io pressure)", errors)
+        self.assertNotIn(
+            "status_before: last full observation is missing, invalid, or older than 1200 seconds",
+            errors,
+        )
 
     def test_scan_first_dirty_status_passes_with_a_recent_full_observation(self):
         value = sample()
@@ -139,7 +153,7 @@ class CanaryMonitorTests(unittest.TestCase):
                                        last_scan_age_seconds=1201)
         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
         self.assertIn(
-            "status_after is not live or its last full observation exceeds 1200 seconds",
+            "status_after: last full observation is missing, invalid, or older than 1200 seconds",
             errors,
         )
 
@@ -149,7 +163,7 @@ class CanaryMonitorTests(unittest.TestCase):
                                         last_scan_timestamp_seconds=0)
         value["status_after"] = dict(value["status_before"])
         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
-        self.assertIn("status_after is not live or its last full observation exceeds 1200 seconds",
+        self.assertIn("status_after: last full observation timestamp is missing or invalid",
                       errors)
 
     def test_scan_first_overflow_is_allowed_but_truncated_journal_evidence_fails(self):

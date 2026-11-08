@@ -898,11 +898,13 @@ fn scan_inner(
     )?;
 
     // The walker assigns provisional IDs concurrently, so their order depends
-    // on worker scheduling. Compute a deterministic disk-backed order before
-    // using it as a tie-breaker for prime-path allocation or the v6 projection.
-    assign_stable_scan_path_order(&mut stage)?;
+    // on worker scheduling. Atomic builds compute the stable order here. An
+    // in-place observation computes the same stable order while assigning
+    // persistent path IDs, avoiding a second full-stage ordering/update pass.
     if incremental {
         assign_persistent_scan_path_ids(&mut stage)?;
+    } else {
+        assign_stable_scan_path_order(&mut stage)?;
     }
 
     stage.execute_batch(
@@ -1357,15 +1359,17 @@ fn assign_persistent_scan_path_ids(stage: &mut Connection) -> Result<()> {
     stage.execute_batch(
         "CREATE TEMP TABLE persistent_path_ids(
            old_id INTEGER PRIMARY KEY,
-           new_id INTEGER NOT NULL UNIQUE
+           new_id INTEGER NOT NULL UNIQUE,
+           stable_order INTEGER NOT NULL UNIQUE
          );
-         INSERT INTO persistent_path_ids(old_id,new_id)
-         SELECT path_id,1 FROM scan_nodes WHERE parent_path_id=-1;",
+         INSERT INTO persistent_path_ids(old_id,new_id,stable_order)
+         SELECT path_id,1,1 FROM scan_nodes WHERE parent_path_id=-1;",
     )?;
     let max_depth: i64 =
         stage.query_row("SELECT COALESCE(MAX(depth),0) FROM scan_nodes", [], |row| {
             row.get(0)
         })?;
+    let mut next_stable_order = 2i64;
     for depth in 1..=max_depth {
         let rows: Vec<(i64, Option<i64>)> = stage
             .prepare(
@@ -1375,7 +1379,7 @@ fn assign_persistent_scan_path_ids(stage: &mut Connection) -> Result<()> {
                  LEFT JOIN existing.paths existing
                    ON existing.parent_path_id=parent.new_id AND existing.name=child.name
                  WHERE child.depth=?1
-                 ORDER BY parent.new_id,child.name",
+                 ORDER BY parent.stable_order,child.name",
             )?
             .query_map([depth], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
@@ -1389,14 +1393,20 @@ fn assign_persistent_scan_path_ids(stage: &mut Connection) -> Result<()> {
                 next_id += 1;
                 allocated
             };
-            additions.push((old_id, new_id));
+            anyhow::ensure!(
+                next_stable_order < i64::MAX,
+                "stable scan-order space exhausted"
+            );
+            additions.push((old_id, new_id, next_stable_order));
+            next_stable_order += 1;
         }
         let tx = stage.transaction()?;
         {
-            let mut insert =
-                tx.prepare("INSERT INTO persistent_path_ids(old_id,new_id) VALUES(?1,?2)")?;
-            for (old_id, new_id) in additions {
-                insert.execute(params![old_id, new_id])?;
+            let mut insert = tx.prepare(
+                "INSERT INTO persistent_path_ids(old_id,new_id,stable_order) VALUES(?1,?2,?3)",
+            )?;
+            for (old_id, new_id, stable_order) in additions {
+                insert.execute(params![old_id, new_id, stable_order])?;
             }
         }
         tx.commit()?;
@@ -1410,6 +1420,16 @@ fn assign_persistent_scan_path_ids(stage: &mut Connection) -> Result<()> {
     anyhow::ensure!(
         rows == mapped,
         "persistent path-ID mapping covered {mapped} of {rows} scan nodes"
+    );
+    let (stable_min, stable_max, stable_count): (i64, i64, i64) = stage.query_row(
+        "SELECT MIN(stable_order),MAX(stable_order),COUNT(DISTINCT stable_order)
+         FROM persistent_path_ids",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    anyhow::ensure!(
+        stable_min == 1 && stable_max == rows && stable_count == rows,
+        "invalid persistent stable order: min={stable_min}, max={stable_max}, distinct={stable_count}, rows={rows}"
     );
     stage.execute(
         "CREATE TABLE scan_path_allocator(next_id INTEGER NOT NULL CHECK(next_id>0));",
@@ -1433,7 +1453,7 @@ fn assign_persistent_scan_path_ids(stage: &mut Connection) -> Result<()> {
          INSERT INTO scan_nodes_remapped
            (path_id,stable_order,parent_path_id,mount_id,dev,inode,parent_dev,
             parent_inode,depth,kind,blocks,uid,mtime,name,birth_ns,cycle)
-         SELECT child_id.new_id,child.stable_order,
+         SELECT child_id.new_id,child_id.stable_order,
                 COALESCE(parent_id.new_id,-1),child.mount_id,child.dev,child.inode,
                 child.parent_dev,child.parent_inode,child.depth,child.kind,child.blocks,
                 child.uid,child.mtime,child.name,child.birth_ns,child.cycle
@@ -3590,6 +3610,79 @@ mod tests {
             .unwrap();
         let invalid = validate_scan_path_stage(&conn, 1, 1).unwrap_err();
         assert!(invalid.to_string().contains("invalid_names=1"));
+    }
+
+    #[test]
+    fn persistent_path_id_assignment_also_builds_stable_breadth_first_order() {
+        let mut stage = Connection::open_in_memory().unwrap();
+        stage
+            .execute_batch(
+                "ATTACH DATABASE ':memory:' AS existing;
+                 CREATE TABLE existing.paths(
+                   path_id INTEGER PRIMARY KEY, parent_path_id INTEGER NOT NULL,
+                   name BLOB NOT NULL, dev_id INTEGER NOT NULL, inode INTEGER NOT NULL,
+                   birth_ns INTEGER NOT NULL, kind TEXT NOT NULL, mount_id INTEGER NOT NULL,
+                   prime INTEGER NOT NULL, cycle INTEGER NOT NULL,
+                   UNIQUE(parent_path_id,name));
+                 CREATE INDEX existing.path_parent_name
+                   ON paths(parent_path_id,name);
+                 CREATE TABLE existing.meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                 INSERT INTO existing.paths VALUES
+                   (1,-1,X'2f',1,1,0,'d',-1,1,0),
+                   (10,1,X'61',1,2,0,'d',-1,1,0),
+                   (11,10,X'78',1,3,0,'f',-1,1,0),
+                   (20,1,X'62',1,4,0,'d',-1,1,0);
+                 INSERT INTO existing.meta VALUES('path_id_next','21');
+                 CREATE TABLE scan_nodes(
+                   path_id INTEGER PRIMARY KEY CHECK(path_id>0), stable_order INTEGER NOT NULL DEFAULT 0,
+                   parent_path_id INTEGER NOT NULL, mount_id INTEGER,
+                   dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+                   parent_dev INTEGER NOT NULL, parent_inode INTEGER NOT NULL,
+                   depth INTEGER NOT NULL, kind TEXT NOT NULL, blocks INTEGER NOT NULL,
+                   uid INTEGER NOT NULL, mtime INTEGER NOT NULL, name BLOB NOT NULL,
+                   birth_ns INTEGER NOT NULL, cycle INTEGER NOT NULL DEFAULT 0,
+                   UNIQUE(parent_path_id,name));
+                 INSERT INTO scan_nodes VALUES
+                   (1,0,-1,-1,1,1,1,1,0,'d',8,0,0,X'2f',0,0),
+                   (2,0,1,-1,1,4,1,1,1,'d',8,0,0,X'62',0,0),
+                   (3,0,1,-1,1,2,1,1,1,'d',8,0,0,X'61',0,0),
+                   (4,0,3,-1,1,3,1,2,2,'f',1,0,0,X'78',0,0),
+                   (5,0,2,-1,1,6,1,4,2,'f',1,0,0,X'79',0,0);",
+            )
+            .unwrap();
+
+        assign_persistent_scan_path_ids(&mut stage).unwrap();
+
+        let rows: Vec<(i64, Vec<u8>, i64, i64)> = stage
+            .prepare(
+                "SELECT path_id,name,stable_order,parent_path_id
+                 FROM scan_nodes ORDER BY stable_order",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, b"/".to_vec(), 1, -1),
+                (10, b"a".to_vec(), 2, 1),
+                (20, b"b".to_vec(), 3, 1),
+                (11, b"x".to_vec(), 4, 10),
+                (21, b"y".to_vec(), 5, 20),
+            ],
+            "existing path IDs must be reused while stable order stays breadth-first and lexical",
+        );
+        assert_eq!(
+            stage
+                .query_row("SELECT next_id FROM scan_path_allocator", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            22
+        );
     }
 
     #[test]

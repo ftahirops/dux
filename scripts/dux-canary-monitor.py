@@ -191,24 +191,40 @@ def healthy_pipeline(status, max_observation_age_seconds=DEFAULT_MAX_OBSERVATION
     dirty when hints arrive, so its guarantee is a recent full observation and
     verified accounting, not a drained event queue.
     """
-    if not (isinstance(status, dict)
-            and status.get("status_version") == 1
-            and status.get("daemon_live") is True
-            and status.get("watch_status_available") is True
-            and status.get("paused") is False
-            and status.get("write_error") is None):
-        return False
+    return pipeline_failure(status, max_observation_age_seconds) is None
+
+
+def pipeline_failure(status,
+                     max_observation_age_seconds=DEFAULT_MAX_OBSERVATION_AGE_SECONDS):
+    """Explain the first failed pipeline health condition for canary reports."""
+    if not isinstance(status, dict) or status.get("status_version") != 1:
+        return "status is not versioned"
+    if status.get("daemon_live") is not True:
+        return "daemon is not live"
+    if status.get("watch_status_available") is not True:
+        return "watch status is unavailable"
+    if status.get("paused") is not False:
+        reason = status.get("pause_reason")
+        return f"daemon is paused{f' ({reason})' if reason else ''}"
+    if status.get("write_error") is not None:
+        return "daemon reports a write error"
     if status.get("scan_first") is True:
         age = status.get("last_scan_age_seconds")
-        return (isinstance(age, (int, float)) and not isinstance(age, bool)
-                and 0 <= age <= max_observation_age_seconds
-                and isinstance(status.get("last_scan_timestamp_seconds"), int)
-                and status["last_scan_timestamp_seconds"] > 0)
-    return (status.get("caught_up") is True
-            and status.get("scan_in_progress") is False
-            and status.get("dirty") is False
-            and status.get("pending_updates") == 0
-            and status.get("events_dropped") == 0)
+        if (not isinstance(age, (int, float)) or isinstance(age, bool)
+                or not 0 <= age <= max_observation_age_seconds):
+            return ("last full observation is missing, invalid, or older than "
+                    f"{max_observation_age_seconds} seconds")
+        if (not isinstance(status.get("last_scan_timestamp_seconds"), int)
+                or status["last_scan_timestamp_seconds"] <= 0):
+            return "last full observation timestamp is missing or invalid"
+        return None
+    if (status.get("caught_up") is not True
+            or status.get("scan_in_progress") is not False
+            or status.get("dirty") is not False
+            or status.get("pending_updates") != 0
+            or status.get("events_dropped") != 0):
+        return "event pipeline is not caught up"
+    return None
 
 
 def journal_failures(journal, scan_first):
@@ -251,14 +267,9 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
         for key in ("status_before", "status_after"))
     for key in ("status_before", "status_after"):
         status = sample.get(key)
-        if not healthy_pipeline(status, max_observation_age_seconds):
-            if isinstance(status, dict) and status.get("scan_first") is True:
-                errors.append(
-                    f"{key} is not live or its last full observation exceeds "
-                    f"{max_observation_age_seconds} seconds"
-                )
-            else:
-                errors.append(f"{key} is not versioned, live, and caught up")
+        failure = pipeline_failure(status, max_observation_age_seconds)
+        if failure is not None:
+            errors.append(f"{key}: {failure}")
         else:
             observed_at = sample.get(f"{key}_observed_at_seconds")
             now = time.time() if now_timestamp is None else now_timestamp

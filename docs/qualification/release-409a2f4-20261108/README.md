@@ -231,8 +231,22 @@ values and must not be summed. These are short, mixed-workload observations,
 not a steady-state benchmark or acceptance result; no CPU/I/O budget exists.
 
 The v3 collector focused suite passed 34/34 tests. Full Python discovery was
-rerun after this change at 22:14 UTC: **330 tests passed**. The v3 JSONL remains
-live on VPS2 at `/root/dux-canary-409a2f4/canary-24h-5m-v3.jsonl`; its captured
-progress through sample 8 is also preserved in
+rerun after this change at 22:14 UTC: **330 tests passed**. The captured v3
+JSONL has since been refreshed from VPS2 through sample 13. Samples 1–12
+passed; sample 13 failed because status-before was paused under host I/O
+pressure. The error text incorrectly described this as a stale observation.
+At sample 13 the daemon was alive with zero restarts, kernel overflows, and
+userspace drops, but the sample did not pass freshness. The VPS2 journal then
+recorded a reconciliation cancellation under memory pressure followed by a
+retry. A follow-up read-only status showed the daemon active and a new scan in
+progress; this is recovery evidence, not a passed canary sample. The 24-hour
+soak is incomplete. See the complete append-only sample history in
 [`live/canary-24h-5m-v3-progress.jsonl`](live/canary-24h-5m-v3-progress.jsonl).
-The v3 canary is still in progress.
+
+The monitor now reports the specific failed health condition, including a
+pause reason, instead of conflating paused status with stale scan age. Its
+focused suite passes **35/35** and full Python discovery passes **331/331**.
+The current Rust working tree passes all-features release tests on VPS2
+(321 passed, 2 ignored), all-features llvm-cov tests (321 passed, 2 ignored),
+strict Clippy, formatting, and diff checks. Exact-tree coverage is 72.17% line,
+70.99% region, and 76.00% function; stable branch coverage is unavailable.
