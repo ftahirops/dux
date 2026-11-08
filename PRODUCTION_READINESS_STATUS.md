@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 14:00 UTC
+**Updated:** 2026-11-08 18:53 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -41,10 +41,18 @@ The run logs and raw audit result are in
 `cargo-audit-20261108.json`. The branch-coverage report shows all per-module
 line, function, and branch totals. No claim of 100% test coverage is made.
 
+The default-feature production-profile binary was built with
+`cargo build --locked --release` at commit `b3831ae`; SHA-256:
+`f631019a87073498a49c1ae4ffdcb5bac47adfc8541d95b5acd654630553f9ac`. It
+reports version `0.6.3` with the expected source hash, and inspection confirms
+the test-only `DUX_TEST_*` injection controls are absent. This is a local host
+release build, not the static-musl package and it was not installed on either
+server.
+
 ### Current live candidate checkpoint
 
 The VPS2 full-root scan-first candidate is under its 24-hour monitored
-canary; its first sample was recorded at 18:35 UTC. A live check at 18:49 UTC
+canary; its first sample was recorded at 18:35 UTC. A live check at 18:53 UTC
 confirmed both the canary monitor and Dux active with zero restarts.
 That sample passed binary/service identity, schema-v7 path/accounting,
 SQLite quick-check, freshness, resource, and critical-journal checks. The
@@ -52,12 +60,15 @@ candidate completed an automatic retry after its first full-root attempt
 failed closed on an inode-incarnation conflict plus concurrent hint loss. The
 retry scanned 1,361,780 files and 163,202 directories with zero coverage
 issues, and the accounting verifier passed. Hints arrived during the scan, so
-the view remained dirty as designed. At 18:49 UTC Dux had seen 34.1M events,
+the view remained dirty as designed. At 18:53 UTC Dux had seen 37.7M events,
 with zero kernel overflows and zero userspace drops; the last full observation
-was 455 seconds old, within the canary's 1,200-second freshness bound. This is
-one passing canary sample plus a live health check, not proof of continuous
-convergence. The 24-hour canary, longer soak, production-host canary, and other
-release gates remain open. The production host was not changed.
+was 632 seconds old, within the canary's 1,200-second freshness bound. The
+legacy `behind_seconds` value was 1,771 seconds; in scan-first mode this is
+not the observation-age SLO and can continue increasing while the UI correctly
+labels the view as non-real-time. This is one passing canary sample plus live
+health checks, not proof of continuous convergence. The 24-hour canary, longer
+soak, production-host canary, and other release gates remain open. The
+production host was not changed.
 
 ## Latest fixed-cadence implementation and VPS2 evidence (11:54 UTC)
 
