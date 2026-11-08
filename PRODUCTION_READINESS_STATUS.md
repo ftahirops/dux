@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 13:54 UTC
+**Updated:** 2026-11-08 14:00 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -1005,3 +1005,22 @@ initial attempt report and final successful machine-readable report are
 [`forced-overflow-attempt-739113c.json`](docs/qualification/scan-first-fixed-cadence-20261108/forced-overflow-attempt-739113c.json)
 and
 [`forced-overflow-739113c.json`](docs/qualification/scan-first-fixed-cadence-20261108/forced-overflow-739113c.json).
+
+The third live-root observation began at 13:55:39.006 UTC, exactly 15 minutes
+after the previous one began. It completed at 13:58:55.097 UTC (196.091
+seconds): 1,315,893 files, 158,096 directories, 1,473,989 staged path
+instances, and zero coverage issues. Independent accounting verification
+passed at 13:59:41.111 UTC (46.003 seconds). At 14:00 UTC VPS2 remained active
+with zero restarts, kernel overflow notifications, or userspace drops; the
+index was dirty only because further filesystem changes arrived after the
+observation. Across the three observations, each due scan started on schedule,
+finished without coverage errors or inode-conflict rejection, and passed the
+separate accounting verifier. This materially improves confidence in cadence
+and convergence for this VPS2 workload, but the index is still only
+last-observed and never claims real-time caught-up status.
+
+Post-test disk sample: VPS2 root remained 93 GiB total / 77 GiB used / 12 GiB
+available (87%); `/var/lib/dux` was 560 MiB. The disposable `/dev/shm`
+qualification workspace had returned to 647 MiB used with 2.4 GiB available,
+and no `dux-readiness-*` units remained. No production index or broad host
+cache cleanup was performed.
