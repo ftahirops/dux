@@ -10,3 +10,7 @@ aa3f083b07b8817f1fbdc1f651ee5fcf803764b21829d75800c5f4521240a1ff  source.tar.gz
 281d56f70265af4ab24dc7137a4d52b770420d488a860973c7f7fe509284207d  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-static-checks-raii-20261109.log
 bb169b62b2a5d591937ff584b15248922feeb109a49e8f142c722a684057f603  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl
 7c015de0649c6054d498058011e7986fdc9a70e841975d21a91f9ee8792f28cd  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-coverage-all-including-ignored-20261109.log
+fbc17f8c60ae2bd4b6aeaa29418fadde56b55eee900071aeda77da9330a0def6  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-debug-tests-all-including-ignored-20261109.log
+96e48a2a4466fa2e1da021caace40b49cf33fd6814cfa2cb72075eff2805bb67  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-python-discovery-20261109.log
+60b96477f89982bcba4fc93b53a582be7e6b1d94515f586cfc3a0a674abcfc2e  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-scale-1370k-20261109.log
+18405a54bf184e1dd937886c635747a362b149d4a663ed0e9cc26525f90927ee  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl

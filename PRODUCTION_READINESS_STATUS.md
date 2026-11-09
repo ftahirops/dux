@@ -2750,3 +2750,22 @@ A read-only VPS2 refresh at 15:48:09 UTC found **21 passing samples** in the
 still-active 24-hour canary. Latest scan age was 6 seconds; errors, overflows,
 drops, OOM events, and service restarts remained zero. Free disk was 7.2 GiB.
 This does not satisfy the 24-hour gate. Production VPS1 remains unchanged.
+
+
+### Expanded local validation — 2026-11-09 16:00 UTC
+
+Additional source-matched evidence: all-features debug tests including ignored
+profiles passed **330/330** in 42.05s; full Python harness discovery passed
+**354/354** in 9.861s. The exact current release source passed a 1,370,000-entry
+scale smoke with a 63.017s baseline and 74.441s unchanged in-place observation
+(441,102,336-byte DB unchanged). This is approximately 18.1% slower than the
+baseline in one unconstrained local run; constrained-host p95/p99 and variance
+remain open. Its generated fixture was removed; local free space is 57 GiB.
+The 10M real-file profile is not run due to scratch-space consumption risk.
+
+VPS2's canary advanced to **23 passing samples** by 15:58:04 UTC; latest scan
+age was 600s, with zero errors, overflows, drops, OOMs, or restarts. systemd
+reported `reloading` while scan-first observation was active; Dux remained
+running under the same PID, and the monitor accepted this only for an active
+scan. The 24-hour gate remains open. Details and logs are in the r121
+qualification folder.

@@ -86,3 +86,32 @@ scan age was 6 seconds, with zero monitor errors, kernel overflows, userspace
 drops, OOMs, and service restarts. VPS2 had 7.2 GiB free. The updated live
 JSONL is preserved as [`vps2-canary-progress.jsonl`](vps2-canary-progress.jsonl).
 This is about 1h41m of a 24-hour run, not a completed soak.
+
+
+## Debug, Python, and 1.37M scale follow-up — 2026-11-09 16:00 UTC
+
+The all-features debug suite with ignored tests enabled passed **330/330** in
+42.05s. Its 100,000-entry scale smoke measured 8.838s baseline and 10.294s
+unchanged reconciliation, with database size unchanged at 31,641,600 bytes.
+The complete Python harness discovery also passed **354/354** in 9.861s
+(`PYTHONDONTWRITEBYTECODE=1`, scratch under `/dev/shm`).
+
+The current release binary/source then passed the isolated **1,370,000-entry**
+scale smoke: baseline 63.017s, unchanged in-place reconciliation 74.441s, and
+an unchanged database size of 441,102,336 bytes. Unchanged reconciliation was
+about 18.1% slower than the initial baseline in this run. It does not include
+constrained-CPU limits or repeat variance, so it is a diagnostic measurement,
+not an SLO qualification. The fixture was removed by test cleanup; local free
+disk returned to 57 GiB. The 10M profile remains unrun because its real-file
+fixture would consume most of available scratch capacity.
+
+At 15:58:04 UTC the VPS2 canary had **23 passing samples**. The latest sample
+reported 600s scan age, zero errors/overflows/drops/OOMs/restarts, and the
+service remained running. During an active scan-first observation systemd
+reports `ActiveState=reloading` by the daemon's existing notify protocol; the
+monitor accepted it only because the status proved an observation in progress.
+This remains an approximately 2-hour checkpoint, not the required 24-hour
+soak. Logs: [`current-debug-tests-all-including-ignored-20261109.log`](current-debug-tests-all-including-ignored-20261109.log),
+[`current-python-discovery-20261109.log`](current-python-discovery-20261109.log),
+[`current-scale-1370k-20261109.log`](current-scale-1370k-20261109.log), and the
+updated canary JSONL above.
