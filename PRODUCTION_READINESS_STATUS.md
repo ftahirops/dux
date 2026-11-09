@@ -1,6 +1,26 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:05 UTC
+## Latest verified checkpoint — 2026-11-09 22:07 UTC
+
+### Targeted VPS2 disk inspection
+
+At 22:05 UTC, the active canary host had 7.2 GiB free on its 93 GiB root
+filesystem (92% used). Targeted file/journal checks found the Dux DB at 744 MB,
+WAL at 128 MiB, SHM at 0.6 MiB, canary JSONL at 0.5 MB, and systemd journals
+at **4.0 GiB**. These explain only a small part of the 81 GiB used. I did not
+vacuum journals or scan the full tree while the canary is active; preserving
+the journal window takes precedence until the soak ends.
+
+Canary sample 96 at 22:03:30 UTC remains the latest verified result: pass,
+zero errors/restarts/overflows/drops/pending, scan age 887 seconds. The corrected
+real lifecycle rerun is still waiting on the local host guard; current checks
+see Go test/compiler workloads and load1 above 10.
+
+**Updated:** 2026-11-09 22:07 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 22:05 UTC
 
 ### Corrected lifecycle rerun admission and disk
 
