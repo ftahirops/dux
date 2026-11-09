@@ -287,3 +287,14 @@ not a package or Dux failure. The next retry requires a sustained quiet window
 to avoid the race between initial admission and new test processes. Raw unit
 journal and host-pressure evidence are in
 `package-lifecycle-guard-abort-20261109T1934Z.json`.
+
+### VPS2 follow-up observation — 2026-11-09 19:40 UTC (read-only)
+
+The next scheduled r121 observation started at 19:29:31 and completed at
+19:33:50 UTC, walking 1,581,566 files and 188,262 directories with zero
+coverage issues. Accounting verification passed at 19:34:50 in 60.548 seconds.
+At 19:40, the service remained active with zero restarts, overflows, drops, or
+pending updates; the last scan was 416 seconds old. Dirty status reflects
+filesystem changes awaiting the next observation. This is another successful
+scan/accounting cycle, not a formal canary-monitor sample. See
+`vps2-live-followup-20261109T1940Z.json`.
