@@ -193,3 +193,18 @@ kills. Completed-scan ages ranged from 4 to 936 seconds (median 453) against the
 1,200-second limit. At capture, r121 was active, no scan was running, and the
 last completed scan was 596 seconds old. This remains under six hours of the
 required 24-hour soak. See `vps2-live-followup-20261109T1857Z.json`.
+
+### VPS2 observation follow-up — 2026-11-09 19:05 UTC (read-only)
+
+A subsequent full observation started at 18:59:31 and completed at 19:04:25
+UTC, walking 1,576,330 files and 187,628 directories in about 4m54s with zero
+coverage issues. Independent accounting verification passed at 19:05:38 after
+72.1 seconds. At 19:05:55, r121 remained active with zero systemd restarts,
+kernel overflow notifications, kernel-reported drops, userspace drops, or
+pending updates; the last completed observation was 90 seconds old. The status
+is dirty because filesystem changes await the next full observation, which is
+expected for scan-first mode. This is a read-only observation, not a formal
+five-minute canary-monitor sample: no SQLite/path-graph checks were run in this
+capture. It adds one successful scan/accounting cycle but does not complete the
+24-hour soak or qualify r123. Raw status, selected journal evidence, and the
+assessment are in `vps2-live-followup-20261109T1905Z.json`.
