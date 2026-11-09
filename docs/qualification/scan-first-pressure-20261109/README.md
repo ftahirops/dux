@@ -1102,3 +1102,10 @@ and restart counters remained zero. This is still under 40 minutes of a
 24-hour qualification. Snapshot:
 [`release120-canary-progress-20261109T1231Z.jsonl`](live/release120-canary-progress-20261109T1231Z.jsonl),
 SHA256 `bc11ff65218e40c89affd03bef2ff0964d2e852ef71eaafdcb5a688ac9818245`.
+
+At 12:36 UTC the r120 canary reached **9/289 passing samples**. Sample 9 took
+65.217 seconds; the observation was 693 seconds old with no scan active. The
+independent path graph was valid at 1,683,013 paths. Overflow, drop, OOM, and
+restart counters remained zero. Snapshot:
+[`release120-canary-progress-20261109T1236Z.jsonl`](live/release120-canary-progress-20261109T1236Z.jsonl),
+SHA256 `38370fabe42cce4cde983e19e61efe3dca23f47a92e2797ad2d7a0b3c3f9d924`.
