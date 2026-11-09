@@ -1,6 +1,31 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 21:27 UTC
+## Latest verified checkpoint — 2026-11-09 21:32 UTC
+
+### Guarded lifecycle retry and host load
+
+Guarded attempt 2/5 launched the disposable Ubuntu 24.04 lifecycle VM, but the
+runtime pressure guard stopped it **before SSH** when a Go test appeared. The
+guard journal records `go test` as the active workload; no package test ran and
+no lifecycle result should be counted. The retry controller remains alive.
+Its latest admission checks now see repeated Go compiler/test processes,
+load1 around 25, and CPU PSI some around 50%, so host admission is correctly
+closed. No VM is running at this checkpoint.
+
+### VPS2 canary update
+
+The latest verified r121 canary sample is **89**, captured 21:28:01 UTC. It
+passed with zero errors, service restarts, kernel overflows, dropped events,
+or pending updates; completed-scan age was 506 seconds. This remains only about
+7.4 hours of the required 24-hour canary. VPS2 root remains at 92% used with
+7.4 GiB free from the 21:24 UTC disk check; the canary and installed service
+were not modified.
+
+**Updated:** 2026-11-09 21:32 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 21:27 UTC
 
 ### Full Python qualification suite
 
