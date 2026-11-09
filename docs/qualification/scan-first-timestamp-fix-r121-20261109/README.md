@@ -174,3 +174,50 @@ free. The soak has not completed 24 hours. Logs:
 [`scale-guard-test-20261109.log`](scale-guard-test-20261109.log),
 [`scale-tmpfs-test-20261109.log`](scale-tmpfs-test-20261109.log), and
 [`static-checks-scale-guard-20261109.log`](static-checks-scale-guard-20261109.log).
+
+## Isolated constrained 1.37M ext4 profile — 2026-11-09 16:40 UTC
+
+A repeat scale profile ran inside a private mount namespace on an 8 GiB ext4
+loop image backed by tmpfs. A private tmpfs covered `/run/dux`, so the host's
+live Dux service was not visible to the scale-fixture guard; the host daemon
+could not see the private ext4 mount, and its backing image was on `/dev/shm`.
+The process ran in a transient scope limited to 50% CPU, 12 GiB memory, zero
+swap, `nice 19`, and idle I/O priority. The 1,370,000-entry test passed in
+453.19s: baseline 186.730s, unchanged reconciliation 141.158s, and DB size
+425,861,120 bytes before and after. The last cgroup memory-event check showed
+zero OOMs; observed current memory stayed below 10.8 GiB. This memory-backed
+ext4 result is a controlled diagnostic, not block-device I/O qualification or
+p95/p99 evidence. It supersedes the earlier non-isolated local timing as the
+better performance comparison; more repeated trials are needed.
+
+An initial run with the same image size but mkfs's default inode density failed
+with ENOSPC while constructing fixture files, before the scan started. The
+fixture cleanup worked. Reformatting with 1,800,000 inodes allowed the full
+run to pass. This was a benchmark-image setup issue, not a Dux scan failure.
+The setup failure is recorded in
+[`scale-inode-setup-failure-20261109.txt`](scale-inode-setup-failure-20261109.txt);
+metrics and successful raw output are in
+[`scale-1370k-isolated-ext4-metadata-20261109.json`](scale-1370k-isolated-ext4-metadata-20261109.json)
+and [`scale-1370k-isolated-ext4-20261109.log`](scale-1370k-isolated-ext4-20261109.log).
+
+After cleanup, `/dev/shm` returned to its prior 1.8 GiB use. A read-only check
+showed the local service still active under PID 1073891 with four restarts;
+its overflow/drop counters were unchanged across this isolated profile at 636
+and 2,518,862. Root filesystem free space was 63 GiB.
+
+The VPS2 canary reached **31 passing samples** at 16:37:57 UTC. Latest scan age
+was 135s; errors, overflows, drops, OOMs, and restarts remained zero. VPS2 was
+active with 7.0 GiB free. The 24-hour soak remains incomplete.
+
+
+### Canary interpretation correction — 2026-11-09
+
+The latest archived VPS2 monitor row is labeled `passed` and reports no monitor
+errors, kernel overflows, dropped updates, OOM events, or service restarts. Its
+`status_after`, however, reports `dirty=true`, `caught_up=false`, and
+`behind_seconds=9510.948` (about 2 h 38 min). This is a successful observation
+sample against the monitor's checks, not evidence that the indexed view is
+current or that the canary has met its reliability/accuracy gate. The sample
+count and zero-fault counters must not be presented without this freshness
+state. The 24-hour qualification is therefore incomplete and the canary's
+index-freshness failure remains open.

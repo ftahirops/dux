@@ -2821,3 +2821,30 @@ ext4 rerun passed it. Logs are recorded in this folder.
 The VPS2 canary reached **27 passing samples** at 16:18:45 UTC, latest scan age
 874s, zero monitor errors/overflows/drops/OOMs/restarts. The service is active
 with zero restarts and 7.0 GiB free. The 24-hour soak remains incomplete.
+
+### Isolated 1.37M constrained ext4 profile and canary checkpoint — 2026-11-09 16:40 UTC
+
+The 1.37M scale test passed in 453.19s inside a private mount namespace on an
+8 GiB ext4 loop image backed by tmpfs, under 50% CPU, 12 GiB memory max, no
+swap, `nice 19`, and idle I/O priority. Baseline scan was 186.730s; unchanged
+reconciliation was 141.158s; DB stayed 425,861,120 bytes. Last-observed cgroup
+OOM counters were zero; current memory observed stayed below 10.8 GiB. This is
+controlled memory-backed ext4 diagnostic evidence, not real block-device or
+p95/p99 qualification. The earlier scale attempt using mkfs's default inode
+density hit ENOSPC while creating files, before Dux scanned; 1.8M inodes fixed
+the fixture, and the full scan profile passed. Logs and the setup failure are
+recorded in the r121 qualification folder.
+
+The local production daemon remained active under the same PID with four
+restarts; its overflow/drop counters remained 636 / 2,518,862 across the
+isolated run. `/dev/shm` returned to 1.8 GiB used; the root volume showed
+63 GiB free. VPS2 canary sample 31 passed at 16:37:57 UTC with scan age 135s
+and zero errors, overflows, drops, OOMs, or restarts; the service was active
+with 7.0 GiB free. The 24-hour soak remains in progress.
+
+
+Canary interpretation: the latest VPS2 sample (sample 31, 2026-11-09 16:37:57
+UTC) has zero monitor errors, overflows, drops, OOMs, and restarts, but status
+reports `dirty=true`, `caught_up=false`, and 9,510.948 seconds behind. It is a
+passing telemetry sample, not a healthy/current-index qualification. The
+24-hour soak and freshness gate remain open.
