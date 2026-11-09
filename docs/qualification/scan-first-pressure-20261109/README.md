@@ -1168,6 +1168,16 @@ Snapshots:
 - [`vps1-readonly-status-20261109T1252Z.json`](live/vps1-readonly-status-20261109T1252Z.json),
   SHA256 `07f46b70502b12b3ee338280159f0b78979a13620929920167b304c1ca4cc3dc`.
 
+At 13:00:26 UTC, a further read-only sample still showed the old daemon dirty,
+with no full scan active, scan age 346,264 seconds, and four restarts. The
+overflow counter remained 540 from 12:52, although `events_seen` grew by about
+241K. Thus overflow activity is bursty, not continuously increasing; the
+index still has not reconciled. The live Go security/race test workload
+continues to use `/tmp/x.mQn3l`, so shared temporary files were left intact.
+Snapshot:
+[`vps1-readonly-status-20261109T1300Z.json`](live/vps1-readonly-status-20261109T1300Z.json),
+SHA256 `de3dd3ff753da938317b2194b9159e7d6120bafead6104bc5196ebdf30b17ef8`.
+
 #### Packaged service security policy check — 2026-11-09
 
 The package lifecycle/security policy suite passed **70/70 tests** in a

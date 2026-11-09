@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 12:58 UTC
+**Updated:** 2026-11-09 13:00 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 12:58 UTC
+## Current status and evidence — 2026-11-09 13:00 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -65,6 +65,10 @@ test process was active during this interval, which is consistent with host
 churn but does not prove it caused the overflows. No production service,
 database, or configuration was changed. A follow-up read at 12:52 UTC showed
 540 overflows and a 345,770-second scan age; the counters were still moving.
+At 13:00 UTC the overflow count remained 540 while `events_seen` had grown by
+about 241K since 12:52; no full scan was active and the scan age was 346,264
+seconds. This shows the overflow rate is bursty, while the index remains
+unreconciled.
 
 Raw read-only snapshots:
 [`12:49Z`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1250Z.json)
@@ -72,6 +76,8 @@ and
 [`12:50Z`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1251Z.json),
 plus the
 [`12:52Z follow-up`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1252Z.json).
+The 13:00Z sample is
+[`here`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1300Z.json).
 
 ### Current local tests
 
@@ -128,10 +134,10 @@ plus the
 
 ### Disk snapshot
 
-Local root: **58 GiB free of 185 GiB** (68% used). `/tmp` currently accounts
-for **14 GiB**; a live Go race-test process still has files open in its
-`/tmp/x.mQn3l` workspace, and the production Dux watcher covers `/`. I did not
-purge shared temporary data during that active workload. VPS2 root: **8.6 GiB
+Local root: **57 GiB free of 185 GiB** (69% used). `/tmp` currently accounts
+for **15 GiB**; active Go security/race tests still use their `/tmp/x.mQn3l`
+workspace, and the production Dux watcher covers `/`. I did not purge shared
+temporary data during that active workload. VPS2 root: **8.6 GiB
 free of 93 GiB** (91% used); it contains the active r120 canary and rollback
 copy. Preserve those qualification artifacts.
 
