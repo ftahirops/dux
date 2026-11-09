@@ -1156,6 +1156,14 @@ gate is still open. Captured log:
 [`release120-canary-progress-20261109T1307Z.jsonl`](live/release120-canary-progress-20261109T1307Z.jsonl),
 SHA256 `9e3da55bf372ae813dea69770720f427dc0d6d01f895a070c3408aa12f4699c4`.
 
+At 13:11:49 UTC, sample 16 passed in 132.004 seconds. A scan was active at
+age 1,059 seconds and the independent path graph passed at 1,689,200 paths.
+Overflow, userspace-drop, OOM, and restart counters remained zero. This was
+the longest canary collection so far, but it completed within the five-minute
+sampling interval. The 24-hour gate remains open. Captured log:
+[`release120-canary-progress-20261109T1313Z.jsonl`](live/release120-canary-progress-20261109T1313Z.jsonl),
+SHA256 `9ee52e4f5a6d2ec71ed8cffe80d608ee72f2463919a4d7329fcec0d0928a4958`.
+
 #### Production VPS1 read-only health samples — 2026-11-09 12:52 UTC
 
 Read-only `dux status --json`, systemd, and binary-hash samples confirm the

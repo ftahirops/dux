@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 13:10 UTC
+**Updated:** 2026-11-09 13:13 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 13:10 UTC
+## Current status and evidence — 2026-11-09 13:13 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -22,8 +22,8 @@ upgrade; a root-only rollback copy of the database, old binary, systemd unit,
 and release-119 DEB is preserved on VPS2. Production VPS1's service and
 database were not changed.
 
-The fresh r120 VPS2 canary has **15/289 passing samples** as of 13:07 UTC; its
-24-hour gate is still open. Samples 1–15 report zero kernel overflows, user
+The fresh r120 VPS2 canary has **16/289 passing samples** as of 13:13 UTC; its
+24-hour gate is still open. Samples 1–16 report zero kernel overflows, user
 drops, OOM events, or Dux restarts. The root observation completed with zero
 coverage issues and a valid 1,677,080-path graph. Sample 5 began with the prior
 observation 1,228 seconds old and an active scan; the scan finished during the
@@ -53,6 +53,9 @@ Overflow, drop, and OOM counters remained zero; both longer collections still
 completed within the five-minute sampling interval.
 Sample 15 passed at 13:06:09 UTC in 92.128 seconds, scan age 720 seconds, and
 1,689,200 valid paths. There were still no overflow, drop, or OOM events.
+Sample 16 passed at 13:11:49 UTC in 132.004 seconds, with a scan active at age
+1,059 seconds and a valid 1,689,200-path graph. No overflow, drop, OOM, or
+restart was recorded; collection remained within the five-minute interval.
 
 ### Production VPS1 read-only check
 
@@ -139,8 +142,8 @@ the 13:10Z follow-up is
 
 ### Disk snapshot
 
-Local root: **62 GiB free of 185 GiB** (66% used). `/tmp` currently accounts
-for **13 GiB**; Go tests were actively using temporary build directories during
+Local root: **61 GiB free of 185 GiB** (66% used). `/tmp` currently accounts
+for **14 GiB**; Go tests were actively using temporary build directories during
 inspection, and the production Dux watcher covers `/`. I did not purge shared
 temporary data during that active workload. VPS2 root: **8.6 GiB
 free of 93 GiB** (91% used); it contains the active r120 canary and rollback
