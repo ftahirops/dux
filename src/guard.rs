@@ -42,16 +42,22 @@ pub fn may_start_reconciliation_with_health(
 }
 
 /// CPU or moderate I/O PSI can rise because the low-priority reconciliation
-/// itself is being throttled. Cancelling on those signals discards staging
+/// itself is being throttled. Moderate memory PSI can also rise while the host
+/// still has ample available memory. Cancelling in either case discards scan
 /// work and can create a repeated scan/cancel loop. Keep an active scan running
-/// for CPU-only or elevated I/O pressure: the scanner is nice'd and uses the
-/// idle I/O class, while optional work is already suppressed. Memory pressure,
-/// high load, and hard Critical pressure still stop it. Starting a new scan
-/// remains more restrictive (`may_start_reconciliation_with_health`).
+/// for those signals: the scanner is nice'd and uses the idle I/O class, while
+/// optional work is already suppressed. Low available memory, high load, and
+/// hard Critical pressure still stop it. Starting a new scan remains more
+/// restrictive (`may_start_reconciliation_with_health`).
 pub fn should_cancel_reconciliation(health: &Health, disk_floor: i64) -> bool {
     match health.level(disk_floor) {
         Pressure::Normal => false,
-        Pressure::Elevated => !matches!(health.reason(disk_floor), "cpu pressure" | "io pressure"),
+        Pressure::Elevated => {
+            let reason = health.reason(disk_floor);
+            !matches!(reason, "cpu pressure" | "io pressure")
+                && !(reason == "memory pressure"
+                    && health.mem_avail > health.elevated_memory_floor())
+        }
         Pressure::Critical => true,
     }
 }
@@ -791,6 +797,42 @@ mod tests {
         assert_eq!(h.level(256 << 20), Pressure::Elevated);
         assert_eq!(h.reason(256 << 20), "io pressure");
         assert!(!should_cancel_reconciliation(&h, 256 << 20));
+    }
+
+    #[test]
+    fn moderate_memory_psi_with_available_headroom_does_not_cancel_active_scan() {
+        let h = Health {
+            mem_avail: 3 << 30,
+            mem_total: 8 << 30,
+            disk_avail: 20 << 30,
+            load1: 1.0,
+            ncpu: 6.0,
+            psi_mem10: 8.0,
+            ..Default::default()
+        };
+        assert_eq!(h.level(256 << 20), Pressure::Elevated);
+        assert_eq!(h.reason(256 << 20), "memory pressure");
+        assert!(!may_start_reconciliation_with_health(
+            Pressure::Elevated,
+            &h,
+            256 << 20
+        ));
+        assert!(!should_cancel_reconciliation(&h, 256 << 20));
+    }
+
+    #[test]
+    fn elevated_low_available_memory_still_cancels_active_scan() {
+        let h = Health {
+            mem_avail: 512 << 20,
+            mem_total: 16 << 30,
+            disk_avail: 20 << 30,
+            load1: 1.0,
+            ncpu: 12.0,
+            ..Default::default()
+        };
+        assert_eq!(h.level(256 << 20), Pressure::Elevated);
+        assert_eq!(h.reason(256 << 20), "low available memory");
+        assert!(should_cancel_reconciliation(&h, 256 << 20));
     }
 
     #[test]

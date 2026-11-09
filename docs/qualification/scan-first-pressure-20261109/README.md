@@ -975,3 +975,41 @@ active and the 24-hour gate is still open. The captured full JSONL snapshot
 contains samples 1–3:
 [`release119-monitorfix-v2-progress-20261109T1124Z.jsonl`](live/release119-monitorfix-v2-progress-20261109T1124Z.jsonl),
 SHA-256 `b674e11d4ab27e8af4e8e20b18456571632b7a47f16afe7a0caa03a4e581bf1d`.
+
+#### Sample 5 freshness failure and pressure-cancellation fix — 2026-11-09
+
+The corrected-monitor run later **failed closed at sample 5** (11:34:30 UTC).
+Its 24-hour gate requires a completed full observation no older than 1,200
+seconds; the observation age was 1,278 seconds before and after collection.
+This failure is real and is not counted as a passing canary. The raw run,
+including samples 1–4 and the failed sample, is preserved at
+[`release119-monitorfix-v2-failed-sample5-20261109T1134Z.jsonl`](live/release119-monitorfix-v2-failed-sample5-20261109T1134Z.jsonl),
+SHA-256 `212b617f0fa3d54b212ecebfb12ad61387823ff2d8994b622a10e0e964d0dbdf`.
+
+The service did not crash: Dux `NRestarts=0`, the sample had no kernel
+overflows, userspace drops, or OOM events, and its exact path-graph/SQLite
+checks passed. The previous scan had been cancelled at 11:29:27 during
+*elevated* memory PSI (`avg10=5.07%`) despite 3.37 GiB available memory; the
+pressure was below the code's critical PSI threshold (>20%). A retry started
+at 11:30:28 and completed at 11:34:52—22 seconds after the failed sample. It
+observed 1,494,739 files, 178,007 directories, 1,672,746 path instances, and
+zero coverage issues. The canary correctly rejected the freshness breach;
+completion shortly afterward does not retroactively pass it.
+
+The current source now keeps an **already active** low-priority scan running
+under elevated memory PSI when available memory remains above the elevated
+floor. It still cancels under critical pressure, genuinely low available
+memory, elevated host load, or unavailable telemetry. New scan admission
+remains more restrictive. This targets the observed cancel/retry loop without
+relaxing the freshness limit. VPS2 runtime qualification of this patch is
+pending; a new 24-hour canary must start after candidate build and pressure
+tests.
+
+The focused resource-guard suite passed **21/21 tests**. Full release/all-
+features Rust tests passed **326, failed 0, ignored 2**. Strict all-target,
+all-feature Clippy, formatting, and diff checks passed. Refreshed coverage is
+**72.26% line, 71.11% region, 76.02% function**; branch coverage is unavailable.
+Logs:
+[`pressure-guard-release-tests-20261109.log`](live/pressure-guard-release-tests-20261109.log),
+[`pressure-guard-clippy-20261109.log`](live/pressure-guard-clippy-20261109.log),
+[`pressure-guard-llvm-cov-20261109.log`](live/pressure-guard-llvm-cov-20261109.log).
