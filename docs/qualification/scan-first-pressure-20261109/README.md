@@ -1047,3 +1047,11 @@ observations, as expected in scan-first mode. This is only minutes of runtime;
 the 24-hour soak is not qualified. Snapshot:
 [`release120-canary-progress-20261109T1200Z.jsonl`](live/release120-canary-progress-20261109T1200Z.jsonl),
 SHA256 `73b7be431183603c3b4f80d32dc4cdac52913b08ee8923454717a40309358e02`.
+
+At 12:06 UTC the same r120 canary reached **3/289 passing samples**. Sample 3
+completed in 79.307 seconds; the observation was 707 seconds old, no scan was
+active at collection end, the path graph still had 1,677,080 paths, and
+overflow, drop, OOM, and restart counters remained zero. Snapshot containing
+samples 1–3:
+[`release120-canary-progress-20261109T1206Z.jsonl`](live/release120-canary-progress-20261109T1206Z.jsonl),
+SHA256 `68ab24387f38c5cfa2a0be0dda98f6d47fb1c4d9883e3b3d5615eabc4db1d4f6`.
