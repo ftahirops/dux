@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 15:13 UTC
+**Updated:** 2026-11-09 15:25 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 15:13 UTC
+## Current status and evidence — 2026-11-09 15:25 UTC
 
 A prior verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -31,8 +31,8 @@ stored scan timestamp advanced from 1794232455 (the old scan-start value) to
 That is runtime evidence that the patched field records completion.
 
 A fresh 24-hour VPS2 canary started at 14:07:03 UTC with five-minute samples
-and the intended 1,200-second freshness gate. **14 samples have passed**; the
-latest was 15:12:50 UTC. The daemon and monitor remain active with zero restarts.
+and the intended 1,200-second freshness gate. **16 samples have passed**; the
+latest was 15:23:37 UTC. The daemon and monitor remain active with zero restarts.
 Sample 3 ran during an active scheduled scan; it completed at 14:20:17 in
 about 5m52s, with zero coverage issues and accounting passed in 54.8s.
 `last_scan_ts` advanced from scan start 1794233665 to completion 1794234017.
@@ -42,8 +42,13 @@ verified graph. Samples 9 and 12 also passed during active scheduled scans;
 the scans completed in 260s and 234s respectively, each with zero coverage
 issues and accounting passed. The latest scan covered 1,713,383 staged paths. Sample 13 also passed with
 that graph at 223–274 seconds freshness. Sample 14 passed at 570 seconds
-freshness. Across all 14 samples there are zero monitor errors, overflows,
-drops, OOMs, or restarts. The 24-hour gate remains open. Monitor limits are 20% CPU, 1 GiB
+freshness. Sample 15 overlapped an active scan at 823–936 seconds freshness;
+the scan completed in 277 seconds at 15:19:03 with zero coverage issues, and
+independent accounting passed in 68.969 seconds. Across all 16 samples there
+are zero monitor errors, overflows, drops, OOMs, or restarts. The 24-hour gate
+remains open. Sample 16 passed at age 274 seconds on the 1,716,749-path graph;
+daemon memory was 248.5 MiB current / 1.75 GiB peak against its 4 GiB limit.
+Monitor limits are 20% CPU, 1 GiB
 memory, no swap, IOWeight 10, and Nice 19. Full build, backup, install, and
 sample evidence is in
 [`release-121 qualification`](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md).
@@ -85,6 +90,12 @@ The 13:14Z follow-up is
 
 - Rust release/all-features suite on the timestamp-fix worktree: **328 passed, 0 failed, 2 ignored**.
   The ignored tests require the handle-capable ext4 and production-scale profiles.
+- The ext4 stale-parent end-to-end test was explicitly run and passed on the
+  local ext4 host. The 1M-entry scale test passed: baseline rebuild 62.029 s,
+  unchanged in-place reconciliation 83.181 s, DB size unchanged at 321,794,048
+  bytes. This unconstrained-host result identifies substantial full-walk cost;
+  constrained-host p95/p99 performance remains unqualified. Logs are in the
+  [r121 qualification folder](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md).
 - Focused resource-guard suite: **21 passed**; includes moderate memory PSI
   with headroom (continue active scan) and low available memory (cancel).
 - Strict all-target/all-feature Clippy, formatting, and `git diff --check`:

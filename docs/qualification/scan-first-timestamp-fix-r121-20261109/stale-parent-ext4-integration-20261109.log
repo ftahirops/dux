@@ -1,0 +1,9 @@
+   Compiling dux v0.6.3 (/home/dux)
+    Finished `release` profile [optimized] target(s) in 52.87s
+     Running unittests src/main.rs (target/release/deps/dux-430eb4dadfdcae33)
+
+running 1 test
+test watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 329 filtered out; finished in 0.59s
+
