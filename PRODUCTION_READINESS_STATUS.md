@@ -1,6 +1,42 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 15:44 UTC
+## Latest verified checkpoint — 2026-11-09 17:55 UTC
+
+Release candidate package revision 122 built successfully from clean commit
+`24456ed8978fa33886ab13944e8afaf57762c7b6` as a static-musl binary, DEB, and
+RPM. Source identity, package payload identity, checksums, embedded dependency
+metadata, and RustSec audits passed; the lockfile audit found zero advisories,
+and the exact-binary audit recovered 202 dependencies. The package lifecycle
+harness passed **70/70** unit tests. The candidate was not installed on VPS2.
+Evidence is in
+[`release-candidate-24456ed-20261109`](docs/qualification/release-candidate-24456ed-20261109/README.md).
+
+VPS2 remains on release 121 and its active 24-hour canary. A read-only check at
+17:55 UTC showed the same daemon PID `2561224`, zero restarts, zero kernel
+overflow notifications, zero dropped updates, and no pending updates. Canary
+sample 46 at 17:53:27 passed monitor checks: SQLite and indexed path graph
+validated, independent accounting passed, and there were no OOMs, overflows,
+drops, or restarts. Its post-observation scan age was 281 seconds. This is
+about 3h46m of the 24-hour run; scan freshness comes from completed-observation
+age, not the legacy `behind_seconds` field. The soak has not passed its full
+duration.
+
+Current test evidence includes 330/330 Rust tests in debug and release
+all-features runs (ignored profiles included), 354/354 Python harness checks,
+an isolated 1.37M-entry ext4 profile, 100k scale smokes, strict
+Clippy/format/diff checks, and 73.65% line / 72.55% region / 76.80% function
+coverage. Branch coverage is unavailable. Results and limits are detailed in
+the [`r121 qualification`](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md).
+
+Production VPS1 remains on legacy `0.6.3`; the prior recorded state had a
+multi-day-old scan, recurring overflows, dropped updates, and restarts. No
+production rollout has been performed. Revision-122 canary install/rollback,
+the completed 24-hour r121 soak, live schema migration qualification,
+disk-full/OOM/filesystem stress, multi-day soak, full security threat review,
+and constrained-host p95/p99 performance evidence remain open. Production
+sign-off is not met.
+
+**Updated:** 2026-11-09 17:55 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 

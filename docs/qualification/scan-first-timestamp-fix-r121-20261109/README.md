@@ -222,6 +222,26 @@ count and zero-fault counters must not be presented without this freshness
 state. The 24-hour qualification is therefore incomplete and the canary's
 index-freshness failure remains open.
 
+### VPS2 read-only checkpoint — 2026-11-09 17:55 UTC
+
+Canary sample 46, captured at 17:53:27 UTC, passed its monitor checks. The
+service binary and unit hashes matched release 121; its PID remained 2561224,
+with zero restarts, kernel overflow notifications, userspace drops, OOM events,
+and pending updates. SQLite `quick_check`, indexed path-graph validation, and
+independent accounting passed. The observed scan age after the cycle was 281
+seconds. The latest read-only `dux status --json` at 17:55 reported the daemon
+active, no scan in progress, zero kernel overflows/drops/pending updates, and
+385 seconds since the completed scan. `dirty=true` is the expected wait for the
+next scheduled scan; the event-pipeline `behind_seconds` is not applicable in
+scan-first mode. Sample 46 is roughly 3h46m into the 24-hour soak, so that gate
+remains open. Live sample evidence is retained in
+[`vps2-canary-progress.jsonl`](vps2-canary-progress.jsonl).
+
+The scan-first metrics change from source commit `b07fc63` is not in the
+installed r121 binary. Revision 122 was packaged and audited separately from
+clean commit `24456ed`; it has not been installed on VPS2. See the separate
+[revision-122 package qualification](../release-candidate-24456ed-20261109/README.md).
+
 
 ### VPS2 post-scan read-only checkpoint — 2026-11-09 16:49 UTC
 
