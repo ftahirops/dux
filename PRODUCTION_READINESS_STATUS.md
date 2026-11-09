@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-08 23:58 UTC
+**Updated:** 2026-11-09 00:43 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -66,21 +66,35 @@ is 44 MiB and its auditable Rust target is 579 MiB. VPS2 root is 86% used with
 13 GiB free. No further cleanup was performed because temporary and rollback
 data may still be active or valuable.
 
-## Test and coverage update (2026-11-08, latest local run)
+## Test and coverage update (2026-11-09, current working tree)
 
 On the current working tree, `cargo llvm-cov --locked --all-features
---summary-only --bin dux` ran the full suite and passed **321 tests, 0 failures,
-2 ignored**; the release all-features run on VPS2 passed the same count.
-Strict all-target/all-feature Clippy with warnings denied and `git diff --check`
-pass on the current tree; `cargo fmt --all` has been run. The latest full
-Python discovery passed **331 tests**, including 35 canary-monitor tests.
-These per-run counts overlap and must not be summed as unique tests. The two
-ignored Rust tests require a
-handle-capable ext4 qualification profile and a manual production-shaped scale
-profile. Static-musl package
-revision 106 was built from clean commit `409a2f4`; its manifest, static binary,
-DEB, RPM, source archive, checksums, and dependency audit verify. It is installed
-only on the disposable VPS2 qualification VM, not production.
+--summary-only --bin dux` ran **324 tests: 322 passed, 0 failed, 2 ignored**.
+It reports 72.16% line coverage (18,273/25,324), 70.98% region coverage
+(29,002/40,857), and 76.03% function coverage (1,278/1,681). Branch coverage
+is not instrumented by this stable llvm-cov run. Per-file line coverage ranges
+from 39.51% in `tui.rs` to 98.94% in `classify.rs`; `main.rs` is 43.61%,
+`containers.rs` 67.25%, and `watch.rs` 72.04%. The full command output is
+preserved at
+[`current-source-llvm-cov.log`](docs/qualification/scan-first-pressure-20261109/live/current-source-llvm-cov.log).
+
+The same exact tree passes strict all-target/all-feature Clippy with warnings
+denied, `cargo fmt --all -- --check`, and `git diff --check`. A full all-features
+release test run on VPS2 also passed **322, failed 0, ignored 2**. The separate
+Python package-lifecycle suite previously passed 70/70; the broader Python
+discovery previously passed 331/331, including canary-monitor tests. Those
+Python results predate this latest Rust-only change and are separate runs, not
+additional unique test cases to add to the Rust total. The two ignored Rust
+tests require a handle-capable ext4 qualification profile and a manual
+production-shaped scale profile. Coverage is not a correctness probability;
+the low UI/CLI coverage and unmeasured branch coverage remain gaps.
+
+The current source change and its VPS2 runtime fixture are not a package
+qualification or production rollout. The active production daemon remains an
+older build, and the 24-hour release-106 v4 canary was interrupted by the
+controlled mount test after samples 1–8 passed. Its sample 9 failed closed and
+the soak is invalid; see the dated scan-first pressure record. Static-musl
+revision 106 remains installed only on the disposable VPS2 qualification VM.
 
 ## VPS2 canary checkpoint at 22:02 UTC (historical; superseded by sample 13)
 
@@ -1941,3 +1955,66 @@ itself isolate whether the limiting factor is CPU throttling, a short producer
 burst, event-resolution I/O, or queue telemetry error; the installed service is
 the older `e0cc915` binary, and queue bytes were not captured in these two
 samples.
+
+## Scan CLI settling fix and controlled VPS2 burst — 2026-11-09 00:25 UTC
+
+The source now allows a bounded 10-second settle interval after a scan-first
+observation before `dux scan` reports uncertainty. The scan can finish its
+walk just before the independent accounting worker and watcher publish their
+final clean state; previously the CLI could report “stale or uncertain” in
+that brief window. A deterministic boundary test covers the settle rule.
+
+The updated test-only release binary was run on the isolated VPS2 ext4 fixture.
+With the index dirty after a file creation, the requested observation and
+accounting completed in 4.50 seconds; `dux scan` returned success, final status
+was `dirty=false`, and `dux find` returned the new file. Rust tests after the
+change passed **322, failed 0, ignored 2**; strict Clippy, formatting, and diff
+checks passed. One earlier full run had a single ext4 inode-reuse test ENOENT;
+its focused rerun and the next complete suite passed, so this remains a test
+flake to watch.
+
+The release-107 static candidate handled 11 controlled bursts of 32,000
+create/unlink pairs each (352,000 pairs, about 704,000 filesystem operations)
+on the separate ext4 loop mount. It saw 975,442 hints with zero overflow or
+userspace drops; the full observation found 1 file, 13 directories, and 14
+paths with no coverage issues, then accounting passed. Sampled hint throughput
+peaked at 45,949/s; sampled queue bytes peaked at 24, with no queue-pressure
+episodes. The concurrently installed release-106 root service counted two
+overflows. These results are one controlled VPS2 comparison, not a general
+throughput guarantee.
+
+The release-106 v4 canary passed samples 1–8 and failed sample 9 during this
+test. It recorded two overflows and a service restart-count change. The restart
+was caused by the loop mount changing filesystem coverage: the old daemon
+exited with its explicit “filesystem mounts changed” status and systemd
+restarted it. This invalidates that soak; it is not evidence of a spontaneous
+crash. The exact service event and failed JSONL sample are preserved under
+[`scan-first-pressure-20261109`](docs/qualification/scan-first-pressure-20261109/README.md)
+and the release-106 v4 live record. The loop mount and its test database were
+removed after preserving the logs.
+
+During the same production-host review, a transient read-only collector on
+vps1 was found retrying a missing script every 10 seconds; it had reached
+11,618 restarts with exit status 2. The transient unit
+`dux-soak-archive-vps2.service` was stopped because its `ExecStart` target
+`/home/dux/target/readiness/vps2-qualification-20261106/soak-archive/collect.py`
+no longer existed. The Dux production daemon and package were not touched.
+
+## Current production and disk snapshot — 2026-11-09 00:45 UTC
+
+Read-only checks show `/usr/bin/dux` is still `0.6.3 (e0cc915f8f37)`, active
+with systemd `NRestarts=4` and `ExecMainStatus=0`. `dux status --json` reports
+`dirty=true`, reason `fanotify queue overflow`, **340 cumulative kernel
+overflow notifications**, zero userspace drops, and a last full scan
+**302,148 seconds old** (about 83.9 hours). It reports 88.7M events seen,
+51.6M resolved, 9 pending, and a 128 MiB WAL. The recent small pending count
+does not make the multi-day-old full observation current. This confirms the
+production reliability issue is still unresolved; no package or database was
+changed.
+
+The effective service has systemd exposure score 3.3 OK. The loaded unit
+SHA-256 is `dd34d308…`; its effective syscall deny list omits explicit `bpf`,
+while the checked-in packaged unit includes it. The lifecycle security policy
+gate therefore still fails. No live unit policy was changed. The local root
+filesystem is 185 GiB total, 112 GiB used, and 65 GiB free (64% used); local
+disk exhaustion is not the current production blocker.

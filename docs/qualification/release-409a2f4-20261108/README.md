@@ -263,9 +263,9 @@ candidate) passed and produced 79,859,712-byte databases. A first retry attempt
 with an incorrect exact-name filter ran zero tests and is excluded from these
 results.
 
-## Fresh VPS2 soak and dependency audit — 2026-11-08 23:29 UTC
+## Fresh VPS2 soak and dependency audit — 2026-11-08 23:29 UTC (historical)
 
-The previous v3 canary remains failed at sample 13 and is stopped. A separate
+The previous v3 canary failed at sample 13 and was stopped. A separate
 v4 run started at 23:27:17 UTC with a new JSONL file and the corrected monitor
 (SHA-256 `6599d0227bd6ea9cbd5295530672bb35cacf8faea4bd71e67d8f7e76f811ec8d`).
 Samples 1–4 passed at 23:28:13, 23:33:07, 23:37:54, and 23:43:21 UTC. Each
@@ -276,8 +276,8 @@ userspace drops, and OOM events. The daemon remained dirty awaiting the next
 observation. The service's cumulative memory peak was 2.03 GiB under its 4 GiB
 limit. Sample collection took 36.8–64.5 seconds. This is the older installed
 service binary, so v4 does not qualify the uninstalled scan optimization. The
-24-hour soak is still in progress; four samples do not qualify its gate. The
-captured progress is preserved in
+At this historical checkpoint, four samples did not qualify the 24-hour gate.
+The captured progress is preserved in
 [`live/canary-24h-5m-v4-progress.jsonl`](live/canary-24h-5m-v4-progress.jsonl).
 
 `cargo audit --json` passed at 23:29 UTC: zero known vulnerabilities and zero
@@ -286,16 +286,20 @@ updated at 23:03 UTC. Raw result:
 [`cargo-audit-20261108-2329.json`](cargo-audit-20261108-2329.json). This is
 dependency audit evidence, not a full application security assessment.
 
-## VPS2 v4 canary and production policy refresh — 2026-11-08 23:58 UTC
+## VPS2 v4 canary and production policy refresh — 2026-11-08 23:58 UTC (superseded)
 
 The live VPS2 v4 progress JSONL was refreshed from the active collector at
-23:58 UTC. Seven samples passed, at 23:28:13, 23:33:07, 23:37:54, 23:43:21,
+23:58 UTC. Seven samples had passed at 23:28:13, 23:33:07, 23:37:54, 23:43:21,
 23:48:03, 23:52:54, and 23:58:22 UTC. Every sample reported zero service restarts, kernel
 queue-overflow notifications, userspace update drops, and OOM events. SQLite
 quick checks, schema-v7 path-graph checks, and accounting checks passed. The
 latest sample's completed scan was 1,055 seconds old and the index was dirty
-while awaiting its next periodic observation. The canary service is still
-active; the 24-hour gate remains open.
+while awaiting its next periodic observation. This checkpoint is superseded:
+samples 1–8 passed, but sample 9 failed after the controlled test mount
+changed filesystem coverage and systemd restarted the service. The soak was
+stopped and is invalid; see
+[`scan-first-pressure-20261109`](../scan-first-pressure-20261109/README.md)
+and the preserved v4 JSONL.
 
 A read-only `systemd-analyze security --offline=yes packaging/dux.service` on
 the local systemd 255 host scored the checked-in service unit **3.3 OK**. This

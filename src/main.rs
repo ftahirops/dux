@@ -996,6 +996,15 @@ fn daemon_scan_first_observation_finished(
     !scan_active && (attempt_advanced || generation_advanced)
 }
 
+const DAEMON_SCAN_FIRST_SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn daemon_scan_first_should_defer_uncertain_result(
+    accounting_pending: bool,
+    settle_elapsed: std::time::Duration,
+) -> bool {
+    accounting_pending || settle_elapsed < DAEMON_SCAN_FIRST_SETTLE_TIMEOUT
+}
+
 const DAEMON_RESCAN_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn daemon_rescan_start_timed_out(
@@ -1070,6 +1079,7 @@ fn request_daemon_rescan(
     let mut generation_advanced = false;
     let mut scan_started = util::read_scan_progress_for(db).is_some();
     let mut generation_observed_at = None;
+    let mut scan_first_observation_finished_at = None;
     loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
         anyhow::ensure!(
@@ -1083,6 +1093,11 @@ fn request_daemon_rescan(
         let attempt_advanced =
             scan_generation_advanced(previous_attempt_id.as_deref(), attempt_id.as_deref());
         let scan_active = util::read_scan_progress_for(db).is_some();
+        if scan_active {
+            // A manual follow-up can start after an earlier observation. Give
+            // that scan its own post-publication settle interval.
+            scan_first_observation_finished_at = None;
+        }
         scan_started |= scan_active || generation_advanced || attempt_advanced;
         if daemon_rescan_start_timed_out(scan_started, generation_advanced, start.elapsed()) {
             anyhow::bail!(
@@ -1123,6 +1138,8 @@ fn request_daemon_rescan(
                 scan_active,
             )
         {
+            let finished_at =
+                *scan_first_observation_finished_at.get_or_insert_with(std::time::Instant::now);
             if attempt_advanced {
                 let attempt_result = poll_store.get_meta("last_reconcile_attempt_result")?;
                 if attempt_result.as_deref() == Some("incomplete") {
@@ -1137,10 +1154,12 @@ fn request_daemon_rescan(
                 }
             }
             let dirty_reason = poll_store.get_meta("dirty_reason")?;
-            if dirty_reason.as_deref() == Some("reconciliation accounting verification pending") {
-                // The scan has published; let the independent verifier own
-                // the transition to a clean status.
-            } else {
+            let accounting_pending =
+                dirty_reason.as_deref() == Some("reconciliation accounting verification pending");
+            if !daemon_scan_first_should_defer_uncertain_result(
+                accounting_pending,
+                finished_at.elapsed(),
+            ) {
                 eprintln!(
                     "dux: observation completed in {:.0}s, but the index remains stale or uncertain due to concurrent changes; see `dux status`.",
                     start.elapsed().as_secs_f64()
@@ -1649,6 +1668,26 @@ mod tests {
         assert!(daemon_scan_first_observation_finished(false, true, false));
         assert!(!daemon_scan_first_observation_finished(true, false, true));
         assert!(!daemon_scan_first_observation_finished(false, false, false));
+    }
+
+    #[test]
+    fn scan_first_cli_waits_for_transient_accounting_status_to_settle() {
+        assert!(daemon_scan_first_should_defer_uncertain_result(
+            false,
+            std::time::Duration::from_secs(1),
+        ));
+        assert!(daemon_scan_first_should_defer_uncertain_result(
+            false,
+            DAEMON_SCAN_FIRST_SETTLE_TIMEOUT - std::time::Duration::from_millis(1),
+        ));
+        assert!(!daemon_scan_first_should_defer_uncertain_result(
+            false,
+            DAEMON_SCAN_FIRST_SETTLE_TIMEOUT,
+        ));
+        assert!(daemon_scan_first_should_defer_uncertain_result(
+            true,
+            DAEMON_SCAN_FIRST_SETTLE_TIMEOUT * 100,
+        ));
     }
 
     fn tmp(tag: &str) -> PathBuf {
