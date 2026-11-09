@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 12:53 UTC
+**Updated:** 2026-11-09 12:54 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 12:53 UTC
+## Current status and evidence — 2026-11-09 12:54 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -124,9 +124,12 @@ plus the
 
 ### Disk snapshot
 
-Local root: **60 GiB free of 185 GiB** (67% used). VPS2 root: **8.6 GiB free
-of 93 GiB** (91% used); it contains the active r120 canary and rollback copy.
-Do not remove those artifacts while qualification is active.
+Local root: **58 GiB free of 185 GiB** (68% used). `/tmp` currently accounts
+for **14 GiB**; a live Go race-test process still has files open in its
+`/tmp/x.mQn3l` workspace, and the production Dux watcher covers `/`. I did not
+purge shared temporary data during that active workload. VPS2 root: **8.6 GiB
+free of 93 GiB** (91% used); it contains the active r120 canary and rollback
+copy. Preserve those qualification artifacts.
 
 ## VPS2 canary checkpoint at 22:02 UTC (historical; superseded by sample 13)
 
