@@ -276,6 +276,18 @@ but does not prove which process produced each update. The snapshot still
 confirms a stale production index and unprocessed churn. Evidence is in
 `vps1-readonly-followup-20261109T1927Z.json`.
 
+### VPS1 overflow follow-up — 2026-11-09 19:44 UTC (read-only)
+
+Since the 19:27 snapshot, VPS1 recorded **13 more kernel fanotify overflows**.
+The journal independently contains 13 matching overflow warnings from 19:31:50
+through 19:32:51 UTC. The overflow counter rose 636→649 while events seen
+increased by 3,062,765; the dropped-update total stayed at 2,518,862. The index
+remains dirty from queue overflow, and the last full scan is now 370,447 seconds
+old (4.29 days). Concurrent Go tests/builds were present, but this timing does
+not prove they caused the overflows. No production service or index state was
+changed. Raw status, host telemetry, deltas, and journal lines are in
+`vps1-readonly-followup-20261109T1943Z.json`.
+
 ### r123 lifecycle VM stopped by runtime pressure guard — 2026-11-09 19:34 UTC
 
 The local host briefly passed admission and QEMU started at 19:34:07. A Go

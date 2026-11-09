@@ -1,6 +1,68 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 18:23 UTC
+## Latest verified checkpoint — 2026-11-09 19:44 UTC
+
+### Candidate and automated qualification
+
+Release candidate 123 remains the static-musl package set built from clean
+source commit `0cad80e6436202fefc2ff385c18872ce2b4a910c`. Artifact identity,
+package hashes, dependency metadata, RustSec audits, CLI smoke checks, unit
+verification, and the package lifecycle harness (**70/70 unit tests**) passed.
+The release suite passed **332/332** with ignored tests included; coverage is
+**73.73% line / 72.67% region / 76.94% function**, with no branch coverage.
+These results do not qualify an r123 installation or production runtime. The
+exact r121→r123 install/upgrade/rollback/purge/clean-install lifecycle remains
+open.
+
+The official Ubuntu 24.04 cloud image is checksum-verified and staged in
+tmpfs. One isolated VM attempt at 19:34 was stopped by the host pressure guard
+within 10 seconds when concurrent Go tests started; SSH and package execution
+never began. A guarded driver is still waiting for 120 continuous seconds of
+clear host admission before retrying. It uses the VM runner's own admission and
+runtime pressure guards and does not alter VPS2.
+
+### VPS2 r121 canary
+
+The 24-hour canary remains on r121. **59 formal five-minute monitor samples**
+passed through 18:58 UTC. Subsequent read-only observations recorded successful
+full scans and independent accounting checks at 19:20 and 19:33, each with zero
+coverage issues. At 19:42 the service was active with zero restarts, kernel
+overflows, event drops, or pending updates; the last completed scan was 509
+seconds old. The formal sample stream does not extend past 18:58 in the current
+evidence, and the required 24 hours are not complete.
+
+### VPS1 production
+
+VPS1 remains on the legacy `0.6.3` executable and is **not production-ready**.
+At 19:43 it was active with four systemd restarts, a dirty index, and a last
+full scan **370,447 seconds old (4.29 days)**. It reported **649 lifetime
+kernel overflows** and **2,518,862 dropped updates**. Thirteen new overflow
+warnings occurred from 19:31:50 to 19:32:51. Concurrent Go tests/builds were
+present, but evidence does not attribute the overflows to a specific process.
+The database occupied 3.26 GB; `/` had about 58 GiB free. No service, database,
+or host configuration was changed.
+
+### Remaining release gates
+
+Current source embeds SQLite 3.54.1 with the WAL-reset fix, but production still
+runs the old SQLite 3.46.0 binary. The current service unit scores 3.3 OK in
+systemd analysis, while root plus `CAP_SYS_ADMIN` remains a material privilege
+risk. The unsafe-block documentation lint passes, but a complete memory-safety
+review is still open.
+
+No production rollout has been performed. r123 package lifecycle and runtime,
+the completed 24-hour canary, live schema migration and rollback, disk-full/OOM
+and filesystem fault qualification, 72-hour endurance, constrained-host
+p95/p99 performance, and full deployment threat review remain open. Production
+sign-off is not met.
+
+**Updated:** 2026-11-09 19:44 UTC
+
+**Goal:** production reliability, security, performance, and correctness review
+
+**State:** active; not production-ready sign-off
+
+## Previous recorded checkpoint — 2026-11-09 18:23 UTC
 
 Release candidate package revision 123 was built from clean commit
 `0cad80e6436202fefc2ff385c18872ce2b4a910c` as a static-musl binary, DEB, and
