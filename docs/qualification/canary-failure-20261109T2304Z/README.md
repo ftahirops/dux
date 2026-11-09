@@ -18,11 +18,36 @@ captures are stored beside this file.
 
 No kernel overflow/drop counter or service restart was reported at failure.
 The retry was initially deferred because host pressure was elevated (load1
-7.69 on 6 CPUs; CPU PSI 19.62%). The latest accessible capture is the one
-included here; SSH to VPS2 subsequently failed with public-key denial, so the
-retry's final outcome is unknown. Do not restart the monitor or call this a
-passing soak without first checking current service state and completing a new
-24-hour run after the scan issue is understood.
+7.69 on 6 CPUs; CPU PSI 19.62%). A subsequent SSH attempt initially failed
+because this host's SSH configuration directs `192.168.5.106` to port 2222;
+connecting explicitly to port 22 with the existing root key succeeds. The
+recovery scan was active at the 23:15:58 UTC follow-up. Its completion and
+independent verification are recorded below. Do not call this a passing soak:
+recovery does not undo the sample-108 failure or complete a fresh 24-hour run.
+
+## Recovery outcome — 2026-11-09 23:19 UTC
+
+The next scheduled full observation completed at 23:16:27 UTC: 1,622,635 files
+and 193,105 directories, zero coverage issues, two paths refreshed after
+inode-reuse races, and zero unresolved reuse paths. Dux's independent directory
+accounting verification passed at 23:17:32 UTC (64.845 seconds). The service
+remained active with PID 2561224 and zero restarts; kernel overflow and
+userspace-drop counters remained zero. Dux then reported the normal scan-first
+dirty reason, `filesystem changes await the next full observation`, with no
+automatic reconciliation pause.
+
+A separate read-only SQLite check passed `PRAGMA quick_check` and the v7 path
+graph checks (one root, valid directory parents, one prime per inode identity,
+complete directory totals, and root entry count matching the 1,815,740 path
+rows). The result is in `independent-db-check-2318Z.json`; raw status and
+journal captures are in `recovery-status-2316Z.txt`,
+`recovery-status-2318Z.txt`, and the two `recovery-journal-*.txt` files.
+
+This shows the existing bounded retry and later full scan recovered after the
+sample-108 failure. It does not prove that repeated validation passes would
+have prevented the failed scan, and it does not rescue the canary: the monitor
+stopped at sample 108 and the 24-hour run remains failed. The current r121
+daemon was not modified.
 
 ## Source-level analysis
 
@@ -45,20 +70,19 @@ Simply ignoring the conflict would compromise correctness. A fix needs a
 deterministic reproducer that introduces reuse between validation passes, then
 must prove bounded convergence when churn stops and continued fail-closed
 behavior when it does not. A bounded retry to a fixed point may help, but has
-not been implemented or qualified.
+not been qualified. A bounded three-pass implementation and two deterministic
+synthetic stage-mutation tests are now present in the working tree; they have
+not yet compiled or run. The tests are intended to check convergence after a
+validation-phase race and fail-closed behavior after persistent races. They do
+not prove that VPS2's sample-108 race had the same cause.
 
 ## Required follow-up
 
-1. Regain read-only access to VPS2 and preserve the retry result and current
-   canary/service state before changing anything.
-2. Add a deterministic race test for reuse during the revalidation phase,
-   including a case where another pass can converge and a case where continued
-   replacement exhausts the bound and remains incomplete.
-3. Implement only after the test demonstrates the current gap; cap extra passes
-   to bound scan CPU and filesystem metadata I/O.
-4. Run targeted regression tests, the all-features Rust suite, strict Clippy,
-   formatting, and exact independent path/accounting comparison on a disposable
-   ext4 filesystem.
-5. Deploy only to the disposable VPS2 candidate after package lifecycle gates
-   pass, then start a fresh uninterrupted 24-hour canary. VPS1 remains on its
-   legacy daemon and was not changed by this incident capture.
+1. Run the two new deterministic tests; inspect and fix any compile or logic
+   failures before proceeding.
+2. Run the all-features Rust suite, strict Clippy, formatting, and exact
+   independent path/accounting comparison on a disposable ext4 filesystem;
+   measure the added scan cost under a conflict case.
+3. Keep the r121 canary monitor stopped. Qualify a rebuilt candidate through
+   package lifecycle and runtime checks before starting a fresh uninterrupted
+   24-hour canary. VPS1 remains on its legacy daemon and was not changed.
