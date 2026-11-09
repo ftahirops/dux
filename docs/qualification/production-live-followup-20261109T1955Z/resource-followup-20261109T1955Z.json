@@ -1,0 +1,43 @@
+{
+  "captured_at_utc": "2026-11-09T19:55:17Z",
+  "vps2_canary": {
+    "sample_file": "/root/dux-canary-121/canary-24h-5m.jsonl",
+    "sample_count": 70,
+    "passed": 70,
+    "failed": 0,
+    "latest_sample_at_utc": "2026-11-09T19:53:01.084187Z",
+    "latest_sample_result": "passed",
+    "latest_sample_errors": [],
+    "observation_age_seconds": {
+      "minimum": 4,
+      "median": 476,
+      "maximum": 936,
+      "configured_maximum": 1200
+    },
+    "service_restart_count_max": 0,
+    "kernel_overflow_count_max": 0,
+    "event_drop_count_max": 0,
+    "memory_current_mib": {
+      "minimum": 35.1,
+      "median": 345.6,
+      "maximum": 1827.4
+    },
+    "cgroup_memory_peak_mib_max": 2048.8,
+    "cumulative_cpu_core_hours_at_latest_sample": 2.407,
+    "inter_sample_cpu_fraction_of_one_core": {
+      "median": 0.479,
+      "maximum": 0.957
+    },
+    "interpretation": "Observed r121 canary resource data, not an r123 test or constrained-host performance qualification."
+  },
+  "local_guarded_vm_runner": {
+    "captured_at_utc": "2026-11-09T19:55:17Z",
+    "driver_pid": 1928589,
+    "driver_active": true,
+    "qemu_active": false,
+    "host_load_1m": 32.27,
+    "cpu_pressure_some_avg10_percent": 28.06,
+    "admission": "closed by configured host load and CPU pressure guards",
+    "r123_lifecycle_started": false
+  }
+}
