@@ -1,0 +1,63 @@
+{
+  "captured_at_utc": "2026-11-09T19:51:18Z",
+  "source": "read-only SSH observations of VPS2 (192.168.5.106:22)",
+  "canary": {
+    "unit": "dux-r121-canary-20m-5m.service",
+    "active": true,
+    "started_at_utc": "2026-11-09T14:07:03Z",
+    "monitor_interval_seconds": 300,
+    "max_observation_age_seconds": 1200,
+    "samples": 69,
+    "passed": 69,
+    "failed": 0,
+    "first_sample_utc": "2026-11-09T14:07:48.483720Z",
+    "last_sample_utc": "2026-11-09T19:48:43.866717Z",
+    "completed_scan_age_seconds_range": [4, 936],
+    "sample_errors": [],
+    "sample_file": "/root/dux-canary-121/canary-24h-5m.jsonl"
+  },
+  "dux_service": {
+    "unit": "dux.service",
+    "active": true,
+    "main_pid": 2561224,
+    "restart_count": 0,
+    "kernel_overflow_notifications": 0,
+    "kernel_dropped_events": 0,
+    "userspace_dropped_events": 0,
+    "pending_updates": 0,
+    "last_scan_age_seconds": 125,
+    "scan_first": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "behind_seconds": 21084.72,
+    "events_seen": 265822298,
+    "events_resolved": 0,
+    "updates_committed": 0,
+    "index_nodes": 1769780,
+    "index_bytes_on_disk": 731140096,
+    "wal_bytes": 134217728
+  },
+  "latest_observation": {
+    "started_at_utc": "2026-11-09T19:44:31Z",
+    "completed_at_utc": "2026-11-09T19:49:13Z",
+    "files": 1584643,
+    "directories": 188619,
+    "staged_path_instances": 1773262,
+    "coverage_issues": 0,
+    "independent_accounting_passed_at_utc": "2026-11-09T19:50:34Z",
+    "accounting_elapsed_ms": 80226,
+    "revalidated_inode_reuse_paths": 2,
+    "unresolved_inode_reuse_paths": 0
+  },
+  "host_vm_lifecycle_driver": {
+    "pid": 1928589,
+    "exec_session_id": 2482,
+    "active_at_capture": true,
+    "qemu_active_at_capture": false,
+    "last_admission_observation_utc": "2026-11-09T19:50:28Z",
+    "host_load_1m": 14.85,
+    "cpu_pressure_some_avg10_percent": 33.83,
+    "admission": "waiting; host Go test/compiler workloads and load exceed runner thresholds",
+    "r123_package_lifecycle_started": false
+  },
+  "interpretation": "VPS2's r121 service and formal canary continue to pass, but this is only about 5h44m of the required 24h soak. The full observation and accounting check passed. The legacy behind_seconds counter is not the scan-first freshness gate; completed observation age is. The r123 install/upgrade/rollback lifecycle remains untested because the guarded disposable-VM runner has not passed host admission. No production service or database was changed."
+}
