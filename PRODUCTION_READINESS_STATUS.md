@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 12:43 UTC
+**Updated:** 2026-11-09 12:47 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 12:43 UTC
+## Current status and evidence — 2026-11-09 12:47 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -22,8 +22,8 @@ upgrade; a root-only rollback copy of the database, old binary, systemd unit,
 and release-119 DEB is preserved on VPS2. Production VPS1's service and
 database were not changed.
 
-The fresh r120 VPS2 canary has **10/289 passing samples** as of 12:41 UTC; its
-24-hour gate is still open. Samples 1–10 report zero kernel overflows, user
+The fresh r120 VPS2 canary has **11/289 passing samples** as of 12:47 UTC; its
+24-hour gate is still open. Samples 1–11 report zero kernel overflows, user
 drops, OOM events, or Dux restarts. The root observation completed with zero
 coverage issues and a valid 1,677,080-path graph. Sample 5 began with the prior
 observation 1,228 seconds old and an active scan; the scan finished during the
@@ -39,6 +39,9 @@ sample 9 passed at age 693 seconds with a valid 1,683,013-path graph. Sample
 997 seconds, zero overflow/drop/OOM/restart counters, and a valid
 1,683,013-path graph. Dux remained dirty and not caught up during the scan.
 The exact log is preserved in the qualification record.
+Sample 11 passed at 12:46:05 UTC in 88.608 seconds; the completed scan age was
+416 seconds, the valid path graph had 1,685,917 paths, and all recorded
+overflow/drop/OOM/restart counters remained zero.
 
 ### Current local tests
 

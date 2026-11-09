@@ -1118,6 +1118,14 @@ remains open. The full append-only monitor log is
 [`release120-canary-progress-20261109T1241Z.jsonl`](live/release120-canary-progress-20261109T1241Z.jsonl),
 SHA256 `bc75b426cfd4e2f1e5ba67adb950ba6a9f9c72b8f806f636bd947d31a0c0007a`.
 
+At 12:46:05 UTC, sample 11 passed in 88.608 seconds. The completed scan was
+416 seconds old, and the independently checked graph contained 1,685,917
+paths with zero coverage issues. Overflow, userspace-drop, OOM, and restart
+counters remained zero. The 24-hour run remains active and incomplete. The
+captured full log is
+[`release120-canary-progress-20261109T1247Z.jsonl`](live/release120-canary-progress-20261109T1247Z.jsonl),
+SHA256 `8c5cfb21c5ab85cdfa633dee122abeab616059eb0c2f0898f84ca047b8c4fb05`.
+
 #### Packaged service security policy check — 2026-11-09
 
 The package lifecycle/security policy suite passed **70/70 tests** in a
