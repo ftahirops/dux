@@ -29,6 +29,8 @@ struct RawFdGuard(RawFd);
 
 impl Drop for RawFdGuard {
     fn drop(&mut self) {
+        // SAFETY: every guard is constructed from a uniquely owned descriptor
+        // and its Drop runs once; no other owner closes this descriptor.
         unsafe { libc::close(self.0) };
     }
 }
@@ -1725,6 +1727,8 @@ fn ext4_path_handle_identity(path: &Path) -> Option<(u32, u32)> {
         f_handle: [0; MAX_HANDLE_SZ],
     };
     let mut mount_id: libc::c_int = 0;
+    // SAFETY: path is a NUL-terminated CString; handle and mount_id point to
+    // initialized, writable storage, and handle advertises its full capacity.
     let result = unsafe {
         libc::name_to_handle_at(
             libc::AT_FDCWD,
@@ -1785,16 +1789,22 @@ fn stale_ext4_parent_identity(
     let (ino, generation) = ino32_handle_identity(parent.handle_type, &parent.handle)?;
     let mount_fd = *fsfds.get(&parent.fsid)?;
     let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: mount_fd is retained by the watched-mount table and fs points to
+    // writable storage for the kernel's statfs result.
     if unsafe { libc::fstatfs(mount_fd, fs.as_mut_ptr()) } != 0 {
         return None;
     }
+    // SAFETY: fstatfs returned success and initialized the output structure.
     if unsafe { fs.assume_init() }.f_type as u64 != EXT4_SUPER_MAGIC {
         return None;
     }
     let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: mount_fd is retained by the watched-mount table and st points to
+    // writable storage for the kernel's stat result.
     if unsafe { libc::fstat(mount_fd, st.as_mut_ptr()) } != 0 {
         return None;
     }
+    // SAFETY: fstat returned success and initialized the output structure.
     let dev = i64::try_from(unsafe { st.assume_init() }.st_dev).ok()?;
     Some((dev, i64::from(ino), generation))
 }
@@ -1995,7 +2005,7 @@ fn unresolved_target_diagnostic(
                     error.raw_os_error()
                 );
             }
-            unsafe { libc::close(fd) };
+            drop(RawFdGuard(fd));
             return format!(
                 "open_by_handle_at succeeded on diagnostic retry: fsid={:?} handle_type={handle_type} handle_bytes={handle_bytes}",
                 fsid
@@ -5214,10 +5224,8 @@ fn resolve_handle(
         }
         Err(HandleOpenError::Other) => return EntryResolution::Unresolved,
     };
-    let dir = std::fs::read_link(format!("/proc/self/fd/{dfd}")).ok();
-    unsafe {
-        libc::close(dfd);
-    }
+    let dfd = RawFdGuard(dfd);
+    let dir = std::fs::read_link(format!("/proc/self/fd/{}", dfd.0)).ok();
     match dir {
         Some(dir) => EntryResolution::Resolved(dir, name),
         None => EntryResolution::Unresolved,
@@ -5244,6 +5252,8 @@ fn resolve_handle_identity(
         Err(HandleOpenError::Stale) => return TargetHandleResolution::Stale(fsid),
         Err(HandleOpenError::Other) => return TargetHandleResolution::Unresolved,
     };
+    // SAFETY: open_handle returned a new, uniquely owned descriptor; File takes
+    // ownership and closes it exactly once when dropped.
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
     let Some(metadata) = file.metadata().ok() else {
         return TargetHandleResolution::Unresolved;
@@ -5296,6 +5306,9 @@ fn open_handle(
         f_handle: [0u8; MAX_HANDLE_SZ],
     };
     fh.f_handle[..hb].copy_from_slice(&payload[16..16 + hb]);
+    // SAFETY: hb is nonzero and bounded by MAX_HANDLE_SZ, payload contains the
+    // complete handle, fh has that capacity, and mount_fd is the retained
+    // descriptor for this event's reported filesystem.
     let fd = unsafe {
         libc::syscall(
             libc::SYS_open_by_handle_at,
@@ -5329,6 +5342,8 @@ fn probe_handle_capability(path: &Path, mount_fd: RawFd) -> bool {
         f_handle: [0; MAX_HANDLE_SZ],
     };
     let mut mount_id = 0;
+    // SAFETY: path is a NUL-terminated CString; handle and mount_id point to
+    // initialized, writable storage, and handle advertises its full capacity.
     let named = unsafe {
         libc::name_to_handle_at(
             libc::AT_FDCWD,
@@ -5341,6 +5356,9 @@ fn probe_handle_capability(path: &Path, mount_fd: RawFd) -> bool {
     if named != 0 || handle.handle_bytes == 0 || handle.handle_bytes as usize > MAX_HANDLE_SZ {
         return false;
     }
+    // SAFETY: name_to_handle_at succeeded and returned a nonempty handle no
+    // larger than MAX_HANDLE_SZ; mount_fd is a retained descriptor and handle
+    // has enough storage for the kernel handle.
     let fd = unsafe {
         libc::syscall(
             libc::SYS_open_by_handle_at,
@@ -5353,8 +5371,13 @@ fn probe_handle_capability(path: &Path, mount_fd: RawFd) -> bool {
         return false;
     }
     let probe_fd = RawFdGuard(fd);
+    // SAFETY: libc::stat is a plain Linux UAPI output structure whose fields
+    // have valid zero representations before fstat overwrites them.
     let mut expected: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: as above, all-zero is a valid initial representation of libc::stat.
     let mut resolved: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: both descriptors are live and point to writable stat structures;
+    // their contents are read only when the corresponding fstat succeeds.
     unsafe {
         libc::fstat(mount_fd, &mut expected) == 0
             && libc::fstat(probe_fd.0, &mut resolved) == 0

@@ -6,3 +6,7 @@ aa3f083b07b8817f1fbdc1f651ee5fcf803764b21829d75800c5f4521240a1ff  source.tar.gz
 3f573b4c14fff8212bd90383bad8da38ab5e5113a913bd9bdfbc733e2678d01e  cargo-audit-lockfile.json
 4f63f8fa5f82e18d937bcf97bada622d937c60fec4fa1e52cdcaf86cf8a2465a  cargo-audit-binary.log
 58b35e0cc5087f32f031f5afe6934031bc67ad552261515a2c205218135b9194  dux.debug
+2a7793eabf574e3cf65ca09b03e368a35a72ffe42b045e3579d5c5ebd2737417  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-release-tests-all-including-ignored-20261109.log
+281d56f70265af4ab24dc7137a4d52b770420d488a860973c7f7fe509284207d  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-static-checks-raii-20261109.log
+bb169b62b2a5d591937ff584b15248922feeb109a49e8f142c722a684057f603  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl
+7c015de0649c6054d498058011e7986fdc9a70e841975d21a91f9ee8792f28cd  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-coverage-all-including-ignored-20261109.log

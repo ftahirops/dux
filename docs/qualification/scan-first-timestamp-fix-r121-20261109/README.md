@@ -55,3 +55,34 @@ The timestamp-fix source was revalidated on 2026-11-09: the release/all-features
 The explicitly ignored reconciliation scale test passed with 1,000,000 file entries on the local host. It measured a 62.029 s initial build and an 83.181 s unchanged in-place reconciliation; the DB remained 321,794,048 bytes. This demonstrates that no-op reconcile still pays a full tree-walk cost and took about 34% longer than the initial build in this run. This was not a constrained-CPU or same-host VPS2 measurement, so it is a diagnostic result, not a production SLO claim. Full output is in [`scale-1m-20261109.log`](scale-1m-20261109.log). Previously measured LLVM coverage is 72.30% line, 71.15% region, and 76.09% function. Branch coverage is unavailable. Coverage is not 100%.
 
 A completed 24-hour canary is still required. Broader OOM, disk-full, multi-day soak, filesystem/kernel, production-schema migration, security threat-model, and controlled production rollout/rollback gates remain open.
+
+## Follow-up validation — 2026-11-09 15:49 UTC
+
+After the earlier qualification snapshot, `src/watch.rs` received a narrow
+resource-safety cleanup: two manually closed file descriptors now use the
+existing `RawFdGuard`, and SAFETY comments document ownership and FFI buffer
+invariants around the related handle operations. The full release/all-features
+suite was rerun against this source, including ignored tests:
+
+```text
+cargo test --locked --release --all-features --bin dux -- --include-ignored --test-threads=4 --nocapture
+330 passed; 0 failed; 0 ignored; finished in 32.54s
+```
+
+This includes the ext4 stale-parent integration and 100,000-entry scale smoke
+profiles. The latter reported 4.406s baseline, 3.898s unchanged reconciliation,
+and an unchanged 32,505,856-byte database. Strict all-target/all-feature
+Clippy (`-D warnings`), `cargo fmt --all -- --check`, and `git diff --check`
+passed after the edits. Fresh LLVM coverage over the same 330-test run measured
+**73.65% lines, 72.55% regions, and 76.80% functions**; branch coverage is
+unavailable in this instrumentation. The weakest modules are `tui.rs` (39.49%
+lines), `main.rs` (43.61%), and `containers.rs` (67.25%). Full logs are
+[`current-release-tests-all-including-ignored-20261109.log`](current-release-tests-all-including-ignored-20261109.log),
+[`current-static-checks-raii-20261109.log`](current-static-checks-raii-20261109.log),
+and [`current-coverage-all-including-ignored-20261109.log`](current-coverage-all-including-ignored-20261109.log).
+
+The 24-hour VPS2 canary remains active. At 15:48:09 UTC, sample 21 passed;
+scan age was 6 seconds, with zero monitor errors, kernel overflows, userspace
+drops, OOMs, and service restarts. VPS2 had 7.2 GiB free. The updated live
+JSONL is preserved as [`vps2-canary-progress.jsonl`](vps2-canary-progress.jsonl).
+This is about 1h41m of a 24-hour run, not a completed soak.

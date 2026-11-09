@@ -2731,3 +2731,22 @@ UTC. Sample 2 passed in 99.598 seconds; scan age was 307 seconds before and
 Dux remain active with zero restarts. This is only a few minutes of the new
 24-hour run. Sample 2 SHA-256:
 `2a6334216f7445649b304bea4f3402914fd3ce3c2f508fb76cb3a7f46ad257c2`.
+
+### Follow-up validation — 2026-11-09 15:49 UTC
+
+A further source review replaced two manual descriptor closes in
+`src/watch.rs` with the existing `RawFdGuard` and added SAFETY comments for
+nearby FID syscalls, FFI output buffers, and descriptor ownership. The latest
+release/all-features run included the ignored ext4 and scale profiles and
+passed **330/330** in 32.54 seconds. The 100,000-entry smoke reported 4.406 s
+baseline, 3.898 s unchanged reconciliation, and an unchanged 32,505,856-byte
+database. Strict Clippy (`--all-targets --all-features -- -D warnings`),
+formatting, and `git diff --check` passed. Full output is in the r121
+qualification folder. Coverage has not yet been regenerated for these latest
+source edits; the last measured coverage remains 72.30% line, 71.15% region,
+and 76.09% function, with branch coverage unavailable.
+
+A read-only VPS2 refresh at 15:48:09 UTC found **21 passing samples** in the
+still-active 24-hour canary. Latest scan age was 6 seconds; errors, overflows,
+drops, OOM events, and service restarts remained zero. Free disk was 7.2 GiB.
+This does not satisfy the 24-hour gate. Production VPS1 remains unchanged.
