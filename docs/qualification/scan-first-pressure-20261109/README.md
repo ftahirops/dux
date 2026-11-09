@@ -1142,6 +1142,13 @@ The 24-hour run remains incomplete. Captured log:
 [`release120-canary-progress-20261109T1258Z.jsonl`](live/release120-canary-progress-20261109T1258Z.jsonl),
 SHA256 `9c1236b1223902451010e76f3f48f3f35e56f883c1ae9f2970850bcf46d2b05d`.
 
+At 13:01:13 UTC, sample 14 passed in 95.954 seconds. The scan was complete
+and 423 seconds old; the independent 1,685,917-path graph passed. Overflow,
+userspace-drop, OOM, and restart counters remained zero. The 24-hour gate
+remains open. Captured log:
+[`release120-canary-progress-20261109T1302Z.jsonl`](live/release120-canary-progress-20261109T1302Z.jsonl),
+SHA256 `df614009f4da875254e0afeb80eb5da452b5070472b746f7c074e1362163225d`.
+
 #### Production VPS1 read-only health samples — 2026-11-09 12:52 UTC
 
 Read-only `dux status --json`, systemd, and binary-hash samples confirm the
