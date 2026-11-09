@@ -155,3 +155,20 @@ and compiler processes were active; Go tests were still being launched during
 the subsequent check. No package or service was changed. Temporary VM inputs
 were removed after confirming the VM unit was inactive. The full package
 upgrade/rollback/removal/clean-install gate therefore remains open.
+
+### Latest live roll-up — 2026-11-09 18:49 UTC
+
+The monitor reached **57 consecutive passing five-minute samples** between
+14:07:48 and 18:48:06 UTC. All samples passed SQLite quick-check and path-graph
+validation; none reported errors, kernel overflows, dropped events, service
+restarts, or OOM kills. Observed completed-scan ages ranged from 4 to 936
+seconds (median 453) against the monitor's 1,200-second limit. At the 18:49:16
+snapshot, r121 was active with zero restarts, zero pending updates, and a 20-
+second completed-scan age. This is positive, bounded live evidence for r121;
+the 24-hour soak is only about 4 hours 41 minutes in and still must finish.
+
+VPS1 remains on its legacy daemon with 636 lifetime overflow notifications,
+2,518,862 dropped events, and a last full scan age of 367,192 seconds (about
+4.25 days). Pending updates were 49 at this sample; that value fluctuates and
+does not clear the stale-index/overflow condition. The full two-host snapshot
+and monitor roll-up are in `live-followup-20261109T1849Z.json`.
