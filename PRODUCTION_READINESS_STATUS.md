@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:20 UTC
+## Latest verified checkpoint — 2026-11-09 22:30 UTC
 
 ### Clean-install lifecycle readiness gate
 
@@ -16,22 +16,37 @@ discovery passes **359/359**. Logs and code are in the lifecycle qualification
 folder. A real guest lifecycle rerun with this strict gate is still required.
 
 The guarded r123 lifecycle controller remains active but has not launched a
-guest: current host Go tests/builds are pushing load above 30 and CPU PSI above
-70%. No guard was relaxed.
+guest. Latest checks show active Go/Vitest work, load1 12.48 (admission limit
+10), and I/O PSI some avg10 11.52% (limit 10%). No guard was relaxed and no VM
+was launched.
 
 ### Canary and disk
 
-VPS2 sample **99** at 22:19:20 UTC passed with zero errors, restarts, kernel
-overflows, drops, or pending updates; scan age was 927 seconds. The r121-only
-24-hour canary remains incomplete. VPS2 root remains 92% used with 7.2 GiB
-free; its 4 GiB journal is preserved until the soak finishes.
+VPS2 r121 sample **101** at 22:28:38 UTC passed with no monitor errors,
+restarts, kernel overflows, event drops, or pending updates. SQLite and
+schema-v7 accounting checks passed; completed-scan age was 437 seconds. The
+24-hour canary is only about 8 hours 21 minutes in and is not release sign-off.
+The cumulative `memory.events.high` count stayed at 1,173 from sample 100 to
+101; previous peak usage was just above the 2 GiB `MemoryHigh` threshold, with
+no OOM events. VPS2 root remains 92% used with 7.2 GiB free; its 4 GiB journal
+is preserved until the soak finishes. Details: [sample 100](docs/qualification/production-live-followup-20261109T2223Z/README.md)
+and [sample 101](docs/qualification/production-live-followup-20261109T2228Z/README.md).
+
+### Production VPS1
+
+A fresh read-only status at 22:30:40 confirms production still runs legacy
+0.6.3 (four lifetime restarts). The index is dirty from fanotify overflow, has
+649 lifetime overflow notifications and 2,518,862 dropped updates, and its
+last full scan was 380,478 seconds old (about 4.4 days). The database is 3.33
+GB with a 128 MiB WAL. `/` is 68% used with 61.7 GB available. No production
+state was changed. See [the raw status and assessment](docs/qualification/production-live-followup-20261109T2230Z/README.md).
 
 Local cleanup reclaimed the stale Cargo intermediates while keeping all eight
-fault-injection binaries verified. `/` has 57 GiB free, `target/readiness` is
+fault-injection binaries verified. `/` has 58 GiB free, `target/readiness` is
 869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
 [`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
 
-**Updated:** 2026-11-09 22:20 UTC
+**Updated:** 2026-11-09 22:30 UTC
 
 ---
 
