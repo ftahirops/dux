@@ -260,3 +260,12 @@ some of which hold preserved evidence. No files, Docker objects, or logs were
 removed: active services and retained test evidence make bulk cleanup unsafe
 without item-by-item retention decisions. The detailed snapshot is
 [`vps2-disk-inventory-20261109T1652Z.json`](vps2-disk-inventory-20261109T1652Z.json).
+
+
+### Evidence checksum verification
+
+`SHA256SUMS` uses repository-root-relative paths and covers artifacts present
+in this checkout. Five release package/source artifacts referenced by the prior
+manifest are not archived here. Their recorded hashes were moved to
+[`UNARCHIVED_RELEASE_ARTIFACT_SHA256.txt`](UNARCHIVED_RELEASE_ARTIFACT_SHA256.txt)
+and are explicitly not verified against artifact bytes in this checkout.
