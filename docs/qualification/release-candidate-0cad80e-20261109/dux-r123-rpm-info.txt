@@ -1,0 +1,19 @@
+Name        : dux
+Version     : 0.6.3
+Release     : 123
+Architecture: x86_64
+Install Date: (not installed)
+Group       : Unspecified
+Size        : 6236104
+License     : MIT
+Signature   : (none)
+Source RPM  : dux-0.6.3-123.src.rpm
+Build Date  : Mon Nov  9 18:21:09 2026
+Build Host  : vps1
+URL         : https://github.com/ftahirops/dux
+Summary     : Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
+Description :
+dux is an indexed, persistent du/ncdu with fast trigram file-name search and an
+optional live fanotify daemon. It answers "largest dirs/files", "fastest-growing
+paths", inode-usage, and deleted-but-open queries in milliseconds, shows df-style
+capacity, and ships an integrity-audit harness. Companion to xtop.

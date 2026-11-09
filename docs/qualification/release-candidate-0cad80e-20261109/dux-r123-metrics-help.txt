@@ -1,0 +1,9 @@
+Prometheus text-exposition metrics (for the node_exporter textfile collector)
+
+Usage: dux-0.6.3-x86_64-linux-static metrics [OPTIONS]
+
+Options:
+      --db <DB>    Override index DB path
+      --top <TOP>  Include the top-N largest directories as dux_path_bytes series [default: 20]
+      --json       Emit machine-readable JSON instead of a table (read commands)
+  -h, --help       Print help

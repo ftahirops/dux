@@ -1,0 +1,32 @@
+Persistent realtime disk usage + file search. du/ncdu/locate/find, but indexed and live.
+
+Usage: dux-0.6.3-x86_64-linux-static [OPTIONS] [PATH] [COMMAND]
+
+Commands:
+  scan          Full scan of PATH into the index
+  overview      One-shot CLI dashboard: largest paths, fastest growth, changes, Docker reclaimable
+  top           Largest directories or files (instant, from index)
+  find          Ultra-fast file search over the live index (locate/find replacement)
+  growth        Fastest-growing paths within a window
+  diff          What changed the disk within a window (net growth AND frees), ranked by magnitude — the "what filled/freed the disk?" query
+  du            du-compatible disk usage from the index (fast, no re-walk)
+  metrics       Prometheus text-exposition metrics (for the node_exporter textfile collector)
+  containers    Disk usage by container (Docker/Podman): writable layer, logs, volumes
+  deleted-open  Deleted-but-open files still consuming disk
+  by-owner      Disk usage by owner
+  by-ext        Disk usage by file extension
+  explain       Explain what an indexed file belongs to and whether/how it may be removed
+  tui           ncdu-style interactive browser
+  status        Index status
+  daemon        Run the realtime watch daemon (for systemd)
+  tunnel        Reverse-SSH tunnel management (reach this host behind NAT via a home endpoint). Run it separately with the optional dux-tunnel.service; this subcommand can also provision the identity key
+  help          Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [PATH]  Path to open in the TUI (when no subcommand is given)
+
+Options:
+      --db <DB>  Override index DB path
+      --json     Emit machine-readable JSON instead of a table (read commands)
+  -h, --help     Print help
+  -V, --version  Print version

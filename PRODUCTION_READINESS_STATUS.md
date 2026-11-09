@@ -1,18 +1,16 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 18:19 UTC
+## Latest verified checkpoint — 2026-11-09 18:23 UTC
 
-Release candidate package revision 122 built successfully from clean commit
-`24456ed8978fa33886ab13944e8afaf57762c7b6` as a static-musl binary, DEB, and
-RPM. Source identity, payload identity, checksums, embedded dependency
+Release candidate package revision 123 was built from clean commit
+`0cad80e6436202fefc2ff385c18872ce2b4a910c` as a static-musl binary, DEB, and
+RPM. Source identity, package payload identity, checksums, embedded dependency
 metadata, and RustSec audits passed; the lockfile audit found zero advisories,
-and the exact-binary audit recovered 202 dependencies. Its package lifecycle
-harness passed **70/70** unit tests. It was not installed on VPS2. The source
-has since received reviewed unsafe-block safety comments and an equivalent
-securebits-call refactor; revision 122 no longer matches the current source
-digest. Rebuild and qualify the updated source before considering a candidate
-rollout. Revision-122 evidence is in
-[`release-candidate-24456ed-20261109`](docs/qualification/release-candidate-24456ed-20261109/README.md).
+and the exact-binary audit recovered 202 dependencies. The package lifecycle
+harness passed **70/70** unit tests; package units passed `systemd-analyze
+verify`, and CLI smoke checks passed. Revision 123 was not installed on VPS2.
+Its exact install/upgrade/rollback/runtime qualification remains open. Evidence
+is in [`release-candidate-0cad80e-20261109`](docs/qualification/release-candidate-0cad80e-20261109/README.md).
 
 VPS2 remains on release 121 and its active 24-hour canary. Sample 51 at
 18:18:25 passed monitor checks. At 18:19 UTC, the service remained under PID
@@ -53,7 +51,7 @@ disk-full/OOM/filesystem stress, multi-day soak, full security threat review,
 and constrained-host p95/p99 performance evidence remain open. Production
 sign-off is not met.
 
-**Updated:** 2026-11-09 18:19 UTC
+**Updated:** 2026-11-09 18:23 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
