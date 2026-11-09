@@ -1149,6 +1149,13 @@ remains open. Captured log:
 [`release120-canary-progress-20261109T1302Z.jsonl`](live/release120-canary-progress-20261109T1302Z.jsonl),
 SHA256 `df614009f4da875254e0afeb80eb5da452b5070472b746f7c074e1362163225d`.
 
+At 13:06:09 UTC, sample 15 passed in 92.128 seconds with scan age 720
+seconds. The independently checked path graph passed at 1,689,200 paths, and
+overflow, userspace-drop, OOM, and restart counters remained zero. The 24-hour
+gate is still open. Captured log:
+[`release120-canary-progress-20261109T1307Z.jsonl`](live/release120-canary-progress-20261109T1307Z.jsonl),
+SHA256 `9e3da55bf372ae813dea69770720f427dc0d6d01f895a070c3408aa12f4699c4`.
+
 #### Production VPS1 read-only health samples — 2026-11-09 12:52 UTC
 
 Read-only `dux status --json`, systemd, and binary-hash samples confirm the
