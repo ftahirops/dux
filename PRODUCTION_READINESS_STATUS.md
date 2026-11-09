@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:36 UTC
+## Latest verified checkpoint — 2026-11-09 22:38 UTC
 
 ### Clean-install lifecycle readiness gate
 
@@ -16,24 +16,27 @@ discovery passes **359/359**. Logs and code are in the lifecycle qualification
 folder. A real guest lifecycle rerun with this strict gate is still required.
 
 The guarded r123 lifecycle controller remains active but has not launched a
-guest. After Go compiler/test activity and I/O pressure repeatedly reset the
-admission window, it entered a fresh 120-second quiet window at 22:36:55 UTC.
-The guard remains enabled; this window must complete before VM launch.
+guest. Go compiler/test processes reappeared during the latest quiet window;
+the guard returned to admission wait, with load1 reaching 13.48. The guard
+remains enabled; no VM was launched.
 
 ### Canary and disk
 
-VPS2 r121 sample **102** at 22:33:12 UTC passed while a scan-first observation
-was active. That observation completed at 22:34:07 after about 275 seconds,
-walking 1,613,677 files and 192,125 directories with zero coverage issues;
-independent accounting passed in 51.258 seconds. A fresh status then showed
-the scan complete, age 144 seconds, and zero overflows, drops, or pending
-updates. The 24-hour canary is only about 8 hours 27 minutes in and is not
-release sign-off. `memory.events.high` stayed at 1,173 from samples 100 through
-102; no OOM events were recorded. VPS2 root remains 92% used with 7.2 GiB
-free; its 4 GiB journal is preserved until the soak finishes. Details: [sample
-100](docs/qualification/production-live-followup-20261109T2223Z/README.md),
+VPS2 r121 sample **103** at 22:38:04 UTC passed: scan age was 237 seconds,
+no scan was running, SQLite and path/accounting checks passed, and restarts,
+overflows, drops, and pending updates were all zero. The previous sample 102
+was captured during a scan-first observation, which completed at 22:34:07
+after about 275 seconds, walking 1,613,677 files and 192,125 directories with
+zero coverage issues; independent accounting passed in 51.258 seconds. A
+fresh status after completion showed scan age 144 seconds and zero overflows,
+drops, or pending updates. The 24-hour canary is only about 8 hours 30 minutes
+in and is not release sign-off. `memory.events.high` stayed at 1,173 through
+samples 100–103; no OOM events were recorded. VPS2 root remains 92% used with
+7.2 GiB free; its 4 GiB journal is preserved until the soak finishes. Details:
+[sample 100](docs/qualification/production-live-followup-20261109T2223Z/README.md),
 [sample 101](docs/qualification/production-live-followup-20261109T2228Z/README.md),
-and [sample 102 and scan cycle](docs/qualification/production-live-followup-20261109T2233Z/README.md).
+[sample 102 and scan cycle](docs/qualification/production-live-followup-20261109T2233Z/README.md),
+and [sample 103](docs/qualification/production-live-followup-20261109T2238Z/README.md).
 
 ### Production VPS1
 
@@ -49,7 +52,7 @@ fault-injection binaries verified. `/` has 58 GiB free, `target/readiness` is
 869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
 [`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
 
-**Updated:** 2026-11-09 22:36 UTC
+**Updated:** 2026-11-09 22:38 UTC
 
 ---
 
