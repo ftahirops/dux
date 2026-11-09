@@ -856,3 +856,19 @@ periodic observation. This is not a completed 24-hour soak. Evidence for
 samples 7–9:
 [`release119-canary-progress-20261109T1024Z.jsonl`](live/release119-canary-progress-20261109T1024Z.jsonl),
 SHA-256 `7ac4ff7214149b309936c779b193d02109804166c6d6bba74a56cf2939d4f697`.
+
+### Release-119 sample 10 and post-scan check — 2026-11-09 10:34 UTC
+
+Sample 10 passed at 10:29:40 UTC in 61.601 seconds, with no monitor errors,
+kernel overflows, userspace drops, or Dux restarts. The sample was collected
+while a periodic full scan was running (`ActiveState=reloading`,
+`scan_in_progress=true`); the most recent completed scan was then 988 seconds
+old. The scan finished at 10:31:38 with 1,482,435 files, 176,659 directories,
+1,659,094 path instances, and zero coverage issues. Accounting verification
+passed in 54.328 seconds. A separate read-only status check at 10:34 found the
+service active/running, zero restarts/overflows/drops, scan age 369 seconds,
+and 1,655,612 indexed nodes. It remained dirty/not caught up between periodic
+observations. The sample passed, but it does not complete the 24-hour soak.
+Raw sample:
+[`release119-canary-sample10-20261109T1029Z.jsonl`](live/release119-canary-sample10-20261109T1029Z.jsonl),
+SHA-256 `e6cb7a3881c6eefb906b5b6f6ec8420a12746b6fc0250b70baae04d760f9175a`.

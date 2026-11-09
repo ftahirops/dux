@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 10:24 UTC
+**Updated:** 2026-11-09 10:34 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2567,3 +2567,18 @@ index remained dirty between observations, with a 671-second-old scan.
 Samples 7, 8, and 9 took 143.404, 64.097, and 43.492 seconds. The three-sample
 snapshot SHA-256 is
 `7ac4ff7214149b309936c779b193d02109804166c6d6bba74a56cf2939d4f697`.
+
+### Release-119 sample 10 and completed observation — 2026-11-09 10:34 UTC
+
+Sample 10 passed at 10:29:40 UTC in 61.601 seconds; it reported no monitor
+errors, kernel overflows, userspace drops, or Dux restarts. Its snapshot was
+taken during a full scan: systemd reported `reloading`, `scan_in_progress` was
+true, and the latest completed scan was 988 seconds old. The daemon then
+completed the observation at 10:31:38: 1,482,435 files, 176,659 directories,
+1,659,094 path instances, zero coverage issues; accounting verification
+passed in 54.3 seconds. A fresh read-only status at 10:34 showed the service
+active/running, zero restarts/overflows/drops, scan age 369 seconds, and
+1,655,612 indexed nodes. It remains dirty/not caught up between observations.
+This is a completed scan and accounting check on the canary VM, not a 24-hour
+soak or production deployment. Sample SHA-256:
+`e6cb7a3881c6eefb906b5b6f6ec8420a12746b6fc0250b70baae04d760f9175a`.
