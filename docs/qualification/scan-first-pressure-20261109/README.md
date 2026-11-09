@@ -1134,6 +1134,14 @@ gate is incomplete. Captured log:
 [`release120-canary-progress-20261109T1253Z.jsonl`](live/release120-canary-progress-20261109T1253Z.jsonl),
 SHA256 `d9690ce7e3f6b3b8e358d07113821f2c7aba1da4c247f493a08bc0ba8fa9642f`.
 
+At 12:56:37 UTC, sample 13 passed in 120.562 seconds. A full scan was active
+at age 1,048 seconds; the independent graph remained valid at 1,685,917 paths.
+Overflow, userspace-drop, OOM, and restart counters remained zero. Collection
+took longer than recent samples but completed within the five-minute cadence.
+The 24-hour run remains incomplete. Captured log:
+[`release120-canary-progress-20261109T1258Z.jsonl`](live/release120-canary-progress-20261109T1258Z.jsonl),
+SHA256 `9c1236b1223902451010e76f3f48f3f35e56f883c1ae9f2970850bcf46d2b05d`.
+
 #### Production VPS1 read-only health samples — 2026-11-09 12:52 UTC
 
 Read-only `dux status --json`, systemd, and binary-hash samples confirm the
