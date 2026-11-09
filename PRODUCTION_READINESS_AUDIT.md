@@ -21597,3 +21597,18 @@ manifest is not changed by this audit append.
 - Disk remains adequate: `/` has **60 GiB free** and `/dev/shm` **11 GiB free**.
   No Dux service was changed. Real r121-to-r123 install/rollback lifecycle,
   full soak, and fault/performance gates remain open.
+
+### r123 package staging identity check — 2026-11-09 21:14 UTC
+
+- Revalidated the staged r123 artifacts with `sha256sum -c
+  /tmp/dux-prod-candidate-0cad80e/SHA256SUMS`; all eight candidate artifacts
+  and evidence files passed. The candidate DEB hash
+  `3e9b5c61422780d577112d8fc8f4cfb3cf95b88f14b379eb60793c63f6e205c4`
+  matches both its build manifest and the DEB copied into the lifecycle guest
+  share. Its packaged binary hash is the manifest's
+  `0539487212efc3da1fd144e4aa58f648634c5ba66340ecdab6af3705fa2853a8`.
+- This confirms the pending VM test will use the staged r123 package identity;
+  it does not qualify installation. The guarded retry controller is still
+  admission-blocked by active Go tests/builds; no VM or package transition is
+  running. VPS2 remains at **86/86** passing r121 samples through 21:12:52 UTC;
+  its 24-hour canary remains incomplete.
