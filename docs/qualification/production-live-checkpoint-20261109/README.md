@@ -183,3 +183,13 @@ the QEMU unit remained inactive. No VM started, no Dux package or service was
 changed, and the partial image and empty staging directories were removed.
 Package lifecycle qualification is still unrun. A verified distro image must
 be staged and the VM runner's host admission checks must pass before retrying.
+
+### Canary monitor follow-up — 2026-11-09 18:58 UTC
+
+The read-only canary monitor reached **59 passing five-minute samples** through
+18:58:45 UTC. All 59 passed SQLite and indexed path-graph checks; there were no
+monitor errors, service restarts, kernel overflows, dropped events, or OOM
+kills. Completed-scan ages ranged from 4 to 936 seconds (median 453) against the
+1,200-second limit. At capture, r121 was active, no scan was running, and the
+last completed scan was 596 seconds old. This remains under six hours of the
+required 24-hour soak. See `vps2-live-followup-20261109T1857Z.json`.
