@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 12:47 UTC
+**Updated:** 2026-11-09 12:53 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 12:47 UTC
+## Current status and evidence — 2026-11-09 12:53 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -42,6 +42,32 @@ The exact log is preserved in the qualification record.
 Sample 11 passed at 12:46:05 UTC in 88.608 seconds; the completed scan age was
 416 seconds, the valid path graph had 1,685,917 paths, and all recorded
 overflow/drop/OOM/restart counters remained zero.
+Sample 12 passed at 12:50:43 UTC in 66.603 seconds; scan age was 694 seconds,
+the path graph remained valid at 1,685,917 paths, and overflow/drop/OOM
+counters remained zero. The latest VPS2 check at 12:53 UTC found the monitor
+active and Dux with zero restarts. The full 24-hour gate remains open.
+
+### Production VPS1 read-only check
+
+Two read-only status captures 58.5 seconds apart show the production service
+still running legacy `dux 0.6.3` (`e0cc915f8f37`, binary SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`). It is
+dirty from fanotify overflow, with the last full scan about 96 hours old,
+`behind_seconds` about 43.3 hours, and four systemd restarts. Kernel overflow
+notifications rose **527 → 539 (+12)** in 58.5 seconds while `events_seen`
+rose by 1.42M and `events_resolved` by 866,774; no full scan was active and scan age advanced by
+59 seconds. The userspace dropped-update counter stayed at 1,511,839. A Go
+test process was active during this interval, which is consistent with host
+churn but does not prove it caused the overflows. No production service,
+database, or configuration was changed. A follow-up read at 12:52 UTC showed
+540 overflows and a 345,770-second scan age; the counters were still moving.
+
+Raw read-only snapshots:
+[`12:49Z`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1250Z.json)
+and
+[`12:50Z`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1251Z.json),
+plus the
+[`12:52Z follow-up`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1252Z.json).
 
 ### Current local tests
 
@@ -76,6 +102,10 @@ overflow/drop/OOM/restart counters remained zero.
 
 - Complete the r120 24-hour soak with exact binary/unit identity, accounting,
   freshness, restart, overflow, drop, memory, and history checks.
+- Production is still on legacy 0.6.3 and the 12:52 UTC snapshot had an
+  approximately 96-hour-old full scan, 540 overflow notifications, 1,511,839
+  dropped updates, and four restarts. Any rollout of the scan-first candidate requires
+  a separate controlled migration/rollback plan; VPS1 has not been changed.
 - Resolve the observed freshness boundary: the 15-minute scan cadence plus a
   measured 6m08s root scan can put `last_scan_age` above the 1,200-second
   canary threshold until the new observation completes. Measure p95/p99 scan

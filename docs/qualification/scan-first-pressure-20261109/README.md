@@ -1126,6 +1126,40 @@ captured full log is
 [`release120-canary-progress-20261109T1247Z.jsonl`](live/release120-canary-progress-20261109T1247Z.jsonl),
 SHA256 `8c5cfb21c5ab85cdfa633dee122abeab616059eb0c2f0898f84ca047b8c4fb05`.
 
+At 12:50:43 UTC, sample 12 passed in 66.603 seconds. Scan age was 694 seconds,
+the independently checked path graph remained valid at 1,685,917 paths, and
+overflow, userspace-drop, OOM, and restart counters remained zero. At 12:53
+UTC, the monitor was still active and Dux had zero restarts. The full 24-hour
+gate is incomplete. Captured log:
+[`release120-canary-progress-20261109T1253Z.jsonl`](live/release120-canary-progress-20261109T1253Z.jsonl),
+SHA256 `d9690ce7e3f6b3b8e358d07113821f2c7aba1da4c247f493a08bc0ba8fa9642f`.
+
+#### Production VPS1 read-only health samples — 2026-11-09 12:52 UTC
+
+Read-only `dux status --json`, systemd, and binary-hash samples confirm the
+production service is still legacy `dux 0.6.3` (`e0cc915f8f37`; binary
+SHA-256 `e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`).
+At 12:49:52 it was dirty from fanotify overflow, the last full scan was
+345,629 seconds old, `behind_seconds` was 155,940, and the service had four
+restarts. In the next 58.5 seconds, overflow notifications increased from 527
+to 539 (+12), `events_seen` increased 1,424,447, and `events_resolved`
+increased 866,774. No full scan was active; scan age advanced by 59 seconds.
+The userspace drop counter remained 1,511,839. A Go test process was active,
+but this time correlation alone does not establish it as the cause. A 12:52:12
+follow-up read showed 540 overflows and scan age 345,770 seconds. Production
+was not modified. This demonstrates that the currently deployed legacy daemon
+is still far behind and overflowing while the r120 candidate is under a
+separate VPS2 soak; the candidate's short soak is not grounds to deploy it.
+
+Snapshots:
+
+- [`vps1-readonly-status-20261109T1250Z.json`](live/vps1-readonly-status-20261109T1250Z.json),
+  SHA256 `b5a78fa75f40e7dd2498a79ca39f91fb8ece2f2f3ff27bbeb44318d051524864`.
+- [`vps1-readonly-status-20261109T1251Z.json`](live/vps1-readonly-status-20261109T1251Z.json),
+  SHA256 `8639005b2df3caf0f0319d25235c69810fe871a702b13296da212dcf9d4a6176`.
+- [`vps1-readonly-status-20261109T1252Z.json`](live/vps1-readonly-status-20261109T1252Z.json),
+  SHA256 `07f46b70502b12b3ee338280159f0b78979a13620929920167b304c1ca4cc3dc`.
+
 #### Packaged service security policy check — 2026-11-09
 
 The package lifecycle/security policy suite passed **70/70 tests** in a
