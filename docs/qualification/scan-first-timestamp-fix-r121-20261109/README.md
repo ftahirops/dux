@@ -221,3 +221,42 @@ current or that the canary has met its reliability/accuracy gate. The sample
 count and zero-fault counters must not be presented without this freshness
 state. The 24-hour qualification is therefore incomplete and the canary's
 index-freshness failure remains open.
+
+
+### VPS2 post-scan read-only checkpoint — 2026-11-09 16:49 UTC
+
+A read-only observation caught the 16:44:26 scheduled scan completing. The
+service journal records `reconciliation accounting verification passed` in
+54.085 seconds at 16:48:52 UTC. At 16:49:40 UTC, the service was active under
+the same PID (2561224), with zero restarts, 203,792,384 bytes current memory,
+zero kernel overflow notifications, zero userspace drops, and no pending
+updates. The last completed scan was 103 seconds old. The status still reports
+`dirty=true` / `caught_up=false` while waiting for the next full observation;
+its legacy `behind_seconds` field is 10,214.579 and must not be confused with
+the 103-second scan age. This is one successful observation/accounting cycle,
+not the 24-hour soak or proof of continued freshness.
+
+At the same checkpoint, VPS2 root storage was 93% used (`df -h` rounded to
+93G total / 82G used, with 6.9G available). This narrows disk headroom and warrants continued
+monitoring; no files were removed. Raw status, service state, journal excerpt,
+and `df` output are preserved in
+[`vps2-postscan-20261109T1649Z.json`](vps2-postscan-20261109T1649Z.json).
+
+
+### VPS2 disk inventory — 2026-11-09 16:52 UTC
+
+The read-only root inventory measured 99.0 GB (92.2 GiB) total, 87.1 GB
+(81.1 GiB) used, and 7.34 GB (6.84 GiB) available (93% full); inode use
+was 29%. `/var` accounts for about
+61.3 GiB, including Docker at 22.7 GiB, containerd at 18.9 GiB, `/var/tmp`
+at 5.2 GiB, `/var/log` at 4.3 GiB, and `/var/lib/dux` at 0.79 GiB. Journald
+reports 3.9 GiB on disk. Docker reports 6.4 GB reclaimable images, 1.96 GB
+reclaimable stopped containers, and 367 MB reclaimable volumes, while 20
+containers and 10 volumes are active. Docker's reported logical sizes overlap
+layer storage and must not be summed with `du` totals.
+
+`/var/tmp` contains multiple Dux test, build, and qualification workspaces,
+some of which hold preserved evidence. No files, Docker objects, or logs were
+removed: active services and retained test evidence make bulk cleanup unsafe
+without item-by-item retention decisions. The detailed snapshot is
+[`vps2-disk-inventory-20261109T1652Z.json`](vps2-disk-inventory-20261109T1652Z.json).

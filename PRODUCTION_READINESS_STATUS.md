@@ -2848,3 +2848,32 @@ UTC) has zero monitor errors, overflows, drops, OOMs, and restarts, but status
 reports `dirty=true`, `caught_up=false`, and 9,510.948 seconds behind. It is a
 passing telemetry sample, not a healthy/current-index qualification. The
 24-hour soak and freshness gate remain open.
+
+
+### VPS2 post-scan read-only checkpoint — 2026-11-09 16:49 UTC
+
+The 16:44:26 periodic observation completed with `reconciliation accounting
+verification passed` in 54.085 seconds at 16:48:52. At 16:49:40, systemd
+showed the same active PID 2561224, zero restarts, and 203,792,384 bytes
+current memory. Dux reported zero kernel overflows, userspace drops, and
+pending updates; its most recent scan was 103 seconds old. Status remains
+`dirty=true` / `caught_up=false` pending the next full observation;
+`behind_seconds` (10,214.579) is distinct from scan age in this scan-first
+mode. This is a single successful scan/accounting cycle, not soak completion.
+VPS2 root disk was 93% used with 6.9 GiB available; nothing was deleted. Raw
+evidence: `docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-postscan-20261109T1649Z.json`.
+
+
+### VPS2 disk inventory — 2026-11-09 16:52 UTC
+
+Read-only inventory: root 99.0 GB (92.2 GiB) total, 87.1 GB (81.1 GiB)
+used, 7.34 GB (6.84 GiB) available (93%); inode use 29%. `/var` is about
+61.3 GiB: Docker 22.7 GiB, containerd 18.9 GiB, `/var/tmp` 5.2 GiB,
+`/var/log` 4.3 GiB, and
+`/var/lib/dux` 0.79 GiB. Journald reports 3.9 GiB. Docker reports 6.4 GB
+reclaimable images, 1.96 GB reclaimable stopped containers, and 367 MB
+reclaimable volumes; 20 containers and 10 volumes are active. Logical Docker
+size/reclaimability overlaps stored image layers and should not be added to `du`
+totals. No files, Docker objects, or logs were removed because `/var/tmp`
+contains qualification artifacts and the host runs active services. Snapshot:
+`docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-disk-inventory-20261109T1652Z.json`.
