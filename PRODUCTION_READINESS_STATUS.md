@@ -1,6 +1,30 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 21:32 UTC
+## Latest verified checkpoint — 2026-11-09 21:45 UTC
+
+### Third guarded lifecycle attempt
+
+Attempt 3/5 booted the disposable Ubuntu guest and began the lifecycle
+controller's legacy-baseline setup. At 21:41:03 UTC, the runtime guard found a
+new Go compiler/test and stopped QEMU. SSH closed before the guest returned a
+report; VM cleanup exited successfully. This attempt is **interrupted**, not a
+package result, and no lifecycle stage is counted as passed. Attempt 4 has not
+started: the controller's renewed admission checks found more Go tests and I/O
+pressure before a continuous quiet window completed.
+
+### VPS2 canary
+
+The latest sample checked is **91**, at 21:38:00 UTC, passing with zero
+errors, restarts, overflows, dropped events, or pending updates and a 122-second
+completed-scan age. This remains an incomplete r121-only 24-hour canary. The
+last capacity check still showed VPS2 root at 92% used (7.4 GiB free); no disk
+cleanup or service change was performed on the canary host.
+
+**Updated:** 2026-11-09 21:45 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 21:32 UTC
 
 ### Guarded lifecycle retry and host load
 
