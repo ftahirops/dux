@@ -238,3 +238,16 @@ guest, Dux service, or canary state was changed. Thus this retry is an
 admission refusal, not a package-lifecycle test result. Retry only after the
 runner's repeated host-pressure/workload checks pass. Captured admission,
 image, and package hashes are in `package-lifecycle-admission-20261109.json`.
+
+### VPS2 observation during host build load — 2026-11-09 19:23 UTC
+
+While the local VM admission gate remained closed for concurrent Go tests,
+VPS2 completed its next scan-first observation. It started at 19:14:31 and
+finished at 19:20:39 UTC (6m08s), walking 1,579,003 files and 187,958
+directories with zero coverage issues. Independent accounting verification
+passed at 19:22:00 in 81.119 seconds. At 19:23, r121 was active with zero
+restarts, kernel overflows, kernel/user event drops, or pending updates; scan
+age was 142 seconds. Dirty status means changes await the next observation.
+This is one observed scan/accounting cycle, not a formal canary-monitor sample
+and not r123 runtime qualification. Evidence is in
+`vps2-live-followup-20261109T1923Z.json`.
