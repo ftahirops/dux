@@ -23,19 +23,28 @@ DEB 0.6.3-121 installed successfully. `/usr/bin/dux` matches the expected static
 
 `systemd-analyze verify` passed for both packaged units. The installed `dux.service` scored 3.3 (OK) in `systemd-analyze security`; this is policy evidence, not proof of containment after a root-level compromise.
 
+The first scheduled r121 observation started at timestamp `1794233665` and
+completed at `1794234017` (about 5m52s). `last_scan_ts` advanced to the
+completion timestamp only after publication; it did not retain the start value.
+The scan covered 1,524,035 files, 181,489 directories, and 1,705,524 staged
+path instances with zero coverage issues. Independent accounting passed in
+54.822s. Kernel overflows, userspace drops, and daemon restarts remained zero.
+The database returned to its post-scan 129 MiB WAL state and VPS2 had 7.5 GiB
+free at 14:21 UTC. See the [scheduled-scan journal](scheduled-scan-1-journal.log)
+and [14:21 status snapshot](vps2-status-20261109T1421Z.json).
+
 Rollback manifest: [`rollback-db-manifest.json`](rollback-db-manifest.json).
 Post-install evidence: [service journal](postinstall-journal.log) and
-[14:10 status snapshot](vps2-status-20261109T1410Z.json), [14:13 status snapshot](vps2-status-20261109T1413Z.json).
+[14:10 status snapshot](vps2-status-20261109T1410Z.json), [14:13 status snapshot](vps2-status-20261109T1413Z.json), [14:20 status snapshot](vps2-status-20261109T1420Z.json).
 
 ## Fresh VPS2 canary
 
 A new 24-hour read-only canary started at `2026-11-09T14:07:03Z`, using five-minute samples and the intended 1,200-second completed-scan freshness limit. It checks the exact binary and unit hashes, indexed path graph, SQLite integrity/accounting, journal errors, resource state, restarts, overflows, drops, OOM events, and history continuity. The monitor is constrained to 20% of one CPU, 1 GiB RAM, no swap, IOWeight 10, and Nice 19; the daemon retains its packaged 100% CPU / 4 GiB limit.
 
-Samples 1 and 2 passed at `14:07:48Z` and `14:12:57Z` (44.888 s and 53.619 s collection time): zero monitor errors, 1,702,097-path graph, SQLite `quick_check=ok`, zero kernel overflows, zero userspace drops, zero OOM events, and zero service restarts. Completed-scan age at sample 2 was 445–499 seconds, under the 1,200-second limit. The daemon's `dirty=true` status reflects scan-first's “filesystem changes await the next full observation” state; the monitor validates recent completed-observation freshness and independent accounting rather than requiring an empty event queue. The 24-hour run remains open at **2 passing samples**. Prior r120 samples are not reused.
+Samples 1–3 passed at `14:07:48Z`, `14:12:57Z`, and `14:19:07Z` (44.888 s, 53.619 s, and 123.689 s collection time). Sample 3 ran during a full scan. Every sample had zero monitor errors, a 1,702,097-path graph, SQLite `quick_check=ok`, zero kernel overflows, zero userspace drops, zero OOM events, and zero service restarts. Sample 3 completed with freshness age 745–868 seconds, under the 1,200-second limit. The daemon's `dirty=true` status reflects scan-first's “filesystem changes await the next full observation” state; the monitor validates completed-observation freshness and independent accounting rather than requiring an empty event queue. The 24-hour run remains open at **3 passing samples**. Prior r120 samples are not reused.
 
-At 14:13 UTC, VPS2 had 7.5 GiB free and a 129 MiB WAL, with zero daemon
-and monitor restarts. These are point-in-time readings; continue monitoring
-disk during the soak.
+At 14:21 UTC, VPS2 had 7.5 GiB free and a 129 MiB WAL after scan staging
+was cleaned. Continue monitoring disk during the soak.
 
 The canary monitor and observer hashes are recorded in the JSONL. Local copy at this checkpoint: [`vps2-canary-progress.jsonl`](vps2-canary-progress.jsonl). The live log remains on VPS2 at `/root/dux-canary-121/canary-24h-5m.jsonl` and must be recopied for final qualification.
 
