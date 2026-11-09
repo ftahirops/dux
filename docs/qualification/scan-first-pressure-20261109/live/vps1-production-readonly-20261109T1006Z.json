@@ -1,0 +1,114 @@
+{
+  "captured_at_utc": "2026-11-09T10:06:56.217061+00:00",
+  "host": "vps1",
+  "kernel": "6.8.0-147-generic",
+  "service": {
+    "NRestarts": "4",
+    "ExecMainStartTimestamp": "Sat 2026-11-07 17:30:51 UTC",
+    "CPUUsageNSec": "11736978235000",
+    "IOReadBytes": "2880176128",
+    "IOWriteBytes": "594248630272",
+    "CPUQuotaPerSecUSec": "1s",
+    "MemoryHigh": "2147483648",
+    "MemoryMax": "4294967296",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "binary": {
+    "version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+    "sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060"
+  },
+  "unit_sha256": "dd34d3086af76117b18b06a23c5c70ace4353ff6a33ae9b3fa3c10f13c04d920",
+  "index_schema_version": "6",
+  "status": {
+    "behind_seconds": 146164.611,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since_timestamp_seconds": 1794216307,
+    "events_dropped": 0,
+    "events_resolved": 71849599,
+    "events_seen": 123575144,
+    "index_bytes": 117437419520,
+    "index_bytes_on_disk": 2932318208,
+    "index_nodes": 1269299,
+    "kernel_overflow_notifications": 435,
+    "last_event_commit_timestamp_seconds": 1794218814,
+    "last_scan_age_seconds": 335854,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 37,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794072651,
+    "updates_committed": 18889209,
+    "userspace_updates_dropped": 0,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794218816,
+    "write_error": null
+  },
+  "database_files_bytes": {
+    "main": 2932318208,
+    "wal": 134217728,
+    "shm": 950272
+  },
+  "fanotify_max_queued_events": 65536,
+  "io_sample": {
+    "start_utc": "2026-11-09T10:05:35.393748+00:00",
+    "end_utc": "2026-11-09T10:06:05.402244+00:00",
+    "seconds": 30.009,
+    "systemd_aggregate_start": {
+      "read_bytes": 2880176128,
+      "write_bytes": 594156896256,
+      "cpu_ns": 11734072835000
+    },
+    "systemd_aggregate_end": {
+      "read_bytes": 2880176128,
+      "write_bytes": 594199224320,
+      "cpu_ns": 11735326810000
+    },
+    "io_stat_per_device_start": {
+      "8:0": {
+        "read_bytes": 1440088064,
+        "write_bytes": 297078448128
+      },
+      "252:0": {
+        "read_bytes": 1440088064,
+        "write_bytes": 297078448128
+      }
+    },
+    "io_stat_per_device_end": {
+      "8:0": {
+        "read_bytes": 1440088064,
+        "write_bytes": 297099612160
+      },
+      "252:0": {
+        "read_bytes": 1440088064,
+        "write_bytes": 297099612160
+      }
+    },
+    "per_device_delta": {
+      "read_bytes": 0,
+      "write_bytes": 21164032
+    },
+    "aggregate_write_delta": 42328064,
+    "interpretation": "The two raw rows are identical stacked representations of the same I/O; do not sum. systemd aggregate reflects both rows. Lifetime per-layer write counter is about 297.1 GB since service start; this is cgroup-attributed I/O, not proof of unique physical-device writes."
+  },
+  "host_disk": {
+    "df_avail_display": "about 62 GiB at the 09:57 snapshot",
+    "note": "The Dux index occupies about 2.93 GB main database plus a 128 MiB WAL."
+  },
+  "upgrade_gate": {
+    "production_schema": "6",
+    "candidate_schema": "7",
+    "direct_multi_million_row_v6_to_v7_upgrade": "not yet qualified",
+    "existing_v6_unit_fixture": "one file; atomic rebuild test passed"
+  }
+}

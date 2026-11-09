@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 09:54 UTC
+**Updated:** 2026-11-09 10:09 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2480,3 +2480,64 @@ had 11 GiB free at the latest check. This is about 11 minutes of a required
 The three-sample log snapshot is
 [`release119-canary-progress-20261109T0954Z.jsonl`](docs/qualification/scan-first-pressure-20261109/live/release119-canary-progress-20261109T0954Z.jsonl),
 SHA-256 `b7099f4ee4784ee8f0ee1d0c985b77181e470dca336171ae1f77ec9187042eec`.
+
+### Production host and migration gate recheck — 2026-11-09 10:06 UTC
+
+A read-only inspection of the actual VPS1 production host confirms the main
+incident remains live. VPS1 runs legacy event-apply Dux `0.6.3` commit
+`e0cc915f8f37` (binary SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`), with
+four systemd restarts. Its index is dirty from fanotify overflow, the last
+completed full scan is **335,854 seconds (93.3 hours) old**, and
+`behind_seconds` is **146,165 (40.6 hours)**. It has 435 cumulative kernel
+overflows, zero userspace drops, and schema version **6**. The main DB is
+2,932,318,208 bytes and the WAL is 128 MiB. VPS1 has about 62 GiB available on
+its 185 GiB root filesystem; disk exhaustion is not the current cause.
+
+A 30-second status sample at 09:58 UTC saw no new overflow: 8,829 events seen
+and 8,543 resolved, with pending updates falling from 656 to 177. The index
+remained dirty and its last-scan age remained over 93 hours. During the latest
+10-minute journal window, 157 stale-file-handle resolution warnings appeared;
+there were no new explicit overflow, scan-failure, reconciliation-failure, or
+accounting-failure log messages. No new overflow in that short sample does not
+clear the existing dirty state.
+
+Production I/O counters are also large. Since the service started on Nov 7,
+the cgroup records about **297.1 GB written on each of two stacked device
+rows**. `systemctl`'s aggregate reports about 594.2 GB because it counts both
+rows; that aggregate must not be presented as unique physical writes. A
+30-second follow-up measured 21.2 MB written per row (42.3 MB in the aggregate)
+and negligible reads. These are cgroup-attributed I/O counters, not a hardware
+write-amplification benchmark; no write budget exists yet.
+
+The production DB being schema 6 exposes an unclosed compatibility gate:
+release 119's Debian lifecycle test upgraded a schema-7 release-106 DB, and
+the code's v6-to-v7 Rust regression fixture contains only one file. It does
+not yet qualify atomic rebuild/migration on a production-sized schema-6
+database. The candidate remains only on VPS2; no VPS1 package, DB, or service
+was changed. Full details and raw counters are in
+[`vps1-production-readonly-20261109T1006Z.json`](docs/qualification/scan-first-pressure-20261109/live/vps1-production-readonly-20261109T1006Z.json)
+(SHA-256 `876758c55554bc89a693d430d1eeefb48d4222e45ba7a5738e52d44c5c3f2304`)
+and the [earlier VPS1 snapshot](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-20261109T1001Z.json).
+
+### Release-119 canary checkpoint — 2026-11-09 10:06 UTC
+
+The VPS2 release-119 canary has **5 of 289 passing samples**. The fifth
+completed in 81.895 seconds; it passed exact accounting, path graph, SQLite,
+binary/unit, journal, and health gates. At that sample the full scan was 409
+seconds old and not running; overflows and userspace drops remained zero. The
+canary is still far short of 24 hours and remains in progress. Its five-sample
+snapshot is
+[`release119-canary-progress-20261109T1006Z.jsonl`](docs/qualification/scan-first-pressure-20261109/live/release119-canary-progress-20261109T1006Z.jsonl),
+SHA-256 `de6bd413a904af216fd9fce10e47ac5423c0b8ff8b55a37357b125048b6456a2`.
+
+### Release-119 canary sample six — 2026-11-09 10:09 UTC
+
+The VPS2 canary is active with zero restarts and **6/289 passing samples**.
+Sample 6 completed in 48.304 seconds with no monitor errors, no kernel
+overflows, and no userspace drops. Accounting/path graph and SQLite checks
+passed. Its latest completed scan was 675 seconds old; the index remained
+dirty and not caught up while waiting for the next periodic observation. This
+is a passing health sample, not proof of fresh/continuous exactness or the
+24-hour soak. Sample evidence SHA-256:
+`792c7125c9a8ba7e08a682ebd1ad82d9ed933f9437ec7ab3029573f2d4375916`.

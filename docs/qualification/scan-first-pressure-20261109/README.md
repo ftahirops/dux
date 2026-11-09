@@ -768,3 +768,54 @@ kernel overflow, userspace drop, or critical journal entry. This is only about
 Three-sample snapshot:
 [`release119-canary-progress-20261109T0954Z.jsonl`](live/release119-canary-progress-20261109T0954Z.jsonl),
 SHA-256 `b7099f4ee4784ee8f0ee1d0c985b77181e470dca336171ae1f77ec9187042eec`.
+
+#### VPS1 production-state check — 2026-11-09 10:06 UTC
+
+Read-only inspection confirms VPS1 is still on legacy event-apply release
+`0.6.3` commit `e0cc915f8f37`, not the release-119 candidate. Its service is
+active with four systemd restarts. The schema-6 database is dirty from an
+overflow; its last completed scan is 93.3 hours old and it reports 40.6 hours
+behind. There are 435 cumulative kernel overflows and zero userspace drops.
+The database is 2.93 GB with a 128 MiB WAL; the root filesystem has roughly 62
+GiB available.
+
+From a 30-second production sample, the current event rates were 294/s seen
+and 285/s resolved, with no new overflow in that interval. The index remained
+dirty. The preceding ten-minute journal sample contained 157
+`Stale file handle` resolution warnings and no new explicit scan,
+reconciliation, accounting, or overflow failure messages. This does not
+establish that the old index is correct or fresh.
+
+The Dux cgroup accumulated approximately 297.1 GB of writes on each of two
+stacked device rows since service start. `systemctl` reports about 594.2 GB
+because it adds both layers. A 30-second sample added 21.2 MB per row; these
+are cgroup counters, not a direct measure of unique physical-media writes.
+The production unit's CPU quota is 100%, memory high/max are 2/4 GiB, and the
+kernel fanotify queue limit is 65,536 events.
+
+This recheck confirms a migration gap: the actual production DB is schema 6,
+while the release-119 package lifecycle only tested schema-7 baseline data.
+The current v6-to-v7 regression fixture is a one-file database. Production-
+scale v6 migration remains unqualified. No production package, DB, or service
+was modified. Raw snapshot:
+[`vps1-production-readonly-20261109T1006Z.json`](live/vps1-production-readonly-20261109T1006Z.json),
+SHA-256 `876758c55554bc89a693d430d1eeefb48d4222e45ba7a5738e52d44c5c3f2304`.
+
+#### Release-119 canary checkpoint — 2026-11-09 10:06 UTC
+
+The test-VM candidate canary has **5/289 passing samples**. Sample 5 passed
+in 81.895 seconds; it showed a 409-second-old completed observation, no scan
+in progress, zero overflows/drops, and no monitor errors. It is still far
+short of the 24-hour gate. Evidence:
+[`release119-canary-progress-20261109T1006Z.jsonl`](live/release119-canary-progress-20261109T1006Z.jsonl),
+SHA-256 `de6bd413a904af216fd9fce10e47ac5423c0b8ff8b55a37357b125048b6456a2`.
+
+#### Release-119 canary sample six — 2026-11-09 10:09 UTC
+
+The VPS2 canary remains active with `NRestarts=0`; **6/289 samples pass**.
+Sample 6 completed in 48.304 seconds with zero errors, overflows, and user
+drops. Exact accounting, path-graph, and SQLite checks passed. The scan age
+was 675 seconds and status remained dirty/not caught up between periodic
+observations. The 24-hour soak remains open. Raw sample:
+[`release119-canary-sample6-20261109T1009Z.jsonl`](live/release119-canary-sample6-20261109T1009Z.jsonl),
+SHA-256 `792c7125c9a8ba7e08a682ebd1ad82d9ed933f9437ec7ab3029573f2d4375916`.
