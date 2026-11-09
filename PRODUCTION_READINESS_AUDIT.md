@@ -21530,3 +21530,20 @@ manifest is not changed by this audit append.
   r123 package install/upgrade/rollback, 24-hour soak, fault injection,
   72-hour endurance, constrained-host p95/p99, and privilege review remain
   open.
+
+### Static systemd hardening check — 2026-11-09 20:47 UTC
+
+- `systemd-analyze verify packaging/dux.service` passed on systemd 255.4 with
+  no diagnostics. The unit SHA-256 is
+  `e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b`, matching
+  the candidate/canary's expected unit hash.
+- Offline `systemd-analyze security` exited 0 and reported heuristic exposure
+  **3.3 (OK)**. It flags root execution, ambient `CAP_SYS_ADMIN` and
+  `CAP_DAC_READ_SEARCH`, no `RootDirectory`, AF_UNIX, and `UMask=0027`. These
+  have operational reasons: global fanotify coverage and protected metadata
+  access, systemd notification over a Unix socket, and intentional `dux`-group
+  read access to the filename index. This score is not a security certification.
+- No daemon or service was modified or restarted. This static check does not
+  inspect runtime drop-ins or replace the open threat/capability review. Raw
+  output and rationale are retained in
+  `docs/qualification/systemd-security-review-20261109/`.
