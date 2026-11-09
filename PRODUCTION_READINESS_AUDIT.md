@@ -21547,3 +21547,12 @@ manifest is not changed by this audit append.
   inspect runtime drop-ins or replace the open threat/capability review. Raw
   output and rationale are retained in
   `docs/qualification/systemd-security-review-20261109/`.
+
+### Cargo advisory database refresh — 2026-11-09 20:49 UTC
+
+- `cargo audit --json` exited 0 against the current lockfile: **229
+  dependencies, 0 advisories, no warnings**. The local advisory DB had 1,430
+  advisories and was last updated at 16:13 UTC, about 4h36m before this run.
+  This is dependency metadata only, not application security proof.
+- Raw report and its SHA-256 are retained in
+  `docs/qualification/cargo-audit-20261109T2049Z/`.
