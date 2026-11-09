@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:40 UTC
+## Latest verified checkpoint — 2026-11-09 22:42 UTC
 
 ### Clean-install lifecycle readiness gate
 
@@ -16,9 +16,8 @@ discovery passes **359/359**. Logs and code are in the lifecycle qualification
 folder. A real guest lifecycle rerun with this strict gate is still required.
 
 The guarded r123 lifecycle controller remains active but has not launched a
-guest. Repeated Go compiler/test processes are continuing to reset quiet
-windows; the latest controller output is admission wait. The guard remains
-enabled; no VM was launched.
+guest. Active Go compiler/test workloads continue to keep it in admission
+wait. The guard remains enabled; no VM was launched.
 
 ### Coverage gap review
 
@@ -33,7 +32,7 @@ critical-path gaps and the targeted tests needed to close them are recorded in
 
 ### Canary and disk
 
-VPS2 r121 sample **103** at 22:38:04 UTC passed: scan age was 237 seconds,
+VPS2 r121 sample **104** at 22:42:53 UTC passed: scan age was 526 seconds,
 no scan was running, SQLite and path/accounting checks passed, and restarts,
 overflows, drops, and pending updates were all zero. The previous sample 102
 was captured during a scan-first observation, which completed at 22:34:07
@@ -47,7 +46,8 @@ samples 100–103; no OOM events were recorded. VPS2 root remains 92% used with
 [sample 100](docs/qualification/production-live-followup-20261109T2223Z/README.md),
 [sample 101](docs/qualification/production-live-followup-20261109T2228Z/README.md),
 [sample 102 and scan cycle](docs/qualification/production-live-followup-20261109T2233Z/README.md),
-and [sample 103](docs/qualification/production-live-followup-20261109T2238Z/README.md).
+and [sample 103](docs/qualification/production-live-followup-20261109T2238Z/README.md),
+plus [sample 104](docs/qualification/production-live-followup-20261109T2242Z/README.md).
 
 ### Production VPS1
 
@@ -63,7 +63,7 @@ fault-injection binaries verified. `/` has 58 GiB free, `target/readiness` is
 869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
 [`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
 
-**Updated:** 2026-11-09 22:40 UTC
+**Updated:** 2026-11-09 22:42 UTC
 
 ---
 
