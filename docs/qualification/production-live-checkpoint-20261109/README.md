@@ -138,3 +138,20 @@ The r121 canary has not been restarted or upgraded. The 24-hour soak remains
 open; the current candidate r123 still lacks real package lifecycle and runtime
 qualification. Treat these measurements as encouraging but incomplete live
 evidence, not a release pass.
+
+### VPS2 and package-lifecycle follow-up — 2026-11-09 18:47 UTC
+
+Canary sample 56 passed at 18:42:53 UTC: no monitor errors, SQLite quick-check
+`ok`, indexed path graph passed, zero restarts/overflows/drops, and last
+completed observation age 420 seconds against the 1,200-second monitor limit.
+At the 18:47:20 read-only status capture, the next observation was in progress,
+age 683 seconds, with zero pending updates or observed overflows. The current
+service PID remains 2561224 with zero restarts. See
+`vps2-live-followup-20261109T1846Z.json`.
+
+An isolated r121-to-r123 DEB lifecycle qualification was prepared but not
+started: the VM manager refused twice before QEMU launch because host Go test
+and compiler processes were active; Go tests were still being launched during
+the subsequent check. No package or service was changed. Temporary VM inputs
+were removed after confirming the VM unit was inactive. The full package
+upgrade/rollback/removal/clean-install gate therefore remains open.
