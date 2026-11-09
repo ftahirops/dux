@@ -1,0 +1,19 @@
+{
+  "evaluation_errors_by_threshold_seconds": {
+    "1200": [
+      "status_before: last full observation is missing, invalid, or older than 1200 seconds",
+      "status_after: last full observation is missing, invalid, or older than 1200 seconds"
+    ],
+    "1500": []
+  },
+  "failed_run_artifact": "release120-canary-failed-freshness-v1-20261109T1318Z.jsonl",
+  "failed_run_sha256": "1906afafcc4f16637c64b440d89569447d0b8db4d34644a13b853f050d7d7471",
+  "focused_monitor_test_log_sha256": "7668ebaa6a16d17819bca7d5bbb5f6965265e03ff0a82e318da1be2ef4fe05fc",
+  "focused_monitor_test_result": "38 passed",
+  "monitor_sha256": "ea1d4c98ea7bcf8fe17632095af6d5535852359b691439987480b7fedc043cad",
+  "sample_captured_at_utc": "2026-11-09T13:15:56.252109+00:00",
+  "scan_in_progress_after": true,
+  "scan_started_at_seconds": 1794229754,
+  "status_after_age_seconds": 1306,
+  "status_before_age_seconds": 1228
+}

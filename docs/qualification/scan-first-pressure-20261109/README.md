@@ -1229,3 +1229,58 @@ host mount view is required for the current fanotify coverage model. This
 check confirms configured controls, not containment of a root-level daemon
 compromise; the daemon retains powerful filesystem/kernel capabilities and
 broader threat-model review remains open.
+
+#### Release-120 freshness-gate failure and corrected soak profile — 2026-11-09
+
+The first r120 run ended after **16 passing samples** when sample 17 failed the
+1,200-second observation-age gate. At the sample's before/after snapshots, the
+last completed scan was 1,228/1,306 seconds old and a new scan was still in
+progress. The candidate had no restart, kernel overflow, dropped update, or
+OOM. The scan completed at 13:15:58 UTC with 1,511,818 files, 180,077
+directories, 1,691,895 path instances, and zero coverage issues; the
+independent accounting verifier passed at 13:17:01.
+
+Timing explains the threshold failure. The prior scan completed at 12:54:09;
+the next began at 13:09:14 (15m05s later) and completed at 13:15:58 (6m44s
+scan duration). The actual completion-to-completion interval was 21m49s. A
+20-minute completed-observation-age gate cannot pass this observed 15-minute
+scan cadence. Replaying the exact sample through the current monitor evaluator
+returns the two expected freshness errors at 1,200 seconds and **no errors at
+1,500 seconds**. This changes the canary budget only; it does not change Dux
+or turn the failed v1 sample into a pass. A 25-minute gate leaves about 3m11s
+beyond the measured interval; it will still fail if scans run more than ten
+minutes past the 15-minute schedule. If the required freshness SLO is 20
+minutes, Dux must reduce the schedule interval or scan duration and then
+requalify performance.
+
+The failed run's full log is preserved at
+[`release120-canary-failed-freshness-v1-20261109T1318Z.jsonl`](live/release120-canary-failed-freshness-v1-20261109T1318Z.jsonl),
+SHA256 `1906afafcc4f16637c64b440d89569447d0b8db4d34644a13b853f050d7d7471`.
+
+A fresh 24-hour v2 soak started at 13:21:05 UTC on the same release binary
+and systemd unit. It samples every 300 seconds with `--max-observation-age-
+seconds=1500`; its monitor remains at 20% CPU, 1 GiB memory, no swap, and
+IOWeight 10/Nice 19, with a 26-hour runtime cap. The first sample passed at
+13:22:25 in 80.189 seconds, with observation age 791
+seconds, a valid 1,691,895-path graph, and zero overflow/drop/OOM/restart
+counters. Sample 1/289 is only the start of qualification. Full evidence:
+[`release120-canary-v2-25m-progress-20261109T1323Z.jsonl`](live/release120-canary-v2-25m-progress-20261109T1323Z.jsonl),
+SHA256 `3e33a2f02542db078433afe8278260ed9c9ca859cc785e6bbba82f835144921a`.
+
+At 13:27:39 UTC, v2 sample 2 passed in 94.011 seconds. A scan was active at
+age 1,104 seconds, with the independent 1,691,895-path graph valid and zero
+overflow, userspace-drop, OOM, or restart counters. This is **2/289**; the
+24-hour gate is still open. The updated full log is
+[`release120-canary-v2-25m-progress-20261109T1329Z.jsonl`](live/release120-canary-v2-25m-progress-20261109T1329Z.jsonl),
+SHA256 `1627b549d8e05d530bedcdd93ecde0ac7c14c0dd8967f0dc2b30f9203cbfcb53`.
+
+The failure replay was independently evaluated with the checked-in monitor
+(`sha256 ea1d4c98ea7bcf8fe17632095af6d5535852359b691439987480b7fedc043cad`):
+the exact sample produces two freshness errors at 1,200 seconds and none at
+1,500 seconds. The focused monitor suite then passed **38/38 tests**. Machine
+readable replay results:
+[`freshness-threshold-replay-20261109T1323Z.json`](live/freshness-threshold-replay-20261109T1323Z.json),
+SHA256 `143f959b3db4765b5586bcebe5e8257a30c8fbc732afa6cedc29a37e28b36cbd`;
+unit log:
+[`canary-monitor-unit-tests-20261109T1323Z.log`](live/canary-monitor-unit-tests-20261109T1323Z.log),
+SHA256 `7668ebaa6a16d17819bca7d5bbb5f6965265e03ff0a82e318da1be2ef4fe05fc`.

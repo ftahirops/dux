@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 13:14 UTC
+**Updated:** 2026-11-09 13:29 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 13:14 UTC
+## Current status and evidence — 2026-11-09 13:29 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -22,40 +22,27 @@ upgrade; a root-only rollback copy of the database, old binary, systemd unit,
 and release-119 DEB is preserved on VPS2. Production VPS1's service and
 database were not changed.
 
-The fresh r120 VPS2 canary has **16/289 passing samples** as of 13:13 UTC; its
-24-hour gate is still open. Samples 1–16 report zero kernel overflows, user
-drops, OOM events, or Dux restarts. The root observation completed with zero
-coverage issues and a valid 1,677,080-path graph. Sample 5 began with the prior
-observation 1,228 seconds old and an active scan; the scan finished during the
-90-second collection, and the after-state was 417 seconds old. The monitor
-accepted the newer, verified after-state. This shows that a scan can briefly
-exceed the 1,200-second threshold; it does **not** prove a hard 20-minute
-maximum. The index was dirty while accounting verification was pending and
-remained not caught up between observations. Sample 6 passed with a
-716-second-old observation; sample 7 passed with the next scan in progress at
-1,049 seconds; sample 8 passed with a completed observation 433 seconds old;
-sample 9 passed at age 693 seconds with a valid 1,683,013-path graph. Sample
-10 passed at 12:40:47 UTC in 70.003 seconds, with a scan in progress, scan age
-997 seconds, zero overflow/drop/OOM/restart counters, and a valid
-1,683,013-path graph. Dux remained dirty and not caught up during the scan.
-The exact log is preserved in the qualification record.
-Sample 11 passed at 12:46:05 UTC in 88.608 seconds; the completed scan age was
-416 seconds, the valid path graph had 1,685,917 paths, and all recorded
-overflow/drop/OOM/restart counters remained zero.
-Sample 12 passed at 12:50:43 UTC in 66.603 seconds; scan age was 694 seconds,
-the path graph remained valid at 1,685,917 paths, and overflow/drop/OOM
-counters remained zero. The latest VPS2 check at 12:53 UTC found the monitor
-active and Dux with zero restarts. The full 24-hour gate remains open.
-Sample 13 passed at 12:56:37 UTC in 120.562 seconds, with a scan active at age
-1,048 seconds and the path graph valid at 1,685,917 paths. Sample 14 passed at
-13:01:13 UTC in 95.954 seconds, with the scan complete at age 423 seconds.
-Overflow, drop, and OOM counters remained zero; both longer collections still
-completed within the five-minute sampling interval.
-Sample 15 passed at 13:06:09 UTC in 92.128 seconds, scan age 720 seconds, and
-1,689,200 valid paths. There were still no overflow, drop, or OOM events.
-Sample 16 passed at 13:11:49 UTC in 132.004 seconds, with a scan active at age
-1,059 seconds and a valid 1,689,200-path graph. No overflow, drop, OOM, or
-restart was recorded; collection remained within the five-minute interval.
+The first r120 VPS2 run recorded **16 passing samples** but did not complete
+the soak: sample 17 failed its configured 1,200-second freshness gate at
+13:15:56 UTC, with the prior scan 1,306 seconds old and a new scan still
+running. The daemon did not crash, overflow, drop updates, or OOM. The scan
+completed at 13:15:58 with 1,511,818 files, 180,077 directories, 1,691,895
+paths, and zero coverage issues; independent accounting passed at 13:17:01.
+The previous scan completed at 12:54:09, the next scan started 15m05s later,
+and it took 6m44s. That gives a measured 21m49s completion interval, so the
+20-minute monitor gate conflicted with the configured 15-minute cadence. Exact
+sample replay yields two freshness errors at 1,200 seconds and none at 1,500.
+This is a test-gate correction, not a product fix or a retroactive pass.
+
+A fresh run with the same exact binary/unit started at 13:21:05 using a
+1,500-second (25-minute) max observation age, five-minute sampling, and the
+same monitor resource limits. Sample 1 passed at 13:22:25 in 80.189 seconds:
+scan age 791 seconds, valid 1,691,895-path graph, zero overflow/drop/OOM/
+restart counters. Sample 2 passed at 13:27:39 in 94.011 seconds with a scan
+active at age 1,104 seconds and the same valid graph; all counters remained
+zero. The new run is **2/289**; its 24-hour soak has just started.
+Full sample history and the preserved v1 failure are in the qualification
+record.
 
 ### Production VPS1 read-only check
 
@@ -110,6 +97,9 @@ The 13:14Z follow-up is
   `CAP_DAC_READ_SEARCH`, `NoNewPrivileges`, seccomp active, AF_UNIX-only
   sockets, and no private mount namespace (needed for host fanotify visibility).
   This is policy evidence, not proof that root-level compromise is contained.
+- Canary monitor suite: **38/38 passed** after replaying v1's failed sample.
+  The sample correctly fails at the recorded 1,200-second budget and passes at
+  1,500 seconds; replay evidence and test log are in the qualification folder.
 - Fresh online RustSec audit: **0 vulnerabilities and no warnings** across 229
   locked Rust dependencies. Gitleaks history coverage now includes all 654
   commits reachable from local/remote-tracking refs; its three matches were
@@ -121,16 +111,17 @@ The 13:14Z follow-up is
 
 ### Open production-readiness gates
 
-- Complete the r120 24-hour soak with exact binary/unit identity, accounting,
-  freshness, restart, overflow, drop, memory, and history checks.
+- Complete the fresh r120 24-hour soak with exact binary/unit identity,
+  accounting, 1,500-second freshness, restart, overflow, drop, memory, and
+  history checks.
 - Production is still on legacy 0.6.3 and the 12:52 UTC snapshot had an
   approximately 96-hour-old full scan, 540 overflow notifications, 1,511,839
   dropped updates, and four restarts. Any rollout of the scan-first candidate requires
   a separate controlled migration/rollback plan; VPS1 has not been changed.
-- Resolve the observed freshness boundary: the 15-minute scan cadence plus a
-  measured 6m08s root scan can put `last_scan_age` above the 1,200-second
-  canary threshold until the new observation completes. Measure p95/p99 scan
-  duration and read/write cost before changing cadence or freshness policy.
+- Measure p95/p99 scan duration and read/write cost. The observed 15-minute
+  schedule plus 6m44s scan yielded 21m49s between completed observations. The
+  current canary gate allows 25 minutes; any stricter 20-minute SLO requires
+  earlier scheduling or a faster scan, not merely a different monitor setting.
 - Qualify an exact migration of the live schema-6 production index. The
   synthetic 1.3M-file/27.3M-growth-row migration passed, but a concurrent-write
   live backup did not make progress and was stopped safely.
