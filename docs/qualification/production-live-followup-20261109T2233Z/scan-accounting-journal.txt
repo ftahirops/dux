@@ -1,0 +1,2 @@
+2026-11-09T22:34:07+00:00 vps2 dux[2561224]: 2026-11-09T22:34:07.421123Z  INFO dux::watch: rescan complete: 1613677 files, 192125 dirs, 1805802 staged path instances (0 directory alias paths), visible 86569451520 bytes/1805802 entries, unique 86382141440 bytes/1802320 inodes, 80.45 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=0 revalidated_reuse_paths=0 unresolved_reuse_paths=0
+2026-11-09T22:34:58+00:00 vps2 dux[2561224]: 2026-11-09T22:34:58.690329Z  INFO dux::watch: reconciliation accounting verification passed elapsed_ms=51258
