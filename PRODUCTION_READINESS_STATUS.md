@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 17:55 UTC
+## Latest verified checkpoint — 2026-11-09 18:02 UTC
 
 Release candidate package revision 122 built successfully from clean commit
 `24456ed8978fa33886ab13944e8afaf57762c7b6` as a static-musl binary, DEB, and
@@ -28,15 +28,28 @@ Clippy/format/diff checks, and 73.65% line / 72.55% region / 76.80% function
 coverage. Branch coverage is unavailable. Results and limits are detailed in
 the [`r121 qualification`](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md).
 
-Production VPS1 remains on legacy `0.6.3`; the prior recorded state had a
-multi-day-old scan, recurring overflows, dropped updates, and restarts. No
-production rollout has been performed. Revision-122 canary install/rollback,
+Production VPS1 remains on legacy `0.6.3` (`e0cc915f8f37`). A fresh read-only
+capture at 18:02 UTC showed four service restarts, 636 kernel overflow
+notifications, 2,518,862 dropped updates, 26 pending updates, and a last scan
+364,366 seconds old (about 4.2 days). The index database occupied about 3.21
+GB; root had 64.3 GB available. The service cgroup reported no OOM events.
+This is a new snapshot, not a change from the prior overflow/drop counters; no
+production service or database state was changed. Details:
+[`production live checkpoint`](docs/qualification/production-live-checkpoint-20261109/README.md).
+
+The current unsafe-block Clippy audit reports 47 production binary warnings;
+promoting `clippy::undocumented_unsafe_blocks` to errors fails across
+all-targets. These warnings are missing safety explanations, not proven
+memory-safety defects, but a reviewed production unsafe-block inventory and
+appropriate comments remain open.
+
+No production rollout has been performed. Revision-122 canary install/rollback,
 the completed 24-hour r121 soak, live schema migration qualification,
 disk-full/OOM/filesystem stress, multi-day soak, full security threat review,
 and constrained-host p95/p99 performance evidence remain open. Production
 sign-off is not met.
 
-**Updated:** 2026-11-09 17:55 UTC
+**Updated:** 2026-11-09 18:02 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 

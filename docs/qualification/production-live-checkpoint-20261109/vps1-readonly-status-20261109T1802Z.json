@@ -1,0 +1,31 @@
+{
+  "binary_version": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882"
+  },
+  "captured_at_utc": "2026-11-09T18:02:28.282920+00:00",
+  "dux_status": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "{\"behind_seconds\":174696.677,\"caught_up\":false,\"daemon_live\":true,\"dirty\":true,\"dirty_reason\":\"fanotify queue overflow\",\"dirty_since_timestamp_seconds\":1794240688,\"events_dropped\":2518862,\"events_resolved\":97542235,\"events_seen\":167372941,\"index_bytes\":122385768448,\"index_bytes_on_disk\":3210035200,\"index_nodes\":1313900,\"kernel_overflow_notifications\":636,\"last_event_commit_timestamp_seconds\":1794247347,\"last_scan_age_seconds\":364386,\"last_scan_timestamp_seconds\":1793882962,\"max_pending_updates\":500000,\"pause_reason\":null,\"paused\":false,\"paused_since_timestamp_seconds\":null,\"pending_updates\":5,\"root\":\"/\",\"scan_in_progress\":false,\"scan_progress\":null,\"status_version\":1,\"throttled_since_timestamp_seconds\":1794072651,\"updates_committed\":25463074,\"userspace_updates_dropped\":2518862,\"wal_bytes\":134217728,\"watch_status_available\":true,\"watch_status_updated_at_seconds\":1794247348,\"write_error\":null}"
+  },
+  "host_role": "production VPS1; read-only observation",
+  "root_filesystem_bytes": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "Filesystem                           1B-blocks         Used   Available Use% Mounted on\n/dev/mapper/ubuntu--vg-ubuntu--lv 198092431360 124858818560 64402264064  66% /"
+  },
+  "service_active": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "active"
+  },
+  "service_cpu_stat": "usage_usec 15648623595\nuser_usec 10809677461\nsystem_usec 4838946133\ncore_sched.force_idle_usec 0\nnr_periods 1286457\nnr_throttled 314\nthrottled_usec 6660773\nnr_bursts 0\nburst_usec 0\n",
+  "service_memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n",
+  "service_properties": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "MainPID=1073891\nNRestarts=4"
+  }
+}
