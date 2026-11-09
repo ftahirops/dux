@@ -104,16 +104,25 @@ Fresh local VPS1 and remote VPS2 snapshots are retained in
 - VPS2 remains on r121 (PID 2561224, zero restarts since its 13:59 UTC start),
   with zero kernel overflows and zero dropped updates in this snapshot. However,
   systemd reports `reloading`, Dux reports a dirty in-progress observation,
-  and its last completed scan was 748 seconds old. The index still reports
-  `caught_up=false`, about 4.52 hours behind, with zero pending updates.
-- VPS2 journal showed an observation completing at 18:18:19 UTC, a new
-  observation beginning at 18:29:30 UTC, and an admission deferral due to
-  elevated host pressure at 18:29:27. Thus the canary has so far shown that
-  scan-first observation can avoid queue overflow during this sample, but it
-  has **not** demonstrated freshness or convergence. Zero overflows alone is
-  not a successful soak gate.
+  and its last completed scan was 748 seconds old while the next scan ran.
+  `caught_up=false` and the 4.52-hour `behind_seconds` value are not scan-first
+  freshness indicators: scan-first mode intentionally does not apply event
+  batches and reports freshness using `last_scan_age_seconds`. This r121 status
+  output does not include the newer explicit `behind_seconds_applicable:false`
+  field, so consumers must use its `scan_first` flag. The current source emits
+  the explicit applicability field.
+- Journal analysis through 18:34 UTC found 19 scan starts and 18 completed
+  observations, each followed by a successful accounting check. Starts were
+  900–903 seconds apart; full scans took 210–394 seconds (mean 275 seconds),
+  and accounting checks took 49–104 seconds (mean 62 seconds). One admission
+  was briefly deferred under elevated pressure at 18:29:27, then the scan
+  started at 18:29:30. This is positive evidence that r121 can maintain its
+  15-minute observation schedule on VPS2 for this 4.5-hour sample without
+  observed queue loss. It does not prove path-level exactness under concurrent
+  changes, a 24-hour soak, or r123 runtime behavior. Machine-readable timings
+  and scan summaries are in `vps2-scan-cycles-20261109T1832Z.json`.
 
 The r121 canary has not been restarted or upgraded. The 24-hour soak remains
 open; the current candidate r123 still lacks real package lifecycle and runtime
-qualification. Treat this checkpoint as continued adverse/incomplete live
+qualification. Treat these measurements as encouraging but incomplete live
 evidence, not a release pass.
