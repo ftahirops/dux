@@ -1077,3 +1077,11 @@ drop, OOM, and restart counters were still zero. This extends the canary by
 five minutes only. Snapshot:
 [`release120-canary-progress-20261109T1221Z.jsonl`](live/release120-canary-progress-20261109T1221Z.jsonl),
 SHA256 `9258733256e0023c7aa65732bc41c2d94afe29da2f9542c05b67131a843ef164`.
+
+At 12:26 UTC the r120 canary reached **7/289 passing samples**. Sample 7 took
+121.719 seconds; it saw the next full observation in progress at age 1,049
+seconds. The independent path graph remained valid at 1,680,006 paths, with
+zero overflows, drops, OOM events, or restarts. The 24-hour gate remains open.
+Snapshot:
+[`release120-canary-progress-20261109T1226Z.jsonl`](live/release120-canary-progress-20261109T1226Z.jsonl),
+SHA256 `6a2305370b2a87c3e35d3a15bc7310091ef6e81635745998f9c99c0e204c92b6`.
