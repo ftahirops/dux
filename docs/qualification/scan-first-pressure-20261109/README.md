@@ -1055,3 +1055,17 @@ overflow, drop, OOM, and restart counters remained zero. Snapshot containing
 samples 1–3:
 [`release120-canary-progress-20261109T1206Z.jsonl`](live/release120-canary-progress-20261109T1206Z.jsonl),
 SHA256 `68ab24387f38c5cfa2a0be0dda98f6d47fb1c4d9883e3b3d5615eabc4db1d4f6`.
+
+At 12:16 UTC the r120 run reached **5/289 passing samples**. Sample 5 began
+with an active scan and a 1,228-second-old prior observation, above the
+1,200-second threshold. The scan completed during the 90-second collection;
+the after-status showed a newer observation 417 seconds old. The monitor
+accepted this because it verifies the completed after-state when a scan
+finishes inside a sample. This is a short observed threshold excursion, not
+proof of a hard 20-minute maximum. SQLite `quick_check` and the 1,677,080-path
+graph passed; the service remained dirty while its separate accounting
+verification was pending, which passed 16 seconds after collection. There were
+no overflows, drops, OOM events, or restarts. The observation completed at
+12:15:17 after 6m08s with zero coverage issues. Full snapshot:
+[`release120-canary-progress-20261109T1216Z.jsonl`](live/release120-canary-progress-20261109T1216Z.jsonl),
+SHA256 `45c25096ca113c5fcd6a24586d41549682998976f7065994ab2f2b2affae4c17`.
