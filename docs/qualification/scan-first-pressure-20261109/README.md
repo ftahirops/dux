@@ -755,3 +755,16 @@ The current two-sample snapshot is
 SHA-256 `b38cb3ec40d9237d154f270be355a8b3cdc8cfab619eecea28096c13eb28ecc8`.
 The complete append-only log remains on VPS2 at
 `/root/dux-canary-119/candidate-canary.jsonl`.
+
+#### Canary checkpoint — 2026-11-09 09:54 UTC
+
+The monitor has recorded **3/289 passing samples**. The latest sample took
+51.609 seconds; scan ages in the three samples were 575, 375, and 679 seconds.
+Every sample passed exact accounting, path-graph and SQLite checks, binary and
+unit identity, and health gates. No sample found a service restart, OOM,
+kernel overflow, userspace drop, or critical journal entry. This is only about
+11 minutes of operation; the required 24-hour interval is still in progress.
+
+Three-sample snapshot:
+[`release119-canary-progress-20261109T0954Z.jsonl`](live/release119-canary-progress-20261109T0954Z.jsonl),
+SHA-256 `b7099f4ee4784ee8f0ee1d0c985b77181e470dca336171ae1f77ec9187042eec`.

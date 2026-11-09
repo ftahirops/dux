@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 09:50 UTC
+**Updated:** 2026-11-09 09:54 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2467,3 +2467,16 @@ certificate bypass was used. `.github/` is absent from this checkout. Reports
 are under
 [`security-current-20261109`](docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/),
 and details are in the [security scan record](docs/qualification/scan-first-pressure-20261109/security-review-20261109.md).
+
+### Candidate canary checkpoint — 2026-11-09 09:54 UTC
+
+The release-119 VPS2 canary remains active and has **3/289 passing samples**.
+The third sample took 51.609 seconds; scan ages across the three samples were
+575, 375, and 679 seconds. All had zero reported kernel overflows, userspace
+drops, service restarts, OOM events, and monitor errors. VPS2's root filesystem
+had 11 GiB free at the latest check. This is about 11 minutes of a required
+24-hour run, not a soak pass.
+
+The three-sample log snapshot is
+[`release119-canary-progress-20261109T0954Z.jsonl`](docs/qualification/scan-first-pressure-20261109/live/release119-canary-progress-20261109T0954Z.jsonl),
+SHA-256 `b7099f4ee4784ee8f0ee1d0c985b77181e470dca336171ae1f77ec9187042eec`.
