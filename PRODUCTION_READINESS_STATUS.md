@@ -2380,3 +2380,14 @@ setup, but do not establish universal correctness or 100% production
 readiness. Large-scale 1M/10M performance, packaging and rollback, other
 filesystems/kernels, hardware-loss behavior, long-duration soak, and canary
 gates remain open. The production binary was not changed by these tests.
+
+## Scoped security scan — 2026-11-09
+
+`cargo audit` found no advisories across 229 locked Rust dependencies, using
+an advisory database last updated 2026-11-08. Trivy found no vulnerabilities
+in either Cargo lockfile; it detected no deployment configuration files, so
+configuration security remains unqualified. Gitleaks found no secrets in
+`src/` or `scripts/`; other workspace paths, generated artifacts, and Git
+history were not covered. A Semgrep ruleset scan did not produce a report and
+is inconclusive. Detailed evidence and scan limits are in
+[`security-review-20261109.md`](docs/qualification/scan-first-pressure-20261109/security-review-20261109.md).
