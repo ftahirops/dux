@@ -21431,3 +21431,25 @@ manifest is not changed by this audit append.
   complete privilege/threat review remain open. Root plus `CAP_SYS_ADMIN`
   remains a material privilege risk. Production readiness/sign-off is **not
   met**.
+
+### Live qualification follow-up — 2026-11-09 20:19 UTC
+
+- The r121 five-minute monitor reached **75/75 passing samples** through
+  20:18:29 UTC, with no sample errors. The latest sample recorded a 843-second
+  completed-observation age against the 1,200-second limit, zero restarts,
+  zero overflows/drops, and zero pending updates. The canary remains active;
+  the 24-hour interval is still incomplete.
+- A full observation completed at **20:18:35 UTC**, walking **1,590,367 files**
+  and **189,257 directories** (1,779,624 staged paths), with **0 coverage
+  issues** and no unresolved inode-reuse paths. Independent accounting
+  verification passed at **20:19:29 UTC** in **53.459 seconds**. This is r121
+  live evidence, not r123 qualification.
+- At 20:19:53, local VM admission still found Go compiler/test processes. The
+  guarded lifecycle driver remains alive and has not started QEMU or package
+  operations. Recent quiet windows were repeatedly interrupted by new Go test
+  work; admission and runtime guards remain enabled. No test result is inferred
+  from this wait.
+- No source or service changes were made in this follow-up. The earlier Rust
+  332/332 and coverage results remain the latest source-suite evidence. The
+  r123 package lifecycle and remaining system-level release gates listed in
+  the 20:13 checkpoint are still open.
