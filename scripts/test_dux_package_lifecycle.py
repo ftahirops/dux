@@ -916,6 +916,30 @@ class DaemonReadinessTests(unittest.TestCase):
         self.assertEqual(observed, baseline)
         command.assert_called_once_with("/usr/bin/dux", "status", "--json", check=False)
 
+    def test_clean_install_waits_for_accounting_verification_after_scan(self):
+        accounting_pending = {
+            "daemon_live": True, "watch_status_available": True,
+            "dirty": True, "dirty_reason": "reconciliation accounting verification pending",
+            "paused": False, "scan_in_progress": False, "caught_up": False,
+            "scan_first": True, "last_scan_timestamp_seconds": 123,
+        }
+        accounted = {
+            **accounting_pending,
+            "dirty_reason": "filesystem changes await the next full observation",
+        }
+        with patch.object(LIFECYCLE, "command", side_effect=[
+            SimpleNamespace(returncode=0, stdout=json.dumps(accounting_pending), stderr=""),
+            SimpleNamespace(returncode=0, stdout=json.dumps(accounted), stderr=""),
+        ]) as command, patch.object(LIFECYCLE.time, "monotonic", return_value=0), \
+                patch.object(LIFECYCLE.time, "sleep") as sleep:
+            observed = LIFECYCLE.wait_initial_scan_complete(
+                10, "clean-install", not_before_timestamp=100
+            )
+
+        self.assertEqual(observed, accounted)
+        self.assertEqual(command.call_count, 2)
+        sleep.assert_called_once_with(LIFECYCLE.DAEMON_READINESS_POLL_SECONDS)
+
     def test_legacy_baseline_does_not_accept_dirty_state_without_completed_scan(self):
         stale = {
             "daemon_live": True, "watch_status_available": True,

@@ -1,6 +1,44 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 21:45 UTC
+## Latest verified checkpoint — 2026-11-09 21:59 UTC
+
+### Debian lifecycle result and harness gate correction
+
+The r121-to-r123 Debian lifecycle completed on the disposable Ubuntu 24.04 KVM
+guest in **88.22 seconds**. All six package stages passed: baseline, upgrade,
+rollback, re-upgrade, remove/purge, and clean install. Candidate and installed
+binary hashes matched; rollback SQLite quick-check passed; clean install
+verified service/unit policy, ownership/modes, disabled tunnel, and no tunnel
+identity. The full report is retained at
+[`package-lifecycle-r123-20261109/report.json`](docs/qualification/package-lifecycle-r123-20261109/report.json).
+
+Review of that report found clean install returned while status still said
+`reconciliation accounting verification pending`. I fixed the lifecycle
+harness to wait until that pending state resolves, added a regression test, and
+documented the finding in the lifecycle README. The focused lifecycle harness
+passes **71/71** and serial full Python discovery passes **358/358**. The
+updated harness SHA-256 matches its staged copy. The initial lifecycle run
+therefore proves the package operations, but **does not qualify initial
+accounting readiness**; repeat the real lifecycle with the corrected gate.
+
+### VPS2 canary
+
+The r121 canary reached **95 passing samples** at 21:58:14 UTC. The sample had
+zero errors, service restarts, kernel overflows, event drops, or pending updates;
+completed-scan age was 571 seconds. It is still far short of the 24-hour
+requirement and does not qualify r123. The VPS2 root-disk check remains 92%
+used (7.4 GiB free, last checked at 21:24 UTC); no cleanup or service change
+was made there.
+
+The local readiness host has 57 GiB free on `/` and 11 GiB free in `/dev/shm`.
+No VM is currently running. The tightened package lifecycle is queued for a
+fresh guarded run.
+
+**Updated:** 2026-11-09 21:59 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 21:45 UTC
 
 ### Third guarded lifecycle attempt
 

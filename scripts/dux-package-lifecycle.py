@@ -355,7 +355,7 @@ def wait_daemon_caught_up(timeout, stage):
 
 
 def wait_initial_scan_complete(timeout, stage, not_before_timestamp):
-    """Wait for a completed baseline scan, even when legacy coverage is known incomplete.
+    """Wait for a completed, accounted baseline scan, even when legacy coverage is incomplete.
 
     Package transition tests need a stable, readable pre-upgrade index; requiring
     a legacy binary to represent mount aliases it cannot model prevents testing
@@ -383,6 +383,8 @@ def wait_initial_scan_complete(timeout, stage, not_before_timestamp):
                     and last_status.get("daemon_live") is True
                     and last_status.get("watch_status_available") is True
                     and last_status.get("scan_in_progress") is False
+                    and last_status.get("dirty_reason")
+                    != "reconciliation accounting verification pending"
                     and isinstance(last_status.get("last_scan_timestamp_seconds"), int)
                     and last_status["last_scan_timestamp_seconds"] > not_before_timestamp):
                 return last_status
