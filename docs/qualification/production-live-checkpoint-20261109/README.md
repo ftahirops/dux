@@ -263,3 +263,15 @@ disk. This confirms production is still unhealthy despite VPS2's r121
 observations. No daemon, index, or host configuration was changed. Raw status
 and running-binary hash are in
 `vps1-readonly-followup-20261109T1923Z.json`.
+
+### VPS1 churn follow-up — 2026-11-09 19:27 UTC (read-only)
+
+The legacy service remained dirty for changed non-watched mounts, with the last
+full scan 369,481 seconds old. Compared with the 19:23 snapshot, pending
+updates rose by 1,907, `events_seen` by 64,738, and reported `index_bytes` by
+1,462,779,904; kernel-overflow and dropped-update counters did not increase.
+Concurrent Go tests and shell test scripts were visible in host telemetry.
+This timing shows the backlog and index changing during host test activity,
+but does not prove which process produced each update. The snapshot still
+confirms a stale production index and unprocessed churn. Evidence is in
+`vps1-readonly-followup-20261109T1927Z.json`.

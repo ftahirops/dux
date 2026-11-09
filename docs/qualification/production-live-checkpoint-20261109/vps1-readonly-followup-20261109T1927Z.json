@@ -1,0 +1,86 @@
+{
+  "assessment": {
+    "dirty": true,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+    "last_scan_age_seconds": 369481,
+    "no_new_kernel_overflow": true,
+    "no_new_reported_event_drops": true,
+    "pending_updates_increased": true
+  },
+  "captured_at_utc": "2026-11-09T19:27:23.699238+00:00",
+  "collection": "read-only systemd, installed-daemon status, proc binary hash, and host admission telemetry",
+  "delta_since_1923Z": {
+    "events_resolved": 47025,
+    "events_seen": 64738,
+    "index_bytes": 1462779904,
+    "index_bytes_on_disk": 3874816,
+    "index_nodes": 13770,
+    "kernel_overflow_notifications": 0,
+    "pending_updates": 1907,
+    "updates_committed": 28961,
+    "userspace_updates_dropped": 0
+  },
+  "host": "VPS1 production host",
+  "host_pressure": {
+    "active_host_workloads": [
+      "go test pid=1882989",
+      "shell test script pid=1859186",
+      "shell test script pid=1882991"
+    ],
+    "cpu": {
+      "full": 0.0,
+      "some": 10.86
+    },
+    "io": {
+      "full": 1.06,
+      "some": 1.47
+    },
+    "load1": 22.22,
+    "memory": {
+      "full": 0.0,
+      "some": 0.0
+    },
+    "telemetry_errors": []
+  },
+  "running_binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
+  "status": {
+    "behind_seconds": 179792.051,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+    "dirty_since_timestamp_seconds": 1794251367,
+    "events_dropped": 2518862,
+    "events_resolved": 99242951,
+    "events_seen": 170071554,
+    "index_bytes": 124644253696,
+    "index_bytes_on_disk": 3251904512,
+    "index_nodes": 1328562,
+    "kernel_overflow_notifications": 636,
+    "last_event_commit_timestamp_seconds": 1794252443,
+    "last_scan_age_seconds": 369481,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 1912,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794072651,
+    "updates_committed": 26197566,
+    "userspace_updates_dropped": 2518862,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794252443,
+    "write_error": null
+  },
+  "systemd": {
+    "ActiveState": "active",
+    "MainPID": "1073891",
+    "NRestarts": "4",
+    "SubState": "running"
+  }
+}
