@@ -964,3 +964,14 @@ drop counters, and no Dux or monitor restarts. The canary remains active but
 is only minutes into its new 24-hour interval. Evidence:
 [`release119-monitorfix-v2-sample2-20261109T1119Z.jsonl`](live/release119-monitorfix-v2-sample2-20261109T1119Z.jsonl),
 SHA-256 `2a6334216f7445649b304bea4f3402914fd3ce3c2f508fb76cb3a7f46ad257c2`.
+
+At 11:24 UTC the corrected-monitor run reached **3 passing samples**. Sample
+3 completed in 57.621 seconds with schema 7, SQLite `quick_check=ok`, a valid
+1,668,477-path graph, zero kernel overflows, zero userspace drops, no OOM
+events, and no Dux or monitor restarts. Scan age was 665 seconds at collection;
+the database was dirty and not caught up, so this is evidence of a bounded,
+accounted observation, not a continuously clean index. The canary remains
+active and the 24-hour gate is still open. The captured full JSONL snapshot
+contains samples 1–3:
+[`release119-monitorfix-v2-progress-20261109T1124Z.jsonl`](live/release119-monitorfix-v2-progress-20261109T1124Z.jsonl),
+SHA-256 `b674e11d4ab27e8af4e8e20b18456571632b7a47f16afe7a0caa03a4e581bf1d`.
