@@ -235,7 +235,7 @@ def active_host_workloads(proc_root=Path('/proc')):
                 continue
             try:
                 raw = Path(process.path, 'cmdline').read_bytes()
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 # Processes can exit between scandir and cmdline read. Other
                 # read failures are not safe to treat as an empty workload set.
                 continue

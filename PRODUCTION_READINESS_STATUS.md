@@ -1,6 +1,25 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 21:17 UTC
+## Latest verified checkpoint — 2026-11-09 21:22 UTC
+
+### Qualification helper `/proc` exit race
+
+The host-workload admission probe now treats `ProcessLookupError` for an
+individual `/proc/<pid>/cmdline` read as a process that exited during the scan,
+and skips that PID. Other read failures still fail closed and block VM
+admission. Regression test added; the focused VM qualification-helper suite
+passes **41/41**. This repairs test admission telemetry only; it does not relax
+the host-pressure or active-workload guard.
+
+The guarded r121-to-r123 lifecycle retry is still live, but its latest
+admission check sees active Go test processes. No VM is running and no package
+lifecycle result has been produced by this retry.
+
+**Updated:** 2026-11-09 21:22 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 21:17 UTC
 
 ### Architecture and candidate
 

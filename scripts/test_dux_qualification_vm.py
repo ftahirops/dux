@@ -199,6 +199,16 @@ class PressureGuardTests(unittest.TestCase):
                 with self.assertRaises(PermissionError):
                     VM.active_host_workloads(Path(temporary))
 
+    def test_host_workload_probe_skips_process_that_exits_during_cmdline_read(self):
+        with tempfile.TemporaryDirectory(prefix="dux-host-workloads-exited-") as temporary:
+            process = Path(temporary) / "101"
+            process.mkdir()
+            (process / "cmdline").write_bytes(b"/usr/bin/go\0build\0./...\0")
+            with patch.object(
+                Path, "read_bytes", side_effect=ProcessLookupError("No such process")
+            ):
+                self.assertEqual(VM.active_host_workloads(Path(temporary)), [])
+
     def test_unavailable_host_workload_probe_blocks_admission(self):
         with patch.object(
             VM, "active_host_workloads", side_effect=PermissionError("denied")
