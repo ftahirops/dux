@@ -1085,3 +1085,20 @@ zero overflows, drops, OOM events, or restarts. The 24-hour gate remains open.
 Snapshot:
 [`release120-canary-progress-20261109T1226Z.jsonl`](live/release120-canary-progress-20261109T1226Z.jsonl),
 SHA256 `6a2305370b2a87c3e35d3a15bc7310091ef6e81635745998f9c99c0e204c92b6`.
+
+The early 5-minute resource windows are variable. Dux averaged 14.9–98.3% of
+one core across adjacent sample intervals. Two intervals containing full-root
+scan work recorded 1.77 GiB read/1.46 GiB written and 1.09 GiB read/1.28 GiB
+written on the root block device. These intervals include scan work and normal daemon
+activity; they are not isolated per-scan benchmarks or a steady-state budget.
+The current 15-minute cadence and freshness threshold therefore still need a
+longer CPU/I/O distribution before any performance SLO or cadence change is
+approved.
+
+At 12:31 UTC the r120 canary reached **8/289 passing samples**. Sample 8 took
+106.305 seconds, ended with no scan active and scan age 433 seconds, and passed
+the 1,680,006-path graph, SQLite, and accounting checks. Overflow, drop, OOM,
+and restart counters remained zero. This is still under 40 minutes of a
+24-hour qualification. Snapshot:
+[`release120-canary-progress-20261109T1231Z.jsonl`](live/release120-canary-progress-20261109T1231Z.jsonl),
+SHA256 `bc11ff65218e40c89affd03bef2ff0964d2e852ef71eaafdcb5a688ac9818245`.

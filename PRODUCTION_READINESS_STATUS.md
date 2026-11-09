@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 12:26 UTC
+**Updated:** 2026-11-09 12:31 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 12:26 UTC
+## Current status and evidence — 2026-11-09 12:31 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -22,8 +22,8 @@ upgrade; a root-only rollback copy of the database, old binary, systemd unit,
 and release-119 DEB is preserved on VPS2. Production VPS1's service and
 database were not changed.
 
-The fresh r120 VPS2 canary has **7/289 passing samples** as of 12:26 UTC; its
-24-hour gate is still open. Samples 1–7 report zero kernel overflows, user
+The fresh r120 VPS2 canary has **8/289 passing samples** as of 12:31 UTC; its
+24-hour gate is still open. Samples 1–8 report zero kernel overflows, user
 drops, OOM events, or Dux restarts. The root observation completed with zero
 coverage issues and a valid 1,677,080-path graph. Sample 5 began with the prior
 observation 1,228 seconds old and an active scan; the scan finished during the
@@ -32,9 +32,10 @@ accepted the newer, verified after-state. This shows that a scan can briefly
 exceed the 1,200-second threshold; it does **not** prove a hard 20-minute
 maximum. The index was dirty while accounting verification was pending and
 remained not caught up between observations. Sample 6 passed with a
-716-second-old observation; sample 7 passed with the next scan in progress, a
-1,049-second observation age, and a valid 1,680,006-path graph. See the
-timestamped r120 evidence below for details and exact checks.
+716-second-old observation; sample 7 passed with the next scan in progress at
+1,049 seconds; sample 8 passed with a completed observation 433 seconds old
+and a valid 1,680,006-path graph. See the timestamped r120 evidence below for
+details and exact checks.
 
 ### Current local tests
 
