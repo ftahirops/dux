@@ -1239,7 +1239,7 @@ completed at 13:15:58 UTC with 1,511,818 files, 180,077 directories,
 1,691,895 path instances, and zero coverage issues; independent accounting
 passed at 13:17:01.
 
-The initial interpretation below was wrong: `last_scan_ts` was captured at
+The earlier interpretation was wrong: `last_scan_ts` was captured at
 scan start, while the monitor treated it as scan completion. The 1,306-second
 sample therefore overstated age since completion. Journal evidence shows scan
 completions at 12:44:34, 13:00:25, and 13:15:58, giving intervals of 15m51s

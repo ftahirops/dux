@@ -1,0 +1,16 @@
+{
+  "backup": "/root/dux-canary-120/rollback-release120/dux.db",
+  "backup_bytes": 696860672,
+  "backup_sha256": "ab51ac276398c06800372cf387cac23b7018dc3be2fcd13b494a60fff51b1f54",
+  "created_at_utc": "2026-11-09T13:59:16.036306+00:00",
+  "database": "/var/lib/dux/dux.db",
+  "database_device": 64512,
+  "database_inode": 2362334,
+  "format": 1,
+  "page_count": 170132,
+  "page_size": 4096,
+  "permissions_octal": "0600",
+  "quick_check": "ok",
+  "schema_version": 7,
+  "sqlite_version": "3.45.1"
+}

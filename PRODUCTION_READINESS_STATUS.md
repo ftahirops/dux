@@ -1,12 +1,12 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 13:52 UTC
+**Updated:** 2026-11-09 14:10 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 13:52 UTC
+## Current status and evidence — 2026-11-09 14:10 UTC
 
-The latest committed product change is commit `5d7cdac`: an active, low-priority
+A prior verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
 available memory remains above the elevated-memory floor. Critical pressure,
 low available memory, high load, and unavailable telemetry still stop it. This
@@ -15,46 +15,28 @@ memory PSI with 3.37 GiB available, then its retry completed 22 seconds after
 the canary failed the 1,200-second freshness gate. The failure is preserved;
 it is not counted as a pass.
 
-An additional local, uncommitted fix corrects `last_scan_ts` to mean scan
-completion; it passes the 328-test release suite, strict Clippy, formatting,
-and LLVM coverage checks recorded below. A default-feature dynamic binary was
-built for identity checks; the required static-musl package is not ready yet.
+Commit `8b02799` fixes `last_scan_ts` to represent scan completion. Release
+0.6.3-121 was built as an audited static-musl package from a clean tree and
+installed on VPS2, not production VPS1. The package binary SHA256 is
+`b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`; the
+installed hash matches. Before upgrade, a verified schema-7 SQLite online
+backup (696,860,672 bytes, `quick_check=ok`) and the exact r120 binary, DEB,
+and service unit were saved for rollback.
 
-Release 0.6.3-120 was built as static musl from `5d7cdacb80aa`, audited, and
-installed on the disposable VPS2 test VM. Its exact binary hash matches the
-build manifest. The existing schema-7 index passed SQLite `quick_check` before
-upgrade; a root-only rollback copy of the database, old binary, systemd unit,
-and release-119 DEB is preserved on VPS2. Production VPS1's service and
-database were not changed.
+The post-install full root observation completed across 1,698,615 indexed inode
+rows and 1,702,097 path instances. Independent accounting passed in 58.337 s,
+with zero coverage issues, zero kernel overflows, and zero userspace drops. The
+stored scan timestamp advanced from 1794232455 (the old scan-start value) to
+1794233078; the new scan started at 1794232765 and completed at 1794233078.
+That is runtime evidence that the patched field records completion.
 
-The first r120 VPS2 run recorded **16 passing samples** but did not complete the
-soak: sample 17 failed its configured 1,200-second freshness gate at
-13:15:56 UTC. This remains a failed run, not a pass. The daemon did not crash,
-overflow, drop updates, or OOM. Its scan completed at 13:15:58 with 1,511,818
-files, 180,077 directories, 1,691,895 paths, and zero coverage issues;
-independent accounting passed at 13:17:01.
-
-Review of `src/scan.rs` found the monitor's age field was misleading:
-`last_scan_ts` was captured at scan start, then consumed as if it represented
-scan completion. The failed sample's 1,306-second value therefore overstated
-age since the last completed scan by the previous scan's duration. The journal
-shows completions at 12:44:34, 13:00:25, and 13:15:58, intervals of 15m51s
-and 15m33s. At the failed sample (13:15:56), the prior completion was about
-15m31s old. This corrects the earlier erroneous 21m49s completion-interval
-interpretation; the 20-minute gate was not breached based on completed-scan
-time in that sample.
-
-The source now records `last_scan_ts` after successful scan/index finalization,
-using completion time and clamping a backward wall-clock adjustment to the
-start time. Regression tests cover completion-time persistence and clock
-rollback. The previous 25-minute-gate follow-up (2 passing samples) was
-diagnostic only and was stopped after finding the timestamp defect; it does not
-count as a qualifying soak. The source fix has passed local tests, but has not yet been installed or
-canaried on VPS2. The first static-musl packaging attempt failed source-digest
-validation because its build log changed inside the source tree during hashing;
-no package was produced. I corrected SSH to use port 22 and confirmed VPS2 is
-reachable, running r120, with no active qualifying monitor. The package must be
-rebuilt from a stable committed tree with outputs outside the source tree.
+A fresh 24-hour VPS2 canary started at 14:07:03 UTC with five-minute samples
+and the intended 1,200-second freshness gate. Sample 1 passed at 14:07:48 in
+44.888 s: no monitor errors, 1,702,097-path graph, SQLite `quick_check=ok`,
+zero overflows/drops/restarts. This is **1 passing sample**; the 24-hour gate
+remains open. The monitor uses 20% CPU, 1 GiB memory, no swap, IOWeight 10,
+and Nice 19. Full build, backup, install, and sample evidence is in
+[`release-121 qualification`](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md).
 
 ### Production VPS1 read-only check
 
@@ -148,12 +130,11 @@ The 13:14Z follow-up is
 
 ### Disk snapshot
 
-Local root: **61 GiB free of 185 GiB** (66% used). `/tmp` currently accounts
-for **12 GiB**; Go tests were actively using temporary build directories during
-inspection, and the production Dux watcher covers `/`. I did not purge shared
-temporary data during that active workload. VPS2 root: **8.6 GiB
-free of 93 GiB** (91% used); it contains the active r120 canary and rollback
-copy. Preserve those qualification artifacts.
+Local release output was placed in `/tmp/dux-r121-dist`; local root had 55 GiB
+free at the last disk check. VPS2 had 7.5 GiB free at 14:10 UTC after the
+rollback snapshot and package install. Its WAL peaked near 335 MiB during startup
+and stood at 129 MiB at that checkpoint. Continue monitoring disk and preserve
+the rollback copy and canary evidence until qualification ends.
 
 ## VPS2 canary checkpoint at 22:02 UTC (historical; superseded by sample 13)
 
