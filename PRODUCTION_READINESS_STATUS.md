@@ -51,9 +51,10 @@ timestamped r120 evidence below for details and exact checks.
   sources; this run predates the Rust guard change and is not additive to the
   Rust test count.
 - Fresh online RustSec audit: **0 vulnerabilities and no warnings** across 229
-  locked Rust dependencies. Gitleaks scanned 641 current-branch commits; its
-  three matches were verified X.509 signer-label false positives. Other
-  divergent-ref history is not fully qualified. Semgrep remains inconclusive
+  locked Rust dependencies. Gitleaks history coverage now includes all 654
+  commits reachable from local/remote-tracking refs; its three matches were
+  verified X.509 signer-label false positives, with no confirmed secrets.
+  Deployment configuration still needs review. Semgrep remains inconclusive
   because its ruleset fetch failed TLS verification.
 
 ### Open production-readiness gates
@@ -67,8 +68,8 @@ timestamped r120 evidence below for details and exact checks.
 - Qualify an exact migration of the live schema-6 production index. The
   synthetic 1.3M-file/27.3M-growth-row migration passed, but a concurrent-write
   live backup did not make progress and was stopped safely.
-- Finish security review of non-current Git refs and deployment configuration;
-  resolve the Semgrep ruleset access gap; review binary/runtime privileges.
+- Finish security review of deployment configuration; resolve the Semgrep
+  ruleset access gap; review binary/runtime privileges.
 - Complete OOM, mount/capability, disk-full recovery, WAL endurance, other
   filesystem/kernel, 10M scale, rollback, and multi-day soak profiles.
 - Coverage is not 100%; branch coverage is not measured. No evidence supports

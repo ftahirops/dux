@@ -51,7 +51,7 @@ not a full application or deployment security review. The JSON evidence is
 [`cargo-audit-rerun-1126z.json`](live/security-current-20261109/cargo-audit-rerun-1126z.json),
 SHA256 `3f573b4c14fff8212bd90383bad8da38ab5e5113a913bd9bdfbc733e2678d01e`.
 
-## Current-branch Git history secret scan — 2026-11-09 11:28 UTC
+## Initial current-branch history scan — 2026-11-09 11:28 UTC (superseded)
 
 Gitleaks scanned **641 commits** (16.86 MB) reachable from the checked-out
 branch. It reported three `generic-api-key` matches, all in commit
@@ -62,11 +62,36 @@ scan; they are X.509 certificate metadata, not credentials. The retained JSON
 report redacts the matched values. SHA256:
 `2be325a99d85e266511994c5ef6bb66ed953be2f1af74cbfd7c25af4e1ceca5f`.
 
-The repository is not shallow, but it has **646 commits reachable across all
-local/remote refs**; the history scan reports 641 for the current branch.
-Attempts to widen Gitleaks with `--all` did not increase its reported commit
-count, so do not treat those attempts as proof that every divergent ref was
-scanned. Non-current-ref history remains an explicit security coverage gap.
+This first history run predates several subsequent commits and did not cover
+all reachable refs. The complete ref scan below supersedes its scope.
+
+## Complete reachable Git history scan — 2026-11-09 12:37 UTC
+
+The refreshed current-branch scan covered **649 non-merge commits** (17.27 MB).
+It found the same three `generic-api-key` matches in the Rocky Linux
+qualification log, already verified as X.509 signer-label metadata rather than
+credentials. The checkout is not shallow; `git rev-list --all` found 654
+reachable commits, four of which are not reachable from the checked-out HEAD.
+I separately scanned the first-parent diff of the one merge commit on HEAD and
+the diffs for all four non-current-ref commits (including the non-current
+merge). All five diffs had **zero findings**. Together, these scans cover all
+654 commits reachable from local and remote-tracking refs; no confirmed secret
+was found. Gitleaks redacted all matched values in the retained reports.
+
+Evidence reports:
+
+- Current-branch history:
+  [`gitleaks-current-branch-history-20261109T1237Z.json`](live/security-current-20261109/gitleaks-current-branch-history-20261109T1237Z.json),
+  SHA256 `2be325a99d85e266511994c5ef6bb66ed953be2f1af74cbfd7c25af4e1ceca5f`.
+- Merge and four ref-divergent commit diffs are in
+  [`live/security-current-20261109/`](live/security-current-20261109/); each
+  report contains zero findings and SHA256
+  `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`.
+
+This closes Git-history coverage for reachable refs. It does not qualify
+untracked or ignored local files, the full deployment configuration, runtime
+attack surface, or application security correctness; Semgrep remains
+inconclusive because its ruleset fetch failed TLS verification.
 
 ## Evidence
 
