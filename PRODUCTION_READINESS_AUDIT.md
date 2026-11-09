@@ -21363,3 +21363,71 @@ At **19:46 UTC**, host pressure had eased (load1 **3.27**, I/O PSI some avg10 **
   controlled comparison. No production binary, database, or service changed.
 - VPS2 soak is still active with **0** restarts after **10 h 27 min**, **20 GiB**
   free disk, and **2.7 GiB** available memory. No candidate was installed.
+
+### Current production-readiness checkpoint — 2026-11-09 20:13 UTC
+
+This checkpoint records current read-only host evidence and supersedes prior
+operational counts below where they conflict. The immutable r123 source/package
+manifest is not changed by this audit append.
+
+#### Production VPS1 (read-only)
+
+- At 20:12:58 UTC, the installed `dux.service` was active under PID **1073891**
+  with **4** systemd restarts. It remains the legacy 0.6.3 executable; no
+  production service, database, or configuration was changed.
+- The index remains dirty with reason **fanotify queue overflow**. Its last full
+  scan was **372,216 seconds old** (about **4.31 days**), with **649** kernel
+  overflow notifications, **2,518,862** dropped updates, and **18** pending
+  updates. The index database is **3,269,582,848 bytes**; `index_nodes` was
+  1,319,822. A low pending count does not repair lost coverage.
+
+#### VPS2 r121 canary (read-only)
+
+- At 20:13:01 UTC, the active five-minute monitor had written **74 passing
+  samples, 0 failed**, starting at 14:07:48 UTC. The latest sample had no
+  errors and a completed-scan age of **515 seconds** against the 1,200-second
+  threshold. The 24-hour canary remains incomplete (about 6 hours elapsed).
+- The service was active under PID 2561224 with **0** restarts, overflows,
+  kernel/user drops, and pending updates. At the 20:13:40 status read the
+  completed-observation age was 554 seconds. Scan-first mode intentionally
+  reports a dirty interim state while changes await the next full observation;
+  use completed-observation age for freshness.
+- The observation completed at 20:04:26 after walking **1,587,197 files** and
+  **188,915 directories**, with **0 coverage issues**. Independent accounting
+  verification passed at 20:05:25 in **59.500 seconds**. Its indexed graph
+  included 1,772,630 nodes. These observations qualify r121 only; r123 has not
+  been installed on VPS2.
+
+#### Local storage and r123 lifecycle admission
+
+- At 20:13:43 UTC, `/` was 185 GiB total, 119 GiB used, and **58 GiB free**;
+  `/dev/shm` had **11 GiB free**. `target/readiness` used 2.7 GiB. Storage is
+  not currently preventing the package lifecycle test.
+- Guarded lifecycle driver PID **1928589** remained alive (about 36 minutes).
+  No QEMU VM was active and no r121→r123 package operation had started. At
+  20:13:43 the VM admission check found active Go compiler/test workloads; the
+  driver has had brief quiet windows, but Go work repeatedly resumed before
+  completing the required 120 continuous seconds. The VM runner's admission
+  and runtime pressure guards have not been bypassed. This is an external host
+  admission wait, not a package test failure.
+
+#### Latest test evidence and limits
+
+- The optimized all-features Rust source suite passed **332/332**, including
+  ignored tests, on 2026-11-09. It included loopback-ext4 stale-parent
+  integration and a 100,000-entry scale smoke. Strict all-target/all-feature
+  Clippy (including undocumented-unsafe lint), formatting, and diff checks
+  passed. LLVM coverage was **73.73% line, 72.67% region, 76.94% function**;
+  branch coverage is unavailable. `tui.rs` line coverage is 39.51%, `main.rs`
+  46.43%, and `containers.rs` 67.25%.
+- The package lifecycle harness unit suite passed **70/70**; separate recorded
+  Python monitor/harness and focused monitor/resource-guard suites passed
+  354/354, 38/38, and 21/21 respectively. These suites overlap in purpose and
+  must not be summed as unique tests. RustSec reported zero known advisories
+  for the audited lockfile; this is not a source-level security proof.
+- No test was newly run in this checkpoint. The exact r123 DEB lifecycle,
+  installed runtime, live schema migration/rollback, disk-full/OOM/filesystem
+  fault tests, 72-hour endurance, constrained-host p95/p99 performance, and
+  complete privilege/threat review remain open. Root plus `CAP_SYS_ADMIN`
+  remains a material privilege risk. Production readiness/sign-off is **not
+  met**.
