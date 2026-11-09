@@ -1,0 +1,7 @@
+{
+  "started_at": "2026-11-09T06:40:23Z",
+  "status": "failed",
+  "error": "RuntimeError: qualification workspace /dev/shm/dux-readiness-release118-final/workspaces has 2473582592 free bytes; need at least 2684354560 to isolate the loop image and database",
+  "workspace_parent": "/dev/shm/dux-readiness-release118-final/workspaces",
+  "harness_sha256": "d0f22f14fdd8eda50f40cadb14f0dccdf383fba51c159c9ca695a5e8fd5809f0"
+}

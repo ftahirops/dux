@@ -1,0 +1,62 @@
+{
+  "started_at": "2026-11-09T08:03:43Z",
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "seed": 20261022,
+  "binary": "/var/tmp/dux-readiness-release118-20261109/bin/dux-0.6.3-x86_64-linux-static",
+  "binary_sha256": "f69e20de7a844f27cccdc11eae886e1ac8164aee027dd9290544bc0f6c007ae5",
+  "fault_binary_sha256": "50d1a3d09bcdbca55fdde615fc264c54a06fda17eb3017a7ae43fef3f2ae5f68",
+  "crash_rounds": 30,
+  "filesystem": "ext4 disposable loop image",
+  "workspace_parent": "/dev/shm/dux-readiness-release118-retry/workspaces",
+  "workspace_device": 26,
+  "workspace_filesystem_type": "tmpfs",
+  "workspace_free_bytes_at_start": 3043942400,
+  "harness_sha256": "44a7e4d3c15b2e4c54445f3c09c86ece5b8b2edd6206528de083e1a0ddb9fe7a",
+  "seed_files": 256,
+  "filesystem_image_mib": 768,
+  "qualification_worker_limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "not_qualified_by_this_run": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "capability",
+    "churn",
+    "coverage",
+    "cpu",
+    "crash",
+    "disk",
+    "mount",
+    "oom",
+    "overflow",
+    "pressure",
+    "root",
+    "soak",
+    "startup",
+    "wal"
+  ],
+  "suites": {
+    "retry": {
+      "status": "failed",
+      "evidence": {},
+      "error": "AssertionError: timeout waiting for scan.install_committed: not ready"
+    }
+  },
+  "status": "failed",
+  "current_suite": null,
+  "last_checkpoint_at": "2026-11-09T08:04:44Z",
+  "current_suite_started_at": "2026-11-09T08:03:44Z",
+  "preserved_workspace": "/dev/shm/dux-readiness-release118-retry/reports/retry-failure-1644718",
+  "log_tail": "\u001b[2m2026-11-09T08:03:44.355531Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected startup index source \u001b[3mrebuilt\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mschema_version\u001b[0m\u001b[2m=\u001b[0m7 \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-09T08:03:44.355658Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m resuming a pre-existing index this daemon didn't build \u2014 marking dirty; automatic background reconciliation will start\n\u001b[2m2026-11-09T08:03:44.357119Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify queue-pressure CPU throttle thresholds \u001b[3mmax_queued_events\u001b[0m\u001b[2m=\u001b[0m16384 \u001b[3mqueue_high_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m294912 \u001b[3mqueue_low_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m196608 \u001b[3mreconcile_first\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-09T08:03:44.357535Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m dux daemon watching /dev/shm/dux-readiness-release118-retry/workspaces/dux-readiness-dp02qjdm/filesystem/tree (1 filesystem(s), FID mode: create/delete/rename/modify, flush 100ms)\n\u001b[2m2026-11-09T08:03:44.357542Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m experimental reconciliation-first mode: fanotify events are hints only; complete full-root observations merge in place after the initial baseline \u001b[3mscan_interval_seconds\u001b[0m\u001b[2m=\u001b[0m900 \u001b[3min_place_full_root_reconciliation\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-09T08:03:44.357821Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-09T08:03:44.357826Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-readiness-release118-retry/workspaces/dux-readiness-dp02qjdm/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-09T08:03:44.617170Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 259 files, 9 dirs, 268 staged path instances (0 directory alias paths), visible 1093632 bytes/268 entries, unique 1089536 bytes/267 inodes, 1.04 MiB (0 coverage issues); replaying 0 pending paths \u001b[3mvanished_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mrevalidated_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3munresolved_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-11-09T08:03:44.636560Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m reconciliation accounting verification passed \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m15\n\u001b[2m2026-11-09T08:03:54.396882Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m57 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-09T08:04:04.419016Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m153 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-09T08:04:14.816389Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m266 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-09T08:04:24.964893Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m384 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-09T08:04:35.114255Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m477 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-09T08:04:44.456773Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m dux daemon: received SIGTERM/SIGINT \u2014 drained + flushed, exiting\n",
+  "error": "AssertionError: timeout waiting for scan.install_committed: not ready",
+  "finished_at": "2026-11-09T08:04:44Z"
+}

@@ -47,6 +47,75 @@ class ReadinessHarnessTests(unittest.TestCase):
              "scan.install_committed"],
         )
 
+    def test_retry_fault_boundary_matches_active_scan_implementation(self):
+        self.assertEqual(
+            READINESS.reconciliation_retry_fault_stage(scan_first=True),
+            "scan.in_place_after_commit",
+        )
+        self.assertEqual(
+            READINESS.reconciliation_retry_fault_stage(scan_first=False),
+            "scan.install_committed",
+        )
+
+    def test_retry_recovery_waits_for_accounting_verifier_to_clear_retry_state(self):
+        verified = {
+            "scan_generation": "new-generation",
+            "last_reconcile_attempt_result": "complete",
+        }
+        self.assertTrue(READINESS.scan_first_retry_recovery_ready(
+            verified, "old-generation", False,
+        ))
+        self.assertFalse(READINESS.scan_first_retry_recovery_ready(
+            {**verified, "failed_reconciliation_attempts": "1"},
+            "old-generation", False,
+        ))
+        self.assertFalse(READINESS.scan_first_retry_recovery_ready(
+            {**verified, "reconciliation_retry_after_unix": "123"},
+            "old-generation", False,
+        ))
+        self.assertFalse(READINESS.scan_first_retry_recovery_ready(
+            verified, "old-generation", True,
+        ))
+
+    def test_retry_suite_has_a_scan_first_persisted_backoff_path(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "reconciliation_retry_test"
+        )
+        source = ast.unparse(function)
+        self.assertIn("if scan_first", source)
+        self.assertIn("scan_first_reconciliation_retry_test", source)
+
+    def test_crash_recovery_artifact_probe_only_matches_generated_scan_stage_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "dux.db"
+            (root / "dux.db.scan-123-456.tmp").write_bytes(b"stale stage")
+            (root / "dux.db.scan-123-456.tmp-wal").write_bytes(b"stale WAL")
+            (root / "dux.db.scan-not-a-stage.tmp").write_bytes(b"user file")
+            (root / "dux.db.scan-123-456.tmp-journal").symlink_to(
+                root / "dux.db.scan-not-a-stage.tmp"
+            )
+            self.assertEqual(
+                READINESS.scan_stage_artifacts(db),
+                ["dux.db.scan-123-456.tmp", "dux.db.scan-123-456.tmp-wal"],
+            )
+
+    def test_database_fingerprint_covers_content_files_but_not_sqlite_shm_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "dux.db"
+            db.write_bytes(b"database")
+            Path(f"{db}-wal").write_bytes(b"committed WAL")
+            Path(f"{db}-shm").write_bytes(b"lock state")
+            before = READINESS.database_content_fingerprint(db)
+            self.assertEqual(set(before), {"", "-wal"})
+            Path(f"{db}-shm").write_bytes(b"different lock state")
+            self.assertEqual(READINESS.database_content_fingerprint(db), before)
+            Path(f"{db}-wal").write_bytes(b"changed committed WAL")
+            self.assertNotEqual(READINESS.database_content_fingerprint(db), before)
+
     def test_incomplete_root_coverage_does_not_pass_qualification(self):
         self.assertEqual(
             READINESS.suite_result_status("root", {"coverage_complete": False}),
@@ -56,6 +125,129 @@ class ReadinessHarnessTests(unittest.TestCase):
             READINESS.aggregate_result_status({"root": {"status": "incomplete"}}),
             "incomplete",
         )
+
+    def test_coverage_fixture_expects_fail_closed_scan_status(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "coverage_test"
+        )
+        source = ast.unparse(function)
+        self.assertIn("assert result.returncode != 0", source)
+        self.assertIn("'scan is incomplete' in result.stderr", source)
+
+    def test_scan_first_capability_case_validates_exactness_without_handle_lookup(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "capability_test"
+        )
+        source = ast.unparse(function)
+        self.assertIn("if scan_first", source)
+        self.assertIn("missing_handle_capability_scan_first_exactness", source)
+        self.assertIn("daemon.exact()", source)
+
+    def test_scan_first_observation_completion_uses_persisted_verified_result(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "request_scan_first_observation"
+        )
+        source = ast.unparse(function)
+        self.assertIn("scan_first_observation_is_complete", source)
+        self.assertIn("return meta", source)
+        self.assertIn("initial index baseline to be published", source)
+        self.assertNotIn("log_offset", source)
+
+    def test_scan_first_observation_waits_for_raced_followup_and_new_generation(self):
+        completed = {
+            "scan_generation": "new-generation",
+            "last_reconcile_attempt_id": "new-attempt",
+            "last_reconcile_attempt_result": "complete",
+        }
+        self.assertTrue(READINESS.scan_first_observation_is_complete(
+            completed, "old-generation", "old-attempt", False,
+        ))
+        self.assertFalse(READINESS.scan_first_observation_is_complete(
+            completed, "old-generation", "old-attempt", True,
+        ))
+        self.assertFalse(READINESS.scan_first_observation_is_complete(
+            completed, "new-generation", "old-attempt", False,
+        ))
+        self.assertFalse(READINESS.scan_first_observation_is_complete(
+            {**completed, "last_reconcile_attempt_result": "incomplete"},
+            "old-generation", "old-attempt", False,
+        ))
+
+    def test_managed_daemon_waits_for_mode_status_before_exactness_branch(self):
+        tree = ast.parse(HARNESS.read_text())
+        daemon = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "Daemon"
+        )
+        exact = next(
+            node for node in daemon.body
+            if isinstance(node, ast.FunctionDef) and node.name == "exact"
+        )
+        source = ast.unparse(exact)
+        self.assertIn("hasattr(self.process, 'unit')", source)
+        self.assertIn("'scan_first' in record", source)
+        self.assertIn("'mode-bearing watcher status'", source)
+        self.assertIn("'journalctl'", source)
+        self.assertIn("'initial scan-first index publication'", source)
+
+    def test_scan_first_exactness_accepts_a_newer_verified_observation(self):
+        tree = ast.parse(HARNESS.read_text())
+        daemon = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "Daemon"
+        )
+        exact = next(
+            node for node in daemon.body
+            if isinstance(node, ast.FunctionDef) and node.name == "exact"
+        )
+        source = ast.unparse(exact)
+        self.assertIn("check_index(self.case.db, self.case.tree)", source)
+        self.assertIn("last_reconcile_attempt_result", source)
+        self.assertNotIn("filesystem truth check did not inspect", source)
+
+    def test_scan_first_observation_can_repair_a_deliberately_corrupt_index(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "request_scan_first_observation"
+        )
+        source = ast.unparse(function)
+        self.assertIn("if validate_before_index", source)
+        self.assertIn("SELECT key,value FROM meta", source)
+        self.assertIn("before_meta = dict(conn.execute('SELECT key,value FROM meta'))", source)
+
+    def test_startup_evidence_distinguishes_scan_first_from_event_apply_repair(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "startup_test"
+        )
+        source = ast.unparse(function)
+        self.assertIn("scan_first_observation_repairs_inode_kind_mismatch", source)
+        self.assertIn("live_fanotify_file_to_directory_inode_repair", source)
+        self.assertIn("live_event_repair = not scan_first_repair", source)
+
+    def test_pressure_suite_has_scan_first_mode_specific_observation_gates(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "scan_first_pressure_reconciliation_test"
+        )
+        source = ast.unparse(function)
+        self.assertIn("scan.in_place_started", source)
+        self.assertIn("last_reconcile_attempt_result", source)
+        self.assertIn("validate_before_index=False", source)
+        self.assertIn("check_index(case.db, case.tree)", source)
+        self.assertNotIn("staging database", source)
 
     def test_path_mismatch_diagnostics_identify_wrong_and_extra_rows(self):
         import sqlite3
@@ -284,6 +476,75 @@ class ReadinessHarnessTests(unittest.TestCase):
             "pending": 0, "drained": False, "scan_first": False,
         }))
 
+    def test_scan_first_churn_allows_conservative_uncertainty_after_exact_scan(self):
+        self.assertTrue(READINESS.churn_status_is_valid({
+            "scan_first": True, "uncertain": True,
+        }))
+        self.assertTrue(READINESS.churn_status_is_valid({
+            "scan_first": True, "uncertain": False,
+        }))
+        self.assertTrue(READINESS.churn_status_is_valid({
+            "scan_first": False, "uncertain": False,
+        }))
+        self.assertFalse(READINESS.churn_status_is_valid({
+            "scan_first": False, "uncertain": True,
+        }))
+
+    def test_disk_pause_activity_uses_hint_counts_for_scan_first_mode(self):
+        before = {
+            "scan_first": True, "status_mtime_ns": 10, "seen": 100,
+            "kernel_overflow_notifications": 2,
+        }
+        self.assertTrue(READINESS.disk_pause_activity_observed(before, {
+            "scan_first": True, "status_mtime_ns": 11, "seen": 164,
+            "kernel_overflow_notifications": 2,
+        }))
+        self.assertFalse(READINESS.disk_pause_activity_observed(before, {
+            "scan_first": True, "status_mtime_ns": 11, "seen": 163,
+            "kernel_overflow_notifications": 2,
+        }))
+        self.assertFalse(READINESS.disk_pause_activity_observed(before, {
+            "scan_first": True, "status_mtime_ns": 11, "seen": 164,
+            "kernel_overflow_notifications": 3,
+        }))
+
+    def test_disk_pause_activity_keeps_event_apply_pending_counter(self):
+        before = {"scan_first": False}
+        self.assertTrue(READINESS.disk_pause_activity_observed(
+            before, {"pending": 1},
+        ))
+        self.assertFalse(READINESS.disk_pause_activity_observed(
+            before, {"pending": 0},
+        ))
+
+    def test_disk_pause_recovery_skips_only_the_expected_stale_precheck(self):
+        tree = ast.parse(HARNESS.read_text())
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "disk_tests"
+        )
+        source = ast.unparse(function)
+        self.assertLess(
+            source.index("filler.unlink()"),
+            source.index("daemon.exact(timeout=600, validate_before_index=False)"),
+        )
+        self.assertIn("post-pause exact observation passed", source)
+
+    def test_scan_first_cpu_gate_requires_fresh_hint_count_without_queue_semantics(self):
+        before = {"scan_first": True, "status_mtime_ns": 10, "seen": 100}
+        self.assertTrue(READINESS.scan_first_hint_count_reached(
+            before, {"scan_first": True, "status_mtime_ns": 11, "seen": 10100},
+        ))
+        self.assertFalse(READINESS.scan_first_hint_count_reached(
+            before, {"scan_first": True, "status_mtime_ns": 10, "seen": 10100},
+        ))
+        self.assertFalse(READINESS.scan_first_hint_count_reached(
+            before, {"scan_first": True, "status_mtime_ns": 11, "seen": 10099},
+        ))
+        self.assertFalse(READINESS.scan_first_hint_count_reached(
+            before, {"scan_first": False, "status_mtime_ns": 11, "seen": 10100},
+        ))
+
     def test_pressure_suite_requires_fault_binary_before_starting_worker(self):
         result = subprocess.run(
             [sys.executable, str(HARNESS), "--suites", "pressure"],
@@ -335,10 +596,15 @@ class ReadinessHarnessTests(unittest.TestCase):
         source = ast.unparse(function)
         self.assertIn("producer_seconds = time.monotonic() - producer_started", source)
         self.assertIn("event_window_seconds = time.monotonic() - event_window_started", source)
-        self.assertIn("cpu_fraction = (process_cpu_seconds(pid) - cpu_before) / event_window_seconds", source)
+        self.assertIn("cpu_fraction = (thread_cpu_seconds(pid, pid) - cpu_before) / event_window_seconds", source)
         self.assertIn("catch_up_seconds = time.monotonic() - catchup_started", source)
         self.assertIn("assert catch_up_seconds < 60", source)
         self.assertIn("event_production_seconds=round(producer_seconds, 3)", source)
+        cpu_reader = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "thread_cpu_seconds"
+        )
+        self.assertIn("/task/{tid}/schedstat", ast.unparse(cpu_reader))
         self.assertLess(source.index("producer_started = time.monotonic()"), source.index("for i in range(12000)"))
         self.assertLess(source.index("producer_seconds = time.monotonic() - producer_started"), source.index("event_window_started = time.monotonic()"))
         self.assertLess(source.index("event_window_started = time.monotonic()"), source.index("os.kill(pid, signal.SIGCONT)"))

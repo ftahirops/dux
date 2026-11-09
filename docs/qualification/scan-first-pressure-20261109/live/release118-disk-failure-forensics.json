@@ -1,0 +1,23 @@
+{
+  "candidate_sha256": "f69e20de7a844f27cccdc11eae886e1ac8164aee027dd9290544bc0f6c007ae5",
+  "harness_sha256": "2652ac8a08d3402225d5b1f3aa4b5df4f92e33e3583b13db64b5200559a3f7a1",
+  "original_error_site": "scripts/dux-readiness.py:1365: check_index(case.db, case.tree, immutable=True)",
+  "failure_report_sha256": "e812af6bafe3d771ea19154fa89600f9620c3fb06349152b4e286a8660e24c10",
+  "post_failure_preserved_database": {
+    "path_mismatch_count_against_saved_filesystem_truth": 0,
+    "inode_allocation_mismatch_count": 0,
+    "paused_path_rows_present": 64,
+    "truth_entries": 100075,
+    "truth_inodes": 100075,
+    "indexed_dirents": 100076,
+    "indexed_inodes": 100075,
+    "sqlite_integrity_check": "ok",
+    "index_db_sha256": "9fb2794558f0c23227b3a16050fc74f62aaf562b701022c7120f189d69cd4b88",
+    "filesystem_truth_sha256": "957b0a3bcc391d3460fd5ef773bed3d0aefbaba09df3edef7d00f1c765b35015",
+    "wal_bytes_after_snapshot": 0
+  },
+  "forensics_archive": "release118-disk-failure-forensics.tar.gz",
+  "forensics_archive_sha256": "92b166185b3d025e656d10af7b89bc143c5a94ea290734644b9c9c47d3a7cb6d",
+  "interpretation": "The saved post-failure SQLite backup matches the saved exact filesystem identity/allocation snapshot, including all 64 pause-time paths. The failing immutable-mode check is therefore not accepted as a product data-loss result; the read-only verification method requires correction and rerun.",
+  "qualification_status": "disk_suite_not_passed; rerun required"
+}

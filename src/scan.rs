@@ -505,9 +505,9 @@ impl Drop for ScanProgressCleanup {
     }
 }
 
-/// A SIGKILL/power loss cannot run StageGuard. The exclusive DB lock guarantees
-/// no other rebuild is active, so remove only staging files for this exact
-/// destination before starting the next atomic rebuild.
+/// A SIGKILL/power loss cannot run StageGuard. Callers must hold the exclusive
+/// per-database lock, so no other scan is active. Remove only generated staging
+/// files for this exact destination before starting the next scan.
 fn cleanup_stale_scan_files(db_new: &Path) -> Result<()> {
     let Some(parent) = db_new.parent() else {
         anyhow::bail!("staging database path has no parent directory");
@@ -591,8 +591,13 @@ pub fn scan(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanSt
 /// Reconcile a complete filesystem observation into an existing v7 index.
 /// Only rows whose values changed are written to the compatibility projection;
 /// path-instance IDs are reused by parent/name identity. An incomplete walk
-/// leaves the previous index rows untouched and records the failure.
-pub fn reconcile_in_place(store: &mut Store, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
+/// leaves the previous index rows untouched and records the failure. The caller
+/// must hold the exclusive per-database lock for this entire operation.
+pub(crate) fn reconcile_in_place(
+    store: &mut Store,
+    root: &Path,
+    opts: &ScanOptions,
+) -> Result<ScanStats> {
     anyhow::ensure!(
         store.schema_version == crate::store::SCHEMA_VERSION,
         "incremental reconciliation requires the current schema"
@@ -832,6 +837,13 @@ fn scan_inner(
     // the walker can exclude the live file, `.new`, WAL/SHM, lock and scan-stage
     // files as one family.
     let index_db = PathBuf::from(main_db.strip_suffix(".new").unwrap_or(&main_db));
+    // An in-place scan writes its observation to `<index>.scan-<pid>-<nonce>.tmp`.
+    // SIGKILL or power loss skips StageGuard::drop, so remove abandoned stages
+    // before starting another observation. The caller holds the exclusive
+    // database writer lock, which ensures these matching files are stale.
+    if incremental {
+        cleanup_stale_scan_files(&index_db)?;
+    }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -3869,6 +3881,39 @@ mod tests {
         drop(store);
         rm_db(&db);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn in_place_reconciliation_cleans_stages_left_by_a_crashed_scan() {
+        let db = tmp("reconcile-stale-stage-db");
+        let root = tmp("reconcile-stale-stage-root");
+        let opts = ScanOptions {
+            include_pseudo: true,
+            ..ScanOptions::default()
+        };
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("present"), b"indexed").unwrap();
+        rebuild_atomic(&db, &root, &opts).unwrap();
+
+        let stale = PathBuf::from(format!("{}.scan-123-456.tmp", db.display()));
+        let stale_wal = PathBuf::from(format!("{}.scan-123-456.tmp-wal", db.display()));
+        let unrelated = PathBuf::from(format!("{}.scan-not-a-stage.tmp", db.display()));
+        fs::write(&stale, b"interrupted staging database").unwrap();
+        fs::write(&stale_wal, b"interrupted staging WAL").unwrap();
+        fs::write(&unrelated, b"unrelated file").unwrap();
+
+        let mut store = Store::open_rw(&db).unwrap();
+        reconcile_in_place(&mut store, &root, &opts).unwrap();
+
+        assert!(!stale.exists(), "abandoned scan database must be removed");
+        assert!(!stale_wal.exists(), "abandoned scan WAL must be removed");
+        assert!(unrelated.exists(), "unrecognized files must be preserved");
+        drop(store);
+        rm_db(&db);
+        fs::remove_file(unrelated).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

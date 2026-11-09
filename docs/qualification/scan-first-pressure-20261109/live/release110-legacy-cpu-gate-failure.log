@@ -1,0 +1,63 @@
+Running as unit: dux-readiness-524285.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PROGRESS crash boundaries selected for scan-first mode: ['scan.in_place_started', 'scan.in_place_projection_ready', 'scan.in_place_before_commit', 'scan.in_place_after_commit']
+PASS crash 1/30: scan.in_place_started
+PASS crash 2/30: random timing
+PASS crash 3/30: scan.in_place_projection_ready
+PASS crash 4/30: random timing
+PASS crash 5/30: scan.in_place_before_commit
+PASS crash 6/30: random timing
+PASS crash 7/30: scan.in_place_after_commit
+PASS crash 8/30: random timing
+PASS crash 9/30: scan.in_place_started
+PASS crash 10/30: random timing
+PASS crash 11/30: scan.in_place_projection_ready
+PASS crash 12/30: random timing
+PASS crash 13/30: scan.in_place_before_commit
+PASS crash 14/30: random timing
+PASS crash 15/30: scan.in_place_after_commit
+PASS crash 16/30: random timing
+PASS crash 17/30: scan.in_place_started
+PASS crash 18/30: random timing
+PASS crash 19/30: scan.in_place_projection_ready
+PASS crash 20/30: random timing
+PASS crash 21/30: scan.in_place_before_commit
+PASS crash 22/30: random timing
+PASS crash 23/30: scan.in_place_after_commit
+PASS crash 24/30: random timing
+PASS crash 25/30: scan.in_place_started
+PASS crash 26/30: random timing
+PASS crash 27/30: scan.in_place_projection_ready
+PASS crash 28/30: random timing
+PASS crash 29/30: scan.in_place_before_commit
+PASS crash 30/30: random timing
+PROGRESS requesting and validating the scan-first baseline
+PROGRESS baseline ready: generation=527321-1794187048804086104 overflows=0 uncertain=True
+PROGRESS overflow storm created; waiting for kernel notification
+PROGRESS kernel overflow observed: count=1; requesting recovery observation
+PASS real queue overflow, visible uncertainty, exact observation recovery, and cleanup
+Evidence: /root/dux-readiness-6dacdf5/release110-readiness.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2616, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2571, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2396, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 951, in cpu_event_burst_test
+    daemon.wait_pipeline(timeout=60, after_status_mtime_ns=before["status_mtime_ns"])
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 355, in wait_pipeline
+    first_meta, first_status = self.wait(ready, "pipeline convergence", timeout)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 336, in wait
+    raise AssertionError(f"timeout waiting for {description}: {last}")
+AssertionError: timeout waiting for pipeline convergence: pipeline reports uncertain event state: {'updated_at': 1794187135, 'status_mtime_ns': 1794187135402000000, 'pending': 0, 'drained': True, 'seen': 12090, 'resolved': 0, 'committed': 0, 'dropped': 0, 'uncertain': True, 'kernel_overflow_notifications': 0, 'scan_first': True}
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 2min 8.329s
+CPU time consumed: 17.014s
+Memory peak: 173.1M
+Memory swap peak: 0B

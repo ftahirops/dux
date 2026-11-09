@@ -1,0 +1,31 @@
+Running as unit: dux-readiness-647874.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+Evidence: /root/dux-readiness-6dacdf5/release110-startup-recheck3.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2723, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2678, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2503, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2050, in startup_test
+    failure_daemon.exact(timeout=150)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 432, in exact
+    meta = request_scan_first_observation(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 277, in request_scan_first_observation
+    return daemon.wait(complete, "full scan-first observation and accounting verification", timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 348, in wait
+    assert self.process.poll() is None, f"daemon exited: {self.process.returncode}"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: daemon exited: 1
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 1.946s
+CPU time consumed: 430ms
+Memory peak: 2.1M
+Memory swap peak: 0B

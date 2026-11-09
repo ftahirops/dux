@@ -1,0 +1,50 @@
+{
+  "started_at": "2026-11-09T01:44:43Z",
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "seed": 20261022,
+  "binary": "/root/dux-readiness-6dacdf5/dux-0.6.3-x86_64-linux-static",
+  "binary_sha256": "1707a1024f7abbbe528ba18f4681f5d680dc684502b62e8e669d774144568e66",
+  "fault_binary_sha256": "c76975c21aafc117ef1ec5e733998092b566a6001c967235d06f28fc2158a29a",
+  "crash_rounds": 30,
+  "filesystem": "ext4 disposable loop image",
+  "workspace_parent": "/dev/shm",
+  "workspace_device": 26,
+  "workspace_filesystem_type": "tmpfs",
+  "workspace_free_bytes_at_start": 2189725696,
+  "harness_sha256": "a1245368908e4a73715a3975e4fae8e2f88f475f1187587326cdcea8f87e2279",
+  "seed_files": 256,
+  "filesystem_image_mib": 768,
+  "qualification_worker_limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "not_qualified_by_this_run": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "capability",
+    "churn",
+    "coverage",
+    "cpu",
+    "crash",
+    "disk",
+    "overflow"
+  ],
+  "suites": {
+    "oom": {
+      "status": "running",
+      "evidence": {}
+    }
+  },
+  "status": "running",
+  "current_suite": "oom",
+  "last_checkpoint_at": "2026-11-09T01:44:43Z",
+  "current_suite_started_at": "2026-11-09T01:44:43Z"
+}

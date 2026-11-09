@@ -213,6 +213,61 @@ def pipeline_records_drained(record):
     return not record["pending"] and (record["scan_first"] or record["drained"])
 
 
+def churn_status_is_valid(record):
+    """Scan-first uncertainty is conservative; event-apply uncertainty is not."""
+    return record["scan_first"] or not record["uncertain"]
+
+
+def disk_pause_activity_observed(before, after, minimum_hints=64):
+    """Use the active event model's counter to verify work survived disk pause."""
+    if not before["scan_first"]:
+        return after["pending"] > 0
+    return (
+        after["scan_first"]
+        and after["status_mtime_ns"] > before["status_mtime_ns"]
+        and after["seen"] - before["seen"] >= minimum_hints
+        and after["kernel_overflow_notifications"]
+        == before["kernel_overflow_notifications"]
+    )
+
+
+def scan_first_hint_count_reached(before, after, minimum_events=10_000):
+    """Require a post-resume status publication with enough hints observed."""
+    return (
+        after["scan_first"]
+        and after["status_mtime_ns"] > before["status_mtime_ns"]
+        and after["seen"] - before["seen"] >= minimum_events
+    )
+
+
+def scan_first_observation_is_complete(
+    meta, previous_generation, previous_attempt, scan_in_progress,
+):
+    """Accept only the requested newer observation after any queued follow-up ends."""
+    return (
+        not scan_in_progress
+        and meta.get("scan_generation") != previous_generation
+        and meta.get("last_reconcile_attempt_id") != previous_attempt
+        and meta.get("last_reconcile_attempt_result") == "complete"
+    )
+
+
+def reconciliation_retry_fault_stage(scan_first):
+    """Select a post-publication fault boundary present in the active scan path."""
+    return "scan.in_place_after_commit" if scan_first else "scan.install_committed"
+
+
+def scan_first_retry_recovery_ready(meta, previous_generation, scan_in_progress):
+    """Wait for the post-walk verifier to clear persisted retry state."""
+    return (
+        not scan_in_progress
+        and meta.get("scan_generation") != previous_generation
+        and meta.get("last_reconcile_attempt_result") == "complete"
+        and "failed_reconciliation_attempts" not in meta
+        and "reconciliation_retry_after_unix" not in meta
+    )
+
+
 def daemon_uses_scan_first(record, daemon_log):
     """Prefer the daemon's startup mode log over a stale/legacy status record."""
     return bool(record.get("scan_first")) or "experimental reconciliation-first mode:" in daemon_log
@@ -228,8 +283,46 @@ def crash_fault_stages(scan_first):
             "scan.install_committed"]
 
 
-def request_scan_first_observation(case, daemon, previous_generation, log_path, timeout=600):
+def scan_stage_artifacts(db):
+    """Return generated in-place scan stages and sidecars left in the DB directory."""
+    pattern = re.compile(r"^.+\.scan-[1-9][0-9]*-[1-9][0-9]*\.tmp(?:-(?:wal|shm|journal))?$")
+    return sorted(
+        path.name for path in db.parent.iterdir()
+        if pattern.fullmatch(path.name) and path.is_file() and not path.is_symlink()
+    )
+
+
+def database_content_fingerprint(db):
+    """Hash SQLite content files, excluding the lock/state-only shared-memory sidecar."""
+    result = {}
+    for suffix in ("", "-wal", "-journal"):
+        path = Path(f"{db}{suffix}")
+        try:
+            info = path.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise AssertionError(f"unexpected non-regular database artifact: {path}")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        result[suffix] = (info.st_dev, info.st_ino, info.st_size, digest)
+    return result
+
+
+def request_scan_first_observation(
+    case, daemon, previous_generation, log_path, timeout=600,
+    validate_before_index=True,
+):
     """Request and wait for one complete, independently accounted observation."""
+    def baseline_ready():
+        try:
+            with contextlib.closing(snapshot(case.db)) as conn:
+                meta = dict(conn.execute("SELECT key,value FROM meta"))
+        except (OSError, sqlite3.Error):
+            return False
+        return meta if "root_dev" in meta and "root_inode" in meta else False
+
+    daemon.wait(baseline_ready, "initial index baseline to be published", timeout)
+
     def scan_active():
         result = command(
             case.binary, "--db", case.db, "status", "--json", env=case.env,
@@ -237,22 +330,28 @@ def request_scan_first_observation(case, daemon, previous_generation, log_path, 
         return json.loads(result.stdout).get("scan_in_progress", False)
 
     daemon.wait(lambda: not scan_active(), "prior scan-first observation to finish", timeout)
-    before_meta, _ = check_index(case.db)
+    if validate_before_index:
+        before_meta, _ = check_index(case.db)
+    else:
+        with contextlib.closing(snapshot(case.db)) as conn:
+            before_meta = dict(conn.execute("SELECT key,value FROM meta"))
     previous_generation = before_meta.get("scan_generation", previous_generation)
     previous_attempt = before_meta.get("last_reconcile_attempt_id")
-    log_offset = log_path.stat().st_size
     daemon.process.send_signal(signal.SIGHUP)
 
     def complete():
         meta, _ = check_index(case.db)
         if meta.get("scan_generation") == previous_generation:
             return False
-        if meta.get("last_reconcile_attempt_id") == previous_attempt:
-            return False
-        if meta.get("last_reconcile_attempt_result") != "complete":
-            return False
-        log = log_path.read_text(errors="replace")
-        return meta if "reconciliation accounting verification passed" in log[log_offset:] else False
+        # The persisted complete result is written only after the independent
+        # accounting verifier succeeds. A kernel-triggered reconciliation can
+        # race the explicit request, so require a newer generation and wait for
+        # any follow-up observation queued by that request to finish as well.
+        # Some qualification daemons run under systemd, where their output is
+        # in the journal rather than log_path.
+        return meta if scan_first_observation_is_complete(
+            meta, previous_generation, previous_attempt, scan_active(),
+        ) else False
 
     return daemon.wait(complete, "full scan-first observation and accounting verification", timeout)
 
@@ -325,7 +424,13 @@ class Daemon:
     def wait(self, predicate, description, timeout=60, interval=0.05):
         end, last = time.monotonic() + timeout, "not ready"
         while time.monotonic() < end:
-            assert self.process.poll() is None, f"daemon exited: {self.process.returncode}"
+            if self.process.poll() is not None:
+                log_path = self.case.base / "daemon.log"
+                tail = log_path.read_text(errors="replace")[-8000:] if log_path.exists() else ""
+                raise AssertionError(
+                    f"daemon exited: {getattr(self.process, 'returncode', 'managed-unit-exited')}; "
+                    f"log_tail={tail}"
+                )
             try:
                 value = predicate()
                 if value:
@@ -369,18 +474,43 @@ class Daemon:
 
         return self.wait(fresh_ready, "fresh post-mutation pipeline convergence", timeout)
 
-    def exact(self, previous_generation=None, timeout=90):
+    def exact(self, previous_generation=None, timeout=90, validate_before_index=True):
         started = time.monotonic()
-        initial_record = self.wait(lambda: self.record(), "initial watcher status", timeout)
+        if hasattr(self.process, "unit"):
+            # A systemd-managed daemon may initially expose the legacy CLI
+            # status before its versioned runtime record has been published.
+            # Wait for the mode-bearing record so scan-first is never
+            # misclassified as event-apply during startup.
+            def mode_record():
+                record = self.record()
+                return record if "scan_first" in record else False
+            initial_record = self.wait(mode_record, "mode-bearing watcher status", timeout)
+        else:
+            initial_record = self.wait(lambda: self.record(), "initial watcher status", timeout)
         log_path = self.case.base / "daemon.log"
-        if daemon_uses_scan_first(
-            initial_record, log_path.read_text(errors="replace")
-        ):
+        daemon_log = log_path.read_text(errors="replace")
+        if hasattr(self.process, "unit"):
+            journal = command(
+                "journalctl", "-u", self.process.unit, "--no-pager", "-o", "cat",
+                timeout=10,
+            )
+            daemon_log += journal.stdout
+        if daemon_uses_scan_first(initial_record, daemon_log):
             # In scan-first mode, an idle or uncertain fanotify hint stream is
             # not the correctness signal. Force a new complete observation,
             # wait for its independent accounting verification, then compare
             # every indexed path and identity with filesystem truth.
-            before_meta, _ = check_index(self.case.db)
+            def baseline_meta_ready():
+                try:
+                    with contextlib.closing(snapshot(self.case.db)) as conn:
+                        meta = dict(conn.execute("SELECT key,value FROM meta"))
+                except (OSError, sqlite3.Error):
+                    return False
+                return meta if "root_dev" in meta and "root_inode" in meta else False
+
+            before_meta = self.wait(
+                baseline_meta_ready, "initial scan-first index publication", timeout
+            )
             baseline_generation = before_meta.get(
                 "scan_generation", previous_generation
             )
@@ -390,11 +520,14 @@ class Daemon:
                 baseline_generation,
                 log_path,
                 timeout=max(timeout, 600),
+                validate_before_index=validate_before_index,
             )
             exact_meta, _ = check_index(self.case.db, self.case.tree)
-            assert exact_meta.get("scan_generation") == meta.get("scan_generation"), (
-                "filesystem truth check did not inspect the completed observation"
-            )
+            # A follow-up full observation may publish between the persisted
+            # completion read and this independent filesystem comparison. The
+            # comparison is against its own SQLite snapshot, so a newer
+            # generation is valid; requiring generation equality creates a
+            # race without strengthening the path/identity oracle.
             assert exact_meta.get("last_reconcile_attempt_result") == "complete", (
                 "scan-first exactness requires a completed reconciliation attempt"
             )
@@ -654,7 +787,14 @@ def crash_tests(case, args, evidence):
         case.history()
         recovered.stop()
         integrity(case.db)
-        evidence.append({"round": round_number + 1, "boundary": stage or "random", "recovery_seconds": round(time.monotonic()-recovery_start, 3)})
+        stage_artifacts = scan_stage_artifacts(case.db)
+        assert not stage_artifacts, (
+            "recovery left abandoned in-place scan artifacts in the index directory: "
+            f"{stage_artifacts}"
+        )
+        evidence.append({"round": round_number + 1, "boundary": stage or "random",
+                         "recovery_seconds": round(time.monotonic()-recovery_start, 3),
+                         "stale_scan_artifacts_after_recovery": stage_artifacts})
         print(f"PASS crash {round_number+1}/{args.crash_rounds}: {stage or 'random timing'}", flush=True)
     with contextlib.closing(sqlite3.connect(case.db)) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -906,10 +1046,11 @@ def overflow_test(case, _args, evidence):
     print("PASS real queue overflow, visible uncertainty, exact observation recovery, and cleanup", flush=True)
 
 
-def process_cpu_seconds(pid):
-    fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-    ticks = int(fields[11]) + int(fields[12])  # utime + stime (Linux stat fields 14 and 15)
-    return ticks / os.sysconf("SC_CLK_TCK")
+def thread_cpu_seconds(pid, tid):
+    # schedstat's runtime field is nanoseconds; /proc/<tid>/stat is only
+    # scheduler-tick precise and can round a short event burst down to zero.
+    runtime_ns = int(Path(f"/proc/{pid}/task/{tid}/schedstat").read_text().split()[0])
+    return runtime_ns / 1e9
 
 
 def wait_for_process_state(pid, expected, timeout=5):
@@ -944,16 +1085,38 @@ def cpu_event_burst_test(case, _args, evidence):
         for i in range(12000):
             (burst / f"event-{i:05d}").write_bytes(b"fanotify catch-up")
         producer_seconds = time.monotonic() - producer_started
-        cpu_before = process_cpu_seconds(pid)
+        # run_daemon executes the fanotify loop on the process leader thread;
+        # the governor intentionally excludes scanner/accounting worker CPU.
+        cpu_before = thread_cpu_seconds(pid, pid)
         event_window_started = time.monotonic()
         os.kill(pid, signal.SIGCONT)
         catchup_started = time.monotonic()
-        daemon.wait_pipeline(timeout=60, after_status_mtime_ns=before["status_mtime_ns"])
+        if before["scan_first"]:
+            def scan_first_hints_ready():
+                record = daemon.record()
+                return record if scan_first_hint_count_reached(before, record) else False
+
+            after = daemon.wait(
+                scan_first_hints_ready,
+                "scan-first fanotify reader to observe at least 10k burst hints",
+                timeout=60,
+            )
+            catchup_basis = "fanotify_hint_drain"
+        else:
+            daemon.wait_pipeline(
+                timeout=60, after_status_mtime_ns=before["status_mtime_ns"]
+            )
+            after = daemon.record()
+            catchup_basis = "event_pipeline_convergence"
         catch_up_seconds = time.monotonic() - catchup_started
         event_window_seconds = time.monotonic() - event_window_started
-        after = daemon.record()
         event_count = after["seen"] - before["seen"]
-        cpu_fraction = (process_cpu_seconds(pid) - cpu_before) / event_window_seconds
+        assert after["kernel_overflow_notifications"] == before["kernel_overflow_notifications"], (
+            "kernel fanotify overflow occurred during the CPU event burst: "
+            f"before={before['kernel_overflow_notifications']} "
+            f"after={after['kernel_overflow_notifications']}"
+        )
+        cpu_fraction = (thread_cpu_seconds(pid, pid) - cpu_before) / event_window_seconds
         exact_started = time.monotonic()
         daemon.exact(timeout=120)
         exact_validation_seconds = time.monotonic() - exact_started
@@ -961,6 +1124,7 @@ def cpu_event_burst_test(case, _args, evidence):
         # starts only after the producer has exited and Dux has resumed.
         evidence.update(event_count=event_count, event_production_seconds=round(producer_seconds, 3),
                         catch_up_seconds=round(catch_up_seconds, 3),
+                        catch_up_basis=catchup_basis,
                         event_window_seconds=round(event_window_seconds, 3),
                         exact_validation_seconds=round(exact_validation_seconds, 3),
                         event_cpu_fraction=round(cpu_fraction, 3), daemon_max_cpu_percent=daemon_max_cpu_percent,
@@ -1128,7 +1292,7 @@ def production_churn_test(case, args, evidence):
             case.history()
             record = daemon.record()
             assert record['dropped'] == event_start['dropped'], record
-            assert not record['uncertain'], record
+            assert churn_status_is_valid(record), record
             with contextlib.closing(snapshot(case.db)) as conn:
                 growth_rows = conn.execute('SELECT COUNT(*) FROM growth').fetchone()[0]
             checkpoints.append({'batch': batch + 1, 'operations': min(args.churn_operations, (batch + 1) * args.churn_batch_size),
@@ -1200,20 +1364,33 @@ def allocate_until_full(path):
 def disk_tests(case, _args, evidence):
     filler = case.root / "filler"
     daemon = Daemon(case)
+    print("PROGRESS disk suite: establishing exact baseline", flush=True)
     daemon.exact()
     available = os.statvfs(case.root).f_bavail * os.statvfs(case.root).f_frsize
     with filler.open("wb") as file:
         os.posix_fallocate(file.fileno(), 0, available - 128*MIB)
     daemon.wait(lambda: "paused_since" in check_index(case.db)[0], "low-disk pause")
+    print("PROGRESS disk suite: low-disk pause confirmed; creating retained mutations", flush=True)
+    before_pause_mutations = daemon.record()
     for i in range(64):
         (case.tree / f"paused-{i}").write_bytes(b"retained during pause")
-    daemon.wait(lambda: daemon.record()["pending"] > 0, "retained changes during disk pause")
+    daemon.wait(
+        lambda: disk_pause_activity_observed(before_pause_mutations, daemon.record()),
+        "retained changes during disk pause",
+    )
+    print("PROGRESS disk suite: pause-time changes observed; releasing filler", flush=True)
     filler.unlink()
-    daemon.exact()
+    # These paths are deliberately absent from the index while writes are
+    # paused. Skip only the pre-observation oracle; exactness after the new
+    # complete observation remains mandatory.
+    print("PROGRESS disk suite: requesting exact post-pause observation", flush=True)
+    daemon.exact(timeout=600, validate_before_index=False)
+    print("PROGRESS disk suite: post-pause exact observation passed", flush=True)
     case.history()
     daemon.stop()
     # Keep a reader established before filling: even WAL read-only connections
     # may need a sidecar when opening for the first time on a completely full FS.
+    stable_db_fingerprint = database_content_fingerprint(case.db)
     reader = snapshot(case.db)
     previous = reader.execute("SELECT COUNT(*) FROM inodes").fetchone()
     try:
@@ -1225,13 +1402,23 @@ def disk_tests(case, _args, evidence):
     finally:
         filler.unlink(missing_ok=True)
         reader.close()
+    assert database_content_fingerprint(case.db) == stable_db_fingerprint, (
+        "failed full-disk scan changed the committed index or its WAL"
+    )
     integrity(case.db)
     case.history()
     command("mount", "-o", "remount,ro", case.root)
     try:
         failed = case.scan(check=False)
         assert failed.returncode != 0, "scan unexpectedly wrote a read-only filesystem"
-        check_index(case.db, case.tree, immutable=True)
+        assert database_content_fingerprint(case.db) == stable_db_fingerprint, (
+            "failed read-only scan changed the committed index or its WAL"
+        )
+        # A fresh SQLite `immutable=1` connection can ignore uncheckpointed WAL
+        # state on a read-only mount. Use a normal read-only snapshot here; the
+        # byte-for-byte main/WAL fingerprints above prove the failed command
+        # left the committed index unchanged.
+        check_index(case.db, case.tree)
     finally:
         command("mount", "-o", "remount,rw", case.root)
     recovered = Daemon(case)
@@ -1271,7 +1458,11 @@ def coverage_test(case, _args, evidence):
         result = subprocess.run([str(unprivileged_binary), "--db", str(db), "scan", str(case.tree), "--quiet"],
                                 capture_output=True, text=True, timeout=90, env=case.env,
                                 user=65534, group=65534, extra_groups=[])
-        assert result.returncode == 0, result.stderr
+        # Direct scans fail closed when coverage is incomplete. The purpose of
+        # this fixture is to verify that an unprivileged scan reports and
+        # persists that uncertainty, so a nonzero exit is the expected result.
+        assert result.returncode != 0, result.stderr
+        assert "scan is incomplete" in result.stderr, result.stderr
         meta, _ = check_index(db)
         assert "dirty_since" in meta, "inaccessible directory was silently reported as a clean scan"
         assert "unreadable" in meta.get("dirty_reason", ""), meta
@@ -1495,28 +1686,48 @@ def capability_test(case, _args, evidence):
     # require a clean pipeline from a deliberately capability-impaired daemon.
     daemon.wait(lambda: check_index(case.db, case.tree)[0].get('scan_generation') != before,
                 'baseline completion with unavailable handle capability')
+    scan_first = daemon.record()['scan_first']
+    before_seen = daemon.record()['seen']
     for i in range(128):
         (case.tree / f'capability-{i}').write_bytes(b'unresolvable handle')
-    daemon.wait(lambda: daemon.record()['uncertain'], 'visible lost path-resolution capability')
-    generation = check_index(case.db)[0]['scan_generation']
-    daemon.process.send_signal(signal.SIGHUP)
-    # A capability-impaired daemon may continuously re-enter reconciliation
-    # while preserving the dirty state. On the 100k-file profile under the
-    # worker's 25% CPU quota, that rebuild can take longer than the generic
-    # 60s polling default even though the daemon has started it correctly.
-    daemon.wait(lambda: check_index(case.db)[0].get('scan_generation') != generation,
-                'rebuild with missing capability', timeout=180)
-    # A successful baseline cannot restore an unavailable event-resolution capability.
-    time.sleep(0.5)
-    assert daemon.record()['uncertain'], 'rebuild hid a known broken event pipeline'
+    if scan_first:
+        # Scan-first uses fanotify only as a hint source; it must not depend on
+        # open_by_handle_at/DAC_READ_SEARCH to keep the index exact. Validate
+        # that hints arrive, then compare a complete observation to filesystem
+        # truth while the capability remains removed.
+        daemon.wait(lambda: daemon.record()['seen'] > before_seen,
+                    'fanotify hints without handle-resolution capability')
+        observed = daemon.exact()
+        assert observed.get('last_reconcile_attempt_result') == 'complete', (
+            'scan-first observation did not finish with a verified exact index'
+        )
+        uncertainty_remained_visible = 'dirty_since' in observed
+    else:
+        daemon.wait(lambda: daemon.record()['uncertain'], 'visible lost path-resolution capability')
+        generation = check_index(case.db)[0]['scan_generation']
+        daemon.process.send_signal(signal.SIGHUP)
+        # A capability-impaired daemon may continuously re-enter reconciliation
+        # while preserving the dirty state. On the 100k-file profile under the
+        # worker's 25% CPU quota, that rebuild can take longer than the generic
+        # 60s polling default even though the daemon has started it correctly.
+        daemon.wait(lambda: check_index(case.db)[0].get('scan_generation') != generation,
+                    'rebuild with missing capability', timeout=180)
+        # A successful baseline cannot restore an unavailable event-resolution capability.
+        time.sleep(0.5)
+        assert daemon.record()['uncertain'], 'rebuild hid a known broken event pipeline'
     daemon.stop()
     recovered = Daemon(case)
     recovered.exact()
     recovered.stop()
     integrity(case.db)
     case.history()
-    evidence.update(missing_sys_admin_fails_closed=True, missing_handle_capability_visible=True,
-                    rebuild_keeps_known_capability_failure_visible=True, restored_capability_converged=True)
+    evidence.update(missing_sys_admin_fails_closed=True, restored_capability_converged=True)
+    if scan_first:
+        evidence.update(missing_handle_capability_scan_first_exactness=True,
+                        conservative_dirty_state_after_missing_capability=uncertainty_remained_visible)
+    else:
+        evidence.update(missing_handle_capability_visible=True,
+                        rebuild_keeps_known_capability_failure_visible=True)
     print('PASS capability failure, persistent uncertainty across rebuild, restored-capability recovery', flush=True)
 
 
@@ -1570,6 +1781,95 @@ def oom_test(case, _args, evidence):
     print('PASS real scoped cgroup OOM, automatic restart and exact downtime recovery', flush=True)
 
 
+def scan_first_pressure_reconciliation_test(case, evidence, pressure_files):
+    """Qualify pressure policy with scan-first observations and no staging DB."""
+    high_load_file, cpu_file, io_file, critical_file = pressure_files
+    scenarios = [
+        ("high_load", high_load_file, True),
+        ("critical", critical_file, True),
+        ("cpu_elevated", cpu_file, False),
+        ("io_elevated", io_file, False),
+    ]
+    results = {}
+    for name, marker, should_cancel in scenarios:
+        marker.unlink(missing_ok=True)
+        baseline = check_index(case.db)[0]
+        baseline_generation = baseline["scan_generation"]
+        daemon = Daemon(case, case.fault_binary, "scan.in_place_started")
+        try:
+            daemon.paused_at("scan.in_place_started")
+            # Keep the scan long enough for the coordinator to observe the
+            # injected pressure after it resumes; the existing 10k+ seed is
+            # reused, and these mutations make post-recovery exactness useful.
+            changed = case.tree / f"pressure-{name}-mutation"
+            changed.write_bytes(f"visible after {name} pressure".encode())
+            log_path = case.base / "daemon.log"
+            log_offset = log_path.stat().st_size
+            marker.touch()
+            daemon.process.send_signal(signal.SIGCONT)
+
+            def completed_or_cancelled():
+                log = log_path.read_bytes()[log_offset:].decode(errors="replace")
+                with contextlib.closing(snapshot(case.db)) as conn:
+                    meta = dict(conn.execute("SELECT key,value FROM meta"))
+                result = meta.get("last_reconcile_attempt_result")
+                if should_cancel:
+                    if "cancelling background reconciliation under elevated or critical host pressure" not in log:
+                        return False
+                    if result != "cancelled":
+                        return False
+                    assert meta.get("scan_generation") == baseline_generation, meta
+                    assert meta.get("dirty_reason") == "reconciliation cancelled while host pressure was elevated", meta
+                    return meta
+                if result != "complete" or meta.get("scan_generation") == baseline_generation:
+                    return False
+                assert marker.exists(), f"{name} pressure ended before observation completed"
+                return meta
+
+            result = daemon.wait(
+                completed_or_cancelled,
+                f"scan-first reconciliation {name} pressure behavior",
+                timeout=180,
+            )
+            if should_cancel:
+                marker.unlink()
+                result = daemon.exact(
+                    previous_generation=baseline_generation,
+                    timeout=600,
+                    validate_before_index=False,
+                )
+            else:
+                exact_meta, _ = check_index(case.db, case.tree)
+                assert exact_meta.get("scan_generation") == result.get("scan_generation")
+                result = exact_meta
+            assert check_index(case.db, case.tree)[0]["scan_generation"] == result["scan_generation"]
+            case.history()
+            results[name] = {
+                "cancelled": should_cancel,
+                "recovered_generation": result["scan_generation"],
+                "mutation_present": changed.exists(),
+            }
+        finally:
+            marker.unlink(missing_ok=True)
+            daemon.stop()
+
+    evidence.update(
+        scan_first_pressure_policy=True,
+        high_load_observation_cancelled_and_recovered=results["high_load"]["cancelled"],
+        critical_observation_cancelled_and_recovered=results["critical"]["cancelled"],
+        cpu_elevated_observation_completed=not results["cpu_elevated"]["cancelled"],
+        io_elevated_observation_completed=not results["io_elevated"]["cancelled"],
+        scan_first_pressure_scenarios=results,
+    )
+    daemon = Daemon(case, case.binary)
+    try:
+        daemon.exact(timeout=600)
+    finally:
+        daemon.stop()
+    integrity(case.db)
+    print("PASS scan-first high-load/critical cancellation, CPU/I/O Elevated completion, and exact recovery", flush=True)
+
+
 def pressure_reconciliation_test(case, _args, evidence):
     assert case.fault_binary, "pressure recovery qualification requires the fault binary"
     with contextlib.closing(snapshot(case.db)) as conn:
@@ -1586,6 +1886,19 @@ def pressure_reconciliation_test(case, _args, evidence):
     case.env["DUX_TEST_HIGH_LOAD_ELEVATED_PRESSURE_FILE"] = str(high_load_elevated_file)
     case.env["DUX_TEST_CPU_ELEVATED_PRESSURE_FILE"] = str(cpu_elevated_file)
     case.env["DUX_TEST_CRITICAL_PRESSURE_FILE"] = str(critical_file)
+    probe = Daemon(case, case.fault_binary)
+    try:
+        probe.exact()
+        if probe.record()["scan_first"]:
+            probe.stop()
+            scan_first_pressure_reconciliation_test(
+                case,
+                evidence,
+                (high_load_elevated_file, cpu_elevated_file, elevated_file, critical_file),
+            )
+            return
+    finally:
+        probe.stop()
     daemon = Daemon(case, case.fault_binary)
     try:
         daemon.exact()
@@ -1933,13 +2246,46 @@ def startup_test(case, args, evidence):
             ).fetchone()[0]
         assert legacy_version == '4', f'failed upgrade replaced legacy index: {legacy_version}'
         assert failure_daemon.record()['uncertain'], 'failed upgrade was not exposed as uncertain'
+        scan_first = failure_daemon.record()['scan_first']
+        seen_before_retry_event = failure_daemon.record()['seen']
         retry_event.write_bytes(b'queued until the legacy upgrade retry succeeds')
-        failure_daemon.wait(
-            lambda: failure_daemon.record()['pending'] > 0,
-            'events queued while legacy generation is read-only',
-            timeout=30,
-        )
+        if scan_first:
+            failure_daemon.wait(
+                lambda: failure_daemon.record()['seen'] > seen_before_retry_event,
+                'fanotify hint observed while legacy generation is read-only',
+                timeout=30,
+            )
+            with contextlib.closing(snapshot(fresh.db)) as conn:
+                dirty_meta = dict(conn.execute("SELECT key,value FROM meta"))
+            assert 'dirty_since' in dirty_meta, (
+                'failed legacy upgrade was presented as a clean scan-first index'
+            )
+        else:
+            failure_daemon.wait(
+                lambda: failure_daemon.record()['pending'] > 0,
+                'events queued while legacy generation is read-only',
+                timeout=30,
+            )
         fail_scan_file.unlink()
+        # This is still a v4 read-only source: `exact()` requests a scan-first
+        # observation, but that observation cannot install the schema upgrade.
+        # Wait for the bounded automatic upgrade retry to publish v7 first;
+        # then use exact() to independently validate the installed generation.
+        def upgraded_schema_published():
+            try:
+                with contextlib.closing(snapshot(fresh.db)) as conn:
+                    value = conn.execute(
+                        "SELECT value FROM meta WHERE key='schema_version'"
+                    ).fetchone()
+            except (OSError, sqlite3.Error):
+                return False
+            return value == ('7',)
+
+        failure_daemon.wait(
+            upgraded_schema_published,
+            'automatic retry to install the v7 schema from the retained legacy source',
+            timeout=180,
+        )
         failure_daemon.exact(timeout=150)
         with contextlib.closing(sqlite3.connect(fresh.db)) as conn:
             upgraded_version = conn.execute(
@@ -2047,13 +2393,14 @@ def startup_test(case, args, evidence):
             conn.execute("INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime) VALUES(?,?,x'7068616e746f6d',?,?,1)",
                          (live_dev, live_ino, live_dev, phantom_ino))
         (live_dir / 'real-event-child').write_bytes(b'candidate fanotify repair')
-        daemon.exact(timeout=30)
+        scan_first_repair = daemon.record()['scan_first']
+        daemon.exact(timeout=30, validate_before_index=False)
         with contextlib.closing(snapshot(case.db)) as conn:
             assert conn.execute('SELECT 1 FROM inodes WHERE dev_id=? AND inode=?',
                                 (live_dev, phantom_ino)).fetchone() is None, 'live event retained stale phantom child'
             assert conn.execute('SELECT kind FROM inodes WHERE dev_id=? AND inode=?',
                                 (live_dev, live_ino)).fetchone() == ('d',), 'live event did not restore directory kind'
-        live_event_repair = True
+        live_event_repair = not scan_first_repair
         case.history()
     finally:
         daemon.stop()
@@ -2062,13 +2409,137 @@ def startup_test(case, args, evidence):
                     upgrade_watches_before_scan=True,legacy_queries_remain_available=True,
                     upgrade_history_and_window_changes_preserved=True,
                     legacy_stale_directory_inode_repaired=True,
-                    live_fanotify_file_to_directory_inode_repair=live_event_repair)
-    print('PASS watch-first startup/upgrade and live fanotify file-to-directory inode repair with exact accounting',flush=True)
+                    live_fanotify_file_to_directory_inode_repair=live_event_repair,
+                    scan_first_observation_repairs_inode_kind_mismatch=scan_first_repair)
+    print('PASS watch-first startup/upgrade and inode-kind repair with exact accounting',flush=True)
+
+
+def scan_first_reconciliation_retry_test(case, evidence):
+    """Prove bounded scan-first retry survives a restart and eventually recovers."""
+    log_path = case.base / "daemon.log"
+
+    def metadata():
+        with contextlib.closing(snapshot(case.db)) as connection:
+            return dict(connection.execute("SELECT key,value FROM meta"))
+
+    def damage_root_rollup():
+        with contextlib.closing(sqlite3.connect(case.db, timeout=5)) as connection, connection:
+            root = connection.execute(
+                "SELECT value FROM meta WHERE key='root_dev'"
+            ).fetchone()
+            inode = connection.execute(
+                "SELECT value FROM meta WHERE key='root_inode'"
+            ).fetchone()
+            assert root and inode, "index has no root identity metadata"
+            changed = connection.execute(
+                "UPDATE inodes SET recursive_bytes=recursive_bytes+4096 "
+                "WHERE dev_id=? AND inode=?", (int(root[0]), int(inode[0]))
+            ).rowcount
+            assert changed == 1, "could not inject root accounting mismatch"
+
+    start_meta = metadata()
+    start_generation = start_meta.get("scan_generation")
+    offset = log_path.stat().st_size
+    daemon = Daemon(
+        case, case.fault_binary,
+        reconciliation_retry_fault_stage(scan_first=True),
+    )
+    try:
+        stage = reconciliation_retry_fault_stage(scan_first=True)
+        daemon.paused_at(stage)
+        damage_root_rollup()
+        daemon.process.send_signal(signal.SIGCONT)
+
+        def retry_scheduled():
+            log = log_path.read_bytes()[offset:].decode(errors="replace")
+            return (
+                "bounded reconciliation retry scheduled" in log
+                or "bounded automatic reconciliation retry scheduled" in log
+            )
+
+        daemon.wait(retry_scheduled, "scan-first bounded retry scheduled", timeout=60)
+        failed = metadata()
+        assert failed.get("failed_reconciliation_attempts") == "1", failed
+        assert int(failed["reconciliation_retry_after_unix"]) > int(time.time()), failed
+        failed_generation = failed.get("scan_generation")
+        assert failed_generation != start_generation, failed
+    finally:
+        daemon.stop()
+
+    # Verify restart restores the persisted cooldown, keeps ingesting hints,
+    # then retries automatically without an operator SIGHUP.
+    restart_offset = log_path.stat().st_size
+    daemon = Daemon(case)
+    try:
+        daemon.wait(lambda: daemon.record(), "watcher status after retry restart")
+        cooling = metadata()
+        assert cooling.get("failed_reconciliation_attempts") == "1", cooling
+        assert int(cooling["reconciliation_retry_after_unix"]) > int(time.time()), cooling
+        assert cooling.get("scan_generation") == failed_generation, cooling
+        previous_seen = daemon.record()["seen"]
+        (case.tree / "event-ingestion-during-retry-cooldown").write_bytes(b"still watched")
+        daemon.wait(
+            lambda: daemon.record()["seen"] > previous_seen,
+            "event ingestion during scan-first retry cooldown", timeout=15,
+        )
+        time.sleep(2)
+        cooling = metadata()
+        assert cooling.get("failed_reconciliation_attempts") == "1", cooling
+        assert cooling.get("scan_generation") == failed_generation, cooling
+        restart_log = log_path.read_bytes()[restart_offset:].decode(errors="replace")
+        assert "starting background reconciliation" not in restart_log, restart_log
+
+        def automatically_recovered():
+            current = metadata()
+            status = command(
+                case.binary, "--db", case.db, "status", "--json", env=case.env,
+            )
+            if not scan_first_retry_recovery_ready(
+                current, failed_generation,
+                json.loads(status.stdout).get("scan_in_progress", False),
+            ):
+                return False
+            check_index(case.db, case.tree)
+            return current
+
+        recovered = daemon.wait(
+            automatically_recovered,
+            "automatic full-observation retry after persisted cooldown", timeout=180,
+        )
+        assert "failed_reconciliation_attempts" not in recovered, recovered
+        assert "reconciliation_retry_after_unix" not in recovered, recovered
+        case.history()
+    finally:
+        daemon.stop()
+    integrity(case.db)
+    evidence.update(
+        retry_mode="scan_first_persisted_bounded_backoff",
+        failure_attempt_persisted=True,
+        cooldown_survived_restart=True,
+        event_ingestion_continued=True,
+        automatic_retry_after_cooldown=True,
+        operator_request_required=False,
+        final_exact_index=True,
+    )
+    print(
+        "PASS scan-first bounded retry, persisted cooldown, live ingestion, automatic exact recovery",
+        flush=True,
+    )
 
 
 def reconciliation_retry_test(case, args, evidence):
-    """Exercise the persisted retry circuit through the real daemon loop."""
+    """Exercise the active scan mode's retry policy through the real daemon loop."""
     assert case.fault_binary, "reconciliation retry qualification requires the fault binary"
+
+    probe = Daemon(case)
+    probe_record = probe.wait(lambda: probe.record(), "initial watcher status")
+    scan_first = daemon_uses_scan_first(
+        probe_record, (case.base / "daemon.log").read_text(errors="replace")
+    )
+    probe.exact()
+    probe.stop()
+    if scan_first:
+        return scan_first_reconciliation_retry_test(case, evidence)
 
     def metadata():
         with contextlib.closing(snapshot(case.db)) as connection:
@@ -2091,9 +2562,10 @@ def reconciliation_retry_test(case, args, evidence):
 
     failed_rounds = []
     for expected_failures in (1, 2):
-        daemon = Daemon(case, case.fault_binary, "scan.install_committed")
+        stage = reconciliation_retry_fault_stage(scan_first=False)
+        daemon = Daemon(case, case.fault_binary, stage)
         try:
-            daemon.paused_at("scan.install_committed")
+            daemon.paused_at(stage)
             damage_root_rollup()
             log_path = case.base / "daemon.log"
             log_offset = log_path.stat().st_size

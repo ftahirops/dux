@@ -2109,6 +2109,19 @@ fn mark_index_dirty_before_reconciliation(store: &Store, read_only_source: bool)
     }
 }
 
+/// A manual retry can reset in-memory backoff while an upgrade source remains
+/// read-only. Its retry metadata is cleared when the atomic replacement lands.
+fn clear_manual_retry_state(store: &Store, read_only_source: bool) -> Result<()> {
+    if read_only_source {
+        return Ok(());
+    }
+    store.conn.execute(
+        "DELETE FROM meta WHERE key IN ('failed_reconciliation_attempts', 'reconciliation_retry_after_unix')",
+        [],
+    )?;
+    Ok(())
+}
+
 /// Run the watch daemon. Uses fanotify FID mode so creates, deletes, renames,
 /// and size-growth are all tracked live — no rescan needed for normal activity.
 #[allow(clippy::too_many_arguments)]
@@ -3026,10 +3039,7 @@ pub fn run_daemon(
             failed_reconciliation_attempts = 0;
             reconciliation_retry_paused = false;
             rescan_retry_after = None;
-            store.conn.execute(
-                "DELETE FROM meta WHERE key IN ('failed_reconciliation_attempts', 'reconciliation_retry_after_unix')",
-                [],
-            )?;
+            clear_manual_retry_state(&store, read_only_source)?;
             RESCAN.store(true, Ordering::SeqCst);
             tracing::warn!(
                 "operator requested a full reconciliation; resetting the accounting retry circuit"
@@ -11934,6 +11944,31 @@ mod tests {
         scan_into(&dir, &db);
         let store = Store::open_rw(&db).unwrap();
         (dir, db, store)
+    }
+
+    #[test]
+    fn manual_retry_reset_does_not_write_to_read_only_upgrade_source() {
+        let (dir, db, store) = fixture("manual-retry-read-only-source");
+        store
+            .set_meta("failed_reconciliation_attempts", "1")
+            .unwrap();
+        store
+            .set_meta("reconciliation_retry_after_unix", "123456")
+            .unwrap();
+        drop(store);
+
+        let source = Store::open_rebuild_source(&db).unwrap();
+        clear_manual_retry_state(&source, true).unwrap();
+        assert_eq!(
+            source.get_meta("failed_reconciliation_attempts").unwrap(),
+            Some("1".to_owned())
+        );
+        assert_eq!(
+            source.get_meta("reconciliation_retry_after_unix").unwrap(),
+            Some("123456".to_owned())
+        );
+        drop(source);
+        cleanup(&dir, &db);
     }
 
     fn assert_totals(store: &Store) {

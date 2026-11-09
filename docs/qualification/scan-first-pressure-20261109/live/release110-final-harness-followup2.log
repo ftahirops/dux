@@ -1,0 +1,24 @@
+Running as unit: dux-readiness-579881.service; invocation ID: 47bd91b20b314c6a9fef7cf1241a541c
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PASS unreadable subtree produces explicit incomplete-coverage state
+Evidence: /root/dux-readiness-6dacdf5/release110-final-harness-followup2.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2671, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2626, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2451, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 1547, in capability_test
+    assert 'dirty_since' not in observed[0], (
+                                ~~~~~~~~^^^
+KeyError: 0
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 3.172s
+CPU time consumed: 759ms
+Memory peak: 256.0K
+Memory swap peak: 0B

@@ -2058,3 +2058,325 @@ fault boundaries once plus four random-timing restarts. Recovery took
 0.736–1.109 seconds, with SQLite integrity and exact filesystem/index equality
 passing after every crash. This is targeted recovery evidence; the wider
 matrix remains unqualified until its completed report is checked.
+
+## Release-110 expanded scan-first evidence — 2026-11-09 01:47 UTC
+
+On VPS2, the release-110 product binary (`1707a102…568e66`) and its matching
+fault-injection binary were rerun with a scan-first-aware harness. One run
+passed 30/30 crash/restart rounds, actual kernel queue overflow detection and
+reconciliation, and the CPU burst: 12,008 hints, zero overflows, event-thread
+CPU reported about 0.01 cores, and exact filesystem/index validation passed.
+The CPU figure is a single controlled burst result, not a workload envelope.
+The overflow test passed its exact-recovery assertion but did not finish with a
+clean status during that fixture, so it does not establish clean-state timing.
+
+Subsequent targeted runs passed the unprivileged unreadable-subtree check and
+the capability check. With `DAC_READ_SEARCH` removed, a complete observation
+matched filesystem truth while Dux kept its dirty marker visible; after
+capability restoration, exact recovery passed. That is evidence for honest
+degraded state and exact data on the tested fixture, not for clean status with
+missing capabilities.
+
+The expanded matrix remains incomplete. Disk and 100,000-file churn were
+excluded because VPS2 `/dev/shm` could not safely hold their required 2 GiB
+fixtures. The pressure suite stopped at a harness gate requiring an atomic
+rebuild staging file, which scan-first in-place reconciliation does not
+produce. The OOM run was interrupted during recovery qualification; do not
+count it as passed. Mount, WAL, startup, retry, root, and soak were not
+completed in the final attempt. No 72-hour soak or 24-hour canary was run.
+
+The harness-only corrections passed 337 Python tests in the documented local
+suite run, plus strict Clippy, formatting, and diff checks. The standard
+release Rust invocation passed 319 tests with 2 ignored; the all-features run
+recorded earlier passed 322 with 2 ignored. Rust line/region/function coverage
+remains 72.16%/70.99%/76.03%, respectively; branch coverage was not reported.
+Current-source evidence and failed attempts are retained in
+[`scan-first-pressure-20261109`](docs/qualification/scan-first-pressure-20261109/README.md).
+Production remains on the older installed binary; none of these candidate
+runs installed or modified the production package or index.
+
+### Verification refresh after the retry-state fix — 2026-11-09
+
+The current working tree passes **323/325 Rust release all-features tests**
+(2 ignored) and **340/340 Python tests**. A focused ext4 inode-reuse
+regression also passed. Updated llvm-cov results are **72.20% line, 71.02%
+region, and 76.05% function** coverage; branch totals are unavailable from
+this stable llvm-cov run. These supersede the earlier 322-test / 72.16%
+figures above.
+
+The new Rust regression covers manual retry metadata cleanup when the legacy
+upgrade source is read-only. It passed in the full Rust suite. A fresh release
+115 static candidate with the fix passed the VPS2 startup/upgrade integration
+suite in 63.0 seconds, including automatic retry from v4 to v7 after an
+injected failed upgrade. The test report and hashes are in the qualification
+README. This closes that specific integration gate for release 115. The broader
+matrix and production deployment gates remain open.
+
+### Pressure suite refresh — 2026-11-09
+
+The release-115 candidate passed four scan-first pressure scenarios on VPS2 in
+110.9 seconds: reconciliation cancellation and exact recovery during synthetic
+high load and Critical pressure, plus successful reconciliation during CPU
+Elevated and I/O Elevated pressure. The disposable ext4 fixture contained
+20,000 seeded files; the transient worker was limited to 25% of one CPU and
+4 GiB memory. The captured report is
+[`release115-pressure.json`](docs/qualification/scan-first-pressure-20261109/live/release115-pressure.json).
+
+Current local results: **323/325 Rust all-features tests passed** (2 ignored),
+**341/341 Python tests passed**, and coverage is **72.20% line, 71.02% region,
+76.05% function**. These counts are separate suites, not a count of unique
+cases. Strict Clippy, formatting, and diff checks passed on the current source
+as recorded in the qualification log. Branch coverage is unavailable from the
+stable llvm-cov run. The two ignored Rust tests and the broader disk, churn,
+overflow, OOM, mount, WAL, package lifecycle, multi-day soak, and canary gates
+remain open; this is not a production-readiness or zero-error guarantee.
+
+## Latest evidence checkpoint — 2026-11-09 05:52 UTC
+
+The release-117 P0 matrix is still running on the disposable VPS2 ext4 fixture.
+Crash recovery passed 8/8 rounds; real queue overflow recovery passed with
+exact fixture equality (99.055 seconds, but final status remained conservatively
+not clean); CPU burst passed (12,000 hints, 0.141-second drain, 0.014 measured
+event-thread CPU, 113.471-second exact validation against a 120-second limit).
+Churn is in progress. Details and the timestamped report snapshot are in the
+qualification README. Production remains untouched.
+
+The crash fixture exposed abandoned in-place scan stage databases after killed
+processes (four files totaling about 84 MiB). In-place reconciliation now runs
+the existing strict stale-stage cleanup before building a new stage. The new
+Rust regression passed and proves unrelated lookalike files remain untouched;
+the crash harness now checks that recovery leaves no generated stage artifacts.
+This fix was made after release 117 was built and needs a rebuilt-candidate
+crash qualification.
+
+On the updated local tree, **324 Rust tests passed, 0 failed, 2 ignored**,
+**345 Python tests passed**, and strict Clippy, formatting, diff, and Python
+syntax checks passed. llvm-cov reports **72.25% line, 71.09% region, and
+76.07% function coverage**; branch coverage is unavailable. These results do
+not qualify the unfinished P0 suites, the updated candidate, package lifecycle,
+other filesystems/kernels, multi-day soak, or production canary.
+At 06:00 UTC, the VPS2 churn test had completed 4 of 10 batches (8,000 of
+20,000 operations) and was still running; its progress record is linked in the
+qualification README.
+At 06:02 UTC, churn reached 5/10 batches (10,000/20,000 operations); no final
+suite result is available yet.
+At 06:13 UTC all 20,000 churn operations across 10 batches were complete, but
+the final filesystem exactness and history checks were still pending.
+The final churn gate passed in 1,623.691 seconds: all 10 independent exact
+comparisons and the concurrent rebuild/history checks passed, with 70,795
+kernel hints seen and zero dropped. The index stayed conservatively uncertain
+in scan-first mode, so this is exactness evidence, not a clean/freshness SLO.
+The P0 matrix has advanced to disk testing.
+
+The release-117 disk suite then stopped at a harness-only timeout: it expected
+the event-apply `pending` counter to rise, which scan-first mode does not use.
+The run failed before testing ENOSPC or read-only recovery. The harness now
+checks for 64 fresh fanotify hints and no new overflow in scan-first mode, while
+preserving the old queue assertion for event-apply mode. The full Python suite
+passes **347/347** with regressions for both event models, expected stale
+prechecks, and database content fingerprints. The first release-118 disk
+attempt reported 64 missing `paused-*` entries at the immutable read-only
+oracle. A saved post-failure SQLite backup compared against the saved exact
+filesystem snapshot has zero path or inode/allocation mismatches, all 64 paths,
+and a clean SQLite integrity check. This suggests a read-only oracle mismatch,
+not data loss, but the disk gate remains open. A workspace-capacity preflight
+rejected one subsequent launch before tests began; the generated ext4 image
+workspace was removed only after its SQLite/truth snapshot had been archived.
+A fresh retry is now active with main DB/WAL fingerprints and a normal
+read-only exact comparison; the prior failure workspace and forensic snapshot
+remain documented.
+
+## Latest evidence checkpoint — 2026-11-09 06:48 UTC
+
+Release 118's disk qualification passed on VPS2 (Linux 6.8.0-147-generic),
+using a disposable 2 GiB ext4 image seeded with 100,000 files. The worker was
+limited to 25% CPU and 4 GiB memory. Low-disk pause/resume, scan while the
+image was full, and read-only scan failure all retained a readable, exact
+index; the test's reserved-space measurement was 1,582,514,176 bytes. The
+suite took 333.091 seconds (systemd worker runtime 6m31s, peak RSS 927.8 MiB).
+Report: [`release118-disk-final2.json`](docs/qualification/scan-first-pressure-20261109/live/release118-disk-final2.json),
+SHA256 `c77403090b41eb8e79c006dcdc6ddd851d4fdbd59093e7692eb5b4f6149883bf`.
+
+Local source evidence: Rust all-features release tests **324 passed, 0 failed,
+2 ignored**; Python workflow/harness suite **347/347 passed**; LLVM coverage
+**72.25% lines, 71.09% regions, 76.07% functions** (branch coverage not
+available). Strict Clippy, `cargo fmt --all -- --check`, Python compilation,
+and `git diff --check` pass. A focused regression for stale in-place scan
+stage cleanup also passed. These are separate test suites, not a deduplicated
+count of unique test cases.
+
+Release-117 VPS2 evidence also passed 8/8 crash rounds, the real fanotify
+overflow recovery scenario, the CPU-burst scenario, and 10/10 exact churn
+batches (20,000 operations total, 70,795 observed events, zero dropped).
+Pressure and startup/upgrade integration suites passed on earlier candidate
+builds. Their reports and qualifications are listed in the qualification
+README. Failed harness attempts are retained; they are not counted as product
+test passes. Release 118's disk-only report explicitly did not run crash,
+churn, CPU, overflow, pressure, startup, mount, OOM, WAL, or other matrix
+suites.
+
+This remains short of production-ready: 100k/1m/10m performance budgets,
+package upgrade/rollback and musl, privilege/dependency release review,
+other filesystems/kernels, media/power loss, multi-day WAL endurance, a 72-hour
+soak, and a 24-hour canary are unqualified. Production was not modified.
+
+## Latest evidence checkpoint — 2026-11-09 07:18 UTC
+
+The release-118 crash suite has also passed **8/8 rounds** on the same
+100,000-file, 2 GiB ext4 fixture and 25% CPU/4 GiB memory limits. The four
+in-place crash boundaries (`in_place_started`, `projection_ready`,
+`before_commit`, `after_commit`) each passed once, with four random-time
+crashes. Every recovery passed exact filesystem comparison and SQLite
+integrity checks; no abandoned scan artifacts remained. Recovery took
+97.592–114.605 seconds per round. The suite took 1,548.604 seconds; transient
+unit peak RSS was 956.5 MiB and peak swap was 458.8 MiB. The installed
+production service remained active with `NRestarts=0`. Report:
+[`release118-crash-8.json`](docs/qualification/scan-first-pressure-20261109/live/release118-crash-8.json),
+SHA256 `0e89e7bf29a6eb634db8aeb2fdb0ccf82c946fbe8637ec260d6e7e60e7c23bf5`.
+
+The disk and crash passes together provide 11 passing release-118 scenario
+checks (three disk gates plus eight crash recoveries). The release-118
+overflow, churn, CPU, mount, OOM, WAL, retry, package lifecycle, scale,
+endurance, and canary gates remain open.
+
+## Latest evidence checkpoint — 2026-11-09 07:22 UTC
+
+Release 118's isolated overflow scenario passed on VPS2. It forced one real
+fanotify overflow by creating 18,432 files against a 16,384-event queue. Dux
+observed the overflow, ran a newer full observation, passed independent
+accounting verification, matched the filesystem path/inode/allocation oracle,
+and cleaned up the storm. Recovery took 13.358 seconds. Status remained
+conservatively uncertain after the observation; therefore this proves exact
+reconciliation, not an immediate clean-state or freshness SLO. Report:
+[`release118-overflow-retry.json`](docs/qualification/scan-first-pressure-20261109/live/release118-overflow-retry.json),
+SHA256 `f6b723dba4900a522ecb69fd130403412d20d9dfc248a11c6bf1758fc8dfcba4`.
+
+The first attempt found a harness race: it treated an automatically started
+overflow observation as the explicit request's completion while another scan
+was still active. The gate now requires a newer generation and attempt, and
+waits until any queued follow-up observation has ended. The first report is
+retained at
+[`release118-overflow-failure.json`](docs/qualification/scan-first-pressure-20261109/live/release118-overflow-failure.json).
+The full Python harness suite passes **348/348** after adding regression
+coverage for this race. The release-118 disk, crash, and overflow suites have
+now passed; churn, CPU, mount, OOM, WAL, retry, package lifecycle, scale,
+endurance, and canary remain open.
+The latest full Python output is archived at
+[`current-source-python-tests-20261109.log`](docs/qualification/scan-first-pressure-20261109/live/current-source-python-tests-20261109.log),
+SHA256 `2b974b8270a5205f6af064c13dc95d4e9bf566149768bc6906b9b291e795d6cb`.
+
+## Latest evidence checkpoint — 2026-11-09 07:58 UTC
+
+Release 118's production-shaped churn suite passed on VPS2. It performed
+20,000 operations in ten 2,000-operation batches against a 100,000-file
+fixture on a disposable 2 GiB ext4 image, with 25% CPU quota and a 4 GiB
+memory cap. Every batch matched paths, inode identities, allocations, and all
+rollups; concurrent rebuild and history continuity passed. The run saw 70,772
+events overall with zero drops. Per-batch exact convergence took
+109.200–202.795 seconds. The index remained conservatively uncertain at every
+churn checkpoint despite exact oracle matches, so this does not prove a
+clean-status/freshness SLO under continuous writes. Suite duration was
+1,977.9 seconds; worker runtime was 33m51s, peak RSS 1,019.6 MiB and peak swap
+525.7 MiB. Production remained active with `NRestarts=0`. Report:
+[`release118-churn-20k.json`](docs/qualification/scan-first-pressure-20261109/live/release118-churn-20k.json),
+SHA256 `aba0b3207a849c1ba872113626603942086a979abb4d2369445045bf81f1a836`.
+
+Release 118's CPU-burst suite passed on VPS2: 12,004 fanotify hints produced
+in 3.401 seconds, the reader observed them in 0.153 seconds, and exact
+validation took 7.634 seconds. Measured event-thread CPU was 0.036 of one core
+against a 10% Dux event-thread cap and a 25% outer cgroup quota; no kernel
+overflow was observed. Suite time was 46.914 seconds. Report:
+[`release118-cpu.json`](docs/qualification/scan-first-pressure-20261109/live/release118-cpu.json),
+SHA256 `7508d67041eb3de045b999d2f1b760ae7a6df4d77dc23b76e4c009557543bb0e`.
+
+The release-118 coverage suite also passed: an unprivileged scan over an
+unreadable subtree exited incomplete and explicitly preserved the
+incomplete-coverage state. Report:
+[`release118-coverage.json`](docs/qualification/scan-first-pressure-20261109/live/release118-coverage.json),
+SHA256 `660a15b7428c96c5989149161e3b332777b2cdc295dd8b94da0ee354a251ee15`.
+
+Capability qualification passed on release 118: removing the handle-lookup
+capability failed closed and preserved uncertainty; restoring it allowed
+exact convergence. The scan-first case matched the independent oracle while
+the capability was absent, and retained the conservative dirty marker.
+Report: [`release118-capability.json`](docs/qualification/scan-first-pressure-20261109/live/release118-capability.json),
+SHA256 `154478a1ab51100b8a4836753afa7b7578d0a652cc3ca04c241f67b6ebb92252`.
+
+Mount coverage qualification passed: the candidate detected a newly mounted
+filesystem, added watch coverage, detected the mount's disappearance, and
+returned to exact accounting. Report:
+[`release118-mount.json`](docs/qualification/scan-first-pressure-20261109/live/release118-mount.json),
+SHA256 `7dfad2246bc3ddc0088c31c67991481f56f0edc6ad45f9246b2adc21a6025f65`.
+
+The release-118 retry suite passed: a fault after in-place publication caused
+an accounting-verifier failure; the bounded retry count and deadline survived
+restart; event ingestion remained active during cooldown; then an automatic
+retry completed verification, cleared retry state, and restored an exact
+index without operator intervention. Duration was 62.105 seconds. The first
+attempt selected a nonexistent atomic-install checkpoint; a later harness
+attempt accepted the database commit before verification completed. Both
+reports are preserved, and the corrected test waits for retry metadata to be
+cleared by the verifier. One retry attempt also observed elevated host CPU
+pressure; Dux deferred reconciliation until admission criteria allowed it.
+Report:
+[`release118-retry.json`](docs/qualification/scan-first-pressure-20261109/live/release118-retry.json),
+SHA256 `b910ad45267e90fe93730e12349f520de178d560b3abbcb72c8a5e78e032cae9`.
+The complete Python suite now passes **351 tests**; output:
+[`current-source-python-tests-20261109.log`](docs/qualification/scan-first-pressure-20261109/live/current-source-python-tests-20261109.log),
+SHA256 `3ba361f7ad65f419bd8b4195d314fe498d7d10fb5b44212dc0f0a25443e2e907`.
+
+Release 118 also passed the actual cgroup OOM recovery gate. The isolated
+daemon hit a 1 MiB memory limit during reconciliation, received a real
+`oom-kill`, restarted once under systemd, and exactly recovered 32 filesystem
+changes made while it was down. The installed production service stayed
+active at zero restarts; the limit change applied only to the test unit.
+Report: [`release118-oom.json`](docs/qualification/scan-first-pressure-20261109/live/release118-oom.json),
+SHA256 `c49dcfca79ab1437119d6c5f92d2e8f7a81a998e72c6f472220fcaa5a409005b`.
+
+The release-118 long-reader WAL test passed as well. A held SQLite reader
+retained its snapshot during 12 observations and 576 file mutations; peak WAL
+was 959,992 bytes and fell to zero after reader release and truncate
+checkpoint. Final index integrity and exactness passed. Report:
+[`release118-wal.json`](docs/qualification/scan-first-pressure-20261109/live/release118-wal.json),
+SHA256 `83f9e0150b5d41f20077f692e43c16363956bc6af4d9eea70bffba1c3dde7be8`.
+
+Host-pressure behavior passed on release 118: high-load and Critical
+observations cancelled while retaining old state, then recovered exactly;
+CPU Elevated and I/O Elevated observations completed. All four induced file
+changes appeared after recovery. Report:
+[`release118-pressure.json`](docs/qualification/scan-first-pressure-20261109/live/release118-pressure.json),
+SHA256 `8b2116cc39ad58ddd0b478e5bc1ba045d44e07ed52a84e731b7eea90c7bcf915`.
+
+Startup/upgrade qualification passed on release 118. The fresh schema-v4
+upgrade preserved old-index queries, stayed alive after an injected upgrade
+scan failure, retried automatically, installed v7, replayed changes from the
+upgrade window, preserved history, and repaired an inode-kind mismatch with
+a complete observation. The scan-first candidate reports observation repair;
+the live event-apply inode-kind repair gate is not applicable to this mode.
+Report:
+[`release118-startup.json`](docs/qualification/scan-first-pressure-20261109/live/release118-startup.json),
+SHA256 `b790c68176ba65739985c37ae953b6431c16c11745aab9412958849709c25790`.
+
+## Qualification summary — 2026-11-09
+
+On the current working tree, the Rust release/all-features suite passes
+**324 tests, 0 failed, 2 ignored**; the Python qualification/workflow suite
+passes **351 tests**. Strict Clippy, formatting, Python compilation, and
+`git diff --check` pass. LLVM coverage is **72.25% lines, 71.09% regions,
+76.07% functions**; this run provides no branch-coverage totals.
+
+The release-118 isolated VPS2 qualification matrix has **13 of 14 P0 suites
+passed**: disk pressure/read-only recovery; eight crash-recovery rounds; real
+fanotify overflow; 20,000-operation churn; CPU burst; incomplete coverage;
+missing capability; mount add/remove; persisted retry across restart; actual
+cgroup OOM recovery; long-reader WAL; host-pressure admission; and startup/
+schema upgrade. The full-root scan suite was not run because it adds a large
+I/O workload to the production host with limited free disk. Its status is
+unqualified, not passed. Earlier harness failures are preserved in the
+qualification directory; only the corrected final reruns count as passes.
+
+These results qualify important recovery paths on the tested Linux/ext4 VPS2
+setup, but do not establish universal correctness or 100% production
+readiness. Large-scale 1M/10M performance, packaging and rollback, other
+filesystems/kernels, hardware-loss behavior, long-duration soak, and canary
+gates remain open. The production binary was not changed by these tests.

@@ -1,0 +1,24 @@
+Running as unit: dux-readiness-581040.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PASS unreadable subtree produces explicit incomplete-coverage state
+Evidence: /root/dux-readiness-6dacdf5/release110-capability-recheck.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2671, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2626, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2451, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 1547, in capability_test
+    assert 'dirty_since' not in observed, (
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: complete scan-first observation did not restore exact index state
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 2.696s
+CPU time consumed: 629ms
+Memory peak: 24.1M
+Memory swap peak: 0B

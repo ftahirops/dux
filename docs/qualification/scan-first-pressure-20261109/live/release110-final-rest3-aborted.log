@@ -1,0 +1,11 @@
+Running as unit: dux-readiness-610435.service; invocation ID: 6c006a60d17e4e9db9dd0940bab53205
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+Finished with result: success
+Main processes terminated with: code=killed/status=TERM
+Service runtime: 1min 18.783s
+CPU time consumed: 11.358s
+Memory peak: 95.8M
+Memory swap peak: 0B
