@@ -15,4 +15,8 @@ fbc17f8c60ae2bd4b6aeaa29418fadde56b55eee900071aeda77da9330a0def6  docs/qualifica
 ade4d9f10e7d96541c47da63ff8211a65ce10ce00a59ececba17f0c7f41fe16c  docs/qualification/scan-first-timestamp-fix-r121-20261109/local-host-test-impact-20261109/dux-journal-relevant.log
 095a6fc1e1a45f24a4e6afc62cf88858df5afb85305ee66b4470a23347c319b1  docs/qualification/scan-first-timestamp-fix-r121-20261109/local-host-test-impact-20261109/host-state.txt
 77ad9c042454d5770d8373b83540a87524747abb01b706673f3b9c6cf04f2744  docs/qualification/scan-first-timestamp-fix-r121-20261109/local-host-test-impact-20261109/vps1-status-after.json
-a2c08167c4597b94be83a97df596f3e6c079ae521d7c8d632255ed75215e944e  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl
+a9d29da18e91fc615f8b7c346073bab31c5f80394bbc1a45aeed3a8c2f007b11  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl
+a91f3229b214ebcbcc2d3123831597958c649dc21f5cc8f4c6155092a5250e72  docs/qualification/scan-first-timestamp-fix-r121-20261109/rust-suite-isolated-ext4-20261109.log
+f25b63f0b7818e40d790fe4fbe77abd5e994b28b5d993d4f340cd5af0ad4b8c5  docs/qualification/scan-first-timestamp-fix-r121-20261109/scale-guard-test-20261109.log
+2b09bcd367b3fa6a64b037d1267534d7887953594738b3ab327b79ec2e92a4b2  docs/qualification/scan-first-timestamp-fix-r121-20261109/scale-tmpfs-test-20261109.log
+9175ebbe3318d6b9e187c24ccedccb04a938a2fd17749786cecbd5dea4fdaffa  docs/qualification/scan-first-timestamp-fix-r121-20261109/static-checks-scale-guard-20261109.log

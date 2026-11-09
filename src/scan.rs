@@ -3772,6 +3772,40 @@ mod tests {
         std::env::temp_dir().join(format!("dux-scan-{tag}-{}", std::process::id()))
     }
 
+    fn scale_fixture_filesystem_guard(dux_is_live: bool, scratch_is_pseudo: bool) -> Result<()> {
+        anyhow::ensure!(
+            !dux_is_live || scratch_is_pseudo,
+            "refusing a large filesystem fixture on a real filesystem while Dux is live; set DUX_RECONCILE_SCALE_TMPDIR to an isolated pseudo filesystem such as /dev/shm"
+        );
+        Ok(())
+    }
+
+    fn scale_fixture_scratch_root() -> Result<PathBuf> {
+        let requested = std::env::var_os("DUX_RECONCILE_SCALE_TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let scratch = requested.canonicalize().with_context(|| {
+            format!(
+                "resolving scale-test scratch directory {}; set DUX_RECONCILE_SCALE_TMPDIR to an existing directory",
+                requested.display()
+            )
+        })?;
+        anyhow::ensure!(
+            scratch.is_dir(),
+            "scale-test scratch path is not a directory"
+        );
+        let dux_is_live = Path::new("/run/dux/heartbeat").exists();
+        scale_fixture_filesystem_guard(dux_is_live, is_pseudo_fs(&scratch))?;
+        Ok(scratch)
+    }
+
+    #[test]
+    fn scale_fixture_refuses_real_filesystems_when_dux_is_live() {
+        assert!(scale_fixture_filesystem_guard(true, false).is_err());
+        assert!(scale_fixture_filesystem_guard(true, true).is_ok());
+        assert!(scale_fixture_filesystem_guard(false, false).is_ok());
+    }
+
     #[test]
     fn in_place_reconciliation_is_noop_when_unchanged_and_tracks_add_delete() {
         let db = tmp("reconcile-db");
@@ -4094,8 +4128,11 @@ mod tests {
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(100_000);
-        let db = tmp("reconcile-scale-db");
-        let root = tmp("reconcile-scale-root");
+        let scratch = scale_fixture_scratch_root()
+            .expect("scale fixture must not churn a live Dux-watched filesystem");
+        let suffix = std::process::id();
+        let db = scratch.join(format!("dux-scan-reconcile-scale-db-{suffix}"));
+        let root = scratch.join(format!("dux-scan-reconcile-scale-root-{suffix}"));
         let _cleanup = Cleanup {
             db: db.clone(),
             root: root.clone(),

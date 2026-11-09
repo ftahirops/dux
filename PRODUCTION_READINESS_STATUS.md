@@ -2796,3 +2796,28 @@ Sample 24 passed at 16:03:17 UTC at 914s scan age. No errors, kernel
 overflows, userspace drops, OOM events, or service restarts were reported;
 Dux was active under the existing PID and VPS2 had 7.1 GiB free. The 24-hour
 gate remains open. The current JSONL is in the r121 qualification folder.
+
+
+### Scale-test harness safety guard and isolated verification — 2026-11-09 16:19 UTC
+
+The ignored Rust scale test previously created large fixtures in the default
+`/tmp`, which can be watched by a live Dux daemon. Added a test-only guard:
+when `/run/dux/heartbeat` exists, the scale fixture now refuses real
+filesystems and requires `DUX_RECONCILE_SCALE_TMPDIR` to select a pseudo
+filesystem such as `/dev/shm`. The target and scratch are resolved before any
+large fixture is created. Focused guard test passed. The 100,000-entry scale
+fixture passed on `/dev/shm` (3.204s baseline / 3.244s unchanged reconciliation;
+DB size unchanged at 30,117,888 bytes).
+
+The complete all-features Rust suite, including both normally ignored profiles,
+then passed **331/331** in 40.71s in a private mount namespace with an ext4
+loopback fixture backed by tmpfs; scale scratch was separately directed to
+`/dev/shm`. This isolates the ext4 stale-parent integration from the host
+filesystem. Strict Clippy, formatting, and diff checks passed. A preceding full
+suite attempt using tmpfs for every test fixture had one unrelated v6 migration
+test failure because that test expects real-filesystem scanning; the isolated
+ext4 rerun passed it. Logs are recorded in this folder.
+
+The VPS2 canary reached **27 passing samples** at 16:18:45 UTC, latest scan age
+874s, zero monitor errors/overflows/drops/OOMs/restarts. The service is active
+with zero restarts and 7.0 GiB free. The 24-hour soak remains incomplete.

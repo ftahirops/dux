@@ -147,3 +147,30 @@ Sample 24 passed at 16:03:17 UTC with 914s scan age; zero errors, kernel
 overflows, drops, OOMs, or service restarts. Dux was active under its existing
 PID, with 7.1 GiB free on VPS2. The 24-hour canary remains in progress. This
 checkpoint does not change the local-host test-impact disclosure above.
+
+
+## Scale-fixture guard and isolated full-suite verification — 2026-11-09 16:19 UTC
+
+The ignored scale test now refuses to generate a large tree on a real
+filesystem when `/run/dux/heartbeat` indicates a local Dux service. Set
+`DUX_RECONCILE_SCALE_TMPDIR` to an existing pseudo filesystem to opt into an
+isolated scratch location. The pure guard test passed. The scale smoke passed
+at 100,000 entries on `/dev/shm`: baseline 3.204s, unchanged reconciliation
+3.244s, DB 30,117,888 bytes unchanged.
+
+The all-features Rust suite including ignored tests passed **331/331** in
+40.71s. It ran inside a private mount namespace using a loopback ext4 fixture
+backed by tmpfs; the large scale fixture used `/dev/shm`. This preserved ext4
+semantics for the stale-parent test without creating test files on the host's
+watched ext4 filesystem. Strict Clippy (`-D warnings`), formatting, and diff
+checks passed. An earlier run that put *all* fixtures on tmpfs had 328 passes,
+one v6 migration test failure, and two ignored tests; the failure was due to
+the test expecting a real filesystem. The ext4-isolated complete rerun passed.
+
+The VPS2 canary had **27 passed samples** at 16:18:45 UTC; latest age 874s,
+with zero errors/overflows/drops/OOM/restarts. VPS2 was active, with 7.0 GiB
+free. The soak has not completed 24 hours. Logs:
+[`rust-suite-isolated-ext4-20261109.log`](rust-suite-isolated-ext4-20261109.log),
+[`scale-guard-test-20261109.log`](scale-guard-test-20261109.log),
+[`scale-tmpfs-test-20261109.log`](scale-tmpfs-test-20261109.log), and
+[`static-checks-scale-guard-20261109.log`](static-checks-scale-guard-20261109.log).
