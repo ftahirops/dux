@@ -1,6 +1,38 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 21:22 UTC
+## Latest verified checkpoint — 2026-11-09 21:27 UTC
+
+### Full Python qualification suite
+
+After the `/proc` exit-race regression was added, repository Python discovery
+passed **357/357 tests** (`PYTHONPATH=scripts python3 -m unittest discover -s
+scripts -p 'test_*.py'`). The complete output is retained in
+[`test.log`](docs/qualification/python-suite-20261109/test.log). This includes
+the focused qualification-helper regression and overlapping package/harness
+tests; these totals must not be added to count unique cases. Python compile and
+`git diff --check` also passed before commit `cc1870c`.
+
+### VPS2 canary and capacity
+
+The r121 five-minute canary is active. Its latest sample inspected was **88**
+at 21:23:07 UTC, passing with zero errors, restarts, kernel overflows, dropped
+events, or pending updates; completed scan age was 211 seconds. This is about
+7.3 hours of the required 24-hour window and qualifies r121 only. VPS2's root
+filesystem was **92% used (7.4 GiB free)** at 21:24 UTC. I did not run further
+tree-wide disk scans or delete files while the canary is active. The low free
+space is a test-host capacity concern and must be reviewed after the soak.
+
+The local readiness host still has approximately 56 GiB free on `/` and 11 GiB
+free in `/dev/shm`; it is not currently disk-blocked. The guarded lifecycle
+controller remains active, but repeated Go build/test jobs and elevated I/O
+pressure have so far prevented a continuous 120-second admission window. It
+has not launched another VM attempt at this checkpoint.
+
+**Updated:** 2026-11-09 21:27 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 21:22 UTC
 
 ### Qualification helper `/proc` exit race
 
