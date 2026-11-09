@@ -21580,3 +21580,20 @@ manifest is not changed by this audit append.
   passed **40/40** tests in 0.271 seconds. This validates the helper change,
   not the Dux package lifecycle. The lifecycle must be rerun; the pressure guard
   and host admission safeguards remain enabled.
+
+### Qualification continuation — 2026-11-09 21:05 UTC
+
+- Re-ran the focused VM-helper suite after the race fix and captured the
+  reproducible output: **40/40 passed** in 0.132 seconds. See
+  `docs/qualification/vm-cleanup-race-20261109/`.
+- The r123 lifecycle retry controller is alive but back at admission wait.
+  Go test/compiler workloads and host load above the configured threshold
+  prevented a new package attempt; no QEMU VM is currently running. Its latest
+  lifecycle attempt had been correctly classified as a pressure-guard abort,
+  not a package result.
+- Direct VPS2 monitor read remains at **84/84 passing r121 samples** through
+  21:03:58 UTC: zero errors, restarts, overflows, drops, and pending updates;
+  latest observation age **851 seconds**. The 24-hour canary remains incomplete.
+- Disk remains adequate: `/` has **60 GiB free** and `/dev/shm` **11 GiB free**.
+  No Dux service was changed. Real r121-to-r123 install/rollback lifecycle,
+  full soak, and fault/performance gates remain open.
