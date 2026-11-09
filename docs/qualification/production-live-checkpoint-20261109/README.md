@@ -122,6 +122,18 @@ Fresh local VPS1 and remote VPS2 snapshots are retained in
   changes, a 24-hour soak, or r123 runtime behavior. Machine-readable timings
   and scan summaries are in `vps2-scan-cycles-20261109T1832Z.json`.
 
+### VPS2 follow-up — 2026-11-09 18:38 UTC
+
+The scan active at the earlier checkpoint completed at 18:35:53 UTC in 383.320
+seconds; independent accounting passed at 18:37:01 in 67.941 seconds. At 18:38,
+VPS2 was active (PID 2561224), with zero restarts, zero kernel overflows, zero
+dropped events, no pending updates, and `last_scan_age_seconds=123`. The live
+24-hour monitor's sample 55 passed with no errors, SQLite quick-check `ok`, and
+the indexed path-graph check passing. Its freshness ceiling is 1,200 seconds.
+The canary still has only about 4.5 hours of elapsed monitoring, so the soak is
+not complete. Full status, sample summary, and all 19 scan/accounting timings
+are in `vps2-live-followup-20261109T1837Z.json`.
+
 The r121 canary has not been restarted or upgraded. The 24-hour soak remains
 open; the current candidate r123 still lacks real package lifecycle and runtime
 qualification. Treat these measurements as encouraging but incomplete live
