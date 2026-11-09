@@ -1,0 +1,72 @@
+{
+  "captured_at_utc": "2026-11-09T19:10:29.229937+00:00",
+  "check_type": "read-only SQLite quick_check plus schema-v7 path graph invariants; not formal canary monitor sample",
+  "database": "/var/lib/dux/dux.db",
+  "database_checks": {
+    "bad_parent_count": 0,
+    "bad_prime_groups": 0,
+    "elapsed_seconds": 5.199,
+    "missing_directory_totals": 0,
+    "passed": true,
+    "path_count": 1763958,
+    "quick_check": [
+      [
+        "ok"
+      ]
+    ],
+    "root_count": 1,
+    "root_visible_entries_match": true,
+    "scan_generation": "2561224-1794250771112655645",
+    "schema_version": "7",
+    "unexpected_directory_totals": 0
+  },
+  "host": "192.168.5.106",
+  "status": {
+    "automatic_reconciliation_paused": false,
+    "behind_seconds": 18668.914,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "dirty_since_timestamp_seconds": 1794251138,
+    "events_dropped": 0,
+    "events_resolved": 0,
+    "events_seen": 231429917,
+    "failed_reconciliation_attempts": null,
+    "index_bytes": 87086518272,
+    "index_bytes_on_disk": 725020672,
+    "index_nodes": 1760476,
+    "kernel_overflow_notifications": 0,
+    "last_event_commit_timestamp_seconds": 0,
+    "last_scan_age_seconds": 369,
+    "last_scan_timestamp_seconds": 1794251065,
+    "max_automatic_reconciliation_retries": 1,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 0,
+    "reconciliation_retry_backoff_seconds": null,
+    "reconciliation_retry_due": false,
+    "reconciliation_retry_remaining_seconds": null,
+    "reconciliation_retry_state_corrupt": false,
+    "root": "/",
+    "scan_first": true,
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794232765,
+    "updates_committed": 0,
+    "userspace_updates_dropped": 0,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794251434,
+    "write_error": null
+  },
+  "systemd": {
+    "ActiveState": "active",
+    "MainPID": "2561224",
+    "NRestarts": "0",
+    "SubState": "running"
+  }
+}

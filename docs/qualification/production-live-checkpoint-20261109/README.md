@@ -208,3 +208,17 @@ five-minute canary-monitor sample: no SQLite/path-graph checks were run in this
 capture. It adds one successful scan/accounting cycle but does not complete the
 24-hour soak or qualify r123. Raw status, selected journal evidence, and the
 assessment are in `vps2-live-followup-20261109T1905Z.json`.
+
+### VPS2 read-only database integrity check — 2026-11-09 19:10 UTC
+
+An additional independent read-only SQLite check passed against the same
+completed r121 scan generation: `PRAGMA quick_check` returned `ok`; schema was
+7; all 1,763,958 path rows had one root, valid directory parents, exactly one
+prime path per inode identity, matching directory-total rows, and a root entry
+count matching the path count. The SQL checks took 5.199 seconds. At capture,
+systemd was active with zero restarts, scan age was 369 seconds, and overflow,
+kernel/user drops, and pending-update counters were all zero. This duplicates
+the database-integrity portion of the monitor but omits its binary/unit hash,
+cgroup, journal-window, history, and independent filesystem-walk checks; it is
+not counted as a formal canary sample. Raw results are in
+`vps2-readonly-db-check-20261109T1909Z.json`.
