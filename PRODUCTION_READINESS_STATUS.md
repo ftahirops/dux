@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 15:25 UTC
+**Updated:** 2026-11-09 15:41 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 15:25 UTC
+## Current status and evidence — 2026-11-09 15:41 UTC
 
 A prior verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -31,8 +31,8 @@ stored scan timestamp advanced from 1794232455 (the old scan-start value) to
 That is runtime evidence that the patched field records completion.
 
 A fresh 24-hour VPS2 canary started at 14:07:03 UTC with five-minute samples
-and the intended 1,200-second freshness gate. **16 samples have passed**; the
-latest was 15:23:37 UTC. The daemon and monitor remain active with zero restarts.
+and the intended 1,200-second freshness gate. **19 samples have passed**; the
+latest was 15:37:56 UTC. The daemon and monitor remain active with zero restarts.
 Sample 3 ran during an active scheduled scan; it completed at 14:20:17 in
 about 5m52s, with zero coverage issues and accounting passed in 54.8s.
 `last_scan_ts` advanced from scan start 1794233665 to completion 1794234017.
@@ -44,10 +44,13 @@ issues and accounting passed. The latest scan covered 1,713,383 staged paths. Sa
 that graph at 223–274 seconds freshness. Sample 14 passed at 570 seconds
 freshness. Sample 15 overlapped an active scan at 823–936 seconds freshness;
 the scan completed in 277 seconds at 15:19:03 with zero coverage issues, and
-independent accounting passed in 68.969 seconds. Across all 16 samples there
+independent accounting passed in 68.969 seconds. Across all 19 samples there
 are zero monitor errors, overflows, drops, OOMs, or restarts. The 24-hour gate
 remains open. Sample 16 passed at age 274 seconds on the 1,716,749-path graph;
 daemon memory was 248.5 MiB current / 1.75 GiB peak against its 4 GiB limit.
+Sample 17 passed at 527 seconds freshness; sample 18 passed after scan
+completion with age 4 seconds. Sample 19 passed at 291 seconds with 1,719,379
+paths. Daemon peak memory remains 1.75 GiB against its 4 GiB limit.
 Monitor limits are 20% CPU, 1 GiB
 memory, no swap, IOWeight 10, and Nice 19. Full build, backup, install, and
 sample evidence is in
@@ -121,8 +124,14 @@ The 13:14Z follow-up is
   verified X.509 signer-label false positives, with no confirmed secrets.
   The packaged service policy and live VPS2 confinement have been checked;
   the broader deployment configuration and root-privilege threat review remain
-  open. Semgrep remains inconclusive because its ruleset fetch failed TLS
-  verification.
+  open. The Semgrep Registry p/rust fetch still fails TLS verification. A
+  pinned local Rust security ruleset ran successfully and produced 133 INFO
+  audit reminders (99 generic unsafe-use matches, 34 test temp-directory
+  matches); no vulnerability was confirmed by those rules. Unsafe-block review
+  and broader application security review remain open. Follow-up review added
+  safety comments to eight fanotify parser reads; all eight malformed-input
+  tests passed, standard strict Clippy remained clean, and the optional
+  undocumented-unsafe lint dropped from 107 to 99 diagnostics.
 
 ### Open production-readiness gates
 

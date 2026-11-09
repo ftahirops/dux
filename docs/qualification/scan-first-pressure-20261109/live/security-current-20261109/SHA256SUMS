@@ -3,3 +3,10 @@ f621c4ac0b0eaee9f2a7910800b9cfd2300dc46fce66aa1640ae2f8f79d56cc0  docs/qualifica
 37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/gitleaks-packaging.json
 37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/gitleaks-scripts.json
 37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/gitleaks-src.json
+3c02144413f28de456aa4d790fbc559cf4fb893bb58b9b88b301a7e99fabf950  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/semgrep-rust-security-local-20261109.json
+43acf05e7b69570ca1c0098a8e89787b38069a3f94acd993a0a85888ecb74306  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/semgrep-rust-security-local-20261109.log
+c53bbd03449c27df3cb70ac2bf69a8c1461492fa2064cec222d09d932646a491  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/clippy-undocumented-unsafe-prod-20261109.log
+f75ac39ad315c7f5492b431758b12ad39596cc8f9498f5f9401e00b14420f579  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/semgrep-remote-config-fetch-failure-20261109.log
+d5db51e2dc472ec57d46a92641d969e032479f87b47a501fa4cb58be87f8ee2b  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/clippy-undocumented-unsafe-after-parser-20261109.log
+96fb080cee0aea05df36df66baf8a51528e2f3ba323967d87620768d1f8c37ca  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/parser-malformed-tests-20261109.log
+4e50af313bfed8707b62e559f7ef5e5ca146b6d2b4648ee7266da205d5301a62  docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/clippy-strict-after-safety-comments-20261109.log

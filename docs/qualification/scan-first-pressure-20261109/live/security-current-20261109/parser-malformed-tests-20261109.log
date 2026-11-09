@@ -1,0 +1,16 @@
+   Compiling dux v0.6.3 (/home/dux)
+    Finished `release` profile [optimized] target(s) in 58.16s
+     Running unittests src/main.rs (target/release/deps/dux-430eb4dadfdcae33)
+
+running 8 tests
+test watch::tests::hint_reader_preserves_malformed_chunks_for_fail_closed_parser ... ok
+test containers::tests::upperdir_rejects_malformed_mount_option_escapes ... ok
+test watch::tests::scan_first_hint_parser_rejects_malformed_record_lengths ... ok
+test watch::tests::malformed_reconciliation_retry_state_fails_closed ... ok
+test store::tests::indexed_path_rejects_malformed_or_partial_root_metadata ... ok
+test util::tests::malformed_watch_status_booleans_and_trailing_fields_are_rejected ... ok
+test watch::tests::malformed_info_record_lengths_fail_closed_without_overread ... ok
+test tests::metrics_reject_malformed_scan_timestamp ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 322 filtered out; finished in 0.34s
+

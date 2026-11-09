@@ -1414,6 +1414,9 @@ fn filter_self_fanotify_records(buf: &[u8]) -> Option<Vec<u8>> {
         if buf.len().saturating_sub(offset) < FAN_EVENT_METADATA_LEN {
             return None;
         }
+        // SAFETY: The remaining slice has at least FAN_EVENT_METADATA_LEN
+        // bytes, and the compile-time size assertion ties that bound to this
+        // C-layout struct. read_unaligned does not require pointer alignment.
         let meta: FanotifyEventMetadata = unsafe {
             std::ptr::read_unaligned(buf[offset..].as_ptr().cast::<FanotifyEventMetadata>())
         };
@@ -1452,6 +1455,9 @@ fn count_fanotify_records_available(buf: &[u8]) -> (u64, u64, usize, bool) {
         if buf.len().saturating_sub(offset) < FAN_EVENT_METADATA_LEN {
             return (seen, overflows, offset, false);
         }
+        // SAFETY: The remaining slice has at least FAN_EVENT_METADATA_LEN
+        // bytes, and the compile-time size assertion ties that bound to this
+        // C-layout struct. read_unaligned does not require pointer alignment.
         let meta: FanotifyEventMetadata = unsafe {
             std::ptr::read_unaligned(buf[offset..].as_ptr().cast::<FanotifyEventMetadata>())
         };
@@ -1488,6 +1494,9 @@ fn parse_fanotify_hints(
     let mut lost = false;
     let mut handles = HashMap::<Vec<u8>, u64>::new();
     while buf.len() >= FAN_EVENT_METADATA_LEN && parsed < max_events {
+        // SAFETY: The loop requires at least FAN_EVENT_METADATA_LEN remaining
+        // bytes; the compile-time size assertion ties that bound to this
+        // C-layout struct. read_unaligned does not require pointer alignment.
         let meta: FanotifyEventMetadata =
             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
         let event_len = meta.event_len as usize;
@@ -1518,6 +1527,11 @@ fn parse_fanotify_hints(
                         info_valid = false;
                         break;
                     }
+                    // SAFETY: The preceding saturating bound check proves that
+                    // a full InfoHeader remains inside the current event; the
+                    // compile-time size assertion ties the checked size to the
+                    // C-layout struct. read_unaligned handles arbitrary input
+                    // alignment.
                     let header: InfoHeader = unsafe {
                         std::ptr::read_unaligned(buf[off..].as_ptr().cast::<InfoHeader>())
                     };
@@ -1903,6 +1917,9 @@ fn event_info_type_mask(event: &[u8], meta_len: usize) -> u64 {
     let mut off = meta_len.max(FAN_EVENT_METADATA_LEN);
     let mut types = 0u64;
     while off + 4 <= event.len() {
+        // SAFETY: The loop condition proves at least four bytes remain, and a
+        // compile-time assertion ties that bound to InfoHeader's C-layout size.
+        // read_unaligned does not require alignment.
         let hdr: InfoHeader =
             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
         let len = hdr.len as usize;
@@ -1924,6 +1941,9 @@ fn unresolved_target_diagnostic(
 ) -> String {
     let mut off = meta_len.max(FAN_EVENT_METADATA_LEN);
     while off + 4 <= event.len() {
+        // SAFETY: The loop condition proves at least four bytes remain, and a
+        // compile-time assertion ties that bound to InfoHeader's C-layout size.
+        // read_unaligned does not require alignment.
         let hdr: InfoHeader =
             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
         let len = hdr.len as usize;
@@ -4746,6 +4766,9 @@ fn parse_events_with_budget(
         if deadline.is_some_and(|limit| Instant::now() >= limit) {
             break;
         }
+        // SAFETY: The loop requires at least FAN_EVENT_METADATA_LEN remaining
+        // bytes; the compile-time size assertion ties that bound to this
+        // C-layout struct. read_unaligned does not require pointer alignment.
         let meta: FanotifyEventMetadata =
             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
         // a version mismatch means the struct layout differs from ours — bail
@@ -4976,6 +4999,9 @@ fn resolve_record(
             info_records_complete = false;
             break;
         }
+        // SAFETY: The preceding check proves at least four bytes remain, and a
+        // compile-time assertion ties that bound to InfoHeader's C-layout size.
+        // read_unaligned does not require alignment.
         let hdr: InfoHeader =
             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
         let rec_len = hdr.len as usize;

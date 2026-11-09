@@ -1,0 +1,634 @@
+   Compiling dux v0.6.3 (/home/dux)
+warning: unsafe block missing a safety comment
+  --> src/fault.rs:71:9
+   |
+71 |         unsafe {
+   |         ^^^^^^^^
+   |
+   = help: consider adding a safety comment on the preceding line
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+   = note: requested on the command line with `-W clippy::undocumented-unsafe-blocks`
+
+warning: unsafe block missing a safety comment
+   --> src/scan.rs:208:8
+    |
+208 |     if unsafe { libc::statfs(c.as_ptr(), s.as_mut_ptr()) } != 0 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/scan.rs:214:10
+    |
+214 |     Some(unsafe { s.assume_init() }.f_type as u64)
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/scan.rs:2558:5
+     |
+2558 |     unsafe {
+     |     ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/scan.rs:2564:5
+     |
+2564 |     unsafe {
+     |     ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/tunnel.rs:740:5
+    |
+740 |     unsafe {
+    |     ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:127:14
+    |
+127 |     let rc = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:187:8
+    |
+187 |     if unsafe { libc::statvfs(c.as_ptr(), s.as_mut_ptr()) } != 0 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:191:13
+    |
+191 |     let s = unsafe { s.assume_init() };
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:295:14
+    |
+295 |     let fd = unsafe {
+    |              ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:305:39
+    |
+305 |     let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    |                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:315:9
+    |
+315 |         unsafe { libc::close(fd) };
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:325:13
+    |
+325 |     let _ = unsafe {
+    |             ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:335:5
+    |
+335 |     unsafe { libc::close(fd) };
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:436:18
+    |
+436 |     let result = unsafe {
+    |                  ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:449:16
+    |
+449 |     let stat = unsafe { stat.assume_init() };
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:483:18
+    |
+483 |     let result = unsafe {
+    |                  ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:496:16
+    |
+496 |     let stat = unsafe { stat.assume_init() };
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/util.rs:903:18
+    |
+903 |     let result = unsafe { libc::kill(pid, 0) };
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+  --> src/watch.rs:32:9
+   |
+32 |         unsafe { libc::close(self.0) };
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider adding a safety comment on the preceding line
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:183:26
+    |
+183 |         let reader_fan = unsafe { libc::fcntl(fan, libc::F_DUPFD_CLOEXEC, 0) };
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:187:25
+    |
+187 |         let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:189:13
+    |
+189 |             unsafe { libc::close(reader_fan) };
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:245:9
+    |
+245 |         unsafe {
+    |         ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:270:5
+    |
+270 |     unsafe {
+    |     ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:323:22
+    |
+323 |         let polled = unsafe { libc::poll(&mut pfd, 1, HINT_READER_POLL_MS) };
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:358:21
+    |
+358 |             let n = unsafe { libc::read(fan, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:892:5
+    |
+892 |     unsafe {
+    |     ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:897:5
+    |
+897 |     unsafe {
+    |     ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/watch.rs:914:5
+    |
+914 |     unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1324:18
+     |
+1324 |     let result = unsafe { libc::ioctl(fanotify_fd, FANOTIFY_FIONREAD, &mut bytes) };
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1334:18
+     |
+1334 |     let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1417:43
+     |
+1417 |         let meta: FanotifyEventMetadata = unsafe {
+     |                                           ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1455:43
+     |
+1455 |         let meta: FanotifyEventMetadata = unsafe {
+     |                                           ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1492:13
+     |
+1492 |             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1521:46
+     |
+1521 |                     let header: InfoHeader = unsafe {
+     |                                              ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1579:17
+     |
+1579 |                 unsafe { libc::close(meta.fd) };
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1714:18
+     |
+1714 |     let result = unsafe {
+     |                  ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1774:8
+     |
+1774 |     if unsafe { libc::fstatfs(mount_fd, fs.as_mut_ptr()) } != 0 {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1777:8
+     |
+1777 |     if unsafe { fs.assume_init() }.f_type as u64 != EXT4_SUPER_MAGIC {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1781:8
+     |
+1781 |     if unsafe { libc::fstat(mount_fd, st.as_mut_ptr()) } != 0 {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1784:29
+     |
+1784 |     let dev = i64::try_from(unsafe { st.assume_init() }.st_dev).ok()?;
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1907:13
+     |
+1907 |             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1928:13
+     |
+1928 |             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1962:22
+     |
+1962 |             let fd = unsafe {
+     |                      ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:1978:13
+     |
+1978 |             unsafe { libc::close(fd) };
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:2370:5
+     |
+2370 |     unsafe {
+     |     ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:2862:33
+     |
+2862 |                         let m = unsafe {
+     |                                 ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:3556:13
+     |
+3556 |             unsafe { libc::poll(&mut pfd, 1, wait_ms.max(0)) }
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:3624:25
+     |
+3624 |                         unsafe {
+     |                         ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4496:9
+     |
+4496 |         unsafe { libc::statfs(c.as_ptr(), s.as_mut_ptr()) } == 0,
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4501:13
+     |
+4501 |     let v = unsafe { s.assume_init() }.f_fsid;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4503:25
+     |
+4503 |     let raw: [i32; 2] = unsafe { std::mem::transmute(v) };
+     |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4510:14
+     |
+4510 |     let fd = unsafe {
+     |              ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4523:14
+     |
+4523 |     let fd = unsafe {
+     |              ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4548:14
+     |
+4548 |     let rc = unsafe {
+     |              ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4750:13
+     |
+4750 |             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const FanotifyEventMetadata) };
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:4980:13
+     |
+4980 |             unsafe { std::ptr::read_unaligned(event[off..].as_ptr() as *const InfoHeader) };
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5192:5
+     |
+5192 |     unsafe {
+     |     ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5221:16
+     |
+5221 |     let file = unsafe { std::fs::File::from_raw_fd(fd) };
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5273:14
+     |
+5273 |     let fd = unsafe {
+     |              ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5306:17
+     |
+5306 |     let named = unsafe {
+     |                 ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5318:14
+     |
+5318 |     let fd = unsafe {
+     |              ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5330:36
+     |
+5330 |     let mut expected: libc::stat = unsafe { std::mem::zeroed() };
+     |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5331:36
+     |
+5331 |     let mut resolved: libc::stat = unsafe { std::mem::zeroed() };
+     |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:5332:5
+     |
+5332 |     unsafe {
+     |     ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:7268:12
+     |
+7268 |         && unsafe { libc::prctl(PR_SET_SECUREBITS, securebits | SECBIT_NOROOT_MASK, 0, 0, 0) } < 0
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/watch.rs:7358:13
+     |
+7358 |             unsafe {
+     |             ^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+   --> src/main.rs:285:5
+    |
+285 |     unsafe {
+    |     ^^^^^^^^
+    |
+    = help: consider adding a safety comment on the preceding line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: unsafe block missing a safety comment
+    --> src/main.rs:1064:14
+     |
+1064 |     let rc = unsafe { libc::kill(pid, libc::SIGHUP) };
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: consider adding a safety comment on the preceding line
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#undocumented_unsafe_blocks
+
+warning: `dux` (bin "dux") generated 70 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.73s

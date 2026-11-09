@@ -744,3 +744,41 @@ read-only status still showed 326 kernel overflow notifications, a dirty
 index, and a last completed scan about 3.46 days old. It does not qualify the
 new candidate or close correctness/freshness gates. No service or database
 state was changed.
+
+## Current-source Semgrep audit-rule scan — 2026-11-09
+
+The Semgrep Registry request for `p/rust` remains inconclusive because TLS
+verification fails for `semgrep.dev`; certificate verification was not
+disabled. To get a usable local scan, Semgrep **1.170.0** ran the Rust security
+rules in the official `semgrep/semgrep-rules` repository at commit
+`16b9e6d45f10649f6a531ec4838ed9924372c3bc`. The scan completed with exit 0,
+zero parser/scanner errors, ten rules, and 14 Rust source files parsed. The
+scanned Dux checkout was clean at commit `e9d1ac0`. It
+reported 133 INFO-level audit reminders: 99 generic `unsafe`-usage matches and
+34 `std::env::temp_dir()` matches. These are audit prompts, not 133 confirmed
+vulnerabilities. Review of the 34 temp-directory match sites found them in
+test fixtures/helpers, including feature-gated fault-injection tests; none was
+a production runtime temp-file creation path.
+
+The 99 unsafe matches cover syscall/FFI, kernel event-buffer parsing, raw file
+descriptor operations, and tests. The generic Semgrep rule does not assess
+pointer validity, kernel record bounds, ownership, or syscall contracts, so
+these matches are not a safety verdict. An initial Clippy run with
+`clippy::undocumented_unsafe_blocks` emitted 107 warnings across selected
+targets (some are duplicate target diagnostics). I added explicit safety
+comments to eight bounded fanotify metadata/info-header reads in the event
+parser; Clippy now emits 99 warnings, and the focused malformed-input run
+passes all eight matching tests. Standard all-target/all-feature Clippy with
+`-D warnings`, formatting, and diff checks also pass. The remaining
+undocumented-unsafe warnings and a reviewed unsafe-block inventory are still
+code-maturity work; these
+automated checks neither confirmed a memory-safety defect nor prove all unsafe
+code correct. See the parser test and follow-up lint logs in
+`docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/`.
+
+Evidence is under
+`docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/`:
+the local Semgrep JSON and log, the `p/rust` TLS-fetch failure, and the
+undocumented-unsafe Clippy output. This local ruleset is useful supplemental
+coverage, not equivalent to the unavailable registry config. The whole
+deployment and root-privilege threat review also remains open.

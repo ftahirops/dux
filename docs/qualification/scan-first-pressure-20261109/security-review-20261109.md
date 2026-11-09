@@ -103,3 +103,46 @@ inconclusive because its ruleset fetch failed TLS verification.
 These are scoped static scans. They do not establish absence of application
 security defects, secret exposure in unscanned paths/history, secure runtime
 configuration, or a complete release security review.
+
+## Supplemental local Semgrep rules — 2026-11-09 15:35 UTC
+
+The registry `p/rust` configuration remains unavailable because the TLS
+certificate chain for `semgrep.dev` cannot be verified. Verification was not
+disabled. As supplemental coverage, Semgrep 1.170.0 ran the Rust security
+rules from the official `semgrep/semgrep-rules` source pinned at commit
+`16b9e6d45f10649f6a531ec4838ed9924372c3bc`. It exited 0, parsed 14 Rust
+files, and produced zero scanner/parser errors. Ten rules reported 133 INFO
+audit reminders: 99 generic unsafe-use matches and 34 `temp_dir()` matches.
+Manual location review found all temp-directory uses in test fixtures/helpers;
+no production temp-file path was flagged.
+
+These are not 133 confirmed vulnerabilities. The generic unsafe rule cannot
+assess pointer validity or syscall contracts, so the 99 unsafe matches remain
+an audit inventory. Clippy's `undocumented_unsafe_blocks` lint emitted 107
+diagnostics across selected targets, with some target duplicates. A reviewed
+unsafe-block inventory and full app/runtime threat review remain open.
+
+Reports and SHA256s are in
+[`live/security-current-20261109/`](live/security-current-20261109/),
+including the local Semgrep JSON/log, the registry TLS failure log, and the
+Clippy lint output. This local ruleset does not replace the unavailable
+registry `p/rust` config.
+
+### Fanotify parser safety-comment follow-up — 2026-11-09 15:41 UTC
+
+Added `SAFETY` comments for eight bounded unaligned reads of the fanotify
+metadata and info-header structs. The guards establish full-record bounds,
+the C-layout struct sizes are compile-time asserted, and unaligned reads do not
+depend on input alignment. No parser behavior changed.
+
+The malformed-input focused filter ran **8 tests, all passed**, including
+`malformed_info_record_lengths_fail_closed_without_overread` and
+`scan_first_hint_parser_rejects_malformed_record_lengths`. Formatting,
+`git diff --check`, and strict all-target/all-feature Clippy with
+`-D warnings` passed. Running Clippy with the optional
+`undocumented_unsafe_blocks` warning dropped its emitted diagnostics from 107
+to 99; the remaining audit debt is open. Logs:
+[`parser-malformed-tests-20261109.log`](live/security-current-20261109/parser-malformed-tests-20261109.log),
+[`clippy-undocumented-unsafe-after-parser-20261109.log`](live/security-current-20261109/clippy-undocumented-unsafe-after-parser-20261109.log),
+and
+[`clippy-strict-after-safety-comments-20261109.log`](live/security-current-20261109/clippy-strict-after-safety-comments-20261109.log).
