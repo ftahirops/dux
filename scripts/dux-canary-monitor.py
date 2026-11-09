@@ -227,6 +227,55 @@ def pipeline_failure(status,
     return None
 
 
+def observation_completed_during_sample(before, after, before_observed_at,
+                                        after_observed_at,
+                                        max_observation_age_seconds):
+    """Accept a stale pre-scan snapshot only if that scan completed by sample end.
+
+    A scan-first observation can take longer than the freshness budget. The
+    before snapshot may therefore refer to the prior scan even while a new scan
+    is near completion. Never waive freshness unless the post-snapshot is
+    independently healthy and proves a newer completed observation.
+    """
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    if before.get("scan_first") is not True or before.get("scan_in_progress") is not True:
+        return False
+    if after.get("scan_first") is not True or after.get("scan_in_progress") is not False:
+        return False
+    before_failure = pipeline_failure(before, max_observation_age_seconds)
+    if before_failure != (
+            "last full observation is missing, invalid, or older than "
+            f"{max_observation_age_seconds} seconds"):
+        return False
+    age = before.get("last_scan_age_seconds")
+    if (not isinstance(age, (int, float)) or isinstance(age, bool)
+            or not math.isfinite(age) or age <= max_observation_age_seconds):
+        return False
+    if pipeline_failure(after, max_observation_age_seconds) is not None:
+        return False
+    progress = before.get("scan_progress")
+    if not isinstance(progress, dict):
+        return False
+    started_at = progress.get("started_at_seconds")
+    previous_scan = before.get("last_scan_timestamp_seconds")
+    completed_scan = after.get("last_scan_timestamp_seconds")
+    if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
+           for value in (started_at, previous_scan, completed_scan)):
+        return False
+    if started_at <= previous_scan or completed_scan < started_at:
+        return False
+    try:
+        before_at = float(before_observed_at)
+        after_at = float(after_observed_at)
+    except (TypeError, ValueError):
+        return False
+    if (not math.isfinite(before_at) or not math.isfinite(after_at)
+            or after_at < before_at or started_at > before_at + 5):
+        return False
+    return completed_scan > previous_scan
+
+
 def journal_failures(journal, scan_first):
     """Return critical journal evidence, allowing scan-first hint loss only.
 
@@ -265,9 +314,19 @@ def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
     scan_first_status = any(
         isinstance(sample.get(key), dict) and sample[key].get("scan_first") is True
         for key in ("status_before", "status_after"))
+    scan_completed_during_sample = observation_completed_during_sample(
+        sample.get("status_before"), sample.get("status_after"),
+        sample.get("status_before_observed_at_seconds"),
+        sample.get("status_after_observed_at_seconds"),
+        max_observation_age_seconds)
     for key in ("status_before", "status_after"):
         status = sample.get(key)
         failure = pipeline_failure(status, max_observation_age_seconds)
+        if (key == "status_before" and scan_completed_during_sample
+                and failure == (
+                    "last full observation is missing, invalid, or older than "
+                    f"{max_observation_age_seconds} seconds")):
+            failure = None
         if failure is not None:
             errors.append(f"{key}: {failure}")
         else:

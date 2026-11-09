@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 10:34 UTC
+**Updated:** 2026-11-09 11:14 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2582,3 +2582,75 @@ active/running, zero restarts/overflows/drops, scan age 369 seconds, and
 This is a completed scan and accounting check on the canary VM, not a 24-hour
 soak or production deployment. Sample SHA-256:
 `e6cb7a3881c6eefb906b5b6f6ec8420a12746b6fc0250b70baae04d760f9175a`.
+
+### Production-scale growth-history migration and canary progress — 2026-11-09 11:02 UTC
+
+Read-only SQLite `dbstat` on the live schema-6 database counted **27,184,763
+growth rows**. The `growth` table and its two indexes occupy 2,557,689,856
+bytes (2.38 GiB), about 86% of the 2,958,880,768-byte database. This explains
+why the production DB is much larger than the schema-7 canary DB. VPS2 has
+about 10 GiB free; a full in-place migration clone plus staging and WAL could
+approach that space budget, so I did not attempt that risky write there.
+
+I tried a consistent SQLite online backup with the production connection
+opened read-only and idle I/O priority. Under live writes it made little
+forward progress; the backup process recorded 65.5 GB of writes while its
+incomplete destination was only about 2.1 GB, consistent with SQLite backup
+restarts as the source changed. I interrupted it, removed only the incomplete
+test destination/sidecar, and verified the production service remained active
+with its restart count unchanged. No production DB or unit was modified. The
+attempt reinforces that a stable snapshot requires a quiescent source or a
+filesystem snapshot; it is not counted as a passing backup test.
+
+To exercise the same growth-history volume without production names, the
+schema migration regression now optionally seeds history rows by cross
+joining the synthetic 1,300,000-file index across 21 buckets. The run passed:
+**27,327,322 history rows** survived v6-layout to v7 rebuild, with 1,300,000
+files, 1,301 directories, 1,301,301 paths, and zero coverage issues. Runtime
+7:32.66, peak RSS 1,009,848 KiB, no swap. This is a strong size/shape test,
+but not an exact migration of the live database. Output SHA-256:
+`66000b7662fb6b5dee4c89a62c5bcdd5416b1c1ae32f894f8eef827cd0c851fc`.
+
+After the test change, the release/all-features suite passed **324 tests, 0
+failed, 2 ignored**; strict Clippy, formatting, and diff checks passed.
+Refreshed LLVM coverage: **72.22% line, 71.08% region, 75.99% function**;
+branch totals are unavailable. Coverage log SHA-256:
+`cc4f8d8d9d61c311336934bf9feb967fe85f49918d1a76ff480cc5562feb041d`.
+
+VPS2 release-119 canary samples **12–16 all passed**; latest sample 16 took
+139.338 seconds and showed zero overflows/drops with a 1,066-second-old scan.
+At 11:02 the daemon remained active with zero restarts; a new observation was
+in progress and scan age was 1,192 seconds. The index was dirty between
+observations. The 24-hour soak remains open. Sample log SHA-256:
+`d481d2b7ea376e6a524b770915890776698257c51cbc0cd054acf249f52220d8`.
+
+### Canary freshness-gate correction — 2026-11-09 11:14 UTC
+
+The original release-119 monitor stopped at sample 17. Its before-snapshot
+reported age 1,227 seconds while a full scan was in progress; by the after
+snapshot the scan had completed, age was 388 seconds, exact accounting passed,
+and there were zero overflows, user-space drops, or Dux restarts. The monitor
+treated the two snapshots independently and failed on the older before value.
+This was a monitor false negative, not a daemon restart or failed scan.
+
+Fixed `scripts/dux-canary-monitor.py` to waive only that stale-before error
+when the before snapshot proves an active scan and the after snapshot proves
+that a newer scan completed with healthy status by the end of collection.
+An unfinished scan, invalid age/timestamps, or unhealthy after snapshot still
+fails. The captured sample 17 re-evaluates with zero errors under the fix.
+The monitor tests now cover completion during the sample, an unfinished scan,
+and invalid age. Full Python discovery passed **354 tests**; py_compile and
+diff checks passed. Monitor SHA-256:
+`ea1d4c98ea7bcf8fe17632095af6d5535852359b691439987480b7fedc043cad`.
+Test log SHA-256:
+`d76183339b5893ba511b9a15a2c7ea52e9e4eb84753080b77c87316fe04e9d2d`.
+
+The original canary remains recorded as failed under its old monitor and is
+not counted as a completed soak. The fixed monitor began a fresh run at
+11:13:18 UTC with a new evidence file. Sample 1 passed in 60.935 seconds;
+scan age was 968 seconds with a scan in progress, zero overflows/drops, and
+zero Dux restarts. Collector unit is active and limited to 20% CPU / 1 GiB.
+This new soak is only beginning. Sample-17 corrected evaluation SHA-256:
+`61a5616fec7f4c2d42ee1d947a630eafa1ef5781a94666af8a68703894304317`.
+New canary sample SHA-256:
+`cf746cabe9873feede7f7769184c173548de51d369ebf35300ba954137a23739`.

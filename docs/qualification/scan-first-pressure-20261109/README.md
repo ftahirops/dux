@@ -872,3 +872,88 @@ observations. The sample passed, but it does not complete the 24-hour soak.
 Raw sample:
 [`release119-canary-sample10-20261109T1029Z.jsonl`](live/release119-canary-sample10-20261109T1029Z.jsonl),
 SHA-256 `e6cb7a3881c6eefb906b5b6f6ec8420a12746b6fc0250b70baae04d760f9175a`.
+
+### Production-volume growth-history migration and live-source snapshot — 2026-11-09
+
+Read-only SQLite `dbstat` on the actual production schema-6 index counted
+**27,184,763 growth rows**. The `growth` table and its two indexes consume
+2,557,689,856 bytes (2.38 GiB), about 86% of the 2,958,880,768-byte database.
+This is the primary reason the old index is much larger than the schema-7
+canary database. VPS2 had only about 10 GiB free. An in-place clone, rebuilt
+staging DB, and SQLite destination WAL could approach that limit, so I did not
+run a full exact-data migration there.
+
+A production-source online backup attempt used SQLite's backup API with the
+source opened read-only and idle I/O priority. While the daemon continued
+writing, the backup made little forward progress: the process reported 65.5
+GB written while the incomplete destination was about 2.1 GB. This is
+consistent with backup restarts when SQLite detects source changes. I
+interrupted the attempt, removed only its incomplete destination, and checked
+that production remained active with its restart count unchanged. No live DB
+or service unit was modified. This attempt is not a pass; a stable source
+snapshot is required before an exact production-data migration test.
+
+Instead, the migration regression now accepts
+`DUX_V6_UPGRADE_GROWTH_BUCKETS` to generate history at scale without copying
+production path names. With 1,300,000 synthetic files and 21 history buckets,
+it migrated **27,327,322 growth rows** successfully—close to production's
+27,184,763. The test verified file, directory, and path totals, zero scan
+coverage issues, schema version 7, path-graph/root resolution, and complete
+growth-row count plus a preserved legacy growth row. It completed in **7:32.66**
+with **1,009,848 KiB peak RSS** and no swap. The full release/all-features
+suite passed **324, failed 0, ignored 2**; strict Clippy, format, and diff
+checks passed. Coverage is **72.22% line, 71.08% region, 75.99% function**;
+branch totals unavailable. Coverage output:
+[`schema6-growth-coverage-20261109.log`](live/schema6-growth-coverage-20261109.log),
+SHA-256 `cc4f8d8d9d61c311336934bf9feb967fe85f49918d1a76ff480cc5562feb041d`.
+Raw migration log:
+[`schema6-production-growth-scale-20261109.log`](live/schema6-production-growth-scale-20261109.log),
+SHA-256 `66000b7662fb6b5dee4c89a62c5bcdd5416b1c1ae32f894f8eef827cd0c851fc`.
+
+The canary monitor passed **samples 12–16** with no errors, restarts,
+overflows, or user-space drops. Sample 16 took 139.338 seconds; at capture the
+last completed scan was 1,066 seconds old. A separate check at 11:02 found the
+service active with zero restarts, a new scan in progress, and scan age 1,192
+seconds. The index remains dirty between periodic observations; 24-hour soak
+is incomplete. Evidence:
+[`release119-canary-progress-20261109T1100Z.jsonl`](live/release119-canary-progress-20261109T1100Z.jsonl),
+SHA-256 `d481d2b7ea376e6a524b770915890776698257c51cbc0cd054acf249f52220d8`.
+
+### Canary monitor freshness-gate defect and correction — 2026-11-09
+
+The first release-119 monitor run ended at sample 17. The before-status had a
+1,227-second-old last scan and a scan in progress. During the 61-second sample,
+the scan completed; after-status had age 388 seconds, scan-in-progress false,
+valid exact accounting, zero overflow/drop counters, and Dux `NRestarts=0`.
+The monitor evaluated before/after independently and failed on the old before
+age even though the collection ended with a fresh verified observation.
+
+The monitor now accepts that sample only when it can prove all of these:
+before-status contains a valid stale age and active scan start after the
+previous scan; after-status proves a newer completed observation within the
+freshness bound; and both status heartbeats and the rest of the sample gates
+pass. If scanning remains active after collection, timestamps are invalid, or
+the final status is unhealthy, the monitor still fails. The actual sample 17
+re-evaluates with zero errors. Raw input, original failure event, and
+re-evaluation are preserved:
+[`release119-canary-sample17-20261109T1104Z.jsonl`](live/release119-canary-sample17-20261109T1104Z.jsonl),
+[`release119-canary-failed-event-20261109T1104Z.jsonl`](live/release119-canary-failed-event-20261109T1104Z.jsonl),
+[`release119-sample17-monitor-reevaluation.json`](live/release119-sample17-monitor-reevaluation.json).
+The sample itself reports no Dux restarts, kernel overflows, or user drops.
+
+Three monitor regression tests cover successful scan completion inside the
+sample, an unfinished scan remaining stale, and invalid age not being waived.
+Full Python discovery passed **354 tests**; Python compilation and diff checks
+passed. Monitor SHA-256:
+`ea1d4c98ea7bcf8fe17632095af6d5535852359b691439987480b7fedc043cad`.
+Test log SHA-256:
+`d76183339b5893ba511b9a15a2c7ea52e9e4eb84753080b77c87316fe04e9d2d`.
+
+The original run is retained as **failed under the old monitor**, not silently
+converted into a pass. A new 24-hour run using the corrected monitor started
+at 11:13:18 UTC. Sample 1 passed in 60.935 seconds; scan age was 968 seconds,
+the next scan was in progress, and overflow/drop/restart counters were zero.
+The collector is active at 20% CPU and 1 GiB memory caps. This new run has only
+one sample and has not qualified the 24-hour soak. Evidence:
+[`release119-monitorfix-v2-sample1-20261109T1114Z.jsonl`](live/release119-monitorfix-v2-sample1-20261109T1114Z.jsonl),
+SHA-256 `cf746cabe9873feede7f7769184c173548de51d369ebf35300ba954137a23739`.

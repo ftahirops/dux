@@ -4142,9 +4142,17 @@ mod tests {
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(1);
+        let growth_bucket_count = std::env::var("DUX_V6_UPGRADE_GROWTH_BUCKETS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
         assert!(
             entry_count <= 10_000_000,
             "scale fixture is capped at ten million files"
+        );
+        assert!(
+            growth_bucket_count <= 32,
+            "growth history fixture is capped at thirty-two buckets"
         );
         for i in 0..entry_count {
             let parent = root.join(format!("d{:04}", i / 1_000));
@@ -4157,8 +4165,12 @@ mod tests {
         assert_eq!(baseline.files, entry_count);
         assert_eq!(baseline.errors, 0);
         eprintln!(
-            "schema-v6 source fixture: files={}, directories={}, path_instances={}, coverage_issues={}",
-            baseline.files, baseline.dirs, baseline.staged_path_instances, baseline.errors
+            "schema-v6 source fixture: files={}, directories={}, path_instances={}, coverage_issues={}, unique_inodes={}",
+            baseline.files,
+            baseline.dirs,
+            baseline.staged_path_instances,
+            baseline.errors,
+            baseline.staged_root_unique_inodes
         );
 
         // Model a real v6 database: the v7 path graph does not exist, but the
@@ -4178,6 +4190,28 @@ mod tests {
                    VALUES(123,1,42,0,8192);",
             )
             .unwrap();
+            if growth_bucket_count > 0 {
+                let mut seed = String::from(
+                    "DROP INDEX idx_growth_bucket_delta;
+                     DROP INDEX idx_growth_inode_bucket_delta;
+                     CREATE TEMP TABLE scale_growth_buckets(bucket INTEGER PRIMARY KEY);",
+                );
+                for bucket in 0..growth_bucket_count {
+                    seed.push_str(&format!(
+                        "INSERT INTO scale_growth_buckets VALUES({});",
+                        1_000 + bucket
+                    ));
+                }
+                seed.push_str(
+                    "INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta)
+                     SELECT b.bucket,i.dev_id,i.inode,i.birth_ns,i.blocks
+                     FROM scale_growth_buckets b CROSS JOIN inodes i;
+                     DROP TABLE scale_growth_buckets;
+                     CREATE INDEX idx_growth_bucket_delta ON growth(bucket,delta DESC,dev_id,inode,birth_ns);
+                     CREATE INDEX idx_growth_inode_bucket_delta ON growth(dev_id,inode,birth_ns,bucket,delta);",
+                );
+                conn.execute_batch(&seed).unwrap();
+            }
         }
         assert!(Store::needs_rebuild(&db).unwrap());
 
@@ -4194,13 +4228,21 @@ mod tests {
             stats.staged_root_visible_entries,
             entry_count + expected_directories
         );
+        let expected_growth_rows = 1_u64
+            .checked_add(
+                growth_bucket_count
+                    .checked_mul(baseline.staged_root_unique_inodes)
+                    .expect("growth row count multiplication overflow"),
+            )
+            .expect("growth row count overflow");
         eprintln!(
-            "schema-v7 migrated fixture: files={}, directories={}, path_instances={}, visible_entries={}, coverage_issues={}",
+            "schema-v7 migrated fixture: files={}, directories={}, path_instances={}, visible_entries={}, coverage_issues={}, expected_growth_rows={}",
             stats.files,
             stats.dirs,
             stats.staged_path_instances,
             stats.staged_root_visible_entries,
-            stats.errors
+            stats.errors,
+            expected_growth_rows
         );
         let store = Store::open_ro(&db).unwrap();
         assert_eq!(store.schema_version, 7);
@@ -4222,6 +4264,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(retained_history, 8192);
+        let growth_rows: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM growth", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(growth_rows as u64, expected_growth_rows);
         drop(store);
         rm_db(&db);
         let _ = fs::remove_dir_all(&root);

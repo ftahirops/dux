@@ -157,6 +157,62 @@ class CanaryMonitorTests(unittest.TestCase):
             errors,
         )
 
+    def test_in_progress_scan_may_finish_during_sample_and_refresh_freshness(self):
+        value = sample()
+        value["status_before"] = status(
+            caught_up=False, dirty=True, scan_first=True, scan_in_progress=True,
+            last_scan_age_seconds=1227, last_scan_timestamp_seconds=1000,
+            watch_status_updated_at_seconds=2227,
+            scan_progress={"started_at_seconds": 1900, "files_seen": 1000})
+        value["status_after"] = status(
+            caught_up=False, dirty=True, scan_first=True, scan_in_progress=False,
+            last_scan_age_seconds=388, last_scan_timestamp_seconds=1900,
+            watch_status_updated_at_seconds=2288)
+        value["status_before_observed_at_seconds"] = 2227
+        value["status_after_observed_at_seconds"] = 2288
+        self.assertEqual(
+            MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT), [])
+
+    def test_stale_observation_is_not_waived_until_scan_completes(self):
+        value = sample()
+        value["status_before"] = status(
+            caught_up=False, dirty=True, scan_first=True, scan_in_progress=True,
+            last_scan_age_seconds=1227, last_scan_timestamp_seconds=1000,
+            watch_status_updated_at_seconds=2227,
+            scan_progress={"started_at_seconds": 1900, "files_seen": 1000})
+        value["status_after"] = status(
+            caught_up=False, dirty=True, scan_first=True, scan_in_progress=True,
+            last_scan_age_seconds=1288, last_scan_timestamp_seconds=1000,
+            watch_status_updated_at_seconds=2288,
+            scan_progress={"started_at_seconds": 1900, "files_seen": 1200})
+        value["status_before_observed_at_seconds"] = 2227
+        value["status_after_observed_at_seconds"] = 2288
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn(
+            "status_before: last full observation is missing, invalid, or older than 1200 seconds",
+            errors)
+        self.assertIn(
+            "status_after: last full observation is missing, invalid, or older than 1200 seconds",
+            errors)
+
+    def test_invalid_age_is_not_waived_by_a_completed_scan(self):
+        value = sample()
+        value["status_before"] = status(
+            caught_up=False, dirty=True, scan_first=True, scan_in_progress=True,
+            last_scan_age_seconds=None, last_scan_timestamp_seconds=1000,
+            watch_status_updated_at_seconds=2227,
+            scan_progress={"started_at_seconds": 1900, "files_seen": 1000})
+        value["status_after"] = status(
+            caught_up=False, dirty=True, scan_first=True, scan_in_progress=False,
+            last_scan_age_seconds=388, last_scan_timestamp_seconds=1900,
+            watch_status_updated_at_seconds=2288)
+        value["status_before_observed_at_seconds"] = 2227
+        value["status_after_observed_at_seconds"] = 2288
+        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+        self.assertIn(
+            "status_before: last full observation is missing, invalid, or older than 1200 seconds",
+            errors)
+
     def test_scan_first_requires_a_completed_observation_timestamp(self):
         value = sample()
         value["status_before"] = status(caught_up=False, dirty=True, scan_first=True,
