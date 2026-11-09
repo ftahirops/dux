@@ -1,6 +1,31 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:07 UTC
+## Latest verified checkpoint — 2026-11-09 22:14 UTC
+
+### Local readiness disk cleanup
+
+The stale 56 GiB VM-directory report is not current: `target/readiness/vms` is
+32 KiB. Eight inactive fault-test Cargo target trees each held about 240 MiB.
+I removed their rebuildable Cargo intermediates with `cargo clean`, while
+restoring each unique fault-injection executable at its original path. All
+eight binary hashes and version strings match the pre-cleanup inventory. Cargo
+reported **1,996.8 MiB removed**; `target/readiness` fell from 2.7 GiB to
+**869 MiB**, and `/` now has **57 GiB free**. The temporary preservation copies
+were deleted. Details and hashes are in
+[`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
+
+The guarded r123 lifecycle rerun remains live in admission wait; the host keeps
+starting Go compiler/test workloads. No VM is running. VPS2's r121 canary
+reached **98 passing samples** at 22:12:57 UTC with zero errors, restarts,
+overflows, drops, or pending updates; completed-scan age was 545 seconds. The
+24-hour canary remains incomplete. VPS2 root was last checked at 92% usage with
+7.2 GiB free; do not vacuum its 4.0 GiB journals before canary completion.
+
+**Updated:** 2026-11-09 22:14 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 22:07 UTC
 
 ### Targeted VPS2 disk inspection
 
