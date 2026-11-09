@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 15:08 UTC
+**Updated:** 2026-11-09 15:13 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 15:08 UTC
+## Current status and evidence — 2026-11-09 15:13 UTC
 
 A prior verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -31,7 +31,8 @@ stored scan timestamp advanced from 1794232455 (the old scan-start value) to
 That is runtime evidence that the patched field records completion.
 
 A fresh 24-hour VPS2 canary started at 14:07:03 UTC with five-minute samples
-and the intended 1,200-second freshness gate. The first **13 samples passed**.
+and the intended 1,200-second freshness gate. **14 samples have passed**; the
+latest was 15:12:50 UTC. The daemon and monitor remain active with zero restarts.
 Sample 3 ran during an active scheduled scan; it completed at 14:20:17 in
 about 5m52s, with zero coverage issues and accounting passed in 54.8s.
 `last_scan_ts` advanced from scan start 1794233665 to completion 1794234017.
@@ -40,8 +41,9 @@ with a scan active to 4s after completion, and the monitor accepted the newer
 verified graph. Samples 9 and 12 also passed during active scheduled scans;
 the scans completed in 260s and 234s respectively, each with zero coverage
 issues and accounting passed. The latest scan covered 1,713,383 staged paths. Sample 13 also passed with
-that graph at 223–274 seconds freshness. Across all 13 samples there are zero monitor errors, overflows, drops, OOMs, or
-restarts. The 24-hour gate remains open. Monitor limits are 20% CPU, 1 GiB
+that graph at 223–274 seconds freshness. Sample 14 passed at 570 seconds
+freshness. Across all 14 samples there are zero monitor errors, overflows,
+drops, OOMs, or restarts. The 24-hour gate remains open. Monitor limits are 20% CPU, 1 GiB
 memory, no swap, IOWeight 10, and Nice 19. Full build, backup, install, and
 sample evidence is in
 [`release-121 qualification`](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md).
