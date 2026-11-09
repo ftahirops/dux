@@ -134,7 +134,17 @@ def cleanup_ephemeral_runtime(guest, runtime_directory):
         raise ValueError(f'refusing unexpected ephemeral guest directory metadata: {runtime}')
     if filesystem_type_for(runtime) != 'tmpfs':
         raise ValueError(f'refusing to remove ephemeral guest data outside tmpfs: {runtime}')
-    shutil.rmtree(runtime)
+    try:
+        shutil.rmtree(runtime)
+    except FileNotFoundError:
+        # The pressure guard and the lifecycle wrapper can both clean the same
+        # stopped VM after systemd has terminated it. A competing cleanup may
+        # remove the run directory after the validation above but before
+        # rmtree's first lstat. Treat an already-absent run directory as
+        # successfully cleaned; still surface errors when anything remains.
+        if not runtime.exists():
+            return False
+        raise
     return True
 
 
@@ -462,10 +472,13 @@ def run_pressure_guard(guest, directory, vm_unit):
             with (directory / 'pressure-guard-events.jsonl').open('a') as stream:
                 stream.write(json.dumps(event, sort_keys=True) + '\n')
                 stream.flush()
+            # Persist the event to journald before stopping the VM. The stopped
+            # guest cleanup can race the lifecycle wrapper and remove the
+            # runtime directory that also contains the JSONL event file.
+            print(json.dumps(event, sort_keys=True), flush=True)
             run('systemctl', 'stop', vm_unit)
             statefile = statefile_for(directory, ephemeral=guest != 'watch-unit')
             cleanup_stopped_guest_runtime(guest, statefile, vm_unit)
-            print(json.dumps(event, sort_keys=True), flush=True)
             return
         time.sleep(5)
 

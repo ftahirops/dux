@@ -290,6 +290,29 @@ class PressureGuardTests(unittest.TestCase):
                 ))
                 self.assertFalse(runtime.exists())
 
+    def test_ephemeral_cleanup_tolerates_runtime_removed_after_validation(self):
+        with tempfile.TemporaryDirectory(prefix='dux-ephemeral-cleanup-race-') as temporary:
+            tmpfs_root = Path(temporary)
+            runtime = tmpfs_root / 'ubuntu24-lifecycle-ephemeral' / '123456'
+            runtime.mkdir(parents=True, mode=0o700)
+            runtime.chmod(0o700)
+            (runtime / 'disk.qcow2').write_bytes(b'guest overlay')
+            original_rmtree = VM.shutil.rmtree
+
+            def competing_cleanup(path):
+                original_rmtree(path)
+                raise FileNotFoundError(2, 'No such file or directory', str(path))
+
+            with (
+                patch.object(VM, 'EPHEMERAL_RUNTIME_DIRECTORY', tmpfs_root),
+                patch.object(VM, 'filesystem_type_for', return_value='tmpfs'),
+                patch.object(VM.shutil, 'rmtree', side_effect=competing_cleanup),
+            ):
+                self.assertFalse(VM.cleanup_ephemeral_runtime(
+                    'ubuntu24-lifecycle-ephemeral', runtime
+                ))
+            self.assertFalse(runtime.exists())
+
     def test_ephemeral_cleanup_rejects_paths_outside_dedicated_guest_slot(self):
         with tempfile.TemporaryDirectory(prefix='dux-ephemeral-cleanup-') as temporary:
             tmpfs_root = Path(temporary) / 'runtime'
@@ -533,6 +556,29 @@ class PressureGuardTests(unittest.TestCase):
                         "ubuntu24", statefile, "dux-vm-guest.service"
                     )
             self.assertTrue(runtime.is_dir())
+
+    def test_runtime_guard_logs_pressure_event_before_cleanup_can_fail(self):
+        with tempfile.TemporaryDirectory(prefix='dux-vm-pressure-guard-log-') as temp:
+            directory = Path(temp)
+            critical = {'cpu': {'some': 41.0}, 'io': {'some': 0.0}, 'memory': {'some': 0.0}}
+            with (
+                patch.object(VM.subprocess, 'run', side_effect=[
+                    SimpleNamespace(returncode=0), SimpleNamespace(returncode=0),
+                ]),
+                patch.object(VM, 'host_pressure', side_effect=[critical, critical]),
+                patch.object(VM, 'run') as run,
+                patch.object(VM, 'cleanup_stopped_guest_runtime',
+                              side_effect=FileNotFoundError('concurrent cleanup')),
+                patch.object(VM.time, 'sleep'),
+                patch('builtins.print') as output,
+            ):
+                with self.assertRaisesRegex(FileNotFoundError, 'concurrent cleanup'):
+                    VM.run_pressure_guard('ubuntu24', directory, 'dux-vm-guest.service')
+
+            run.assert_called_once_with('systemctl', 'stop', 'dux-vm-guest.service')
+            output.assert_called_once()
+            logged = json.loads((directory / 'pressure-guard-events.jsonl').read_text())
+            self.assertEqual(logged['action'], 'stopped_disposable_vm')
 
 
 class CommandSafetyTests(unittest.TestCase):

@@ -21556,3 +21556,27 @@ manifest is not changed by this audit append.
   This is dependency metadata only, not application security proof.
 - Raw report and its SHA-256 are retained in
   `docs/qualification/cargo-audit-20261109T2049Z/`.
+
+### Disposable-VM guard cleanup race — 2026-11-09 20:58 UTC
+
+- The first r121-to-r123 Debian lifecycle attempt installed the 0.6.3-121
+  baseline and upgraded to 0.6.3-123, then the guest SSH connection closed during
+  rollback. This is **not** counted as a rollback/package failure: journald shows
+  the disposable QEMU unit was stopped by the runtime pressure guard. The
+  guard's pressure-event file and guest report were lost during cleanup, so the
+  exact trigger and rollback result cannot be recovered from this attempt.
+- The guard then failed with an uncaught `FileNotFoundError` in
+  `cleanup_ephemeral_runtime`: the lifecycle wrapper and pressure guard can
+  concurrently clean the same stopped guest directory. Its event was printed
+  only after cleanup, so the failure also erased the pressure reason from the
+  retained log. This is a verified qualification-harness race.
+- Made cleanup idempotent when a concurrent cleanup removes the validated run
+  directory before `shutil.rmtree`, while still propagating errors if anything
+  remains. The guard now emits its pressure event to journald before stopping
+  the VM and before run-directory cleanup. Added regression tests for the
+  between-validation removal race and for preserving the guard event if cleanup
+  fails.
+- `PYTHONPATH=scripts python3 -m unittest scripts.test_dux_qualification_vm`
+  passed **40/40** tests in 0.271 seconds. This validates the helper change,
+  not the Dux package lifecycle. The lifecycle must be rerun; the pressure guard
+  and host admission safeguards remain enabled.
