@@ -21492,3 +21492,17 @@ manifest is not changed by this audit append.
   24-hour canary, live migration/rollback, disk-full/OOM/filesystem fault
   testing, 72-hour endurance, constrained-host p95/p99 performance, and full
   privilege/threat sign-off remain open.
+
+### Canary continuation — 2026-11-09 20:39 UTC
+
+- The active VPS2 r121 monitor advanced to **79/79 passing samples** through
+  20:39:07 UTC, with no sample errors. Its latest completed-observation age
+  was **279 seconds**; service restarts, kernel overflows, kernel/userspace
+  drops, and pending updates remain zero. The 24-hour interval remains open.
+- At 20:39:24, the service was active, not scanning, and the latest full
+  observation was 296 seconds old. The 20:34:28 scan and 20:35:44 independent
+  accounting pass remain the latest completed cycle.
+- At 20:39:27, local VM admission found active Go compiler/test workloads and
+  load1 **29.76**. No QEMU or r123 package lifecycle operation started. The
+  guarded driver remains active; no Dux tests or service changes occurred in
+  this interval.
