@@ -222,3 +222,19 @@ the database-integrity portion of the monitor but omits its binary/unit hash,
 cgroup, journal-window, history, and independent filesystem-walk checks; it is
 not counted as a formal canary sample. Raw results are in
 `vps2-readonly-db-check-20261109T1909Z.json`.
+
+### r123 package-lifecycle VM admission retry — 2026-11-09 19:18 UTC
+
+The official Ubuntu 24.04 amd64 cloud image was downloaded from Canonical's
+`releases/noble/release` endpoint and matched the published SHA-256
+`04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`.
+The verified image is staged in `/dev/shm` with a local image manifest; r121
+and r123 DEBs plus the lifecycle harness are staged read-only in a separate
+tmpfs share. A retry of the guarded `ubuntu24-lifecycle-ephemeral` VM start was
+refused before QEMU launch because the host had an active Go build/test and
+load1 above the runner's limit of 10. A later 19:18 admission snapshot still
+found a Go race test/compiler and load1 17.27. The VM unit is inactive; no
+guest, Dux service, or canary state was changed. Thus this retry is an
+admission refusal, not a package-lifecycle test result. Retry only after the
+runner's repeated host-pressure/workload checks pass. Captured admission,
+image, and package hashes are in `package-lifecycle-admission-20261109.json`.

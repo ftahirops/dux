@@ -1,0 +1,47 @@
+{
+  "captured_at_utc": "2026-11-09T19:18:11.615099+00:00",
+  "current_admission_blockers": [
+    "active host build/test/install/analysis workload: Go compiler pid=1840335",
+    "active host build/test/install/analysis workload: go test pid=1813086",
+    "host load1=17.27 exceeds 10"
+  ],
+  "current_vm_unit": {
+    "ActiveState": "inactive",
+    "MainPID": "0",
+    "SubState": "dead"
+  },
+  "host_pressure": {
+    "active_host_workloads": [
+      "Go compiler pid=1840335",
+      "go test pid=1813086"
+    ],
+    "cpu": {
+      "full": 0.0,
+      "some": 6.05
+    },
+    "io": {
+      "full": 1.46,
+      "some": 1.67
+    },
+    "load1": 17.27,
+    "memory": {
+      "full": 0.0,
+      "some": 0.0
+    },
+    "telemetry_errors": []
+  },
+  "image": {
+    "bytes": 621284352,
+    "checksum_verified": true,
+    "expected_official_sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+    "path": "/dev/shm/dux-qualification-images/ubuntu-24.04-server-cloudimg-amd64.img",
+    "sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94"
+  },
+  "no_guest_or_dux_service_changes": true,
+  "qualification_packages": {
+    "lifecycle_harness_sha256": "7ff3bd69701aa798e455540e72d01814e690b806391c02a1be17ab8dea6a81b1",
+    "r121_deb_sha256": "091930e93fd36dd7a93cdc7983ded6e893c207035b66d5d010cec585bde81d57",
+    "r123_deb_sha256": "3e9b5c61422780d577112d8fc8f4cfb3cf95b88f14b379eb60793c63f6e205c4"
+  },
+  "vm_start_attempt": "refused by scripts/dux-qualification-vm.py host admission before QEMU launch"
+}
