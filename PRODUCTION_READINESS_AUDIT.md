@@ -21469,3 +21469,26 @@ manifest is not changed by this audit append.
   regions, and 76.94% functions. No new Rust or package test ran in this
   follow-up; r123 install/upgrade/rollback and runtime qualification remain
   open.
+
+### Scheduled scan and admission follow-up — 2026-11-09 20:36 UTC
+
+- VPS2's r121 canary reached **78/78 passing five-minute samples** through
+  20:33:33 UTC, with no errors. The latest sample's completed-scan age was
+  898 seconds against the 1,200-second limit.
+- The scheduled full observation started at **20:29:31** and completed at
+  **20:34:28 UTC** in about **4m57s**. It observed **1,593,093 files** and
+  **189,586 directories** (1,782,679 staged paths), with **0 coverage issues**
+  and zero unresolved inode-reuse paths. Independent accounting verification
+  passed at **20:35:44 UTC** in **75.479 seconds**. At 20:35:56, the service
+  had zero restarts, overflows, kernel/userspace drops, or pending updates; the
+  completed observation was 88 seconds old. This is r121 evidence, not r123
+  package/runtime qualification.
+- At 20:36:06, local VM admission found active Go build/test/vet workloads,
+  load1 **31.60**, and CPU PSI `some avg10` **83.99%**. The guarded driver was
+  active (PID 1928589) but QEMU remained stopped; r123 package operations have
+  not begun. Disk remained adequate: `/` had 60 GiB free and `/dev/shm` 11 GiB.
+  The current blocker is host CPU pressure and concurrent builds, not disk.
+- No Dux source or service change was made. The r123 package lifecycle, full
+  24-hour canary, live migration/rollback, disk-full/OOM/filesystem fault
+  testing, 72-hour endurance, constrained-host p95/p99 performance, and full
+  privilege/threat sign-off remain open.
