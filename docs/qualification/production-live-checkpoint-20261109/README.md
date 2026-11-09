@@ -172,3 +172,14 @@ VPS1 remains on its legacy daemon with 636 lifetime overflow notifications,
 4.25 days). Pending updates were 49 at this sample; that value fluctuates and
 does not clear the stale-index/overflow condition. The full two-host snapshot
 and monitor roll-up are in `live-followup-20261109T1849Z.json`.
+
+### r123 lifecycle retry — 2026-11-09 18:57 UTC
+
+Host Go test activity had cleared, so the isolated lifecycle attempt was retried
+using the VM runner. The Ubuntu cloud image transfer stalled at 96 KiB from the
+primary endpoint, then at 192 KiB from the US mirror after nearly three minutes;
+small checksum/HEAD requests worked. The transfer was stopped after verifying
+the QEMU unit remained inactive. No VM started, no Dux package or service was
+changed, and the partial image and empty staging directories were removed.
+Package lifecycle qualification is still unrun. A verified distro image must
+be staged and the VM runner's host admission checks must pass before retrying.
