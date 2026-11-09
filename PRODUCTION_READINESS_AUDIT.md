@@ -21506,3 +21506,27 @@ manifest is not changed by this audit append.
   load1 **29.76**. No QEMU or r123 package lifecycle operation started. The
   guarded driver remains active; no Dux tests or service changes occurred in
   this interval.
+
+
+### Live qualification refresh — 2026-11-09 20:45 UTC
+
+- Read the current VPS2 monitor directly over SSH (the similarly named local
+  JSONL copy was stale). Its active r121 five-minute canary recorded **80/80
+  passing samples** through **20:43:20 UTC**, with no sample errors. The latest
+  sample reported zero service restarts, kernel overflows, kernel/userspace
+  drops, or pending updates; completed-observation age was **532 seconds**.
+  This is about **6h36m**, so the 24-hour canary is still incomplete.
+- A separate read-only `dux status --json` query on VPS2 reported a live
+  scan-first daemon, dirty interim state (expected while awaiting the next
+  observation), last completed observation **635 seconds** old, zero overflow,
+  drop, and pending counters, **1,779,197** indexed nodes, and no write error.
+  This qualifies r121 behavior only; r123 has not been installed there.
+- The guarded local r123 package-lifecycle driver is still alive (PID
+  **1928589**) and remains at host admission: Go test work resumed and load
+  exceeded the runner's threshold. No QEMU VM or package transition has
+  started. The guard remains enabled; this is not a package-test failure.
+- No source, production service, or VPS2 state was changed. Rust 332/332 and
+  coverage figures remain the latest source-suite results; no new tests ran.
+  r123 package install/upgrade/rollback, 24-hour soak, fault injection,
+  72-hour endurance, constrained-host p95/p99, and privilege review remain
+  open.
