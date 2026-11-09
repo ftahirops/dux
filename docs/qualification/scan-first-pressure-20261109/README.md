@@ -603,10 +603,39 @@ observation repair rather than per-event inode-kind repair. Report:
 
 ### Matrix checkpoint
 
-The release-118 P0 matrix currently has **13 passed suites out of 14**. The
-only suite not run is the full-root scan: it would add substantial I/O to the
-production host, which has limited free disk. This is unqualified, not a
-pass. Rust release/all-features tests: **324 passed, 0 failed, 2 ignored**.
+The P0 matrix now has **14 of 14 scenarios passed across the release-118 and
+release-119 builds**. The 13 earlier scenarios used release 118; all Rust
+product sources match release 119 except `src/scan.rs` documentation and
+visibility narrowing of `reconcile_in_place` (`pub` to `pub(crate)`), which
+does not change runtime behavior. The root-scan scenario below used the clean
+release-119 artifact built from commit `4fe2730ced1d`.
+
+#### Release-119 full-root scan passed — 2026-11-09
+
+The candidate scanned `/` on VPS2 inside the isolated, CPU/memory-capped
+qualification unit, writing its fresh index to `/dev/shm`; the installed
+Dux index and service were not used by the test. The scan covered one
+filesystem, excluded its own workspace, found **1,430,977 files, 174,668
+directories, and 1,640,588 entries**, reported complete coverage, and passed
+accounting and SQLite integrity checks. Scan/check duration was 298.673
+seconds at a 75% CPU quota; the transient unit ran for about 5 minutes 28
+seconds, with 1.1 GiB memory peak and 140 MiB swap peak. The installed service
+remained active with `NRestarts=0`; root disk remained at 11 GiB free.
+
+The first attempt at a 25% CPU quota timed out at the harness's 780-second
+scan limit. That result is preserved and is not counted as a pass; it shows
+that this full-root workload does not meet that budget on this VM. Raising
+the bounded qualification quota to 75% completed the same gate. This does
+not qualify the production freshness SLO or 1M/10M performance budgets.
+
+Pass report: [`release119-root.json`](live/release119-root.json), SHA256
+`d20b360254a90d344b5883d6743045b5263eb065cc093226153759b50f9c710b`.
+Timeout report: [`release119-root-25cpu-timeout.json`](live/release119-root-25cpu-timeout.json),
+SHA256 `9d4c2eba4feb12fb84d3b8885c04ab0293d86b0f8ada64091e6e4691082ada8f`.
+Build identity: [`release119-build-manifest.json`](live/release119-build-manifest.json),
+SHA256 `ce6686e874dbf684a5186c478467860d93b094d7de80822718f6a88b23362229`.
+
+Rust release/all-features tests: **324 passed, 0 failed, 2 ignored**.
 Python readiness/workflow tests: **351 passed**. Current LLVM coverage:
 **72.25% line, 71.09% region, and 76.07% function**; branch totals are not
 available from this run. Formatting, strict Clippy, Python compilation, and
@@ -616,8 +645,8 @@ The passing P0 scenarios are disk pressure/read-only recovery, eight crash
 recoveries, real fanotify overflow, 20,000-operation churn, CPU burst,
 incomplete coverage, missing capability, mount add/remove, retry across
 restart, cgroup OOM recovery, long-reader WAL, host-pressure behavior, and
-startup/schema upgrade. Earlier failed harness attempts remain archived to
-show how the gates were corrected; they are not counted as passes. This
-matrix is meaningful candidate evidence, not a complete production-readiness
+startup/schema upgrade, and the full-root scan. Earlier failed harness attempts remain archived to
+show how the gates were corrected; they are not counted as passes. The P0
+scenarios are candidate evidence, not a complete production-readiness
 qualification. Scale budgets, package/rollback, filesystem/kernel breadth,
 hardware-loss behavior, endurance, and canary gates remain open.

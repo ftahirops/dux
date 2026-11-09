@@ -2365,21 +2365,28 @@ passes **351 tests**. Strict Clippy, formatting, Python compilation, and
 `git diff --check` pass. LLVM coverage is **72.25% lines, 71.09% regions,
 76.07% functions**; this run provides no branch-coverage totals.
 
-The release-118 isolated VPS2 qualification matrix has **13 of 14 P0 suites
-passed**: disk pressure/read-only recovery; eight crash-recovery rounds; real
-fanotify overflow; 20,000-operation churn; CPU burst; incomplete coverage;
-missing capability; mount add/remove; persisted retry across restart; actual
-cgroup OOM recovery; long-reader WAL; host-pressure admission; and startup/
-schema upgrade. The full-root scan suite was not run because it adds a large
-I/O workload to the production host with limited free disk. Its status is
-unqualified, not passed. Earlier harness failures are preserved in the
-qualification directory; only the corrected final reruns count as passes.
+The P0 matrix now has **14 of 14 scenarios passed across release 118 and
+release 119**. The 13 earlier scenarios ran against release 118. Every Rust
+product source matches release 119 except `src/scan.rs`, where the only
+difference is documentation and visibility narrowing
+(`reconcile_in_place`: `pub` to `pub(crate)`); runtime behavior is unchanged.
+The full-root scenario passed against the clean release-119 build from commit
+`4fe2730ced1d`: 1,430,977 files, 174,668 directories, and 1,640,588 entries,
+complete coverage, accounting/integrity checks passed. It ran for 298.673
+seconds at a 75% CPU quota; peak memory was 1.1 GiB. The first 25%-quota run
+timed out at 780 seconds and is retained as a performance failure at that
+budget, not counted as a pass. See
+[`release119-root.json`](docs/qualification/scan-first-pressure-20261109/live/release119-root.json)
+and the [qualification matrix](docs/qualification/scan-first-pressure-20261109/README.md).
+Earlier harness failures remain preserved; only corrected final reruns count
+as passes.
 
 These results qualify important recovery paths on the tested Linux/ext4 VPS2
 setup, but do not establish universal correctness or 100% production
-readiness. Large-scale 1M/10M performance, packaging and rollback, other
+readiness. Large-scale 1M/10M performance, package lifecycle/rollback, other
 filesystems/kernels, hardware-loss behavior, long-duration soak, and canary
-gates remain open. The production binary was not changed by these tests.
+gates remain open. The installed Dux service and index were not changed by the
+root-scan test.
 
 ## Scoped security scan — 2026-11-09
 
