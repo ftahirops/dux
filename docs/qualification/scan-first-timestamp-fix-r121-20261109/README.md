@@ -115,3 +115,35 @@ soak. Logs: [`current-debug-tests-all-including-ignored-20261109.log`](current-d
 [`current-python-discovery-20261109.log`](current-python-discovery-20261109.log),
 [`current-scale-1370k-20261109.log`](current-scale-1370k-20261109.log), and the
 updated canary JSONL above.
+
+## Local-host test-impact disclosure — 2026-11-09 16:05 UTC
+
+The 1.37M fixture was mistakenly run on the checkout host rather than VPS2. A
+read-only check afterward confirmed that this host runs a legacy `dux daemon /`
+under systemd (PID 1073891), which can observe filesystem activity created by
+that test. The fixture was removed and local free disk returned to 55 GiB at
+the status capture. The daemon remained running with the same PID and four
+recorded restarts; its post-run status was already dirty from fanotify overflow
+and showed 617 lifetime overflow notifications and 2,518,862 userspace-dropped
+updates. Journald contains 27 overflow warnings since 15:50 UTC, overlapping
+the test period. There was no exact pre-run counter snapshot, so the amount
+caused by the test cannot be isolated and no causal count is claimed.
+
+Treat the local 1.37M timing as **non-isolated diagnostic evidence**, not a
+clean performance qualification. The simultaneous 100k `perf` profile also
+captured kernel fanotify work from the host service and its generated-file
+workload; it cannot attribute the observed CPU to Dux reconciliation. No
+service restart, configuration change, or database repair was performed.
+Production VPS1 remains unmodified by administrative action, but the test
+workload itself was not appropriately isolated. Further churn/scale profiling
+must run in a dedicated environment after preserving the VPS2 soak evidence.
+Post-run snapshots and relevant journal lines are preserved in
+[`local-host-test-impact-20261109/`](local-host-test-impact-20261109/).
+
+
+### VPS2 canary checkpoint — 2026-11-09 16:03 UTC
+
+Sample 24 passed at 16:03:17 UTC with 914s scan age; zero errors, kernel
+overflows, drops, OOMs, or service restarts. Dux was active under its existing
+PID, with 7.1 GiB free on VPS2. The 24-hour canary remains in progress. This
+checkpoint does not change the local-host test-impact disclosure above.

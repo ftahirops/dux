@@ -8,9 +8,11 @@ aa3f083b07b8817f1fbdc1f651ee5fcf803764b21829d75800c5f4521240a1ff  source.tar.gz
 58b35e0cc5087f32f031f5afe6934031bc67ad552261515a2c205218135b9194  dux.debug
 2a7793eabf574e3cf65ca09b03e368a35a72ffe42b045e3579d5c5ebd2737417  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-release-tests-all-including-ignored-20261109.log
 281d56f70265af4ab24dc7137a4d52b770420d488a860973c7f7fe509284207d  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-static-checks-raii-20261109.log
-bb169b62b2a5d591937ff584b15248922feeb109a49e8f142c722a684057f603  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl
 7c015de0649c6054d498058011e7986fdc9a70e841975d21a91f9ee8792f28cd  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-coverage-all-including-ignored-20261109.log
 fbc17f8c60ae2bd4b6aeaa29418fadde56b55eee900071aeda77da9330a0def6  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-debug-tests-all-including-ignored-20261109.log
 96e48a2a4466fa2e1da021caace40b49cf33fd6814cfa2cb72075eff2805bb67  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-python-discovery-20261109.log
 60b96477f89982bcba4fc93b53a582be7e6b1d94515f586cfc3a0a674abcfc2e  docs/qualification/scan-first-timestamp-fix-r121-20261109/current-scale-1370k-20261109.log
-18405a54bf184e1dd937886c635747a362b149d4a663ed0e9cc26525f90927ee  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl
+ade4d9f10e7d96541c47da63ff8211a65ce10ce00a59ececba17f0c7f41fe16c  docs/qualification/scan-first-timestamp-fix-r121-20261109/local-host-test-impact-20261109/dux-journal-relevant.log
+095a6fc1e1a45f24a4e6afc62cf88858df5afb85305ee66b4470a23347c319b1  docs/qualification/scan-first-timestamp-fix-r121-20261109/local-host-test-impact-20261109/host-state.txt
+77ad9c042454d5770d8373b83540a87524747abb01b706673f3b9c6cf04f2744  docs/qualification/scan-first-timestamp-fix-r121-20261109/local-host-test-impact-20261109/vps1-status-after.json
+a2c08167c4597b94be83a97df596f3e6c079ae521d7c8d632255ed75215e944e  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl

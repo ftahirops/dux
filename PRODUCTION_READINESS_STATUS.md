@@ -2769,3 +2769,30 @@ reported `reloading` while scan-first observation was active; Dux remained
 running under the same PID, and the monitor accepted this only for an active
 scan. The 24-hour gate remains open. Details and logs are in the r121
 qualification folder.
+
+### Test isolation disclosure — 2026-11-09 16:05 UTC
+
+The 1.37M scale fixture was mistakenly executed on the checkout host, where a
+legacy `dux daemon /` runs and observes filesystem activity. After the fixture
+was removed, read-only status showed the same daemon PID (1073891), four
+lifetime restarts, dirty state due to fanotify overflow, 617 lifetime kernel
+overflows, and 2,518,862 userspace-dropped updates. Journald had 27 overflow
+warnings since 15:50 UTC, overlapping the test. No exact pre-run counter
+snapshot exists, so causation or the number attributable to the test cannot be
+established. The service was not restarted or reconfigured; no database repair
+was performed. Local free space was 55 GiB in the captured status.
+
+Accordingly, the 1.37M timing is retained only as **non-isolated diagnostic
+evidence**, not a clean performance qualification; the whole-test `perf`
+profile is likewise contaminated by host fanotify work. Future stress profiles
+must use an isolated test environment. The post-run status and journal evidence
+are in the r121 qualification folder under
+`local-host-test-impact-20261109/`.
+
+
+### VPS2 canary checkpoint — 2026-11-09 16:03 UTC
+
+Sample 24 passed at 16:03:17 UTC at 914s scan age. No errors, kernel
+overflows, userspace drops, OOM events, or service restarts were reported;
+Dux was active under the existing PID and VPS2 had 7.1 GiB free. The 24-hour
+gate remains open. The current JSONL is in the r121 qualification folder.
