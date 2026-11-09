@@ -1,0 +1,58 @@
+{
+  "attempt_started_at_utc": "2026-11-09T19:34:07.583969Z",
+  "captured_at_utc": "2026-11-09T19:35:45.780570+00:00",
+  "current_host_pressure": {
+    "active_host_workloads": [
+      "Go compiler pid=1923041",
+      "Go compiler pid=1923121",
+      "Go compiler pid=1923436",
+      "Go compiler pid=1923679",
+      "Go compiler pid=1923877",
+      "Go compiler pid=1924009",
+      "Go compiler pid=1924021",
+      "Go compiler pid=1924149",
+      "Go compiler pid=1924238",
+      "Go test binary pid=1919313",
+      "go test pid=1918740",
+      "go test pid=1922698",
+      "go test pid=1923057",
+      "go test pid=1923554",
+      "go vet pid=1923908"
+    ],
+    "cpu": {
+      "full": 0.0,
+      "some": 34.74
+    },
+    "io": {
+      "full": 0.59,
+      "some": 1.54
+    },
+    "load1": 12.43,
+    "memory": {
+      "full": 0.0,
+      "some": 0.06
+    },
+    "telemetry_errors": []
+  },
+  "dux_package_operations": false,
+  "event": "runtime pressure guard stopped VM before guest SSH readiness",
+  "guest_ssh_ready": false,
+  "host": "VPS1 local isolated KVM; VPS2 untouched",
+  "image_sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+  "package_lifecycle_started": false,
+  "production_or_canary_service_changed": false,
+  "qemu_cpu_time_seconds": 5.327,
+  "selected_unit_journal": [
+    "2026-11-09T19:34:07.583969+00:00 vps1 systemd[1]: Started dux-qualification-vm-ubuntu24-lifecycle-ephemeral.service - /dev/shm/dux-qualification-vm/ubuntu24-lifecycle-ephemeral/1794252847144813232/run-qemu.sh.",
+    "2026-11-09T19:34:07.592197+00:00 vps1 systemd[1]: Started dux-qualification-pressure-guard-ubuntu24-lifecycle-ephemeral-1794252847585230452.service - /usr/bin/python3 /home/dux/scripts/dux-qualification-vm.py guard ubuntu24-lifecycle-ephemeral.",
+    "2026-11-09T19:34:07.599530+00:00 vps1 run-qemu.sh[1917330]: Formatting '/run/dux-qualification-overlay/disk.qcow2', fmt=qcow2 cluster_size=65536 extended_l2=off compression_type=zlib size=21474836480 backing_file=/home/dux/target/readiness/vms/ubuntu-24.04-server-cloudimg-amd64.img backing_fmt=qcow2 lazy_refcounts=off refcount_bits=16",
+    "2026-11-09T19:34:18.191001+00:00 vps1 systemd[1]: Stopping dux-qualification-vm-ubuntu24-lifecycle-ephemeral.service - /dev/shm/dux-qualification-vm/ubuntu24-lifecycle-ephemeral/1794252847144813232/run-qemu.sh...",
+    "2026-11-09T19:34:18.207442+00:00 vps1 run-qemu.sh[1917328]: qemu-system-x86_64: terminating on signal 15 from pid 1 (/sbin/init)",
+    "2026-11-09T19:34:18.297347+00:00 vps1 systemd[1]: dux-qualification-vm-ubuntu24-lifecycle-ephemeral.service: Deactivated successfully.",
+    "2026-11-09T19:34:18.297830+00:00 vps1 systemd[1]: Stopped dux-qualification-vm-ubuntu24-lifecycle-ephemeral.service - /dev/shm/dux-qualification-vm/ubuntu24-lifecycle-ephemeral/1794252847144813232/run-qemu.sh.",
+    "2026-11-09T19:34:18.298583+00:00 vps1 systemd[1]: dux-qualification-vm-ubuntu24-lifecycle-ephemeral.service: Consumed 5.327s CPU time.",
+    "2026-11-09T19:34:18.665640+00:00 vps1 python3[1917331]: {\"action\": \"stopped_disposable_vm\", \"guest\": \"ubuntu24-lifecycle-ephemeral\", \"pressure\": {\"active_host_workloads\": [\"Go compiler pid=1917508\", \"go test pid=1917353\"], \"cpu\": {\"full\": 0.0, \"some\": 17.36}, \"io\": {\"full\": 1.03, \"some\": 1.22}, \"load1\": 5.01, \"memory\": {\"full\": 0.0, \"some\": 0.0}, \"telemetry_errors\": []}, \"reason\": [\"active host build/test/install/analysis workload: Go compiler pid=1917508\", \"active host build/test/install/analysis workload: go test pid=1917353\"], \"time\": \"2026-11-09T19:34:17Z\", \"vm_unit\": \"dux-qualification-vm-ubuntu24-lifecycle-ephemeral\"}",
+    "2026-11-09T19:34:19.265090+00:00 vps1 systemd[1]: dux-qualification-pressure-guard-ubuntu24-lifecycle-ephemeral-1794252847585230452.service: Deactivated successfully."
+  ],
+  "systemd_vm_state": "Result=success\nExecMainStatus=0\nLoadState=not-found\nActiveState=inactive\n"
+}

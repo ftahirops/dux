@@ -275,3 +275,15 @@ This timing shows the backlog and index changing during host test activity,
 but does not prove which process produced each update. The snapshot still
 confirms a stale production index and unprocessed churn. Evidence is in
 `vps1-readonly-followup-20261109T1927Z.json`.
+
+### r123 lifecycle VM stopped by runtime pressure guard — 2026-11-09 19:34 UTC
+
+The local host briefly passed admission and QEMU started at 19:34:07. A Go
+compiler and test process appeared shortly afterward; the runtime guard stopped
+the VM at 19:34:17, after 5.327 QEMU CPU-seconds. SSH never became ready, so
+the package lifecycle did not start. The VM and guard units are inactive and
+the disposable overlay was cleaned. This is a correctly guarded boot abort,
+not a package or Dux failure. The next retry requires a sustained quiet window
+to avoid the race between initial admission and new test processes. Raw unit
+journal and host-pressure evidence are in
+`package-lifecycle-guard-abort-20261109T1934Z.json`.
