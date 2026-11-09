@@ -89,3 +89,31 @@ and pending updates rose to 97. The DB occupied 3,213,430,784 bytes, with a
 OOM-kill events were recorded. This follow-up confirms the index remains stale
 and the legacy event backlog is still accumulating; it is a read-only sample.
 Raw data: `vps1-readonly-checkpoint-20261109T1819Z.json`.
+
+## Live follow-up — 2026-11-09 18:30 UTC (read-only)
+
+Fresh local VPS1 and remote VPS2 snapshots are retained in
+`vps1-readonly-followup-20261109T183047Z.json` and
+`vps2-readonly-followup-20261109T183047Z.json`.
+
+- VPS1 remains on the legacy daemon (PID 1073891, four restarts), dirty from
+  fanotify overflow. Counters remained at 636 kernel overflow notifications
+  and 2,518,862 dropped events; the last full scan was about 4.24 days old.
+  Pending updates were 1,213. This is read-only evidence; production was not
+  changed.
+- VPS2 remains on r121 (PID 2561224, zero restarts since its 13:59 UTC start),
+  with zero kernel overflows and zero dropped updates in this snapshot. However,
+  systemd reports `reloading`, Dux reports a dirty in-progress observation,
+  and its last completed scan was 748 seconds old. The index still reports
+  `caught_up=false`, about 4.52 hours behind, with zero pending updates.
+- VPS2 journal showed an observation completing at 18:18:19 UTC, a new
+  observation beginning at 18:29:30 UTC, and an admission deferral due to
+  elevated host pressure at 18:29:27. Thus the canary has so far shown that
+  scan-first observation can avoid queue overflow during this sample, but it
+  has **not** demonstrated freshness or convergence. Zero overflows alone is
+  not a successful soak gate.
+
+The r121 canary has not been restarted or upgraded. The 24-hour soak remains
+open; the current candidate r123 still lacks real package lifecycle and runtime
+qualification. Treat this checkpoint as continued adverse/incomplete live
+evidence, not a release pass.

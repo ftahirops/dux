@@ -1,0 +1,7 @@
+{
+  "captured_at_utc": "20261109T183047Z",
+  "host": "vps1-local-production",
+  "systemd": {"MainPID": "1073891", "NRestarts": "4", "ExecMainStartTimestamp": "Sat 2026-11-07 17:30:51 UTC", "ActiveState": "active"},
+  "dux_status": {"behind_seconds":176396.036,"caught_up":false,"daemon_live":true,"dirty":true,"dirty_reason":"fanotify queue overflow","dirty_since_timestamp_seconds":1794240688,"events_dropped":2518862,"events_resolved":97951012,"events_seen":167936545,"index_bytes":121118863360,"index_bytes_on_disk":3217911808,"index_nodes":1308468,"kernel_overflow_notifications":636,"last_event_commit_timestamp_seconds":1794249047,"last_scan_age_seconds":366085,"last_scan_timestamp_seconds":1793882962,"max_pending_updates":500000,"pause_reason":null,"paused":false,"paused_since_timestamp_seconds":null,"pending_updates":1213,"root":"/","scan_in_progress":false,"scan_progress":null,"status_version":1,"throttled_since_timestamp_seconds":1794072651,"updates_committed":25643862,"userspace_updates_dropped":2518862,"wal_bytes":134217728,"watch_status_available":true,"watch_status_updated_at_seconds":1794249047,"write_error":null}
+
+}
