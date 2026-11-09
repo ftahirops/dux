@@ -1001,9 +1001,9 @@ under elevated memory PSI when available memory remains above the elevated
 floor. It still cancels under critical pressure, genuinely low available
 memory, elevated host load, or unavailable telemetry. New scan admission
 remains more restrictive. This targets the observed cancel/retry loop without
-relaxing the freshness limit. VPS2 runtime qualification of this patch is
-pending; a new 24-hour canary must start after candidate build and pressure
-tests.
+relaxing the freshness limit. Revision 120 has now exercised the change in its
+first root observation and remains in a fresh 24-hour VPS2 canary; the long
+runtime gate is still pending.
 
 The focused resource-guard suite passed **21/21 tests**. Full release/all-
 features Rust tests passed **326, failed 0, ignored 2**. Strict all-target,
@@ -1013,3 +1013,37 @@ Logs:
 [`pressure-guard-release-tests-20261109.log`](live/pressure-guard-release-tests-20261109.log),
 [`pressure-guard-clippy-20261109.log`](live/pressure-guard-clippy-20261109.log),
 [`pressure-guard-llvm-cov-20261109.log`](live/pressure-guard-llvm-cov-20261109.log).
+
+#### Release-120 build and fresh VPS2 canary — 2026-11-09
+
+Package revision **0.6.3-120** was built from commit `5d7cdacb80aa` as static
+musl. The build audited the 229-dependency lockfile and exact release binary;
+the audit found zero advisories. The binary SHA256 is
+`67bf2fa27680c014ebc3623adb16b6e435eef83ed5e92dad68eae909cc302806`; the
+DEB SHA256 is
+`9f701f0b8eca926765be6bb1536e9168a80c831cac9eeca72639e986ed47fd4d`. The
+manifest and all package checksums are preserved in
+[`release120-build-manifest.json`](live/release120-build-manifest.json),
+SHA256 `ba67af8255ebce73aa16f10c63ba2672e116ea1943a17dea7e8a0b91fc1f636b`,
+and [`release120-SHA256SUMS`](live/release120-SHA256SUMS), SHA256
+`3893464eeae7e29ddb332a62c01eed29bbdae9e3bc3003ffb03fefaeaf0127de`.
+
+On VPS2, I stopped release 119 after its current observation finished, copied
+the schema-7 database, binary, unit, and old package to a root-only rollback
+directory, then verified the database with SQLite `quick_check=ok` and
+1,672,454 inode rows. Revision 120 is installed and running; its process binary
+hash matches the build manifest and its systemd unit hash is unchanged. The
+production VPS1 service and database were not touched.
+
+A new 24-hour canary started at **11:54:37 UTC** with 5-minute sampling,
+20%-CPU/1-GiB monitor limits, and the existing 1,200-second observation-age
+gate. Its first two samples passed. Sample 1 had a scan in progress, zero
+overflow/drop/OOM/restart counters, and a valid 1,675,936-path graph. Sample 2
+passed after the full root observation completed: 1,677,080 paths, SQLite
+integrity and path graph passed, scan age 384 seconds, zero overflows/drops,
+and no service or monitor restart. The full observation finished in about
+4m37s with zero coverage issues. The index remained dirty between periodic
+observations, as expected in scan-first mode. This is only minutes of runtime;
+the 24-hour soak is not qualified. Snapshot:
+[`release120-canary-progress-20261109T1200Z.jsonl`](live/release120-canary-progress-20261109T1200Z.jsonl),
+SHA256 `73b7be431183603c3b4f80d32dc4cdac52913b08ee8923454717a40309358e02`.
