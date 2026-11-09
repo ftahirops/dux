@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 11:14 UTC
+**Updated:** 2026-11-09 11:20 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2654,3 +2654,10 @@ This new soak is only beginning. Sample-17 corrected evaluation SHA-256:
 `61a5616fec7f4c2d42ee1d947a630eafa1ef5781a94666af8a68703894304317`.
 New canary sample SHA-256:
 `cf746cabe9873feede7f7769184c173548de51d369ebf35300ba954137a23739`.
+
+The latest corrected-monitor run has **2/289 passing samples** as of 11:20
+UTC. Sample 2 passed in 99.598 seconds; scan age was 307 seconds before and
+407 seconds after, with zero overflow/drop counters. The canary monitor and
+Dux remain active with zero restarts. This is only a few minutes of the new
+24-hour run. Sample 2 SHA-256:
+`2a6334216f7445649b304bea4f3402914fd3ce3c2f508fb76cb3a7f46ad257c2`.

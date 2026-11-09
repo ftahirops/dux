@@ -957,3 +957,10 @@ The collector is active at 20% CPU and 1 GiB memory caps. This new run has only
 one sample and has not qualified the 24-hour soak. Evidence:
 [`release119-monitorfix-v2-sample1-20261109T1114Z.jsonl`](live/release119-monitorfix-v2-sample1-20261109T1114Z.jsonl),
 SHA-256 `cf746cabe9873feede7f7769184c173548de51d369ebf35300ba954137a23739`.
+
+At 11:20 UTC the corrected-monitor run has **2/289 passing samples**. Sample
+2 passed in 99.598 seconds with scan ages 307/407 seconds, zero overflow and
+drop counters, and no Dux or monitor restarts. The canary remains active but
+is only minutes into its new 24-hour interval. Evidence:
+[`release119-monitorfix-v2-sample2-20261109T1119Z.jsonl`](live/release119-monitorfix-v2-sample2-20261109T1119Z.jsonl),
+SHA-256 `2a6334216f7445649b304bea4f3402914fd3ce3c2f508fb76cb3a7f46ad257c2`.
