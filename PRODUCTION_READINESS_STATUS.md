@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:53 UTC
+## Latest verified checkpoint — 2026-11-09 22:59 UTC
 
 ### Clean-install lifecycle readiness gate
 
@@ -32,12 +32,13 @@ critical-path gaps and the targeted tests needed to close them are recorded in
 
 ### Canary and disk
 
-VPS2 r121 sample **106** at 22:52:58 UTC passed with scan age 255 seconds;
+VPS2 r121 sample **107** at 22:58:11 UTC passed with scan age 568 seconds;
 SQLite and path/accounting checks passed. Service restarts, overflows, drops,
 pending updates, and OOM events remained zero. The 24-hour canary is about
-8 hours 45 minutes in, not release sign-off. `memory.events.high` remains at
+8 hours 50 minutes in, not release sign-off. `memory.events.high` remains at
 1,173. VPS2 root remains 92% used with 7.2 GiB free; its 4 GiB journal is
-preserved until the soak finishes. See [sample 106 and scan evidence](docs/qualification/scan-first-cost-followup-20261109T2253Z/README.md).
+preserved until the soak finishes. See [sample 107](docs/qualification/production-live-followup-20261109T2258Z/README.md)
+and [sample 106 and scan evidence](docs/qualification/scan-first-cost-followup-20261109T2253Z/README.md).
 
 ### Measured scan-first overhead
 
@@ -66,7 +67,7 @@ fault-injection binaries verified. `/` has 58 GiB free, `target/readiness` is
 869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
 [`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
 
-**Updated:** 2026-11-09 22:53 UTC
+**Updated:** 2026-11-09 22:59 UTC
 
 ---
 
