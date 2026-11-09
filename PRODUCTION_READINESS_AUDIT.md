@@ -21453,3 +21453,19 @@ manifest is not changed by this audit append.
   332/332 and coverage results remain the latest source-suite evidence. The
   r123 package lifecycle and remaining system-level release gates listed in
   the 20:13 checkpoint are still open.
+
+### Canary and VM-admission follow-up — 2026-11-09 20:25 UTC
+
+- VPS2's formal r121 canary advanced to **76/76 passing samples** through
+  20:22:50 UTC, with no errors. The latest sample reported a 255-second
+  completed-observation age, zero restarts, zero kernel/userspace drops, and
+  zero pending updates. This is still roughly 6h16m of the required 24 hours.
+- The local runner has not started QEMU. At 20:25:19, its admission check
+  found active Go test/compiler work. The test processes were from `/home/xtop`
+  (`go test ./engine -count=1` and selected native-restore recovery tests), not
+  this Dux test suite. They are left untouched. The 120-second quiet window
+  continues to reset; this remains an admission wait, not a Dux test result.
+- Latest source suite and coverage remain 332/332, 73.73% lines, 72.67%
+  regions, and 76.94% functions. No new Rust or package test ran in this
+  follow-up; r123 install/upgrade/rollback and runtime qualification remain
+  open.
