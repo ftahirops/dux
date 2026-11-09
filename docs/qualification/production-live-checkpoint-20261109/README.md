@@ -251,3 +251,15 @@ age was 142 seconds. Dirty status means changes await the next observation.
 This is one observed scan/accounting cycle, not a formal canary-monitor sample
 and not r123 runtime qualification. Evidence is in
 `vps2-live-followup-20261109T1923Z.json`.
+
+### VPS1 production status — 2026-11-09 19:24 UTC (read-only)
+
+The installed legacy daemon remained active, with four systemd restarts. Its
+index was dirty; status reported the reason as changed non-watched filesystem
+mounts requiring reconciliation. The last completed full scan was 369,285
+seconds old (4.27 days). Lifetime counters remained at 636 kernel overflows
+and 2,518,862 dropped updates; the database occupied 3,248,029,696 bytes on
+disk. This confirms production is still unhealthy despite VPS2's r121
+observations. No daemon, index, or host configuration was changed. Raw status
+and running-binary hash are in
+`vps1-readonly-followup-20261109T1923Z.json`.
