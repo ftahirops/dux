@@ -354,13 +354,17 @@ def wait_daemon_caught_up(timeout, stage):
         time.sleep(DAEMON_READINESS_POLL_SECONDS)
 
 
-def wait_initial_scan_complete(timeout, stage, not_before_timestamp):
-    """Wait for a completed, accounted baseline scan, even when legacy coverage is incomplete.
+def wait_initial_scan_complete(
+    timeout, stage, not_before_timestamp, require_accounting=False,
+):
+    """Wait for a post-start scan; optionally require successful accounting.
 
     Package transition tests need a stable, readable pre-upgrade index; requiring
     a legacy binary to represent mount aliases it cannot model prevents testing
-    the candidate at all. Candidate clean-install readiness remains strict via
-    ``wait_daemon_caught_up``.
+    the candidate at all. For a clean candidate install, the caller requires
+    accounting to have completed. Only a clean status or the normal
+    post-accounting hint-dirty state is acceptable; pending, incomplete, and
+    accounting-failure states do not qualify.
     """
     deadline = time.monotonic() + timeout
     last_status = None
@@ -375,21 +379,9 @@ def wait_initial_scan_complete(timeout, stage, not_before_timestamp):
                 "status_stderr": result.stderr[-4000:],
             }
         if isinstance(last_status, dict):
-            if (result.returncode == 0 and last_status.get("caught_up") is True
-                    and last_status.get("dirty") is False
-                    and last_status.get("scan_in_progress") is False):
-                return last_status
-            if (result.returncode == 0
-                    and last_status.get("daemon_live") is True
-                    and last_status.get("watch_status_available") is True
-                    and last_status.get("scan_in_progress") is False
-                    and last_status.get("dirty_reason")
-                    != "reconciliation accounting verification pending"
-                    and isinstance(last_status.get("last_scan_timestamp_seconds"), int)
-                    and last_status["last_scan_timestamp_seconds"] > not_before_timestamp):
-                return last_status
-            reason = (last_status.get("dirty_reason") or "").lower()
-            if "automatic retries paused" in reason:
+            reason = last_status.get("dirty_reason")
+            if (last_status.get("automatic_reconciliation_paused") is True
+                    or (isinstance(reason, str) and "paused after" in reason.lower())):
                 journal = command(
                     "journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False
                 )
@@ -397,6 +389,26 @@ def wait_initial_scan_complete(timeout, stage, not_before_timestamp):
                     "stage": stage, "baseline_reconciliation_paused": last_status,
                     "journal": journal.stdout, "journal_error": journal.stderr,
                 })
+            scan_completed = (
+                result.returncode == 0
+                and last_status.get("daemon_live") is True
+                and last_status.get("watch_status_available") is True
+                and last_status.get("scan_in_progress") is False
+                and isinstance(last_status.get("last_scan_timestamp_seconds"), int)
+                and last_status["last_scan_timestamp_seconds"] > not_before_timestamp
+            )
+            accounting_complete = (
+                not require_accounting
+                or (
+                    "dirty_reason" in last_status
+                    and reason in {
+                        None,
+                        "filesystem changes await the next full observation",
+                    }
+                )
+            )
+            if scan_completed and accounting_complete:
+                return last_status
         if time.monotonic() >= deadline:
             journal = command("journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False)
             raise AssertionError({
@@ -806,6 +818,7 @@ def main():
             LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS,
             "clean_install_reconciliation",
             clean_scan_started_at,
+            require_accounting=True,
         )
         assert clean_service["enabled"] == "enabled" and clean_service["active"] == "active", clean_service
         assert clean_service["tunnel_enabled"] in {"disabled", "not-found"}, clean_service

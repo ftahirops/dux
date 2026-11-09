@@ -1,6 +1,41 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:14 UTC
+## Latest verified checkpoint — 2026-11-09 22:20 UTC
+
+### Clean-install lifecycle readiness gate
+
+Code review of the first lifecycle report showed that merely excluding the
+`reconciliation accounting verification pending` reason was insufficient: an
+incomplete scan or failed accounting check could then be accepted. The clean
+install gate now requires a scan newer than installation and allows only a
+clean status or the normal post-accounting hint-dirty reason. It rejects
+pending, incomplete, and accounting-failure states; automatic-reconciliation
+pause fails with journal diagnostics. Legacy baseline handling remains
+separate. Focused lifecycle harness tests pass **72/72**; serial Python
+discovery passes **359/359**. Logs and code are in the lifecycle qualification
+folder. A real guest lifecycle rerun with this strict gate is still required.
+
+The guarded r123 lifecycle controller remains active but has not launched a
+guest: current host Go tests/builds are pushing load above 30 and CPU PSI above
+70%. No guard was relaxed.
+
+### Canary and disk
+
+VPS2 sample **99** at 22:19:20 UTC passed with zero errors, restarts, kernel
+overflows, drops, or pending updates; scan age was 927 seconds. The r121-only
+24-hour canary remains incomplete. VPS2 root remains 92% used with 7.2 GiB
+free; its 4 GiB journal is preserved until the soak finishes.
+
+Local cleanup reclaimed the stale Cargo intermediates while keeping all eight
+fault-injection binaries verified. `/` has 57 GiB free, `target/readiness` is
+869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
+[`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
+
+**Updated:** 2026-11-09 22:20 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 22:14 UTC
 
 ### Local readiness disk cleanup
 

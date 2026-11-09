@@ -32,10 +32,15 @@ condition appeared in the r121 baseline. Therefore the six package operations
 were exercised successfully, but this run does not qualify completed initial
 accounting/readiness.
 
-The harness now waits past that specific pending-accounting state before
-accepting a completed initial observation. Its regression test and full Python
-suite pass; a second real lifecycle run using the tightened harness is still
-required before marking the lifecycle gate qualified.
+The harness now requires the clean-install scan timestamp to be newer than the
+install start and accepts only a clear status or the normal
+`filesystem changes await the next full observation` state. Pending accounting,
+incomplete coverage, accounting-invariant failure, and paused automatic
+reconciliation do not qualify. Legacy baseline handling remains separate so
+the old package can be exercised without demanding coverage it cannot model.
+The focused harness passes **72/72**, and serial repository Python discovery
+passes **359/359**. A second real lifecycle run using this stricter gate is
+still required before marking the lifecycle readiness gate qualified.
 
 ## Artifact identity and scope
 

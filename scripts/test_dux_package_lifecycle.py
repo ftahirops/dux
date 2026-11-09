@@ -933,12 +933,45 @@ class DaemonReadinessTests(unittest.TestCase):
         ]) as command, patch.object(LIFECYCLE.time, "monotonic", return_value=0), \
                 patch.object(LIFECYCLE.time, "sleep") as sleep:
             observed = LIFECYCLE.wait_initial_scan_complete(
-                10, "clean-install", not_before_timestamp=100
+                10, "clean-install", not_before_timestamp=100,
+                require_accounting=True,
             )
 
         self.assertEqual(observed, accounted)
         self.assertEqual(command.call_count, 2)
         sleep.assert_called_once_with(LIFECYCLE.DAEMON_READINESS_POLL_SECONDS)
+
+    def test_clean_install_rejects_incomplete_and_failed_accounting_states(self):
+        incomplete = {
+            "daemon_live": True, "watch_status_available": True,
+            "dirty": True,
+            "dirty_reason": "incomplete coverage or changes lost during reconciliation",
+            "paused": False, "scan_in_progress": False, "caught_up": False,
+            "scan_first": True, "last_scan_timestamp_seconds": 123,
+        }
+        accounting_failed = {
+            **incomplete,
+            "dirty_reason": "directory accounting invariant failed; one bounded automatic reconciliation retry remains",
+        }
+        accounted = {
+            **incomplete,
+            "dirty": False,
+            "dirty_reason": None,
+        }
+        with patch.object(LIFECYCLE, "command", side_effect=[
+            SimpleNamespace(returncode=0, stdout=json.dumps(incomplete), stderr=""),
+            SimpleNamespace(returncode=0, stdout=json.dumps(accounting_failed), stderr=""),
+            SimpleNamespace(returncode=0, stdout=json.dumps(accounted), stderr=""),
+        ]) as command, patch.object(LIFECYCLE.time, "monotonic", return_value=0), \
+                patch.object(LIFECYCLE.time, "sleep") as sleep:
+            observed = LIFECYCLE.wait_initial_scan_complete(
+                10, "clean-install", not_before_timestamp=100,
+                require_accounting=True,
+            )
+
+        self.assertEqual(observed, accounted)
+        self.assertEqual(command.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_legacy_baseline_does_not_accept_dirty_state_without_completed_scan(self):
         stale = {
