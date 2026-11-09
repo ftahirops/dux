@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:48 UTC
+## Latest verified checkpoint — 2026-11-09 22:53 UTC
 
 ### Clean-install lifecycle readiness gate
 
@@ -32,26 +32,25 @@ critical-path gaps and the targeted tests needed to close them are recorded in
 
 ### Canary and disk
 
-VPS2 r121 sample **105** at 22:48:12 UTC passed with a full observation in
-progress, age 844 seconds, and zero overflows/drops. Samples 102–104 also
-passed; sample 102's observation covered 1,613,677 files and 192,125
-directories, completed in about 275 seconds with zero coverage issues, and
-passed independent accounting in 51.258 seconds. Samples 100–105 show no
-service restarts or OOM events; `memory.events.high` stayed at 1,173. The
-24-hour canary is about 8 hours 40 minutes in, not release sign-off. VPS2 root
-remains 92% used with 7.2 GiB free; its 4 GiB journal is preserved until the
-soak finishes. See [sample 104](docs/qualification/production-live-followup-20261109T2242Z/README.md)
-and [sample 102 scan details](docs/qualification/production-live-followup-20261109T2233Z/README.md).
+VPS2 r121 sample **106** at 22:52:58 UTC passed with scan age 255 seconds;
+SQLite and path/accounting checks passed. Service restarts, overflows, drops,
+pending updates, and OOM events remained zero. The 24-hour canary is about
+8 hours 45 minutes in, not release sign-off. `memory.events.high` remains at
+1,173. VPS2 root remains 92% used with 7.2 GiB free; its 4 GiB journal is
+preserved until the soak finishes. See [sample 106 and scan evidence](docs/qualification/scan-first-cost-followup-20261109T2253Z/README.md).
 
 ### Measured scan-first overhead
 
-Consecutive cgroup samples show 51–61% of one core and 1.3–1.64 GB read I/O in
-five-minute intervals containing an observation; an interval without an
-observation used 21.4% CPU and recorded no block I/O despite about 23.6k
-fanotify events/second. A 275-second scan plus 51-second accounting check uses
-about 36% of the 900-second cadence. This is observed service cost, not an
-isolated benchmark or proof of exact attribution. Deltas and raw samples are
-in [`scan-first-cost-20261109T2248Z`](docs/qualification/scan-first-cost-20261109T2248Z/README.md).
+Two consecutive observations completed without coverage issues. One scanned
+1.61M files / 192k directories in 275 seconds and verified accounting in
+51.3 seconds; the next scanned 1.62M / 192k in 251.8 seconds and verified in
+73.9 seconds. Both use about 36% of the 900-second schedule before other Dux
+work. Cgroup samples during observation-related intervals used 49–61% of one
+core and 0.4–1.6 GB reads plus 0.17–1.74 GB writes per five minutes. A
+no-observation interval used 21.4% CPU at 23.6k fanotify events/second. These
+are live measurements, not isolated attribution. Reports:
+[cycle 1](docs/qualification/scan-first-cost-20261109T2248Z/README.md) and
+[cycle 2](docs/qualification/scan-first-cost-followup-20261109T2253Z/README.md).
 
 ### Production VPS1
 
@@ -67,7 +66,7 @@ fault-injection binaries verified. `/` has 58 GiB free, `target/readiness` is
 869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
 [`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
 
-**Updated:** 2026-11-09 22:48 UTC
+**Updated:** 2026-11-09 22:53 UTC
 
 ---
 

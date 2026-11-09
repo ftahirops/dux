@@ -1,0 +1,3 @@
+2026-11-09T22:44:32+00:00 vps2 dux[2561224]: 2026-11-09T22:44:32.081719Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+2026-11-09T22:48:43+00:00 vps2 dux[2561224]: 2026-11-09T22:48:43.875259Z  INFO dux::watch: rescan complete: 1617443 files, 192444 dirs, 1809887 staged path instances (0 directory alias paths), visible 86613852160 bytes/1809887 entries, unique 86426542080 bytes/1806405 inodes, 80.49 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=0 revalidated_reuse_paths=0 unresolved_reuse_paths=0
+2026-11-09T22:49:57+00:00 vps2 dux[2561224]: 2026-11-09T22:49:57.807415Z  INFO dux::watch: reconciliation accounting verification passed elapsed_ms=73903
