@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 01:16 UTC
+**Updated:** 2026-11-09 09:50 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2402,3 +2402,68 @@ configuration security remains unqualified. Gitleaks found no secrets in
 history were not covered. A Semgrep ruleset scan did not produce a report and
 is inconclusive. Detailed evidence and scan limits are in
 [`security-review-20261109.md`](docs/qualification/scan-first-pressure-20261109/security-review-20261109.md).
+
+## Current verification and VPS2 candidate canary — 2026-11-09 09:45 UTC
+
+I reran the current checked-out source: Rust release/all-features tests passed
+**324/324 (2 ignored)**; Python readiness/workflow tests passed **351/351**;
+strict all-target/all-feature Clippy, formatting, Python compilation,
+`git diff --check`, and systemd unit verification passed. `systemd-analyze
+security --offline=yes packaging/dux.service` reports **3.3 OK**. A refreshed
+`cargo audit --json` found **0 advisories across 229 locked dependencies**;
+its advisory database was updated at 2026-11-09 09:22 UTC. These checks do not
+close the documented branch-coverage, 100%-coverage, or configuration-security
+gaps.
+
+On VPS2, the currently installed release-106 baseline finished its 09:35 UTC
+full-root observation at 09:39:54, covering 1,474,513 files, 175,623
+directories, and 1,650,136 paths with zero coverage issues. The walk took 290
+seconds; independent accounting verification passed after 60.7 more seconds.
+The host recorded 20.9 million hint events across the observation and
+verification interval, with zero kernel overflow notifications, zero
+userspace drops, and zero daemon restarts. The index stayed conservatively
+dirty between observations. This is a single current-host sample, not an
+endurance or throughput benchmark.
+
+After taking and verifying a root-only SQLite backup (668,336,128 bytes,
+schema v7, `quick_check=ok`), I upgraded only the marked VPS2 VM to the clean
+release-119 package. Candidate binary SHA-256 is
+`e4841e7b75a4785a3fcf2597d4e711b21df18ebca25639f27ec0d96b9dfa293d`; the
+effective service-unit hash is `e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b`.
+VPS1 production remains untouched. A read-only candidate canary is now active
+at five-minute intervals, with a 20-minute full-observation-age gate; its
+collector is capped at 20% CPU and 1 GiB memory. Sample 1 passed in 60.766
+seconds while a scan was in progress: schema-v7 graph, exact accounting,
+SQLite quick check, binary/unit identity, service health, journal, and memory
+events all passed. It found 1,646,654 inodes and 1,650,136 path instances,
+with zero accounting-graph defects. This is **1 sample of the required 289**;
+the 24-hour canary is in progress, not passed. The rollback package and
+database snapshot remain on VPS2.
+
+Evidence snapshot:
+[`release119-canary-progress-20261109T0943Z.jsonl`](docs/qualification/scan-first-pressure-20261109/live/release119-canary-progress-20261109T0943Z.jsonl),
+SHA-256 `fda22a0a9cf3d8bcc08570ae19fad42eee77d8c3e34c16da8c925dc72d449ea5`.
+The live append-only monitor log is on VPS2 at
+`/root/dux-canary-119/candidate-canary.jsonl`.
+
+### Canary and security scan follow-up — 2026-11-09 09:50 UTC
+
+The release-119 canary has now passed **2 samples of the required 289** and
+remains active. Sample durations were 60.766 and 47.603 seconds; both passed
+with zero findings. At sample 2, Dux had zero restarts, OOM events, kernel
+overflows, userspace drops, or journal-critical failures. Its measured memory
+peak was 1,329,266,688 bytes under the 4 GiB cap. Per-device I/O counters had
+reached 1,781,170,176 bytes read and 1,484,582,912 bytes written on device
+`8:0` since service start. Device `252:0` is a stacked representation of the
+same underlying I/O and is not added. This short interval is not a steady-state
+performance qualification.
+
+The refreshed Cargo audit still finds zero advisories in 229 dependencies.
+Gitleaks found no credentials in `src/`, `scripts/`, or `packaging/`; the three
+documentation matches were verified false positives on certificate signer
+labels, with matched text redacted in the retained report. Semgrep remains
+inconclusive because its remote ruleset fetch failed TLS verification; no
+certificate bypass was used. `.github/` is absent from this checkout. Reports
+are under
+[`security-current-20261109`](docs/qualification/scan-first-pressure-20261109/live/security-current-20261109/),
+and details are in the [security scan record](docs/qualification/scan-first-pressure-20261109/security-review-20261109.md).

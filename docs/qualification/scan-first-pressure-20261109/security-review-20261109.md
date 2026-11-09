@@ -18,6 +18,29 @@
 - Semgrep's remote `p/security-audit` ruleset invocation did not produce a
   report; it is inconclusive and is not counted as a pass.
 
+## Refreshed local scans — 2026-11-09 09:48 UTC
+
+- A fresh `cargo audit --json` again found **0 advisories across 229
+  dependencies**. Its advisory database was updated at
+  `2026-11-09T10:22:53+01:00` (09:22 UTC).
+- Gitleaks `dir` scans found no leaks in `src/`, `scripts/`, or `packaging/`.
+  A scan of `docs/` returned three `generic-api-key` matches on Rocky Linux
+  X.509 certificate signer labels in a console log; inspection confirmed the
+  matched text was certificate-name metadata, not credentials. The preserved
+  docs finding report redacts all matched strings.
+- `.github/` does not exist in this checkout, so there are no workflow files
+  to scan here.
+- Semgrep `p/rust` could not fetch its ruleset because TLS verification of
+  `semgrep.dev` failed with `SSLCertVerificationError`. I kept certificate
+  verification enabled; the run produced no findings report and remains
+  **inconclusive**, not a pass.
+
+Refresh evidence is in
+[`live/security-current-20261109/`](live/security-current-20261109/): the
+current Cargo audit JSON and separate Gitleaks JSON reports for source,
+scripts, packaging, and the redacted documentation false positives. The empty
+Gitleaks result files are identical because each scan produced no findings.
+
 ## Evidence
 
 - [`cargo-audit-20261109.json`](live/cargo-audit-20261109.json),

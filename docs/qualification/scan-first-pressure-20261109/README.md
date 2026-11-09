@@ -692,3 +692,66 @@ and [`release119-package-restore-verification.json`](live/release119-package-res
 This qualifies Debian transitions on one Ubuntu 24.04/Linux 6.8/ext4 KVM
 guest. RPM lifecycle, other distributions, and upgrades from older
 pre-scan-first production databases remain open.
+
+#### Release-119 candidate canary started — 2026-11-09 09:43 UTC
+
+After release-106 completed its scheduled full-root observation on VPS2, the
+observation covered **1,474,513 files, 175,623 directories, and 1,650,136 path
+instances**, with zero coverage issues. The walk took 290 seconds; independent
+accounting verification passed 60.7 seconds later. During the interval the
+watcher recorded about 20.9 million hints, with zero kernel overflows and zero
+userspace drops; systemd reported zero service restarts. This was a live
+baseline observation, not candidate evidence. The old daemon's index remained
+dirty between observations as expected in scan-first mode.
+
+Before upgrading, the release-106 package, binary, systemd unit, and an online
+SQLite backup were verified. The backup is root-only, 668,336,128 bytes, schema
+v7, and passed `PRAGMA quick_check`; SHA-256 is
+`2ced1b0b4379fbda37faae719f37d83b180cf65e8f445bf6ba3682d0a215140f`. The
+marked VPS2 qualification VM was upgraded to release 119. Its installed binary
+matches the clean candidate SHA-256
+`e4841e7b75a4785a3fcf2597d4e711b21df18ebca25639f27ec0d96b9dfa293d`, and the
+effective unit matches `e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b`.
+VPS1 production was not changed.
+
+A read-only 24-hour canary is active as
+`dux-candidate-canary-119.service`, sampling every 300 seconds with a
+20-minute maximum full-observation age. The collector is capped at 20% CPU and
+1 GiB memory; Dux retains its packaged 100% CPU and 4 GiB memory ceilings. The
+first sample passed in 60.766 seconds while a scan was running: exact binary
+and unit identities, schema-v7 path graph, root accounting, and SQLite quick
+check all passed; no journal failures, restarts, or OOM events were found.
+Independent accounting found 1,646,654 inodes and 1,650,136 paths, with zero
+orphan dirents, invalid prime attributions, parent errors, or rollup errors.
+At the initial checkpoint there was **1 passing sample**, not a completed
+soak; see the later checkpoint below for the current count. The pre-upgrade
+package and DB backup are retained for rollback.
+
+Initial evidence snapshot:
+[`release119-canary-progress-20261109T0943Z.jsonl`](live/release119-canary-progress-20261109T0943Z.jsonl),
+SHA-256 `fda22a0a9cf3d8bcc08570ae19fad42eee77d8c3e34c16da8c925dc72d449ea5`.
+The append-only live log continues on VPS2 at
+`/root/dux-canary-119/candidate-canary.jsonl`; the monitor and observer hashes
+are recorded in that log. Preserve subsequent snapshots and record any failed
+sample; do not treat the run as passed until the monitor records
+`canary_completed` after the full 24 hours.
+
+#### Canary checkpoint — 2026-11-09 09:50 UTC
+
+The release-119 monitor has recorded **2 passing samples out of 289 required**
+and remains active. Sample 2 completed in 47.603 seconds; its before/after
+status reads showed the same full observation within the 20-minute age bound,
+zero kernel overflows and userspace drops, and exact schema-v7 accounting.
+Across both samples there are no monitor errors, restarts, OOM events, or
+critical journal entries. At sample 2, the systemd Dux memory peak was
+1,329,266,688 bytes against the 4 GiB service cap. Cgroup I/O counters for
+device `8:0` had reached 1,781,170,176 bytes read and 1,484,582,912 bytes
+written since service start; `8:0` and `252:0` are stacked representations and
+must not be summed. These are early single-run observations, not an efficiency
+SLO or steady-state benchmark.
+
+The current two-sample snapshot is
+[`release119-canary-progress-20261109T0950Z.jsonl`](live/release119-canary-progress-20261109T0950Z.jsonl),
+SHA-256 `b38cb3ec40d9237d154f270be355a8b3cdc8cfab619eecea28096c13eb28ecc8`.
+The complete append-only log remains on VPS2 at
+`/root/dux-canary-119/candidate-canary.jsonl`.
