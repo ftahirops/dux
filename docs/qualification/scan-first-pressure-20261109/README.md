@@ -648,5 +648,47 @@ restart, cgroup OOM recovery, long-reader WAL, host-pressure behavior, and
 startup/schema upgrade, and the full-root scan. Earlier failed harness attempts remain archived to
 show how the gates were corrected; they are not counted as passes. The P0
 scenarios are candidate evidence, not a complete production-readiness
-qualification. Scale budgets, package/rollback, filesystem/kernel breadth,
+qualification. Scale budgets, RPM and other distro lifecycle, filesystem/kernel breadth,
 hardware-loss behavior, endurance, and canary gates remain open.
+
+#### Release-119 Debian lifecycle passed — 2026-11-09
+
+The clean static-musl DEB from commit `4fe2730ced1d` passed the VPS2 KVM
+lifecycle against the release-106 baseline: baseline runtime, upgrade to 119,
+rollback to 106 with verified SQLite snapshot restore, re-upgrade,
+remove/purge, and clean install of 119. The report completed in **1,053.154
+seconds**. Package and binary hashes matched at every transition; upgrade
+preserved disabled service state; rollback restored an index with SQLite
+`quick_check=ok`; remove retained state and purge removed it; clean install
+enabled only `dux.service` and created no tunnel identity.
+
+The candidate's clean-install observation covered **1,642,252 indexed nodes**
+with no kernel overflow or event drops. At capture, status was still dirty
+with accounting verification pending and `caught_up=false`; this does not
+prove a clean/freshness SLO. The service cgroup had recorded about 3.51 GiB
+read and 6.26 GiB written. This is material I/O cost from one host run, not a
+controlled benchmark. The candidate passed effective systemd policy checks
+and private index modes (directory `0750`, DB and sidecars `0640`, owner
+`root:dux`).
+
+The lifecycle harness left release 119 stopped and disabled as designed. A
+restore guard reinstalled the original release-106 package and restored its
+pretest database snapshot. The guard's first check saw systemd `reloading`
+while the restored daemon performed its normal full scan; it was a verifier
+assumption, not a failed restore. The final check after scan completion passed:
+release 106 enabled and active, original binary and unit hashes matched,
+SQLite `quick_check=ok`, 1,643,390 inode rows, zero restarts, zero event drops,
+and 9.7 GiB free. The 1.3 GiB of redundant snapshots and temporary package/
+runner files was removed after verification; test reports were retained.
+
+Lifecycle report: [`release119-package-lifecycle.json`](live/release119-package-lifecycle.json),
+SHA256 `f92e58299bdfff998aae342f0f0c90aa92fa4a050dda84b6986070df511e7444`.
+Final restore check: [`release119-package-final-restore.json`](live/release119-package-final-restore.json),
+SHA256 `3fe1dd12de9f9d4f7bf154924f5474c6f62b91fb124720a5f99b5724309cb1df`.
+Pretest state and the intermediate `reloading` check are in
+[`release119-package-pretest-state.json`](live/release119-package-pretest-state.json)
+and [`release119-package-restore-verification.json`](live/release119-package-restore-verification.json).
+
+This qualifies Debian transitions on one Ubuntu 24.04/Linux 6.8/ext4 KVM
+guest. RPM lifecycle, other distributions, and upgrades from older
+pre-scan-first production databases remain open.

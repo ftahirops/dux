@@ -2383,10 +2383,14 @@ as passes.
 
 These results qualify important recovery paths on the tested Linux/ext4 VPS2
 setup, but do not establish universal correctness or 100% production
-readiness. Large-scale 1M/10M performance, package lifecycle/rollback, other
-filesystems/kernels, hardware-loss behavior, long-duration soak, and canary
-gates remain open. The installed Dux service and index were not changed by the
-root-scan test.
+readiness. The Debian package lifecycle now passed release 106→119; RPM and
+other-distribution package behavior, direct upgrade from older pre-scan-first
+production state, large-scale 1M/10M performance, other filesystems/kernels,
+hardware-loss behavior, long-duration soak, and canary gates remain open. The
+root-scan test did not modify the installed index; the package test restored
+the pretest release-106 package and index, then the old daemon completed its
+normal scan. Final restore verification passed SQLite integrity, service
+active/enabled state, and binary/unit identity checks.
 
 ## Scoped security scan — 2026-11-09
 

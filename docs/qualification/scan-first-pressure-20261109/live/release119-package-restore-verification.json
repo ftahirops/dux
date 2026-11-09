@@ -1,0 +1,15 @@
+{
+  "captured_at_epoch": 1794216008.3757596,
+  "package_version": "0.6.3-106",
+  "binary_sha256": "0f2c14df15cbcaec0c934d409703843fc03e35fd089287234653e01be250a556",
+  "expected_binary_sha256": "0f2c14df15cbcaec0c934d409703843fc03e35fd089287234653e01be250a556",
+  "unit_sha256": "e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b",
+  "expected_unit_sha256": "e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b",
+  "db_quick_check": "ok",
+  "db_inode_rows": 1637441,
+  "expected_db_inode_rows": 1637441,
+  "service_active": "reloading",
+  "service_enabled": "enabled",
+  "service_nrestarts": "0",
+  "df_root": "/dev/mapper/ubuntu--vg-ubuntu--lv   93G   79G  9.7G  89% /"
+}
