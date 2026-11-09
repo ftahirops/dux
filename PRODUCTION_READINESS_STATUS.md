@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:42 UTC
+## Latest verified checkpoint — 2026-11-09 22:48 UTC
 
 ### Clean-install lifecycle readiness gate
 
@@ -32,22 +32,26 @@ critical-path gaps and the targeted tests needed to close them are recorded in
 
 ### Canary and disk
 
-VPS2 r121 sample **104** at 22:42:53 UTC passed: scan age was 526 seconds,
-no scan was running, SQLite and path/accounting checks passed, and restarts,
-overflows, drops, and pending updates were all zero. The previous sample 102
-was captured during a scan-first observation, which completed at 22:34:07
-after about 275 seconds, walking 1,613,677 files and 192,125 directories with
-zero coverage issues; independent accounting passed in 51.258 seconds. A
-fresh status after completion showed scan age 144 seconds and zero overflows,
-drops, or pending updates. The 24-hour canary is only about 8 hours 30 minutes
-in and is not release sign-off. `memory.events.high` stayed at 1,173 through
-samples 100–103; no OOM events were recorded. VPS2 root remains 92% used with
-7.2 GiB free; its 4 GiB journal is preserved until the soak finishes. Details:
-[sample 100](docs/qualification/production-live-followup-20261109T2223Z/README.md),
-[sample 101](docs/qualification/production-live-followup-20261109T2228Z/README.md),
-[sample 102 and scan cycle](docs/qualification/production-live-followup-20261109T2233Z/README.md),
-and [sample 103](docs/qualification/production-live-followup-20261109T2238Z/README.md),
-plus [sample 104](docs/qualification/production-live-followup-20261109T2242Z/README.md).
+VPS2 r121 sample **105** at 22:48:12 UTC passed with a full observation in
+progress, age 844 seconds, and zero overflows/drops. Samples 102–104 also
+passed; sample 102's observation covered 1,613,677 files and 192,125
+directories, completed in about 275 seconds with zero coverage issues, and
+passed independent accounting in 51.258 seconds. Samples 100–105 show no
+service restarts or OOM events; `memory.events.high` stayed at 1,173. The
+24-hour canary is about 8 hours 40 minutes in, not release sign-off. VPS2 root
+remains 92% used with 7.2 GiB free; its 4 GiB journal is preserved until the
+soak finishes. See [sample 104](docs/qualification/production-live-followup-20261109T2242Z/README.md)
+and [sample 102 scan details](docs/qualification/production-live-followup-20261109T2233Z/README.md).
+
+### Measured scan-first overhead
+
+Consecutive cgroup samples show 51–61% of one core and 1.3–1.64 GB read I/O in
+five-minute intervals containing an observation; an interval without an
+observation used 21.4% CPU and recorded no block I/O despite about 23.6k
+fanotify events/second. A 275-second scan plus 51-second accounting check uses
+about 36% of the 900-second cadence. This is observed service cost, not an
+isolated benchmark or proof of exact attribution. Deltas and raw samples are
+in [`scan-first-cost-20261109T2248Z`](docs/qualification/scan-first-cost-20261109T2248Z/README.md).
 
 ### Production VPS1
 
@@ -63,7 +67,7 @@ fault-injection binaries verified. `/` has 58 GiB free, `target/readiness` is
 869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
 [`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
 
-**Updated:** 2026-11-09 22:42 UTC
+**Updated:** 2026-11-09 22:48 UTC
 
 ---
 
