@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 12:36 UTC
+**Updated:** 2026-11-09 12:43 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 12:36 UTC
+## Current status and evidence — 2026-11-09 12:43 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -22,8 +22,8 @@ upgrade; a root-only rollback copy of the database, old binary, systemd unit,
 and release-119 DEB is preserved on VPS2. Production VPS1's service and
 database were not changed.
 
-The fresh r120 VPS2 canary has **9/289 passing samples** as of 12:36 UTC; its
-24-hour gate is still open. Samples 1–9 report zero kernel overflows, user
+The fresh r120 VPS2 canary has **10/289 passing samples** as of 12:41 UTC; its
+24-hour gate is still open. Samples 1–10 report zero kernel overflows, user
 drops, OOM events, or Dux restarts. The root observation completed with zero
 coverage issues and a valid 1,677,080-path graph. Sample 5 began with the prior
 observation 1,228 seconds old and an active scan; the scan finished during the
@@ -34,8 +34,11 @@ maximum. The index was dirty while accounting verification was pending and
 remained not caught up between observations. Sample 6 passed with a
 716-second-old observation; sample 7 passed with the next scan in progress at
 1,049 seconds; sample 8 passed with a completed observation 433 seconds old;
-sample 9 passed at age 693 seconds with a valid 1,683,013-path graph. See the
-timestamped r120 evidence below for details and exact checks.
+sample 9 passed at age 693 seconds with a valid 1,683,013-path graph. Sample
+10 passed at 12:40:47 UTC in 70.003 seconds, with a scan in progress, scan age
+997 seconds, zero overflow/drop/OOM/restart counters, and a valid
+1,683,013-path graph. Dux remained dirty and not caught up during the scan.
+The exact log is preserved in the qualification record.
 
 ### Current local tests
 
@@ -50,12 +53,21 @@ timestamped r120 evidence below for details and exact checks.
 - Python discovery: **354 passed** for the current canary monitor and harness
   sources; this run predates the Rust guard change and is not additive to the
   Rust test count.
+- Package lifecycle/security policy suite: **70 passed** in a focused rerun.
+  `systemd-analyze verify` passed for both packaged units. On VPS2's systemd
+  255, the installed daemon scored **3.3 (OK)** in `systemd-analyze security`;
+  runtime inspection confirmed UID 0/GID `dux`, only `CAP_SYS_ADMIN` and
+  `CAP_DAC_READ_SEARCH`, `NoNewPrivileges`, seccomp active, AF_UNIX-only
+  sockets, and no private mount namespace (needed for host fanotify visibility).
+  This is policy evidence, not proof that root-level compromise is contained.
 - Fresh online RustSec audit: **0 vulnerabilities and no warnings** across 229
   locked Rust dependencies. Gitleaks history coverage now includes all 654
   commits reachable from local/remote-tracking refs; its three matches were
   verified X.509 signer-label false positives, with no confirmed secrets.
-  Deployment configuration still needs review. Semgrep remains inconclusive
-  because its ruleset fetch failed TLS verification.
+  The packaged service policy and live VPS2 confinement have been checked;
+  the broader deployment configuration and root-privilege threat review remain
+  open. Semgrep remains inconclusive because its ruleset fetch failed TLS
+  verification.
 
 ### Open production-readiness gates
 
@@ -68,8 +80,10 @@ timestamped r120 evidence below for details and exact checks.
 - Qualify an exact migration of the live schema-6 production index. The
   synthetic 1.3M-file/27.3M-growth-row migration passed, but a concurrent-write
   live backup did not make progress and was stopped safely.
-- Finish security review of deployment configuration; resolve the Semgrep
-  ruleset access gap; review binary/runtime privileges.
+- Finish the broader deployment configuration and root-privilege threat
+  review; resolve the Semgrep ruleset access gap. The packaged unit and live
+  process policy check is recorded, but Dux still runs as root with
+  `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH` for filesystem event/handle access.
 - Complete OOM, mount/capability, disk-full recovery, WAL endurance, other
   filesystem/kernel, 10M scale, rollback, and multi-day soak profiles.
 - Coverage is not 100%; branch coverage is not measured. No evidence supports
@@ -77,7 +91,7 @@ timestamped r120 evidence below for details and exact checks.
 
 ### Disk snapshot
 
-Local root: **60 GiB free of 185 GiB** (67% used). VPS2 root: **8.8 GiB free
+Local root: **60 GiB free of 185 GiB** (67% used). VPS2 root: **8.6 GiB free
 of 93 GiB** (91% used); it contains the active r120 canary and rollback copy.
 Do not remove those artifacts while qualification is active.
 

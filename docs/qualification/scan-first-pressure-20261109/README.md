@@ -1109,3 +1109,25 @@ independent path graph was valid at 1,683,013 paths. Overflow, drop, OOM, and
 restart counters remained zero. Snapshot:
 [`release120-canary-progress-20261109T1236Z.jsonl`](live/release120-canary-progress-20261109T1236Z.jsonl),
 SHA256 `38370fabe42cce4cde983e19e61efe3dca23f47a92e2797ad2d7a0b3c3f9d924`.
+
+At 12:40:47 UTC, sample 10 passed in 70.003 seconds. It observed a root scan
+in progress at age 997 seconds, with a valid 1,683,013-path graph, zero
+coverage issues, and zero overflow, userspace-drop, OOM, or restart counters.
+The index was dirty and not caught up during the active scan. The 24-hour gate
+remains open. The full append-only monitor log is
+[`release120-canary-progress-20261109T1241Z.jsonl`](live/release120-canary-progress-20261109T1241Z.jsonl),
+SHA256 `bc75b426cfd4e2f1e5ba67adb950ba6a9f9c72b8f806f636bd947d31a0c0007a`.
+
+#### Packaged service security policy check — 2026-11-09
+
+The package lifecycle/security policy suite passed **70/70 tests** in a
+focused rerun. `systemd-analyze verify` passed for `packaging/dux.service` and
+`packaging/dux-tunnel.service`. On VPS2 (systemd 255), the effective running
+`dux.service` scored **3.3 (OK)** under `systemd-analyze security`. Runtime
+inspection confirmed UID 0/GID `dux`, the expected `CAP_SYS_ADMIN` and
+`CAP_DAC_READ_SEARCH` capability sets, `NoNewPrivileges=yes`, seccomp active,
+`RestrictAddressFamilies=AF_UNIX`, and no private mount namespace. Keeping the
+host mount view is required for the current fanotify coverage model. This
+check confirms configured controls, not containment of a root-level daemon
+compromise; the daemon retains powerful filesystem/kernel capabilities and
+broader threat-model review remains open.
