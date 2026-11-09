@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 13:07 UTC
+**Updated:** 2026-11-09 13:10 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 13:07 UTC
+## Current status and evidence — 2026-11-09 13:10 UTC
 
 The latest verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -67,11 +67,11 @@ rose by 1.42M and `events_resolved` by 866,774; no full scan was active and scan
 test process was active during this interval, which is consistent with host
 churn but does not prove it caused the overflows. No production service,
 database, or configuration was changed. A follow-up read at 12:52 UTC showed
-540 overflows and a 345,770-second scan age; the counters were still moving.
-At 13:00 UTC the overflow count remained 540 while `events_seen` had grown by
-about 241K since 12:52; no full scan was active and the scan age was 346,264
-seconds. This shows the overflow rate is bursty, while the index remains
-unreconciled.
+540 overflows and a 345,770-second scan age. At 13:10 UTC the count remained
+540, although `events_seen` grew by about 406K since 13:00 and the scan age
+reached 346,865 seconds. No full scan was active; indexed node count fell by
+51K while the database was already dirty. These samples show the overflow
+rate is bursty, while the index remains unreconciled and its live counts move.
 
 Raw read-only snapshots:
 [`12:49Z`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1250Z.json)
@@ -80,7 +80,9 @@ and
 plus the
 [`12:52Z follow-up`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1252Z.json).
 The 13:00Z sample is
-[`here`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1300Z.json).
+[`here`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1300Z.json);
+the 13:10Z follow-up is
+[`here`](docs/qualification/scan-first-pressure-20261109/live/vps1-readonly-status-20261109T1310Z.json).
 
 ### Current local tests
 
@@ -137,8 +139,8 @@ The 13:00Z sample is
 
 ### Disk snapshot
 
-Local root: **55 GiB free of 185 GiB** (69% used). `/tmp` currently accounts
-for **16 GiB**; Go tests were actively using temporary build directories during
+Local root: **62 GiB free of 185 GiB** (66% used). `/tmp` currently accounts
+for **13 GiB**; Go tests were actively using temporary build directories during
 inspection, and the production Dux watcher covers `/`. I did not purge shared
 temporary data during that active workload. VPS2 root: **8.6 GiB
 free of 93 GiB** (91% used); it contains the active r120 canary and rollback

@@ -1192,6 +1192,15 @@ Snapshot:
 [`vps1-readonly-status-20261109T1300Z.json`](live/vps1-readonly-status-20261109T1300Z.json),
 SHA256 `de3dd3ff753da938317b2194b9159e7d6120bafead6104bc5196ebdf30b17ef8`.
 
+At 13:10:27 UTC, the production service still had no full scan active and its
+last scan was 346,865 seconds old. Overflow notifications remained at 540
+since the 12:52 sample, while `events_seen` increased by 405,571 since 13:00.
+The dirty index's reported node count fell by 51,201; these changing counts
+are not an independent correctness proof. Dux remained active with four
+restarts. Snapshot:
+[`vps1-readonly-status-20261109T1310Z.json`](live/vps1-readonly-status-20261109T1310Z.json),
+SHA256 `6501d1db471e0a8b7423424898018c34af1f80012f853258403b364ac9257ea3`.
+
 #### Packaged service security policy check — 2026-11-09
 
 The package lifecycle/security policy suite passed **70/70 tests** in a
