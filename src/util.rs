@@ -124,6 +124,7 @@ pub fn lock_db(db: &std::path::Path) -> Result<std::fs::File> {
         .open(&lock_path)
         .with_context(|| format!("opening lock {}", lock_path.display()))?;
     // LOCK_EX | LOCK_NB: fail fast rather than block if another process holds it.
+    // SAFETY: `f` owns a live descriptor and flock only inspects its open-file description.
     let rc = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if rc != 0 {
         let e = std::io::Error::last_os_error();
@@ -184,10 +185,12 @@ pub fn fs_stat_checked(path: &std::path::Path) -> Result<FsStat> {
     let c = std::ffi::CString::new(path.as_os_str().as_bytes())
         .with_context(|| format!("filesystem path contains NUL: {}", path.display()))?;
     let mut s = MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `c` is NUL-terminated and `s` points to writable statvfs storage.
     if unsafe { libc::statvfs(c.as_ptr(), s.as_mut_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error())
             .with_context(|| format!("statvfs {}", path.display()));
     }
+    // SAFETY: successful statvfs initialized the complete output structure.
     let s = unsafe { s.assume_init() };
     fs_stat_from_counts(
         s.f_blocks, s.f_bfree, s.f_bavail, s.f_frsize, s.f_files, s.f_ffree,
@@ -292,6 +295,7 @@ pub fn systemd_notify(message: &str) {
     if bytes.is_empty() {
         return;
     }
+    // SAFETY: socket takes scalar arguments and returns a new owned descriptor.
     let fd = unsafe {
         libc::socket(
             libc::AF_UNIX,
@@ -302,6 +306,7 @@ pub fn systemd_notify(message: &str) {
     if fd < 0 {
         return;
     }
+    // SAFETY: zero is valid for sockaddr_un; the family and path are filled below.
     let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
     addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
     let max = addr.sun_path.len();
@@ -312,6 +317,7 @@ pub fn systemd_notify(message: &str) {
     };
     let start = usize::from(abstract_socket);
     if copy.len() + start >= max {
+        // SAFETY: `fd` is the newly created socket and has not been transferred.
         unsafe { libc::close(fd) };
         return;
     }
@@ -322,6 +328,8 @@ pub fn systemd_notify(message: &str) {
     let path_len = copy.len() + 1;
     let addr_len =
         (std::mem::offset_of!(libc::sockaddr_un, sun_path) + path_len) as libc::socklen_t;
+    // SAFETY: `addr` is initialized, `addr_len` is bounded by sun_path, and the
+    // message slice remains alive for the duration of the synchronous sendto.
     let _ = unsafe {
         libc::sendto(
             fd,
@@ -332,6 +340,7 @@ pub fn systemd_notify(message: &str) {
             addr_len,
         )
     };
+    // SAFETY: `fd` is still uniquely owned by this function.
     unsafe { libc::close(fd) };
 }
 
@@ -433,6 +442,8 @@ pub fn inode_path_metadata_at(
         return (cached_birth, None);
     };
     let mut stat = std::mem::MaybeUninit::<InodeStatx>::zeroed();
+    // SAFETY: statx receives a valid NUL-terminated path and writable output
+    // storage sized as InodeStatx; syscall success is checked before reading it.
     let result = unsafe {
         libc::syscall(
             libc::SYS_statx,
@@ -446,6 +457,7 @@ pub fn inode_path_metadata_at(
     if result != 0 {
         return (cached_birth, None);
     }
+    // SAFETY: a successful statx call initialized the requested output structure.
     let stat = unsafe { stat.assume_init() };
     if stat.stx_mask & STATX_INODE == 0
         || stat.stx_ino != metadata.ino()
@@ -480,6 +492,8 @@ pub fn inode_birth_ns_at(metadata: &std::fs::Metadata, path: &std::path::Path) -
         return 0;
     };
     let mut stat = std::mem::MaybeUninit::<InodeStatx>::zeroed();
+    // SAFETY: statx receives a valid NUL-terminated path and writable output
+    // storage sized as InodeStatx; syscall success is checked before reading it.
     let result = unsafe {
         libc::syscall(
             libc::SYS_statx,
@@ -493,6 +507,7 @@ pub fn inode_birth_ns_at(metadata: &std::fs::Metadata, path: &std::path::Path) -
     if result != 0 {
         return 0;
     }
+    // SAFETY: a successful statx call initialized the requested output structure.
     let stat = unsafe { stat.assume_init() };
     if stat.stx_mask & STATX_BIRTH == 0
         || stat.stx_ino != metadata.ino()
@@ -900,6 +915,8 @@ pub fn process_alive(pid: i32) -> bool {
     if pid <= 0 {
         return false;
     }
+    // SAFETY: kill with signal 0 takes only the validated PID and performs no
+    // signal delivery; it is used as an existence/permission probe.
     let result = unsafe { libc::kill(pid, 0) };
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }

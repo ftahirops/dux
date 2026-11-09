@@ -737,6 +737,8 @@ pub fn run() -> Result<()> {
     key_usable(KEY_PATH)?;
     known_hosts_usable(KNOWN_HOSTS_PATH, 0)?;
     load_config()?;
+    // SAFETY: both handlers have the C signal-handler signature and only set an
+    // atomic flag; the function-pointer representation is libc's Linux ABI.
     unsafe {
         libc::signal(
             libc::SIGTERM,
@@ -913,6 +915,7 @@ mod tests {
         let status = kill_and_reap(&mut child).unwrap();
 
         assert!(!status.success(), "killed child unexpectedly succeeded");
+        // SAFETY: pid is the child process ID returned by spawn and signal 0 only probes it.
         assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
         assert_eq!(
             std::io::Error::last_os_error().raw_os_error(),

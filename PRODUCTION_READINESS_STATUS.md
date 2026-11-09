@@ -1,47 +1,51 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 18:02 UTC
+## Latest verified checkpoint — 2026-11-09 18:19 UTC
 
 Release candidate package revision 122 built successfully from clean commit
 `24456ed8978fa33886ab13944e8afaf57762c7b6` as a static-musl binary, DEB, and
-RPM. Source identity, package payload identity, checksums, embedded dependency
+RPM. Source identity, payload identity, checksums, embedded dependency
 metadata, and RustSec audits passed; the lockfile audit found zero advisories,
-and the exact-binary audit recovered 202 dependencies. The package lifecycle
-harness passed **70/70** unit tests. The candidate was not installed on VPS2.
-Evidence is in
+and the exact-binary audit recovered 202 dependencies. Its package lifecycle
+harness passed **70/70** unit tests. It was not installed on VPS2. The source
+has since received reviewed unsafe-block safety comments and an equivalent
+securebits-call refactor; revision 122 no longer matches the current source
+digest. Rebuild and qualify the updated source before considering a candidate
+rollout. Revision-122 evidence is in
 [`release-candidate-24456ed-20261109`](docs/qualification/release-candidate-24456ed-20261109/README.md).
 
-VPS2 remains on release 121 and its active 24-hour canary. A read-only check at
-17:55 UTC showed the same daemon PID `2561224`, zero restarts, zero kernel
-overflow notifications, zero dropped updates, and no pending updates. Canary
-sample 46 at 17:53:27 passed monitor checks: SQLite and indexed path graph
-validated, independent accounting passed, and there were no OOMs, overflows,
-drops, or restarts. Its post-observation scan age was 281 seconds. This is
-about 3h46m of the 24-hour run; scan freshness comes from completed-observation
-age, not the legacy `behind_seconds` field. The soak has not passed its full
-duration.
+VPS2 remains on release 121 and its active 24-hour canary. Sample 51 at
+18:18:25 passed monitor checks. At 18:19 UTC, the service remained under PID
+`2561224` with zero restarts, kernel overflows, dropped updates, or pending
+updates; last completed scan age was 72 seconds. This is about 4h11m of the
+24-hour soak, which remains incomplete. Scan freshness is based on completed-
+observation age, not the legacy `behind_seconds` field.
 
-Current test evidence includes 330/330 Rust tests in debug and release
-all-features runs (ignored profiles included), 354/354 Python harness checks,
-an isolated 1.37M-entry ext4 profile, 100k scale smokes, strict
-Clippy/format/diff checks, and 73.65% line / 72.55% region / 76.80% function
-coverage. Branch coverage is unavailable. Results and limits are detailed in
-the [`r121 qualification`](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md).
+On the updated source, the optimized all-features Rust suite passed **332/332**
+with ignored tests included, in a private namespace with loopback ext4 and
+separate tmpfs scale scratch. The 100k scale smoke passed; the ext4 stale-parent
+integration passed. All-target/all-feature Clippy passed with
+`undocumented_unsafe_blocks` denied, as did formatting and diff checks. Fresh
+LLVM coverage on this source is **73.73% line / 72.67% region / 76.94% function**.
+Branch coverage remains unavailable; lowest line coverage is `tui.rs` 39.51%,
+`main.rs` 46.43%, and `containers.rs` 67.25%. Details and limits are in the
+[`r121 qualification`](docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md)
+and [latest unsafe review](docs/qualification/production-live-checkpoint-20261109/README.md).
 
-Production VPS1 remains on legacy `0.6.3` (`e0cc915f8f37`). A fresh read-only
-capture at 18:02 UTC showed four service restarts, 636 kernel overflow
-notifications, 2,518,862 dropped updates, 26 pending updates, and a last scan
-364,366 seconds old (about 4.2 days). The index database occupied about 3.21
-GB; root had 64.3 GB available. The service cgroup reported no OOM events.
-This is a new snapshot, not a change from the prior overflow/drop counters; no
-production service or database state was changed. Details:
+Production VPS1 remains on legacy `0.6.3` (`e0cc915f8f37`). A read-only
+follow-up at 18:19 UTC showed four service restarts, 636 kernel overflow
+notifications, 2,518,862 dropped updates, 97 pending updates, and a last scan
+365,390 seconds old (about 4.23 days). The DB occupied 3.21 GB; root had 63.4
+GB available. The service cgroup reported no OOM events. No production service
+or database state was changed. Details:
 [`production live checkpoint`](docs/qualification/production-live-checkpoint-20261109/README.md).
 
-The current unsafe-block Clippy audit reports 47 production binary warnings;
-promoting `clippy::undocumented_unsafe_blocks` to errors fails across
-all-targets. These warnings are missing safety explanations, not proven
-memory-safety defects, but a reviewed production unsafe-block inventory and
-appropriate comments remain open.
+The unsafe-block audit initially found 47 production and 36 test-only blocks
+without recognized safety comments. Those blocks now have local safety
+explanations, and all-target/all-feature Clippy passes with
+`clippy::undocumented_unsafe_blocks` denied. This improves reviewability but
+does not prove every unsafe block correct; deeper memory-safety review remains
+open.
 
 No production rollout has been performed. Revision-122 canary install/rollback,
 the completed 24-hour r121 soak, live schema migration qualification,
@@ -49,7 +53,7 @@ disk-full/OOM/filesystem stress, multi-day soak, full security threat review,
 and constrained-host p95/p99 performance evidence remain open. Production
 sign-off is not met.
 
-**Updated:** 2026-11-09 18:02 UTC
+**Updated:** 2026-11-09 18:19 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 

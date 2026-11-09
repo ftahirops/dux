@@ -182,12 +182,16 @@ impl Drop for FanotifyHintResolver {
 
 impl FanotifyHintReader {
     fn start(fan: RawFd, discard_chunks: bool) -> Result<Self> {
+        // SAFETY: `fan` is live and caller-owned; fcntl creates an independent
+        // close-on-exec descriptor that this reader owns on success.
         let reader_fan = unsafe { libc::fcntl(fan, libc::F_DUPFD_CLOEXEC, 0) };
         if reader_fan < 0 {
             return Err(std::io::Error::last_os_error()).context("duplicating fanotify fd");
         }
+        // SAFETY: eventfd takes scalar arguments and returns a new owned descriptor.
         let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         if notify_fd < 0 {
+            // SAFETY: the duplicate has not yet been wrapped in its RAII guard.
             unsafe { libc::close(reader_fan) };
             return Err(std::io::Error::last_os_error()).context("creating hint-reader eventfd");
         }
@@ -244,6 +248,8 @@ impl FanotifyHintReader {
 
     fn acknowledge(&self) {
         let mut count = 0u64;
+        // SAFETY: `count` is writable for the requested u64 length; notify is
+        // this reader's live nonblocking eventfd, so EAGAIN needs no recovery.
         unsafe {
             libc::read(
                 self.notify.0,
@@ -269,6 +275,7 @@ impl Drop for FanotifyHintReader {
 
 fn notify_hint_reader(fd: RawFd) {
     let count = 1u64;
+    // SAFETY: count is an initialized u64 and fd is the live nonblocking eventfd.
     unsafe {
         libc::write(
             fd,
@@ -322,6 +329,7 @@ fn fanotify_reader_loop(
     };
     while !state.stop.load(Ordering::Acquire) {
         pfd.revents = 0;
+        // SAFETY: pfd is initialized writable storage for exactly one entry.
         let polled = unsafe { libc::poll(&mut pfd, 1, HINT_READER_POLL_MS) };
         if polled == 0 {
             // A previous bounded drain may have stopped at its time/read cap
@@ -357,6 +365,8 @@ fn fanotify_reader_loop(
                 notify_hint_reader(notify);
                 break;
             }
+            // SAFETY: buf provides writable storage for its full length and fan
+            // is the reader-owned live nonblocking fanotify descriptor.
             let n = unsafe { libc::read(fan, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
             if n > 0 {
                 state.kernel_empty.store(false, Ordering::Release);
@@ -891,11 +901,13 @@ const FANOTIFY_FIONREAD: libc::Ioctl = 0x541B;
 /// are best-effort hints; they reduce priority but do not eliminate contention.
 /// Lowering one's own priority never requires privilege.
 fn set_background_priority() {
+    // SAFETY: setpriority receives only scalar process selectors and values.
     unsafe {
         // nice +10 — production threads always win the CPU.
         libc::setpriority(libc::PRIO_PROCESS, 0, 10);
     }
     #[cfg(target_os = "linux")]
+    // SAFETY: ioprio_set syscall arguments are scalar constants; no pointers pass.
     unsafe {
         // ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IDLE, 0)).
         const IOPRIO_WHO_PROCESS: libc::c_int = 1;
@@ -913,6 +925,7 @@ fn thread_cpu_secs() -> f64 {
         tv_sec: 0,
         tv_nsec: 0,
     };
+    // SAFETY: ts is valid writable timespec storage and the clock id is defined.
     unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
     ts.tv_sec as f64 + ts.tv_nsec as f64 / 1e9
 }
@@ -1323,6 +1336,7 @@ fn fanotify_queue_pressure_override(
 
 fn read_fanotify_queue_bytes(fanotify_fd: RawFd) -> Option<u64> {
     let mut bytes: libc::c_int = 0;
+    // SAFETY: the ioctl output pointer addresses a writable c_int and the fd is fanotify.
     let result = unsafe { libc::ioctl(fanotify_fd, FANOTIFY_FIONREAD, &mut bytes) };
     (result == 0 && bytes >= 0).then_some(bytes as u64)
 }
@@ -1333,6 +1347,7 @@ fn fanotify_queue_readable(fanotify_fd: RawFd) -> Option<bool> {
         events: libc::POLLIN,
         revents: 0,
     };
+    // SAFETY: descriptor is initialized writable storage for one pollfd entry.
     let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
     if result < 0 {
         return None;
@@ -1592,6 +1607,8 @@ fn parse_fanotify_hints(
             // FID-mode notifications normally use FAN_NOFD. Close defensively if
             // a kernel or future mark mode supplies an event descriptor.
             if meta.fd >= 0 {
+                // SAFETY: a reported fanotify event fd is transferred to this
+                // process and this branch closes that owned descriptor once.
                 unsafe { libc::close(meta.fd) };
             }
         }
@@ -1989,6 +2006,9 @@ fn unresolved_target_diagnostic(
                 f_handle: [0u8; MAX_HANDLE_SZ],
             };
             fh.f_handle[..handle_bytes].copy_from_slice(&payload[16..16 + handle_bytes]);
+            // SAFETY: fh has the C ABI layout, handle_bytes was checked against
+            // MAX_HANDLE_SZ, the bytes were copied from a bounded payload, and
+            // mount_fd remains open for this synchronous syscall.
             let fd = unsafe {
                 libc::syscall(
                     libc::SYS_open_by_handle_at,
@@ -2397,6 +2417,7 @@ pub fn run_daemon(
 
     // Flush pending events on SIGTERM/SIGINT instead of dropping up to a full
     // flush window on shutdown (systemd stops the daemon with SIGTERM).
+    // SAFETY: handlers use the C signal ABI and only update atomic flags.
     unsafe {
         let h = on_term as *const () as libc::sighandler_t;
         libc::signal(libc::SIGTERM, h);
@@ -2889,6 +2910,8 @@ pub fn run_daemon(
                         {
                             break;
                         }
+                        // SAFETY: buf is writable for its full length and fan
+                        // is the daemon's live nonblocking fanotify descriptor.
                         let m = unsafe {
                             libc::read(fan, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
                         };
@@ -3583,6 +3606,7 @@ pub fn run_daemon(
         let pr = if buf_len > 0 {
             1
         } else {
+            // SAFETY: pfd is initialized writable storage for one pollfd entry.
             unsafe { libc::poll(&mut pfd, 1, wait_ms.max(0)) }
         };
         if pr > 0 {
@@ -3651,6 +3675,8 @@ pub fn run_daemon(
                             }
                         }
                     } else {
+                        // SAFETY: buf is writable for its full length and fan
+                        // is the daemon's live nonblocking fanotify descriptor.
                         unsafe {
                             libc::read(fan, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len())
                         }
@@ -4522,14 +4548,18 @@ fn statfs_fsid(path: &Path) -> Result<(i32, i32)> {
     let c = std::ffi::CString::new(path.as_os_str().as_bytes())
         .with_context(|| format!("encoding mount path {}", path.display()))?;
     let mut s = MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: c is NUL-terminated and s points to writable statfs storage.
+    let statfs_rc = unsafe { libc::statfs(c.as_ptr(), s.as_mut_ptr()) };
     anyhow::ensure!(
-        unsafe { libc::statfs(c.as_ptr(), s.as_mut_ptr()) } == 0,
+        statfs_rc == 0,
         "statfs {}: {}",
         path.display(),
         std::io::Error::last_os_error()
     );
+    // SAFETY: successful statfs initialized the complete output structure.
     let v = unsafe { s.assume_init() }.f_fsid;
     // fsid_t is an opaque 8-byte struct ({ __val: [i32;2] }); read its two ints.
+    // SAFETY: Linux fsid_t is two i32 values and transmute statically checks size.
     let raw: [i32; 2] = unsafe { std::mem::transmute(v) };
     Ok((raw[0], raw[1]))
 }
@@ -4537,6 +4567,7 @@ fn statfs_fsid(path: &Path) -> Result<(i32, i32)> {
 fn open_dir(path: &Path) -> Result<RawFd> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+    // SAFETY: c is a valid NUL-terminated path and open takes scalar flags.
     let fd = unsafe {
         libc::open(
             c.as_ptr(),
@@ -4550,6 +4581,7 @@ fn open_dir(path: &Path) -> Result<RawFd> {
 }
 
 fn init_fanotify() -> Result<RawFd> {
+    // SAFETY: fanotify_init takes scalar flags and returns a new descriptor.
     let fd = unsafe {
         libc::fanotify_init(
             FAN_CLASS_NOTIF | FAN_REPORT_DFID_NAME_TARGET | FAN_CLOEXEC | FAN_NONBLOCK,
@@ -4575,6 +4607,8 @@ fn mark_fs(fan: RawFd, root: &Path) -> Result<()> {
         | FAN_ATTRIB
         | FAN_CLOSE_WRITE
         | FAN_ONDIR;
+    // SAFETY: fan is a live fanotify fd; cpath is NUL-terminated and valid for
+    // the call; AT_FDCWD is the dirfd required for the pathname argument.
     let rc = unsafe {
         libc::fanotify_mark(
             fan,
@@ -7313,10 +7347,13 @@ fn drop_alert_child_capabilities() -> std::io::Result<()> {
     if securebits < 0 {
         return Err(std::io::Error::last_os_error());
     }
-    if securebits & SECBIT_NOROOT_MASK != SECBIT_NOROOT_MASK
-        && unsafe { libc::prctl(PR_SET_SECUREBITS, securebits | SECBIT_NOROOT_MASK, 0, 0, 0) } < 0
-    {
-        return Err(std::io::Error::last_os_error());
+    if securebits & SECBIT_NOROOT_MASK != SECBIT_NOROOT_MASK {
+        // SAFETY: prctl is called with scalar securebits values and unused args zero.
+        let result =
+            unsafe { libc::prctl(PR_SET_SECUREBITS, securebits | SECBIT_NOROOT_MASK, 0, 0, 0) };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
     }
 
     // Clear ambient capabilities before clearing permitted/effective sets.
@@ -7404,6 +7441,8 @@ fn check_alerts(
             // script must not inherit dux's preferred-OOM-victim boost (B3). Raw
             // syscalls only (async-signal-safe in the post-fork/pre-exec child).
             let keep_capabilities = cfg.keep_capabilities;
+            // SAFETY: the pre_exec closure uses only async-signal-safe libc
+            // calls before exec and does not access parent-owned mutable state.
             unsafe {
                 command.pre_exec(move || {
                     let p = b"/proc/self/oom_score_adj\0";
@@ -7479,12 +7518,12 @@ mod tests {
     #[test]
     fn scan_first_reader_drains_events_without_a_bounded_payload_queue() {
         let mut pipe = [-1; 2];
-        assert_eq!(
-            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) },
-            0
-        );
+        // SAFETY: pipe points to two writable RawFd slots.
+        let pipe_rc = unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) };
+        assert_eq!(pipe_rc, 0);
         let read_guard = RawFdGuard(pipe[0]);
         let write_guard = RawFdGuard(pipe[1]);
+        // SAFETY: eventfd takes scalar flags and returns a new descriptor.
         let notify = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         assert!(notify >= 0);
         let notify_guard = RawFdGuard(notify);
@@ -7528,6 +7567,8 @@ mod tests {
         const BURST_EVENTS: u64 = 10_000;
         for _ in 0..BURST_EVENTS {
             loop {
+                // SAFETY: event is an initialized byte slice and write_guard
+                // owns a live pipe writer; write reads only event.len() bytes.
                 let written = unsafe {
                     libc::write(
                         write_guard.0,
@@ -7568,12 +7609,12 @@ mod tests {
     #[test]
     fn dedicated_hint_reader_drains_fd_into_bounded_channel() {
         let mut pipe = [-1; 2];
-        assert_eq!(
-            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) },
-            0
-        );
+        // SAFETY: pipe points to two writable RawFd slots.
+        let pipe_rc = unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) };
+        assert_eq!(pipe_rc, 0);
         let read_guard = RawFdGuard(pipe[0]);
         let write_guard = RawFdGuard(pipe[1]);
+        // SAFETY: eventfd takes scalar flags and returns a new descriptor.
         let notify = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         assert!(notify >= 0);
         let notify_guard = RawFdGuard(notify);
@@ -7606,16 +7647,15 @@ mod tests {
         });
 
         let payload = b"synthetic fanotify bytes";
-        assert_eq!(
-            unsafe {
-                libc::write(
-                    write_guard.0,
-                    payload.as_ptr().cast::<libc::c_void>(),
-                    payload.len(),
-                )
-            },
-            payload.len() as isize
-        );
+        // SAFETY: payload is initialized and write_guard owns a live pipe writer.
+        let written = unsafe {
+            libc::write(
+                write_guard.0,
+                payload.as_ptr().cast::<libc::c_void>(),
+                payload.len(),
+            )
+        };
+        assert_eq!(written, payload.len() as isize);
         assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), payload);
         let deadline = Instant::now() + Duration::from_secs(1);
         while !kernel_empty.load(Ordering::Acquire) && Instant::now() < deadline {
@@ -7634,12 +7674,12 @@ mod tests {
     #[test]
     fn dedicated_hint_reader_clears_stale_nonempty_state_after_idle_poll() {
         let mut pipe = [-1; 2];
-        assert_eq!(
-            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) },
-            0
-        );
+        // SAFETY: pipe points to two writable RawFd slots.
+        let pipe_rc = unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) };
+        assert_eq!(pipe_rc, 0);
         let read_guard = RawFdGuard(pipe[0]);
         let write_guard = RawFdGuard(pipe[1]);
+        // SAFETY: eventfd takes scalar flags and returns a new descriptor.
         let notify = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         assert!(notify >= 0);
         let notify_guard = RawFdGuard(notify);
@@ -7688,6 +7728,7 @@ mod tests {
 
     #[test]
     fn hint_resolver_processes_bounded_jobs_off_coordinator() {
+        // SAFETY: eventfd takes scalar flags and returns a new descriptor.
         let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         assert!(notify_fd >= 0);
         let notify = RawFdGuard(notify_fd);
@@ -7718,6 +7759,7 @@ mod tests {
 
     #[test]
     fn resolver_result_queue_saturation_records_loss_without_blocking() {
+        // SAFETY: eventfd takes scalar flags and returns a new descriptor.
         let notify_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         assert!(notify_fd >= 0);
         let notify = RawFdGuard(notify_fd);
@@ -7768,6 +7810,8 @@ mod tests {
         // restricted root container, the test cannot establish NOROOT itself;
         // the packaged-unit integration check covers its locked-SecureBits
         // path. Do not weaken the production helper when that setup is absent.
+        // SAFETY: PR_GET_SECUREBITS takes scalar arguments; this test uses the
+        // same Linux ABI that the production helper exercises.
         let securebits = unsafe { libc::prctl(27, 0, 0, 0, 0) };
         let mut status = String::new();
         if let Ok(contents) = std::fs::read_to_string("/proc/self/status") {
@@ -7780,6 +7824,7 @@ mod tests {
             .unwrap_or(0);
         const CAP_SETPCAP: u64 = 1 << 8;
         const SECBIT_NOROOT_MASK: i32 = 3;
+        // SAFETY: geteuid has no pointer arguments or additional preconditions.
         if unsafe { libc::geteuid() } == 0
             && effective & CAP_SETPCAP == 0
             && (securebits < 0 || securebits & SECBIT_NOROOT_MASK != SECBIT_NOROOT_MASK)
@@ -7787,6 +7832,8 @@ mod tests {
             eprintln!("skipping alert capability integration: cannot set or inherit locked NOROOT");
             return;
         }
+        // SAFETY: CommandExt requires a child-side callback; the callback uses
+        // the production helper's post-fork syscall-only path.
         unsafe {
             command.pre_exec(drop_alert_child_capabilities);
         }
@@ -7801,11 +7848,13 @@ mod tests {
     #[test]
     fn raw_fd_guard_closes_descriptors_on_early_return() {
         let mut pipe_fds = [-1; 2];
+        // SAFETY: pipe_fds provides two writable descriptor slots.
         assert_eq!(unsafe { libc::pipe(pipe_fds.as_mut_ptr()) }, 0);
         let read_guard = RawFdGuard(pipe_fds[0]);
         let write_guard = RawFdGuard(pipe_fds[1]);
         let read_fd = read_guard.0;
         drop(read_guard);
+        // SAFETY: read_fd was just closed by RawFdGuard; F_GETFD uses a scalar fd.
         assert_eq!(unsafe { libc::fcntl(read_fd, libc::F_GETFD) }, -1);
         assert_eq!(
             std::io::Error::last_os_error().raw_os_error(),
@@ -8309,6 +8358,8 @@ mod tests {
             fd: -1,
             pid: 0,
         };
+        // SAFETY: the repr(C) metadata is fully initialized, has no padding,
+        // and the compile-time size assertion matches this byte-slice length.
         let event = unsafe {
             std::slice::from_raw_parts(
                 (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -8531,6 +8582,8 @@ mod tests {
             fd: -1,
             pid: 123,
         };
+        // SAFETY: the repr(C) metadata is fully initialized, has no padding,
+        // and the compile-time size assertion matches this byte-slice length.
         let bytes = unsafe {
             std::slice::from_raw_parts(
                 (&malformed as *const FanotifyEventMetadata).cast::<u8>(),
@@ -8614,6 +8667,8 @@ mod tests {
             fd: -1,
             pid,
         };
+        // SAFETY: the repr(C) metadata is fully initialized, has no padding,
+        // and the compile-time size assertion matches this byte-slice length.
         let metadata_bytes = unsafe {
             std::slice::from_raw_parts(
                 (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -8638,6 +8693,8 @@ mod tests {
             fd: -1,
             pid: 0,
         };
+        // SAFETY: metadata is fully initialized with no padding, and the
+        // compile-time size assertion proves the requested byte length.
         unsafe {
             std::slice::from_raw_parts(
                 (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -8671,6 +8728,8 @@ mod tests {
             pad: 0,
             len: 4,
         };
+        // SAFETY: metadata has no padding and is fully initialized; the vector
+        // is sized for the full metadata plus the four-byte record header.
         let event = unsafe {
             let mut bytes = vec![0u8; FAN_EVENT_METADATA_LEN + 4];
             std::ptr::copy_nonoverlapping(
@@ -8733,6 +8792,8 @@ mod tests {
                 len: declared_len,
             };
             let mut event = vec![0u8; FAN_EVENT_METADATA_LEN + 4];
+            // SAFETY: metadata and header are initialized repr(C) values with
+            // asserted sizes; event has room for both copied byte ranges.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -8796,6 +8857,8 @@ mod tests {
             len: 28,
         };
         let mut event = vec![0u8; metadata.event_len as usize];
+        // SAFETY: metadata is initialized and has no padding; event is allocated
+        // at exactly metadata.event_len, which is at least the metadata size.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -8862,6 +8925,8 @@ mod tests {
                 };
                 let offset = event.len();
                 event.resize(offset + 12, 0);
+                // SAFETY: header has a four-byte repr(C) layout and event was
+                // resized to hold the entire header at this offset.
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         (&header as *const InfoHeader).cast::<u8>(),
@@ -8880,6 +8945,8 @@ mod tests {
                 fd: -1,
                 pid: 123,
             };
+            // SAFETY: metadata is initialized without padding and event is
+            // allocated for at least FAN_EVENT_METADATA_LEN bytes.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -9124,7 +9191,10 @@ mod tests {
         std::fs::create_dir_all(root.join("kept")).unwrap();
         let mount_fd = RawFdGuard(open_dir(&root).unwrap());
         let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
-        assert_eq!(unsafe { libc::fstatfs(mount_fd.0, fs.as_mut_ptr()) }, 0);
+        // SAFETY: mount_fd is open and fs points to writable statfs storage.
+        let fstatfs_rc = unsafe { libc::fstatfs(mount_fd.0, fs.as_mut_ptr()) };
+        assert_eq!(fstatfs_rc, 0);
+        // SAFETY: the successful fstatfs call initialized the whole struct.
         let ext4_supported = unsafe { fs.assume_init() }.f_type as u64 == EXT4_SUPER_MAGIC
             && probe_handle_capability(&root, mount_fd.0);
         if !ext4_supported {
@@ -9144,6 +9214,8 @@ mod tests {
                 f_handle: [0; MAX_HANDLE_SZ],
             };
             let mut mount_id = 0;
+            // SAFETY: c is NUL-terminated; handle has the C ABI layout and
+            // sufficient output storage; mount_id is writable and the call is synchronous.
             let rc = unsafe {
                 libc::name_to_handle_at(
                     libc::AT_FDCWD,
@@ -9185,6 +9257,8 @@ mod tests {
                 pid: 123,
             };
             let mut event = vec![0u8; FAN_EVENT_METADATA_LEN + 4];
+            // SAFETY: metadata is fully initialized without padding and the
+            // destination is allocated for its asserted byte size.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -9385,6 +9459,8 @@ mod tests {
             f_handle: [0; MAX_HANDLE_SZ],
         };
         let mut mount_id = 0;
+        // SAFETY: c is NUL-terminated, handle has the C ABI layout and enough
+        // storage, and mount_id is writable; syscall success is checked below.
         let named = unsafe {
             libc::name_to_handle_at(
                 libc::AT_FDCWD,
@@ -9424,6 +9500,8 @@ mod tests {
             len: info_len as u16,
         };
         let mut event = vec![0u8; metadata.event_len as usize];
+        // SAFETY: metadata is fully initialized without padding and event is
+        // allocated for its asserted byte size plus the record header.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -9546,6 +9624,8 @@ mod tests {
                 fd: -1,
                 pid: 0,
             };
+            // SAFETY: metadata has no padding and the vector has the exact
+            // asserted metadata size before constructing this byte slice.
             unsafe {
                 std::slice::from_raw_parts(
                     (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
@@ -10390,7 +10470,9 @@ mod tests {
         ));
         let status_path = crate::util::runtime_path(&db, "watch.status");
         let mut pipe = [0; 2];
-        assert_eq!(unsafe { libc::pipe(pipe.as_mut_ptr()) }, 0);
+        // SAFETY: pipe points to two writable RawFd slots.
+        let pipe_rc = unsafe { libc::pipe(pipe.as_mut_ptr()) };
+        assert_eq!(pipe_rc, 0);
         let (read_fd, write_fd) = (pipe[0], pipe[1]);
         let mut governor = CpuGovernor::new(0.10, 100);
         let cpu_start = thread_cpu_secs();
@@ -10423,6 +10505,8 @@ mod tests {
         RESCAN.store(old_rescan, Ordering::SeqCst);
         SHUTDOWN.store(old_shutdown, Ordering::SeqCst);
         let _ = std::fs::remove_file(status_path);
+        // SAFETY: these descriptors are the pipe ends created in this test and
+        // have not been transferred to another owner.
         unsafe {
             libc::close(read_fd);
             libc::close(write_fd);

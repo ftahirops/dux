@@ -282,6 +282,7 @@ enum TunnelCmd {
 fn main() {
     // Restore default SIGPIPE so `dux ... | head` exits quietly instead of
     // panicking with "Broken pipe" (Rust ignores SIGPIPE by default).
+    // SAFETY: signal accepts this constant and SIG_DFL is its documented sentinel.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
@@ -1061,6 +1062,7 @@ fn request_daemon_rescan(
     let previous_generation = read_scan_generation(&poll_store)?;
     let previous_attempt_id = poll_store.get_meta("last_reconcile_attempt_id")?;
     // SIGHUP = "rescan now"; the daemon picks it up at the top of its loop.
+    // SAFETY: pid was validated positive above and kill takes scalar arguments.
     let rc = unsafe { libc::kill(pid, libc::SIGHUP) };
     if rc != 0 {
         let e = std::io::Error::last_os_error();

@@ -205,12 +205,14 @@ fn fs_magic(path: &Path) -> Option<u64> {
         Err(_) => return None,
     };
     let mut s = MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: `c` is NUL-terminated and `s` points to writable storage for statfs.
     if unsafe { libc::statfs(c.as_ptr(), s.as_mut_ptr()) } != 0 {
         return None;
     }
     // libc exposes `f_type` as a signed long on glibc and an unsigned long on
     // musl. Filesystem magic values are bit patterns, so normalize both ABI
     // representations to the same unsigned value before matching.
+    // SAFETY: successful statfs initialized the complete statfs structure.
     Some(unsafe { s.assume_init() }.f_type as u64)
 }
 
@@ -2555,12 +2557,14 @@ fn insert_stage_batch(
 }
 
 fn set_low_priority() {
+    // SAFETY: setpriority receives scalar process selectors and values only.
     unsafe {
         // best-effort: nice + idle IO class
         libc::setpriority(libc::PRIO_PROCESS, 0, 10);
     }
     // IO priority (ioprio_set IDLE) is best-effort via syscall.
     #[cfg(target_os = "linux")]
+    // SAFETY: syscall arguments are scalar constants; no pointers are passed.
     unsafe {
         const IOPRIO_WHO_PROCESS: libc::c_int = 1;
         const IOPRIO_CLASS_IDLE: libc::c_int = 3;

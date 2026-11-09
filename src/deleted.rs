@@ -125,8 +125,10 @@ mod tests {
         let removed_fd = fs::File::open(&removed).unwrap();
         let literal_fd = fs::File::open(&literal).unwrap();
         // A duplicated descriptor must not duplicate the reclaimed byte count.
+        // SAFETY: removed_fd is a live owned descriptor; dup returns a new fd.
         let duplicate_fd = unsafe { libc::dup(removed_fd.as_raw_fd()) };
         assert!(duplicate_fd >= 0);
+        // SAFETY: the test asserts dup succeeded, transferring its unique fd to File.
         let _duplicate = unsafe { fs::File::from_raw_fd(duplicate_fd) };
         fs::remove_file(&removed).unwrap();
 

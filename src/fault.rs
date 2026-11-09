@@ -68,6 +68,8 @@ pub fn checkpoint(stage: &str) {
     };
     if std::fs::write(marker, format!("{} {stage}\n", std::process::id())).is_ok() {
         // The test supervisor either kills us here or resumes with SIGCONT.
+        // SAFETY: `raise` takes a valid signal number and no pointers; SIGSTOP
+        // is available on Linux and its default action stops this test process.
         unsafe {
             libc::raise(libc::SIGSTOP);
         }

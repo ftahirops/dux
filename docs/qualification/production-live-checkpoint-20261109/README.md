@@ -24,3 +24,68 @@ safety comments; they do **not** demonstrate that those blocks are unsound.
 The output has not been counted as a passing check. The production-only and
 all-target logs are retained here. A manual unsafe-block audit and appropriate
 safety documentation remain open; do not silence the lint globally.
+
+## Unsafe-block review progress — 2026-11-09 18:15 UTC
+
+Reviewed each production Clippy unsafe site and added a local `SAFETY:` note
+that records the relevant pointer, descriptor, signal, or syscall preconditions.
+Test-only unsafe sites were also documented. An equivalent `PR_SET_SECUREBITS`
+condition was rewritten as a separate checked call so its safety note is
+attached directly to the FFI operation; its behavior is unchanged.
+
+The release all-features suite passed **332/332**, including both ignored
+profiles: the ext4 stale-parent integration and 100,000-entry scale smoke. The
+scale run measured a 3.505s initial build and 3.243s unchanged reconciliation;
+the database remained 29,868,032 bytes. The suite ran in a private mount
+namespace with loopback ext4 for the handle/migration fixture and separate
+private tmpfs scratch for scale output. A preceding exploratory run put every
+test temp directory on tmpfs and failed only the v6-to-v7 migration test; the
+same migration test passed when rerun on private loopback ext4, and the complete
+ext4-configured run passed. The mismatch run's full stderr was not saved, so its
+precise assertion is not claimed here.
+
+All-target/all-feature Clippy passed with both general warnings and
+`clippy::undocumented_unsafe_blocks` denied. Formatting and diff checks passed.
+The production unsafe-comment warning count fell from 47 to zero; the all-target
+unsafe lint also reports zero. Logs are retained in `rust-release-all-332-isolated-ext4.log`,
+`clippy-all-targets-deny-unsafe.log`, and `fmt-check.log`.
+
+This is a safety-documentation and reviewability improvement, not proof that
+all unsafe blocks are correct or a substitute for memory-safety analysis. The
+VPS1 live-risk snapshot above is unchanged; the production daemon remains on
+legacy 0.6.3. Existing coverage remains below 100%, and branch coverage is not
+available.
+
+## Current-source release test and coverage refresh — 2026-11-09 18:18 UTC
+
+After the safety-note edits, the optimized all-features release suite passed
+**332/332**, with ignored tests included, in 14.12 seconds of test execution.
+This includes the stale-parent integration on loopback ext4 and the 100,000-file
+scale smoke. The scale smoke measured 3.505s initial build and 3.243s unchanged
+reconciliation; DB size stayed 29,868,032 bytes. The full log is
+`rust-release-all-332-isolated-ext4.log`.
+
+Fresh LLVM coverage on the same source and 332-test profile reports **73.73%
+line, 72.67% region, and 76.94% function** coverage. Branch counters are not
+provided by this instrumentation. Lowest line coverage remains `tui.rs` 39.51%,
+`main.rs` 46.43%, and `containers.rs` 67.25%. The isolated coverage-profile
+scale smoke measured 8.517s baseline and 8.413s unchanged reconciliation, with
+29,798,400-byte DB unchanged. Coverage command and report are in
+`llvm-cov-all-332-isolated.log`.
+
+The exact current source passes all-target/all-feature Clippy with
+`-D warnings -D clippy::undocumented_unsafe_blocks`, formatting, and diff
+checks. This source supersedes r122's source digest; build a new package before
+any deployment. The separate current-source package install/upgrade/rollback
+qualification and 24-hour canary remain open.
+
+### Production VPS1 follow-up — 2026-11-09 18:19 UTC
+
+The read-only counters remained at 636 kernel overflows and 2,518,862 dropped
+updates; the service remained PID 1073891 with four restarts. The last scan age
+was 365,390 seconds (about 4.23 days), the dirty reason remained queue overflow,
+and pending updates rose to 97. The DB occupied 3,213,430,784 bytes, with a
+128 MiB WAL and 63,422,918,656 bytes available on `/`. No memory cgroup OOM or
+OOM-kill events were recorded. This follow-up confirms the index remains stale
+and the legacy event backlog is still accumulating; it is a read-only sample.
+Raw data: `vps1-readonly-checkpoint-20261109T1819Z.json`.
