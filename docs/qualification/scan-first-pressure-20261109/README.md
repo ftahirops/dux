@@ -819,3 +819,40 @@ was 675 seconds and status remained dirty/not caught up between periodic
 observations. The 24-hour soak remains open. Raw sample:
 [`release119-canary-sample6-20261109T1009Z.jsonl`](live/release119-canary-sample6-20261109T1009Z.jsonl),
 SHA-256 `792c7125c9a8ba7e08a682ebd1ad82d9ed933f9437ec7ab3029573f2d4375916`.
+
+### Production-shaped schema-6 migration regression — 2026-11-09
+
+The existing v6-to-v7 test now accepts `DUX_V6_UPGRADE_SCALE_ENTRIES` and
+asserts source and migrated counts, zero coverage issues, exact path totals,
+schema version, root resolution, and retained growth history. It defaults to
+one file for ordinary test runs. The explicit 1,300,000-file run passed in
+**3:37.28 elapsed**, at **722,524 KiB peak RSS**, with no swap. The constructed
+schema-6 source had 1,300,000 files, 1,301 directories, and 1,301,301 path
+instances. The rebuilt schema-7 index had the same counts, no coverage issues,
+and exact root-visible entry totals. `cargo test --locked --release
+--all-features --bin dux` then passed **324, failed 0, ignored 2**; strict
+Clippy, formatting, and diff checks passed. Refreshed LLVM coverage is **72.24%
+line, 71.08% region, 76.02% function**; branch totals are unavailable. Raw
+coverage output:
+[`schema6-current-coverage-20261109.log`](live/schema6-current-coverage-20261109.log),
+SHA-256 `6347d9650a07d891f59c56dfa70cfb117f73ffa5a43d13a640ad30be50e5125a`.
+
+This synthetic fixture starts from a schema-7 scan and removes the v7 path
+graph while setting schema metadata to 6. It tests production scale and the
+known v6 source layout, but does not use a backup of the live production DB or
+prove its exact contents and history. Production migration qualification is
+therefore improved but remains an open release gate. Complete raw test output:
+[`schema6-upgrade-scale-20261109.log`](live/schema6-upgrade-scale-20261109.log),
+SHA-256 `deeae8385aff194e8c10e3d6aea733d787e56734ddba5ff9ee40afe548129e74`.
+
+### Release-119 canary checkpoint — 2026-11-09 10:24 UTC
+
+The VPS2 canary is active with zero Dux and monitor restarts and **9/289
+passing samples**. Samples 7–9 passed with no monitor errors, overflows, or
+userspace drops; sample 9's accounting, path graph, SQLite, binary/unit,
+journal, and health checks passed in 43.492 seconds. The scan age was 671
+seconds; status remained dirty/not caught up while waiting for the next
+periodic observation. This is not a completed 24-hour soak. Evidence for
+samples 7–9:
+[`release119-canary-progress-20261109T1024Z.jsonl`](live/release119-canary-progress-20261109T1024Z.jsonl),
+SHA-256 `7ac4ff7214149b309936c779b193d02109804166c6d6bba74a56cf2939d4f697`.

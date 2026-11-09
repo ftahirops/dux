@@ -4138,8 +4138,28 @@ mod tests {
         rm_db(&db);
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("payload"), b"v6 migration fixture").unwrap();
-        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let entry_count = std::env::var("DUX_V6_UPGRADE_SCALE_ENTRIES")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(1);
+        assert!(
+            entry_count <= 10_000_000,
+            "scale fixture is capped at ten million files"
+        );
+        for i in 0..entry_count {
+            let parent = root.join(format!("d{:04}", i / 1_000));
+            if i % 1_000 == 0 {
+                fs::create_dir_all(&parent).unwrap();
+            }
+            fs::write(parent.join(format!("f{i:09}")), b"v6 migration fixture").unwrap();
+        }
+        let baseline = rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        assert_eq!(baseline.files, entry_count);
+        assert_eq!(baseline.errors, 0);
+        eprintln!(
+            "schema-v6 source fixture: files={}, directories={}, path_instances={}, coverage_issues={}",
+            baseline.files, baseline.dirs, baseline.staged_path_instances, baseline.errors
+        );
 
         // Model a real v6 database: the v7 path graph does not exist, but the
         // compatibility inode/dirent and incarnation-aware growth tables do.
@@ -4162,6 +4182,26 @@ mod tests {
         assert!(Store::needs_rebuild(&db).unwrap());
 
         let stats = rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+        let expected_directories = entry_count.saturating_add(999) / 1_000 + 1;
+        assert_eq!(stats.files, entry_count);
+        assert_eq!(stats.dirs, expected_directories);
+        assert_eq!(stats.errors, 0);
+        assert_eq!(
+            stats.staged_path_instances,
+            entry_count + expected_directories
+        );
+        assert_eq!(
+            stats.staged_root_visible_entries,
+            entry_count + expected_directories
+        );
+        eprintln!(
+            "schema-v7 migrated fixture: files={}, directories={}, path_instances={}, visible_entries={}, coverage_issues={}",
+            stats.files,
+            stats.dirs,
+            stats.staged_path_instances,
+            stats.staged_root_visible_entries,
+            stats.errors
+        );
         let store = Store::open_ro(&db).unwrap();
         assert_eq!(store.schema_version, 7);
         let path_count: i64 = store

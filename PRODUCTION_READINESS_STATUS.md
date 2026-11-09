@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 10:09 UTC
+**Updated:** 2026-11-09 10:24 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2512,9 +2512,10 @@ write-amplification benchmark; no write budget exists yet.
 
 The production DB being schema 6 exposes an unclosed compatibility gate:
 release 119's Debian lifecycle test upgraded a schema-7 release-106 DB, and
-the code's v6-to-v7 Rust regression fixture contains only one file. It does
-not yet qualify atomic rebuild/migration on a production-sized schema-6
-database. The candidate remains only on VPS2; no VPS1 package, DB, or service
+the v6-to-v7 regression had not previously tested production scale. A new
+synthetic 1.3M-file schema-6-layout qualification now passes, but it does not
+use the actual production database. Exact production DB migration remains an
+open gate. The candidate remains only on VPS2; no VPS1 package, DB, or service
 was changed. Full details and raw counters are in
 [`vps1-production-readonly-20261109T1006Z.json`](docs/qualification/scan-first-pressure-20261109/live/vps1-production-readonly-20261109T1006Z.json)
 (SHA-256 `876758c55554bc89a693d430d1eeefb48d4222e45ba7a5738e52d44c5c3f2304`)
@@ -2541,3 +2542,28 @@ dirty and not caught up while waiting for the next periodic observation. This
 is a passing health sample, not proof of fresh/continuous exactness or the
 24-hour soak. Sample evidence SHA-256:
 `792c7125c9a8ba7e08a682ebd1ad82d9ed933f9437ec7ab3029573f2d4375916`.
+
+### Production-shaped schema-6 migration qualification — 2026-11-09
+
+Expanded the v6-to-v7 regression to generate a configurable tree and assert
+source and migrated file/directory/path counts, zero coverage issues, schema
+version, root path resolution, and preserved growth history. The explicit
+1,300,000-file run passed: schema-6 source had 1,300,000 files, 1,301
+directories, and 1,301,301 paths; migration produced the same counts with
+zero scan coverage issues. Elapsed 3:37.28, peak RSS 722,524 KiB, no swap.
+The fixture is synthetic (the v7 path graph was removed and schema metadata
+set to 6); this proves scale/layout behavior, not migration of the actual
+production DB or its exact contents. Full run output SHA-256:
+`deeae8385aff194e8c10e3d6aea733d787e56734ddba5ff9ee40afe548129e74`.
+
+The full release/all-features suite passed **324 tests, 0 failed, 2 ignored**;
+strict Clippy, formatting, and diff checks passed. Refreshed LLVM coverage is
+**72.24% line, 71.08% region, and 76.02% function**, with no branch totals.
+Coverage output SHA-256:
+`6347d9650a07d891f59c56dfa70cfb117f73ffa5a43d13a640ad30be50e5125a`.
+The release-119 canary is active at **9/289 passing samples**, with zero
+restarts. Sample 9 passed its gates with zero kernel overflows/user drops; the
+index remained dirty between observations, with a 671-second-old scan.
+Samples 7, 8, and 9 took 143.404, 64.097, and 43.492 seconds. The three-sample
+snapshot SHA-256 is
+`7ac4ff7214149b309936c779b193d02109804166c6d6bba74a56cf2939d4f697`.
