@@ -135,7 +135,7 @@ The 13:00Z sample is
 
 ### Disk snapshot
 
-Local root: **57 GiB free of 185 GiB** (68% used). `/tmp` currently accounts
+Local root: **56 GiB free of 185 GiB** (69% used). `/tmp` currently accounts
 for **16 GiB**; shared test workspaces and caches were active during inspection,
 and the production Dux watcher covers `/`. I did not purge shared temporary
 data during that active workload. VPS2 root: **8.6 GiB
