@@ -1,6 +1,27 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 21:59 UTC
+## Latest verified checkpoint — 2026-11-09 22:05 UTC
+
+### Corrected lifecycle rerun admission and disk
+
+The corrected lifecycle harness and regression are committed and pushed in
+`9ec181f`. The focused package lifecycle harness passed **71/71** and serial
+repository Python discovery passed **358/358**. A fresh guarded VM controller
+is live, but no VM has launched: repeated host Go compiler/test processes have
+prevented a 120-second quiet admission window.
+
+The VPS2 r121 canary is active at **96 passing samples** through 22:03:30 UTC.
+That sample reported zero errors, service restarts, kernel overflows, dropped
+events, and pending updates; scan age was 887 seconds. Its root filesystem is
+**92% used with 7.2 GiB free** at 22:05 UTC, down from 7.4 GiB at 21:24. No
+cleanup or workload was run on the canary host; storage growth needs review
+after the 24-hour soak.
+
+**Updated:** 2026-11-09 22:05 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 21:59 UTC
 
 ### Debian lifecycle result and harness gate correction
 
