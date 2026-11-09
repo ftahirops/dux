@@ -1069,3 +1069,11 @@ no overflows, drops, OOM events, or restarts. The observation completed at
 12:15:17 after 6m08s with zero coverage issues. Full snapshot:
 [`release120-canary-progress-20261109T1216Z.jsonl`](live/release120-canary-progress-20261109T1216Z.jsonl),
 SHA256 `45c25096ca113c5fcd6a24586d41549682998976f7065994ab2f2b2affae4c17`.
+
+At 12:21 UTC the r120 run reached **6/289 passing samples**. Sample 6 took
+88.505 seconds; the latest observation was 716 seconds old with no scan active.
+The path graph had advanced to 1,680,006 paths and remained valid. Overflow,
+drop, OOM, and restart counters were still zero. This extends the canary by
+five minutes only. Snapshot:
+[`release120-canary-progress-20261109T1221Z.jsonl`](live/release120-canary-progress-20261109T1221Z.jsonl),
+SHA256 `9258733256e0023c7aa65732bc41c2d94afe29da2f9542c05b67131a843ef164`.

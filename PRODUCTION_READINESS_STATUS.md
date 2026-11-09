@@ -1,100 +1,82 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 11:20 UTC
+**Updated:** 2026-11-09 12:21 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Latest optimization and test checkpoint (2026-11-08, VPS2)
+## Current status and evidence — 2026-11-09 12:21 UTC
 
-The current working tree adds a persistent-path-ID assignment pass that also
-establishes deterministic breadth-first scan order during in-place
-reconciliation. This removes a separate staging pass for that mode; the
-atomic rebuild path still uses the existing ordering implementation. The
-focused regression test passed. Two valid paired 250,000-entry release A/B
-runs on VPS2 measured unchanged reconciliation at 11.127 s baseline / 10.915 s
-candidate, then 21.111 s / 15.640 s. The latter pair appears 25.9% faster for
-the candidate. However, atomic scan timings also varied from 11.926/11.976 s
-in the first pair to 17.540/14.591 s in the second. This confirms substantial
-host variance; the speedup is promising but unqualified. All databases were
-about 79.9 MB. The matching benchmark test passed once per source revision.
+The latest verified product change is commit `5d7cdac`: an active, low-priority
+reconciliation is no longer cancelled for *moderate memory PSI alone* when
+available memory remains above the elevated-memory floor. Critical pressure,
+low available memory, high load, and unavailable telemetry still stop it. This
+addresses a verified retry loop: release 119 cancelled a root scan at 5.07%
+memory PSI with 3.37 GiB available, then its retry completed 22 seconds after
+the canary failed the 1,200-second freshness gate. The failure is preserved;
+it is not counted as a pass.
 
-The candidate then passed the full release all-features Rust binary suite on
-VPS2: **321 passed, 0 failed, 2 ignored**, in 52.8 seconds (systemd-bounded at
-150% CPU, 3 GiB memory, 30-minute runtime; observed peak memory 771.7 MiB).
-The ignored tests need a handle-capable ext4 profile and a separately invoked
-production-shaped scale profile. Focused monitor tests pass 35/35 and full
-Python discovery passes 331/331 after a diagnostic fix described below. Do not
-add test-run totals together because focused tests overlap full suites.
+Release 0.6.3-120 was built as static musl from `5d7cdacb80aa`, audited, and
+installed on the disposable VPS2 test VM. Its exact binary hash matches the
+build manifest. The existing schema-7 index passed SQLite `quick_check` before
+upgrade; a root-only rollback copy of the database, old binary, systemd unit,
+and release-119 DEB is preserved on VPS2. Production VPS1's service and
+database were not changed.
 
-Exact-working-tree coverage is 72.17% line, 70.99% region, and 76.00% function
-coverage; stable llvm-cov reports no usable branch coverage. The v3 VPS2
-canary passed samples 1–12, then **sample 13 failed** because status-before
-reported the daemon paused under I/O pressure. The daemon stayed alive with no
-restart, overflow, or userspace drop, but a subsequent reconciliation was
-cancelled under memory pressure and retried. That retry's full scan completed
-at 23:13:39 with 1,522,965 staged paths and zero coverage issues. This does not
-pass the failed canary's freshness gate; that soak is incomplete. A fresh v4
-24-hour soak started at 23:27:17 with the corrected diagnostic monitor.
-Samples 1–7 passed through 23:58:22 UTC with zero restarts, overflows,
-userspace drops, or OOMs. The daemon remained dirty awaiting the next
-observation; the latest completed scan age was 1,055 seconds. V4 monitors the
-installed release-106 binary, not the newer source changes, and remains in
-progress. At sample 6 the service was active and unpaused with zero overflows,
-drops, or restarts.
-The earlier full scan covered 1,514,820 staged paths with zero coverage issues
-and passed accounting verification; its scan-plus-accounting interval used
-87.6% of one core and about 1.75 GiB read / 1.66 GiB written. No CPU/I/O SLO
-has been set.
+The fresh r120 VPS2 canary has **6/289 passing samples** as of 12:21 UTC; its
+24-hour gate is still open. Samples 1–6 report zero kernel overflows, user
+drops, OOM events, or Dux restarts. The root observation completed with zero
+coverage issues and a valid 1,677,080-path graph. Sample 5 began with the prior
+observation 1,228 seconds old and an active scan; the scan finished during the
+90-second collection, and the after-state was 417 seconds old. The monitor
+accepted the newer, verified after-state. This shows that a scan can briefly
+exceed the 1,200-second threshold; it does **not** prove a hard 20-minute
+maximum. The index was dirty while accounting verification was pending and
+remained not caught up between observations. Sample 6 passed with the scan
+complete, a 716-second observation age, and a valid 1,680,006-path graph. See
+the timestamped r120 evidence below for details and exact checks.
 
-A clean static-musl release candidate 0.6.3-107 was built from commit
-`d27d3b7`. Package checksums, embedded dependency metadata, DEB/RPM payloads,
-and audits verified. The candidate binary passed an isolated ext4 daemon smoke
-test: the in-place path updated a 105-node fixture to 107 nodes, accounting
-verification passed, and indexed lookups matched the new, renamed, and deleted
-paths. The status remained dirty due to filesystem hints during the test, and
-the scan command did not claim a clean index. The package was not installed.
+### Current local tests
 
-The fresh Cargo.lock audit reported zero vulnerabilities and warnings across
-229 dependencies; the release builder also audited the exact candidate binary's
-202 dependency records. These are dependency checks, not a complete application
-security assessment. The scan optimization and canary-monitor diagnostic fix
-are committed and pushed on `hardening/stale-dfid-classification-review`;
-neither is installed on production or the VPS2 service.
+- Rust release/all-features suite: **326 passed, 0 failed, 2 ignored**. The
+  ignored tests require the handle-capable ext4 and production-scale profiles.
+- Focused resource-guard suite: **21 passed**; includes moderate memory PSI
+  with headroom (continue active scan) and low available memory (cancel).
+- Strict all-target/all-feature Clippy, formatting, and `git diff --check`:
+  passed.
+- LLVM coverage: **72.26% line, 71.11% region, 76.02% function**. Branch
+  coverage is unavailable; `tui.rs` and parts of the CLI remain weakly covered.
+- Python discovery: **354 passed** for the current canary monitor and harness
+  sources; this run predates the Rust guard change and is not additive to the
+  Rust test count.
+- Fresh online RustSec audit: **0 vulnerabilities and no warnings** across 229
+  locked Rust dependencies. Gitleaks scanned 641 current-branch commits; its
+  three matches were verified X.509 signer-label false positives. Other
+  divergent-ref history is not fully qualified. Semgrep remains inconclusive
+  because its ruleset fetch failed TLS verification.
 
-Disk snapshot: local root is 62% used with 68 GiB free; the release package set
-is 44 MiB and its auditable Rust target is 579 MiB. VPS2 root is 86% used with
-13 GiB free. No further cleanup was performed because temporary and rollback
-data may still be active or valuable.
+### Open production-readiness gates
 
-## Test and coverage update (2026-11-09, current working tree)
+- Complete the r120 24-hour soak with exact binary/unit identity, accounting,
+  freshness, restart, overflow, drop, memory, and history checks.
+- Resolve the observed freshness boundary: the 15-minute scan cadence plus a
+  measured 6m08s root scan can put `last_scan_age` above the 1,200-second
+  canary threshold until the new observation completes. Measure p95/p99 scan
+  duration and read/write cost before changing cadence or freshness policy.
+- Qualify an exact migration of the live schema-6 production index. The
+  synthetic 1.3M-file/27.3M-growth-row migration passed, but a concurrent-write
+  live backup did not make progress and was stopped safely.
+- Finish security review of non-current Git refs and deployment configuration;
+  resolve the Semgrep ruleset access gap; review binary/runtime privileges.
+- Complete OOM, mount/capability, disk-full recovery, WAL endurance, other
+  filesystem/kernel, 10M scale, rollback, and multi-day soak profiles.
+- Coverage is not 100%; branch coverage is not measured. No evidence supports
+  a zero-error or universal-host guarantee.
 
-On the current working tree, `cargo llvm-cov --locked --all-features
---summary-only --bin dux` ran **324 tests: 322 passed, 0 failed, 2 ignored**.
-It reports 72.16% line coverage (18,273/25,324), 70.98% region coverage
-(29,002/40,857), and 76.03% function coverage (1,278/1,681). Branch coverage
-is not instrumented by this stable llvm-cov run. Per-file line coverage ranges
-from 39.51% in `tui.rs` to 98.94% in `classify.rs`; `main.rs` is 43.61%,
-`containers.rs` 67.25%, and `watch.rs` 72.04%. The full command output is
-preserved at
-[`current-source-llvm-cov.log`](docs/qualification/scan-first-pressure-20261109/live/current-source-llvm-cov.log).
+### Disk snapshot
 
-The same exact tree passes strict all-target/all-feature Clippy with warnings
-denied, `cargo fmt --all -- --check`, and `git diff --check`. A full all-features
-release test run on VPS2 also passed **322, failed 0, ignored 2**. The separate
-Python package-lifecycle suite previously passed 70/70; the broader Python
-discovery previously passed 331/331, including canary-monitor tests. Those
-Python results predate this latest Rust-only change and are separate runs, not
-additional unique test cases to add to the Rust total. The two ignored Rust
-tests require a handle-capable ext4 qualification profile and a manual
-production-shaped scale profile. Coverage is not a correctness probability;
-the low UI/CLI coverage and unmeasured branch coverage remain gaps.
-
-The current source change and its VPS2 runtime fixture are not a package
-qualification or production rollout. The active production daemon remains an
-older build, and the 24-hour release-106 v4 canary was interrupted by the
-controlled mount test after samples 1–8 passed. Its sample 9 failed closed and
-the soak is invalid; see the dated scan-first pressure record. Static-musl
-revision 106 remains installed only on the disposable VPS2 qualification VM.
+Local root: **60 GiB free of 185 GiB** (67% used). VPS2 root: **8.8 GiB free
+of 93 GiB** (91% used); it contains the active r120 canary and rollback copy.
+Do not remove those artifacts while qualification is active.
 
 ## VPS2 canary checkpoint at 22:02 UTC (historical; superseded by sample 13)
 
