@@ -8,7 +8,9 @@ RPM. Source identity, package payload identity, checksums, embedded dependency
 metadata, and RustSec audits passed; the lockfile audit found zero advisories,
 and the exact-binary audit recovered 202 dependencies. The package lifecycle
 harness passed **70/70** unit tests; package units passed `systemd-analyze
-verify`, and CLI smoke checks passed. Revision 123 was not installed on VPS2.
+verify`, offline `systemd-analyze security` scored the service unit 3.3 OK, and
+CLI smoke checks passed. The score does not eliminate the root plus
+`CAP_SYS_ADMIN` privilege risk. Revision 123 was not installed on VPS2.
 Its exact install/upgrade/rollback/runtime qualification remains open. Evidence
 is in [`release-candidate-0cad80e-20261109`](docs/qualification/release-candidate-0cad80e-20261109/README.md).
 

@@ -29,6 +29,11 @@ at `/tmp/dux-prod-candidate-0cad80e`; package archives are not committed here.
   0. DEB and RPM metadata parsed successfully.
 - `systemd-analyze verify` passed for service and tunnel units extracted from
   both packages; corresponding unit hashes match across formats.
+- On systemd 255.4, `systemd-analyze security --offline=yes` scores the exact
+  service unit hash
+  `e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b` at
+  **3.3 OK**; the installed VPS2 unit reports the same score. This policy score does not remove the residual
+  root plus `CAP_SYS_ADMIN` privilege risk.
 - Package lifecycle harness unit tests: **70 passed**.
 
 Full machine evidence is in `build-manifest.json`, the two cargo-audit files,
