@@ -21612,3 +21612,20 @@ manifest is not changed by this audit append.
   admission-blocked by active Go tests/builds; no VM or package transition is
   running. VPS2 remains at **86/86** passing r121 samples through 21:12:52 UTC;
   its 24-hour canary remains incomplete.
+
+### VPS1 live-counter delta — 2026-11-09 21:17 UTC (read-only)
+
+- At 21:17:15, the legacy service remained active under PID 1073891 with four
+  systemd restarts. Status was dirty from fanotify overflow; last scan age was
+  **376,073 seconds**, with **649** lifetime overflow notifications,
+  **2,518,862** dropped updates, and **9** pending updates.
+- Compared with the 21:10:40 read-only sample, `events_seen` rose by **119,714**,
+  `events_resolved` by **95,299**, and `updates_committed` by **38,102**. The
+  overflow and dropped-update counters did not change; scan age advanced by
+  395 seconds. A Go test process was present at the 21:17 sample. This short,
+  uncontrolled interval neither attributes prior overflows to that process nor
+  demonstrates recovery: the index remains dirty and its last complete scan is
+  still over four days old.
+- No service, database, or host setting changed. Root had **57 GiB free** and
+  `/dev/shm` **11 GiB free**. The guarded r123 package runner was still waiting
+  on host admission; no QEMU VM was running.

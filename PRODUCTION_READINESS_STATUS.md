@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 21:11 UTC
+## Latest verified checkpoint — 2026-11-09 21:17 UTC
 
 ### Architecture and candidate
 
@@ -31,20 +31,21 @@ representative-churn performance, or endurance.
 
 ### VPS1 production
 
-At **21:10:40 UTC**, the legacy 0.6.3 service was active under PID 1073891 with
+At **21:17:15 UTC**, the legacy 0.6.3 service was active under PID 1073891 with
 four systemd restarts. It remains dirty from fanotify queue overflow; the last
-completed scan was **375,678 seconds old (about 4.35 days)**. Status reported
-**649** lifetime kernel overflows, **2,518,862** dropped updates, **8** pending
-updates, and a **3.07 GiB** database. The lower pending count does not repair
-coverage lost in prior overflows. This was a read-only query; production was not
-changed.
+completed scan was **376,073 seconds old (about 4.35 days)**. Status reported
+**649** lifetime kernel overflows, **2,518,862** dropped updates, **9** pending
+updates, and a **3.07 GiB** database. Since 21:10:40, events seen increased by
+119,714 and updates committed by 38,102, while overflow/drop counters were
+unchanged. This short uncontrolled interval does not prove recovery or event
+producer causation.
 
 ### VPS2 canary
 
 The VPS2 service remains on r121, not r123. The formal 24-hour monitor recorded
-**85/85 passing five-minute samples** through 21:08:50 UTC. The latest sample
+**86/86 passing five-minute samples** through 21:12:52 UTC. The latest sample
 had zero errors, restarts, overflows, drops, or pending updates and a completed-
-observation age of 283 seconds. This is about seven hours, not the required
+observation age of 526 seconds. This is about seven hours, not the required
 24-hour soak, and qualifies r121 only.
 
 ### Package lifecycle and disk
@@ -56,9 +57,10 @@ failure or pass. A race in pressure-guard cleanup then lost the guest report;
 that qualification harness bug was fixed and its helper regression suite passed
 40/40. The guarded retry process remains alive, but admission is closed by
 active Go builds/tests and load above threshold; no VM is currently running.
-Its safeguards have not been relaxed.
+The staged r123 DEB was independently checksum-verified against its build
+manifest and lifecycle share.
 
-At 21:10 UTC, `/` had about **58 GiB free** and `/dev/shm` about **11 GiB free**.
+At 21:17 UTC, `/` had about **57 GiB free** and `/dev/shm` about **11 GiB free**.
 Disk is not currently blocking the lifecycle attempt.
 
 ### Release decision
@@ -73,7 +75,7 @@ The detailed evidence and historical checkpoints remain in
 [`PRODUCTION_READINESS_AUDIT.md`](PRODUCTION_READINESS_AUDIT.md) and the linked
 qualification folders below.
 
-**Updated:** 2026-11-09 21:11 UTC
+**Updated:** 2026-11-09 21:17 UTC
 
 **Goal:** production reliability, security, performance, and correctness review
 
