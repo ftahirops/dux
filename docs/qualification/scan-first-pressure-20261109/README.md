@@ -82,6 +82,33 @@ coverage-refresh behavior and the test environment was cleaned afterward.
 - Current-source strict Clippy (`--all-targets --all-features -D warnings`),
   formatting, and diff checks passed.
 
+## Qualification harness correction and release-108 candidate
+
+Release 108 was built from clean commit `0fc18fc` as static musl, DEB, and RPM
+artifacts. Its build manifest records source digest
+`6884e20a…a671a8df7`; the binary embeds the same digest and commit. All eight
+published artifact checksums passed, and the release script completed both
+the 229-dependency lockfile audit and the exact binary audit. This candidate
+was not installed.
+
+The first isolated readiness run failed before completing its first crash
+round. The harness required scan-first status to become event-pipeline
+“certain,” even though scan-first treats those events as hints and can remain
+conservatively uncertain. The fixture's initial observation and accounting
+verification had completed, but the harness waited 90 seconds for the legacy
+status condition. The failure report and log are preserved; this is a harness
+incompatibility and is not counted as a product pass or product data-loss
+failure.
+
+The harness now detects scan-first mode, requests a new full observation,
+waits for the independent accounting verifier, and compares the full indexed
+filesystem truth. The updated harness passed all **331 Python tests**. The
+release-108 production binary then passed an isolated crash/restart smoke test
+with exact post-recovery filesystem comparison: one crash round passed and
+recovered in 1.909 seconds. These results validate the corrected test path;
+the broader release qualification matrix remains pending and will use a build
+from the corrected harness source.
+
 ## Artifacts
 
 - [`release-107-stress-service.log`](live/release-107-stress-service.log)
@@ -91,6 +118,10 @@ coverage-refresh behavior and the test environment was cleaned afterward.
 - [`current-source-release-tests.log`](live/current-source-release-tests.log)
 - [`current-source-llvm-cov.log`](live/current-source-llvm-cov.log)
 - [`current-source-clippy.log`](live/current-source-clippy.log)
+- [`release108-old-harness-failure.json`](live/release108-old-harness-failure.json)
+- [`release108-old-harness-failure.log`](live/release108-old-harness-failure.log)
+- [`release108-scanfirst-crash-smoke.json`](live/release108-scanfirst-crash-smoke.json)
+- [`release108-scanfirst-crash-smoke.log`](live/release108-scanfirst-crash-smoke.log)
 
 The temporary loop image, test database, transient candidate units, and copied
 test executables were removed after these records were collected.

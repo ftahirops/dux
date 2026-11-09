@@ -361,6 +361,38 @@ class Daemon:
 
     def exact(self, previous_generation=None, timeout=90):
         started = time.monotonic()
+        initial_record = self.wait(lambda: self.record(), "initial watcher status", timeout)
+        log_path = self.case.base / "daemon.log"
+        if daemon_uses_scan_first(
+            initial_record, log_path.read_text(errors="replace")
+        ):
+            # In scan-first mode, an idle or uncertain fanotify hint stream is
+            # not the correctness signal. Force a new complete observation,
+            # wait for its independent accounting verification, then compare
+            # every indexed path and identity with filesystem truth.
+            before_meta, _ = check_index(self.case.db)
+            baseline_generation = before_meta.get(
+                "scan_generation", previous_generation
+            )
+            meta = request_scan_first_observation(
+                self.case,
+                self,
+                baseline_generation,
+                log_path,
+                timeout=max(timeout, 600),
+            )
+            exact_meta, _ = check_index(self.case.db, self.case.tree)
+            assert exact_meta.get("scan_generation") == meta.get("scan_generation"), (
+                "filesystem truth check did not inspect the completed observation"
+            )
+            assert exact_meta.get("last_reconcile_attempt_result") == "complete", (
+                "scan-first exactness requires a completed reconciliation attempt"
+            )
+            self.last_exact_convergence_ms = round(
+                (time.monotonic() - started) * 1000
+            )
+            return exact_meta
+
         meta, status = self.wait_pipeline(previous_generation, timeout)
         def ready():
             return self.pipeline_ready(previous_generation)

@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 00:43 UTC
+**Updated:** 2026-11-09 01:00 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2018,3 +2018,27 @@ while the checked-in packaged unit includes it. The lifecycle security policy
 gate therefore still fails. No live unit policy was changed. The local root
 filesystem is 185 GiB total, 112 GiB used, and 65 GiB free (64% used); local
 disk exhaustion is not the current production blocker.
+
+## Release-108 build and qualification harness correction — 2026-11-09 01:00 UTC
+
+Clean commit `0fc18fc` built successfully as release 108 (static-musl binary,
+DEB, RPM, source archive, debug symbols, and checksums). All eight checksums
+passed; the binary embeds the expected commit and source-tree digest. The build
+audited the locked 229 dependencies and the exact binary. The candidate was
+not installed.
+
+The first isolated readiness attempt stopped before its first crash round
+because the old harness waited for the event pipeline to become certain. That
+is not the scan-first correctness contract: fanotify events are hints and may
+remain uncertain until a full observation. The harness was corrected to force
+a new observation, wait for accounting verification, and compare every path
+and identity against filesystem truth. It passed all **331 Python tests** and
+release 108 passed a one-round crash/restart exactness smoke test, recovering
+in 1.909 seconds. The initial failure and smoke evidence are preserved under
+[`scan-first-pressure-20261109`](docs/qualification/scan-first-pressure-20261109/README.md).
+
+The expanded matrix is now being prepared against the corrected harness. The
+VPS2 `/dev/shm` free space supports a 768 MiB fixture, but not the 2 GiB image
+required to promote the dedicated disk-full and 100,000-file churn suites;
+those two suites are excluded from this run. The remaining matrix is
+unqualified until its completed report is checked.
