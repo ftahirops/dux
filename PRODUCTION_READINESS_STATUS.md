@@ -1,10 +1,10 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 14:50 UTC
+**Updated:** 2026-11-09 14:53 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 14:50 UTC
+## Current status and evidence — 2026-11-09 14:53 UTC
 
 A prior verified product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
@@ -31,7 +31,7 @@ stored scan timestamp advanced from 1794232455 (the old scan-start value) to
 That is runtime evidence that the patched field records completion.
 
 A fresh 24-hour VPS2 canary started at 14:07:03 UTC with five-minute samples
-and the intended 1,200-second freshness gate. The first **9 samples passed**.
+and the intended 1,200-second freshness gate. The first **10 samples passed**.
 Sample 3 ran during an active scheduled scan; that scan completed at 14:20:17
 in about 5m52s, with zero coverage issues and accounting passed in 54.8s.
 `last_scan_ts` advanced from scan start 1794233665 to completion 1794234017.
