@@ -1,0 +1,5 @@
+command: cargo build --locked --release --bin dux
+command: target/release/dux --version
+dux 0.6.3 (69d32bd6bf52+modified) [production] source-sha256=076cecd188c0828355e49e1829a5cc8b61c20bfeb1adbe5cde693d4cf0894c7a
+command: sha256sum target/release/dux
+70b4b418131d37a7ac9557959b50b2ec957650f47beb9e1655933ccb11808bfe  target/release/dux

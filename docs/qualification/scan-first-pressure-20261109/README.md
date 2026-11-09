@@ -1230,57 +1230,59 @@ check confirms configured controls, not containment of a root-level daemon
 compromise; the daemon retains powerful filesystem/kernel capabilities and
 broader threat-model review remains open.
 
-#### Release-120 freshness-gate failure and corrected soak profile — 2026-11-09
+#### Release-120 freshness failure and timestamp-semantics correction — 2026-11-09
 
-The first r120 run ended after **16 passing samples** when sample 17 failed the
-1,200-second observation-age gate. At the sample's before/after snapshots, the
-last completed scan was 1,228/1,306 seconds old and a new scan was still in
-progress. The candidate had no restart, kernel overflow, dropped update, or
-OOM. The scan completed at 13:15:58 UTC with 1,511,818 files, 180,077
-directories, 1,691,895 path instances, and zero coverage issues; the
-independent accounting verifier passed at 13:17:01.
+The first r120 VPS2 run recorded **16 passing samples**, then sample 17 failed
+the 1,200-second observation-age gate. Preserve this as a failed run. The
+daemon had no restart, kernel overflow, userspace drop, or OOM. The scan
+completed at 13:15:58 UTC with 1,511,818 files, 180,077 directories,
+1,691,895 path instances, and zero coverage issues; independent accounting
+passed at 13:17:01.
 
-Timing explains the threshold failure. The prior scan completed at 12:54:09;
-the next began at 13:09:14 (15m05s later) and completed at 13:15:58 (6m44s
-scan duration). The actual completion-to-completion interval was 21m49s. A
-20-minute completed-observation-age gate cannot pass this observed 15-minute
-scan cadence. Replaying the exact sample through the current monitor evaluator
-returns the two expected freshness errors at 1,200 seconds and **no errors at
-1,500 seconds**. This changes the canary budget only; it does not change Dux
-or turn the failed v1 sample into a pass. A 25-minute gate leaves about 3m11s
-beyond the measured interval; it will still fail if scans run more than ten
-minutes past the 15-minute schedule. If the required freshness SLO is 20
-minutes, Dux must reduce the schedule interval or scan duration and then
-requalify performance.
+The initial interpretation below was wrong: `last_scan_ts` was captured at
+scan start, while the monitor treated it as scan completion. The 1,306-second
+sample therefore overstated age since completion. Journal evidence shows scan
+completions at 12:44:34, 13:00:25, and 13:15:58, giving intervals of 15m51s
+and 15m33s. At the failed sample at 13:15:56, the prior completed scan was
+about 15m31s old. This supersedes the original 21m49s completion-interval
+claim and the original conclusion that a 25-minute gate was justified.
 
-The failed run's full log is preserved at
+The v1 raw log and the monitor replay are retained as evidence of the failure
+and of the old field behavior:
 [`release120-canary-failed-freshness-v1-20261109T1318Z.jsonl`](live/release120-canary-failed-freshness-v1-20261109T1318Z.jsonl),
-SHA256 `1906afafcc4f16637c64b440d89569447d0b8db4d34644a13b853f050d7d7471`.
-
-A fresh 24-hour v2 soak started at 13:21:05 UTC on the same release binary
-and systemd unit. It samples every 300 seconds with `--max-observation-age-
-seconds=1500`; its monitor remains at 20% CPU, 1 GiB memory, no swap, and
-IOWeight 10/Nice 19, with a 26-hour runtime cap. The first sample passed at
-13:22:25 in 80.189 seconds, with observation age 791
-seconds, a valid 1,691,895-path graph, and zero overflow/drop/OOM/restart
-counters. Sample 1/289 is only the start of qualification. Full evidence:
+SHA256 `1906afafcc4f16637c64b440d89569447d0b8db4d34644a13b853f050d7d7471`;
+[`freshness-threshold-replay-20261109T1323Z.json`](live/freshness-threshold-replay-20261109T1323Z.json).
+The replay's pass at 1,500 seconds is not evidence that 1,500 seconds is a
+valid product SLO because it evaluates the misleading scan-start timestamp.
+The 25-minute follow-up recorded two diagnostic samples and was stopped; it
+does not count toward an endurance soak:
 [`release120-canary-v2-25m-progress-20261109T1323Z.jsonl`](live/release120-canary-v2-25m-progress-20261109T1323Z.jsonl),
-SHA256 `3e33a2f02542db078433afe8278260ed9c9ca859cc785e6bbba82f835144921a`.
+[`release120-canary-v2-25m-progress-20261109T1329Z.jsonl`](live/release120-canary-v2-25m-progress-20261109T1329Z.jsonl).
+The focused monitor suite passed 38/38 tests, but those tests do not fix the
+product metadata semantics.
 
-At 13:27:39 UTC, v2 sample 2 passed in 94.011 seconds. A scan was active at
-age 1,104 seconds, with the independent 1,691,895-path graph valid and zero
-overflow, userspace-drop, OOM, or restart counters. This is **2/289**; the
-24-hour gate is still open. The updated full log is
-[`release120-canary-v2-25m-progress-20261109T1329Z.jsonl`](live/release120-canary-v2-25m-progress-20261109T1329Z.jsonl),
-SHA256 `1627b549d8e05d530bedcdd93ecde0ac7c14c0dd8967f0dc2b30f9203cbfcb53`.
+The current source fix writes `last_scan_ts` at the end of a successful scan,
+after index finalization. In-place reconciliation no longer writes the
+scan-start value during projection publication. The completion timestamp is
+clamped to the start time if the wall clock moved backwards. Two new unit tests
+cover completion-time persistence and clock rollback. On this worktree, the
+release/all-features Rust suite passed **328 tests, 0 failed, 2 ignored**;
+strict Clippy, formatting, and `git diff --check` passed. LLVM coverage is
+**72.30% line, 71.15% region, and 76.09% function**; branch coverage is not
+available. Logs: [full Rust suite](live/timestamp-fix-release-tests-20261109.log),
+[LLVM coverage](live/timestamp-fix-llvm-cov-20261109.log), and
+[formatting, diff, and strict Clippy](live/timestamp-fix-static-checks-20261109.log).
 
-The failure replay was independently evaluated with the checked-in monitor
-(`sha256 ea1d4c98ea7bcf8fe17632095af6d5535852359b691439987480b7fedc043cad`):
-the exact sample produces two freshness errors at 1,200 seconds and none at
-1,500 seconds. The focused monitor suite then passed **38/38 tests**. Machine
-readable replay results:
-[`freshness-threshold-replay-20261109T1323Z.json`](live/freshness-threshold-replay-20261109T1323Z.json),
-SHA256 `143f959b3db4765b5586bcebe5e8257a30c8fbc732afa6cedc29a37e28b36cbd`;
-unit log:
-[`canary-monitor-unit-tests-20261109T1323Z.log`](live/canary-monitor-unit-tests-20261109T1323Z.log),
-SHA256 `7668ebaa6a16d17819bca7d5bbb5f6965265e03ff0a82e318da1be2ef4fe05fc`.
+The default-feature local GNU/Linux binary was built for identity/smoke checks;
+it is dynamically linked and is **not** the portable static-musl production
+release artifact. Its source digest and SHA256 are in [the build record](live/timestamp-fix-local-build-20261109.txt).
+The first static-musl packaging attempt failed its source-digest self-check:
+the build log was being written inside the source tree while the build was
+hashing it, so the tree changed mid-build. No package was produced. The
+failure is preserved in [the release-build log](live/timestamp-fix-release-build-20261109.log).
+The package build must be repeated from a stable committed tree, with outputs
+outside the source tree. Neither binary has been installed on VPS2. SSH from
+this workspace is available on port 22; the next qualification must install
+the exact static package and restart the monitor with the intended
+**1,200-second completed-scan freshness gate**. It must earn a fresh
+full-duration soak; prior samples cannot be reused.

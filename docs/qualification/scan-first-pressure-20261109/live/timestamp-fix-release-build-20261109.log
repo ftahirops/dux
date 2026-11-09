@@ -1,0 +1,5 @@
+>> building auditable static musl binary (v0.6.3) with cargo-auditable 0.7.7
+   Compiling dux v0.6.3 (/home/dux)
+    Finished `release` profile [optimized + debuginfo] target(s) in 53.97s
+>> splitting Build-ID-matched debug symbols
+ERROR: binary source digest does not match packaging checkout 886b90c1d5047cf1b0020be14e68958f34b1b1f4cd197e9311def8d87b898321: dux 0.6.3 (69d32bd6bf52+modified) [production] source-sha256=0a6b3bbc97249bea391f1ed78713f50b00473494dd57c72223078ece88379dd7

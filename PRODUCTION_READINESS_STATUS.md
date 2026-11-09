@@ -1,12 +1,12 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 13:29 UTC
+**Updated:** 2026-11-09 13:52 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
-## Current status and evidence — 2026-11-09 13:29 UTC
+## Current status and evidence — 2026-11-09 13:52 UTC
 
-The latest verified product change is commit `5d7cdac`: an active, low-priority
+The latest committed product change is commit `5d7cdac`: an active, low-priority
 reconciliation is no longer cancelled for *moderate memory PSI alone* when
 available memory remains above the elevated-memory floor. Critical pressure,
 low available memory, high load, and unavailable telemetry still stop it. This
@@ -15,6 +15,11 @@ memory PSI with 3.37 GiB available, then its retry completed 22 seconds after
 the canary failed the 1,200-second freshness gate. The failure is preserved;
 it is not counted as a pass.
 
+An additional local, uncommitted fix corrects `last_scan_ts` to mean scan
+completion; it passes the 328-test release suite, strict Clippy, formatting,
+and LLVM coverage checks recorded below. A default-feature dynamic binary was
+built for identity checks; the required static-musl package is not ready yet.
+
 Release 0.6.3-120 was built as static musl from `5d7cdacb80aa`, audited, and
 installed on the disposable VPS2 test VM. Its exact binary hash matches the
 build manifest. The existing schema-7 index passed SQLite `quick_check` before
@@ -22,27 +27,34 @@ upgrade; a root-only rollback copy of the database, old binary, systemd unit,
 and release-119 DEB is preserved on VPS2. Production VPS1's service and
 database were not changed.
 
-The first r120 VPS2 run recorded **16 passing samples** but did not complete
-the soak: sample 17 failed its configured 1,200-second freshness gate at
-13:15:56 UTC, with the prior scan 1,306 seconds old and a new scan still
-running. The daemon did not crash, overflow, drop updates, or OOM. The scan
-completed at 13:15:58 with 1,511,818 files, 180,077 directories, 1,691,895
-paths, and zero coverage issues; independent accounting passed at 13:17:01.
-The previous scan completed at 12:54:09, the next scan started 15m05s later,
-and it took 6m44s. That gives a measured 21m49s completion interval, so the
-20-minute monitor gate conflicted with the configured 15-minute cadence. Exact
-sample replay yields two freshness errors at 1,200 seconds and none at 1,500.
-This is a test-gate correction, not a product fix or a retroactive pass.
+The first r120 VPS2 run recorded **16 passing samples** but did not complete the
+soak: sample 17 failed its configured 1,200-second freshness gate at
+13:15:56 UTC. This remains a failed run, not a pass. The daemon did not crash,
+overflow, drop updates, or OOM. Its scan completed at 13:15:58 with 1,511,818
+files, 180,077 directories, 1,691,895 paths, and zero coverage issues;
+independent accounting passed at 13:17:01.
 
-A fresh run with the same exact binary/unit started at 13:21:05 using a
-1,500-second (25-minute) max observation age, five-minute sampling, and the
-same monitor resource limits. Sample 1 passed at 13:22:25 in 80.189 seconds:
-scan age 791 seconds, valid 1,691,895-path graph, zero overflow/drop/OOM/
-restart counters. Sample 2 passed at 13:27:39 in 94.011 seconds with a scan
-active at age 1,104 seconds and the same valid graph; all counters remained
-zero. The new run is **2/289**; its 24-hour soak has just started.
-Full sample history and the preserved v1 failure are in the qualification
-record.
+Review of `src/scan.rs` found the monitor's age field was misleading:
+`last_scan_ts` was captured at scan start, then consumed as if it represented
+scan completion. The failed sample's 1,306-second value therefore overstated
+age since the last completed scan by the previous scan's duration. The journal
+shows completions at 12:44:34, 13:00:25, and 13:15:58, intervals of 15m51s
+and 15m33s. At the failed sample (13:15:56), the prior completion was about
+15m31s old. This corrects the earlier erroneous 21m49s completion-interval
+interpretation; the 20-minute gate was not breached based on completed-scan
+time in that sample.
+
+The source now records `last_scan_ts` after successful scan/index finalization,
+using completion time and clamping a backward wall-clock adjustment to the
+start time. Regression tests cover completion-time persistence and clock
+rollback. The previous 25-minute-gate follow-up (2 passing samples) was
+diagnostic only and was stopped after finding the timestamp defect; it does not
+count as a qualifying soak. The source fix has passed local tests, but has not yet been installed or
+canaried on VPS2. The first static-musl packaging attempt failed source-digest
+validation because its build log changed inside the source tree during hashing;
+no package was produced. I corrected SSH to use port 22 and confirmed VPS2 is
+reachable, running r120, with no active qualifying monitor. The package must be
+rebuilt from a stable committed tree with outputs outside the source tree.
 
 ### Production VPS1 read-only check
 
@@ -79,13 +91,13 @@ The 13:14Z follow-up is
 
 ### Current local tests
 
-- Rust release/all-features suite: **326 passed, 0 failed, 2 ignored**. The
-  ignored tests require the handle-capable ext4 and production-scale profiles.
+- Rust release/all-features suite on the timestamp-fix worktree: **328 passed, 0 failed, 2 ignored**.
+  The ignored tests require the handle-capable ext4 and production-scale profiles.
 - Focused resource-guard suite: **21 passed**; includes moderate memory PSI
   with headroom (continue active scan) and low available memory (cancel).
 - Strict all-target/all-feature Clippy, formatting, and `git diff --check`:
   passed.
-- LLVM coverage: **72.26% line, 71.11% region, 76.02% function**. Branch
+- LLVM coverage on the timestamp-fix worktree: **72.30% line, 71.15% region, 76.09% function**. Branch
   coverage is unavailable; `tui.rs` and parts of the CLI remain weakly covered.
 - Python discovery: **354 passed** for the current canary monitor and harness
   sources; this run predates the Rust guard change and is not additive to the
@@ -98,8 +110,8 @@ The 13:14Z follow-up is
   sockets, and no private mount namespace (needed for host fanotify visibility).
   This is policy evidence, not proof that root-level compromise is contained.
 - Canary monitor suite: **38/38 passed** after replaying v1's failed sample.
-  The sample correctly fails at the recorded 1,200-second budget and passes at
-  1,500 seconds; replay evidence and test log are in the qualification folder.
+  Replay checked the stored field value, which was scan-start time in r120; it
+  does not establish that a 1,500-second completed-scan budget is required.
 - Fresh online RustSec audit: **0 vulnerabilities and no warnings** across 229
   locked Rust dependencies. Gitleaks history coverage now includes all 654
   commits reachable from local/remote-tracking refs; its three matches were
@@ -111,17 +123,17 @@ The 13:14Z follow-up is
 
 ### Open production-readiness gates
 
-- Complete the fresh r120 24-hour soak with exact binary/unit identity,
-  accounting, 1,500-second freshness, restart, overflow, drop, memory, and
-  history checks.
+- Produce and audit a static-musl package from the timestamp-fix commit, install
+  it on VPS2, then complete a fresh 24-hour
+  soak with exact binary/unit identity, accounting, 1,200-second completed-scan
+  freshness, restart, overflow, drop, memory, and history checks.
 - Production is still on legacy 0.6.3 and the 12:52 UTC snapshot had an
   approximately 96-hour-old full scan, 540 overflow notifications, 1,511,839
   dropped updates, and four restarts. Any rollout of the scan-first candidate requires
   a separate controlled migration/rollback plan; VPS1 has not been changed.
-- Measure p95/p99 scan duration and read/write cost. The observed 15-minute
-  schedule plus 6m44s scan yielded 21m49s between completed observations. The
-  current canary gate allows 25 minutes; any stricter 20-minute SLO requires
-  earlier scheduling or a faster scan, not merely a different monitor setting.
+- Measure p95/p99 scan duration and read/write cost against completion-time
+  freshness; prior r120 age samples used scan-start timestamps and cannot prove
+  completed-scan SLO compliance.
 - Qualify an exact migration of the live schema-6 production index. The
   synthetic 1.3M-file/27.3M-growth-row migration passed, but a concurrent-write
   live backup did not make progress and was stopped safely.

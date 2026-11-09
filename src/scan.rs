@@ -1191,7 +1191,6 @@ fn scan_inner(
         store.set_meta("dirty_reason", &incomplete_scan_reason(&stats))?;
     }
     if !incremental || stats.errors == 0 {
-        store.set_meta("last_scan_ts", &now.to_string())?;
         store.set_meta(
             "scan_generation",
             &format!("{}-{nonce}", std::process::id()),
@@ -1203,6 +1202,7 @@ fn scan_inner(
         )?;
         store.set_meta("root_dev", &root_dev.to_string())?;
         store.set_meta("root_inode", &root_inode.to_string())?;
+        record_last_scan_completion(&store.conn, now, now_secs())?;
     }
     Ok(stats)
 }
@@ -2090,7 +2090,6 @@ fn reconcile_staged_projection(
                ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
         )?;
         for (key, value) in [
-            ("last_scan_ts", scan_time.to_string()),
             ("scan_generation", format!("{}-{nonce}", std::process::id())),
             ("last_scan_root", root.to_string_lossy().into_owned()),
             (
@@ -2117,6 +2116,23 @@ fn reconcile_staged_projection(
         |r| r.get(0),
     )?;
     Ok(total)
+}
+
+fn record_last_scan_completion(
+    conn: &Connection,
+    scan_started_at: i64,
+    scan_completed_at: i64,
+) -> Result<i64> {
+    // Wall-clock adjustments must not make a completed scan appear to predate
+    // its start. Keep the completion instant where possible; clamp only when
+    // the system clock moved backwards during the scan.
+    let completed_at = scan_completed_at.max(scan_started_at);
+    conn.execute(
+        "INSERT INTO meta(key,value) VALUES('last_scan_ts',?1)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [completed_at.to_string()],
+    )?;
+    Ok(completed_at)
 }
 
 /// Parallel directory walk (jwalk). All per-entry stat work happens on worker
@@ -2556,6 +2572,46 @@ fn set_low_priority() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completed_scan_timestamp_records_completion_not_start() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);")
+            .unwrap();
+
+        let recorded = record_last_scan_completion(&conn, 100, 145).unwrap();
+
+        assert_eq!(recorded, 145);
+        assert_eq!(
+            conn.query_row(
+                "SELECT value FROM meta WHERE key='last_scan_ts'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "145"
+        );
+    }
+
+    #[test]
+    fn completed_scan_timestamp_clamps_clock_rollback_to_scan_start() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);")
+            .unwrap();
+
+        let recorded = record_last_scan_completion(&conn, 100, 90).unwrap();
+
+        assert_eq!(recorded, 100);
+        assert_eq!(
+            conn.query_row(
+                "SELECT value FROM meta WHERE key='last_scan_ts'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "100"
+        );
+    }
 
     #[test]
     fn incomplete_projection_skips_discarded_rollups_and_keeps_published_total() {
