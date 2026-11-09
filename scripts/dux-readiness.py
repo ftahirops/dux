@@ -218,6 +218,16 @@ def daemon_uses_scan_first(record, daemon_log):
     return bool(record.get("scan_first")) or "experimental reconciliation-first mode:" in daemon_log
 
 
+def crash_fault_stages(scan_first):
+    """Select crash boundaries used by the daemon's active correctness mode."""
+    if scan_first:
+        return ["scan.in_place_started", "scan.in_place_projection_ready",
+                "scan.in_place_before_commit", "scan.in_place_after_commit"]
+    return ["watch.flush_before_commit", "watch.flush_committed",
+            "scan.build_complete", "scan.install_started", "scan.install_midway",
+            "scan.install_committed"]
+
+
 def request_scan_first_observation(case, daemon, previous_generation, log_path, timeout=600):
     """Request and wait for one complete, independently accounted observation."""
     def scan_active():
@@ -607,8 +617,19 @@ class DisposableFilesystem:
 
 def crash_tests(case, args, evidence):
     randomizer = random.Random(args.seed)
-    stages = ["watch.flush_before_commit", "watch.flush_committed", "scan.build_complete",
-              "scan.install_started", "scan.install_midway", "scan.install_committed"]
+    probe = Daemon(case)
+    probe_record = probe.wait(lambda: probe.record(), "initial watcher status")
+    scan_first = daemon_uses_scan_first(
+        probe_record, (case.base / "daemon.log").read_text(errors="replace")
+    )
+    probe.exact()
+    probe.stop()
+    stages = crash_fault_stages(scan_first)
+    print(
+        f"PROGRESS crash boundaries selected for "
+        f"{'scan-first' if scan_first else 'event-apply'} mode: {stages}",
+        flush=True,
+    )
     for round_number in range(args.crash_rounds):
         stage = stages[(round_number // 2) % len(stages)] if args.fault_binary and round_number % 2 == 0 else None
         daemon = Daemon(case, case.fault_binary if stage else case.binary, stage)

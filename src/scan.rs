@@ -601,7 +601,12 @@ pub fn reconcile_in_place(store: &mut Store, root: &Path, opts: &ScanOptions) ->
         !opts.one_file_system && opts.exclude.is_empty(),
         "incremental reconciliation requires an unfiltered full-root observation"
     );
-    scan_with_progress_policy_mode(store, root, opts, false, true)
+    crate::fault::checkpoint("scan.in_place_started");
+    let result = scan_with_progress_policy_mode(store, root, opts, false, true);
+    if result.is_ok() {
+        crate::fault::checkpoint("scan.in_place_completed");
+    }
+    result
 }
 
 /// Keep the final progress snapshot visible while an atomic caller fsyncs and
@@ -1026,6 +1031,7 @@ fn scan_inner(
             if complete {
                 store.conn.execute_batch(V6_SCAN_PROJECTION_SQL)?;
             }
+            crate::fault::checkpoint("scan.in_place_projection_ready");
             return reconcile_staged_projection(
                 &mut store.conn,
                 root_dev,
@@ -2087,7 +2093,9 @@ fn reconcile_staged_projection(
                 rusqlite::params![key, value],
             )?;
         }
+        crate::fault::checkpoint("scan.in_place_before_commit");
         tx.commit()?;
+        crate::fault::checkpoint("scan.in_place_after_commit");
     } else {
         conn.execute("INSERT INTO meta(key,value) VALUES('last_scan_attempt_ts',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [scan_time.to_string()])?;
     }

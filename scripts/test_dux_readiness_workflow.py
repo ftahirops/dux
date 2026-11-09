@@ -31,6 +31,22 @@ class ReadinessHarnessTests(unittest.TestCase):
             {"scan_first": False}, "event-apply watcher started",
         ))
 
+    def test_crash_fault_boundaries_follow_the_active_correctness_mode(self):
+        scan_first_stages = READINESS.crash_fault_stages(scan_first=True)
+        self.assertEqual(
+            scan_first_stages,
+            ["scan.in_place_started", "scan.in_place_projection_ready",
+             "scan.in_place_before_commit", "scan.in_place_after_commit"],
+        )
+        self.assertFalse(any(stage.startswith("watch.") for stage in scan_first_stages))
+        event_apply_stages = READINESS.crash_fault_stages(scan_first=False)
+        self.assertEqual(event_apply_stages[:2], ["watch.flush_before_commit", "watch.flush_committed"])
+        self.assertEqual(
+            event_apply_stages[2:],
+            ["scan.build_complete", "scan.install_started", "scan.install_midway",
+             "scan.install_committed"],
+        )
+
     def test_incomplete_root_coverage_does_not_pass_qualification(self):
         self.assertEqual(
             READINESS.suite_result_status("root", {"coverage_complete": False}),

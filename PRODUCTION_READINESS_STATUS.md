@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 01:00 UTC
+**Updated:** 2026-11-09 01:12 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2042,3 +2042,13 @@ VPS2 `/dev/shm` free space supports a 768 MiB fixture, but not the 2 GiB image
 required to promote the dedicated disk-full and 100,000-file churn suites;
 those two suites are excluded from this run. The remaining matrix is
 unqualified until its completed report is checked.
+
+The 30-round candidate attempt then found that fault hooks for atomic install
+are absent from the in-place scan-first path. I added four `fault-injection`
+only checkpoints around in-place observation and publication, and updated the
+readiness harness to select them only in scan-first mode. The production
+feature build compiles these checkpoint calls to no-ops. The updated source
+passes the 322-test Rust release suite (2 ignored) and all 332 Python tests;
+Clippy with warnings denied, formatting, and diff checks pass. A fresh package
+build and crash-boundary matrix are still required before the expanded
+qualification result is valid.

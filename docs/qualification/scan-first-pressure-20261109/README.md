@@ -105,9 +105,19 @@ waits for the independent accounting verifier, and compares the full indexed
 filesystem truth. The updated harness passed all **331 Python tests**. The
 release-108 production binary then passed an isolated crash/restart smoke test
 with exact post-recovery filesystem comparison: one crash round passed and
-recovered in 1.909 seconds. These results validate the corrected test path;
-the broader release qualification matrix remains pending and will use a build
-from the corrected harness source.
+recovered in 1.909 seconds.
+
+The next run exposed a second harness assumption. It selected fault-injection
+stages from the atomic rebuild path (`scan.build_complete` and `scan.install_*`)
+even though the candidate had a ready v7 baseline and reconciled in place.
+Those callbacks are not reached by in-place reconciliation. The failure is
+preserved and did not show an index mismatch. The in-place implementation now
+has test-only fault checkpoints at observation start, projection-ready, before
+the publication transaction commits, and immediately after commit. The
+scan-first crash matrix selects those checkpoints; event-apply mode retains
+the existing event-flush and atomic-rebuild stages. The checkpoints compile to
+no-ops in production builds. The broader matrix will be rerun against a fresh
+candidate built from this corrected harness and checkpoint set.
 
 ## Artifacts
 
@@ -122,6 +132,10 @@ from the corrected harness source.
 - [`release108-old-harness-failure.log`](live/release108-old-harness-failure.log)
 - [`release108-scanfirst-crash-smoke.json`](live/release108-scanfirst-crash-smoke.json)
 - [`release108-scanfirst-crash-smoke.log`](live/release108-scanfirst-crash-smoke.log)
+- [`release109-atomic-checkpoint-harness-failure.json`](live/release109-atomic-checkpoint-harness-failure.json)
+- [`release109-atomic-checkpoint-harness-failure.log`](live/release109-atomic-checkpoint-harness-failure.log)
+- [`release109-inplace-checkpoint-smoke-failure.json`](live/release109-inplace-checkpoint-smoke-failure.json)
+- [`release109-inplace-checkpoint-smoke-failure.log`](live/release109-inplace-checkpoint-smoke-failure.log)
 
 The temporary loop image, test database, transient candidate units, and copied
 test executables were removed after these records were collected.

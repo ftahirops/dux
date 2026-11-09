@@ -1,0 +1,26 @@
+Running as unit: dux-readiness-490316.service; invocation ID: 4cf232041691441390afb901de6742fc
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+Evidence: /root/dux-readiness-f693786/release109-readiness.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 2595, in <module>
+    main()
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 2550, in main
+    worker(args)
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 2375, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 621, in crash_tests
+    daemon.paused_at(stage)
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 497, in paused_at
+    self.wait(lambda: self.marker.exists() and self.marker.read_text().strip() == f"{self.process.pid} {stage}", stage)
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 326, in wait
+    raise AssertionError(f"timeout waiting for {description}: {last}")
+AssertionError: timeout waiting for watch.flush_before_commit: not ready
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 1min 2.405s
+CPU time consumed: 1.587s
+Memory peak: 28.3M
+Memory swap peak: 0B
