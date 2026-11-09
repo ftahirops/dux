@@ -1,5 +1,5 @@
 b6612e264487aa3acaa59ee3c342f21e7a83378baf6abff8af31b4a8188610c8  README.md
-716dfc5bee63b01a60023efba47e0d71439fa45478a261e46fcb45dc3842ad52  docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md
+56d14024812a61ebd686fdad52efd583322a787ad7cfb5163f5e0422757aee58  docs/qualification/scan-first-timestamp-fix-r121-20261109/README.md
 ff4322ddb73301a9ed73a7ad17b955e7d5dc2844ca9460d5135d33f4ff8c10d0  docs/qualification/scan-first-timestamp-fix-r121-20261109/UNARCHIVED_RELEASE_ARTIFACT_SHA256.txt
 27ecbfc6b3bb0936ebad262b89717ee8a230dea69a9a294864073174dc303577  docs/qualification/scan-first-timestamp-fix-r121-20261109/build-manifest.json
 4f63f8fa5f82e18d937bcf97bada622d937c60fec4fa1e52cdcaf86cf8a2465a  docs/qualification/scan-first-timestamp-fix-r121-20261109/cargo-audit-binary.log
@@ -27,9 +27,11 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/qualifica
 116d89875e8c2695babb06864864f60fa1ccda0955a81da7248a9ad295c19d66  docs/qualification/scan-first-timestamp-fix-r121-20261109/scan-first-metrics-focused-tests-20261109.log
 5de59b740bcee4d1adb99fa1a10be51338f673900aa43488341ad5712b9f71cf  docs/qualification/scan-first-timestamp-fix-r121-20261109/scan-first-metrics-full-suite-20261109.log
 3938481b09bdb2be3906619a1bed5756ebdae651f0ba2338b13d6a832a8d2a0d  docs/qualification/scan-first-timestamp-fix-r121-20261109/scan-first-metrics-release-all-20261109.log
+0926e7292acb70c4f1ab37a8fbd98cc49291bac240f1f877ade76a81d3f3eaaa  docs/qualification/scan-first-timestamp-fix-r121-20261109/scan-first-metrics-release-binary-20261109.log
 a5d9bdfd92d95c21718b467340f746cb577e4ea87070b633e9d41089ed26147d  docs/qualification/scan-first-timestamp-fix-r121-20261109/scan-first-metrics-status-test-20261109.log
 9175ebbe3318d6b9e187c24ccedccb04a938a2fd17749786cecbd5dea4fdaffa  docs/qualification/scan-first-timestamp-fix-r121-20261109/static-checks-scale-guard-20261109.log
 19c48bf7d4ee8f37fd251befd8990537250353bf746a2a932587e7a4cc243105  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-canary-progress.jsonl
 a334c85c2c974281475f1802d99b5dd61fee63e4dee5a67a2a9560202a91862f  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-disk-inventory-20261109T1652Z.json
 cc0e95c63e35ca29ff76f9dbfadeb50eb8b43de3e394b6c025639c705074904d  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-postscan-20261109T1649Z.json
 7283a6b047205b59474cae1188ab9ed7b0bc4b110b54b5ce1c8b16ea12fb0dce  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-runtime-20261109T1706Z.json
+2989bf56f29c6220732a4717d0558dbf8a20e7e00642ce956a8a6581ed8610e7  docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-runtime-20261109T1743Z.json

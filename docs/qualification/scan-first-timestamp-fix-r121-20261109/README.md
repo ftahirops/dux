@@ -308,9 +308,14 @@ exercised by the regression tests, but total coverage remains incomplete;
 [`scan-first-metrics-coverage-run-20261109.log`](scan-first-metrics-coverage-run-20261109.log),
 and [`scan-first-metrics-coverage-json-20261109.json`](scan-first-metrics-coverage-json-20261109.json).
 
-Remaining: capture the clean-commit release binary hash, package and lifecycle
-qualify it, then test the new metric output in a canary. Do not treat the
-existing VPS2 process as verification of this source change.
+The clean-commit release executable is 5,354,616 bytes, SHA-256
+`f23b4a07066f8ccd1a6ce470a2038e811db0e9cda35ba8cc4a570e967f7458f6`; it reports
+revision `b07fc635b6ce` with no modified-tree marker. `--version`, top-level
+help, and metrics help all exited successfully. Build and smoke output is in
+[`scan-first-metrics-release-binary-20261109.log`](scan-first-metrics-release-binary-20261109.log).
+Remaining: package and lifecycle qualify the candidate, then run it on a canary.
+The existing VPS2 process is still the earlier binary and does not verify this
+source change.
 
 
 ### VPS2 scan-first runtime checkpoint — 2026-11-09 17:07 UTC
@@ -325,3 +330,16 @@ with accounting verification passed at 17:04:17 in 49.529 seconds. Root disk
 remained 93% full with 7.29 GB available. This is one more passing observation,
 not 24-hour qualification. Raw data is in
 [`vps2-runtime-20261109T1706Z.json`](vps2-runtime-20261109T1706Z.json).
+
+
+### VPS2 scan-first checkpoint — 2026-11-09 17:43 UTC
+
+At 17:43:57 UTC the existing service remained active under PID 2561224, with
+zero restarts and 110,206,976 bytes current memory. The 17:14:26 and 17:29:26
+observations both completed accounting verification (103.467s and 71.042s). At
+capture, scan age was 552s, with zero kernel overflows, userspace drops, and
+pending updates. Status remains dirty awaiting the next full observation,
+`caught_up=false`, and the old event-pipeline `behind_seconds` counter is
+13,472.1s; that counter is inapplicable to scan-first freshness. Root disk was
+93% used with 7.23 GB available. The local `b07fc63` metrics fix is not yet
+installed on this VM. Evidence: [`vps2-runtime-20261109T1743Z.json`](vps2-runtime-20261109T1743Z.json).

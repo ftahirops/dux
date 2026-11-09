@@ -2891,9 +2891,10 @@ non-ignored tests; optimized release suite passed 332/332 including both ignored
 scale and ext4 stale-parent tests. Focused status/metrics tests, strict Clippy,
 formatting, diff check, release binary build and CLI smoke passed. Current LLVM
 coverage: 73.67% lines, 72.57% regions, 76.76% functions; branch counters were
-not collected and `main.rs` line coverage is 46.43%. The local candidate is not
-installed on VPS2; package/lifecycle and runtime-canary verification remain
-open. Evidence is in `docs/qualification/scan-first-timestamp-fix-r121-20261109/`.
+not collected and `main.rs` line coverage is 46.43%. Clean-commit release executable `b07fc635b6ce` built successfully (5,354,616
+bytes; SHA-256 `f23b4a07066f8ccd1a6ce470a2038e811db0e9cda35ba8cc4a570e967f7458f6`)
+and CLI smoke passed. It is not installed on VPS2; package/lifecycle and
+runtime-canary verification remain open. Evidence is in `docs/qualification/scan-first-timestamp-fix-r121-20261109/`.
 
 
 ### VPS2 scan-first runtime checkpoint — 2026-11-09 17:07 UTC
@@ -2906,3 +2907,15 @@ observation and `caught_up=false` as scan-first requires. The legacy
 `behind_seconds` value is not an applicable scan-first freshness measure. Root
 disk was 93% full with 7.29 GB available. This remains a short runtime
 checkpoint, not soak completion. Current local metrics fix is not deployed.
+
+
+### VPS2 runtime checkpoint — 2026-11-09 17:43 UTC
+
+Read-only status: service active under PID 2561224, zero restarts, 110 MB
+current memory. The 17:14 and 17:29 scheduled observations passed accounting
+verification in 103.467s and 71.042s. At 17:43:57, last scan age was 552s,
+with no kernel overflow, userspace drops, or pending updates. It remains dirty
+waiting for the next scan; `caught_up=false` and `behind_seconds` 13,472.1s is
+not a scan-first freshness measure. Root disk remains 93% used with 7.23 GB
+available. The local `b07fc63` fix has not been installed on VPS2. Raw record:
+`docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-runtime-20261109T1743Z.json`.
