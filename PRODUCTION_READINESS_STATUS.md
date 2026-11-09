@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:38 UTC
+## Latest verified checkpoint — 2026-11-09 22:40 UTC
 
 ### Clean-install lifecycle readiness gate
 
@@ -16,9 +16,20 @@ discovery passes **359/359**. Logs and code are in the lifecycle qualification
 folder. A real guest lifecycle rerun with this strict gate is still required.
 
 The guarded r123 lifecycle controller remains active but has not launched a
-guest. Go compiler/test processes reappeared during the latest quiet window;
-the guard returned to admission wait, with load1 reaching 13.48. The guard
-remains enabled; no VM was launched.
+guest. Repeated Go compiler/test processes are continuing to reset quiet
+windows; the latest controller output is admission wait. The guard remains
+enabled; no VM was launched.
+
+### Coverage gap review
+
+I queried the saved Rust coverage profile without rerunning tests. The 332-test
+profile remains 73.73% line / 72.67% region / 76.94% function, with no branch
+counters. `watch.rs` has 75.16% line coverage and 74 of 481 functions missed;
+the actual `fanotify_init`, `fanotify_mark`, and event-path
+`open_by_handle_at` call sites have zero line hits in that unit profile. Live
+VPS2 evidence exercises real scans but is not instrumented coverage. These
+critical-path gaps and the targeted tests needed to close them are recorded in
+[`coverage-gaps-20261109.md`](docs/qualification/coverage-gaps-20261109.md).
 
 ### Canary and disk
 
@@ -52,7 +63,7 @@ fault-injection binaries verified. `/` has 58 GiB free, `target/readiness` is
 869 MiB, and `target/readiness/vms` is 32 KiB. Cleanup evidence is linked in
 [`disk-cleanup-20261109.md`](docs/qualification/disk-cleanup-20261109.md).
 
-**Updated:** 2026-11-09 22:38 UTC
+**Updated:** 2026-11-09 22:40 UTC
 
 ---
 
