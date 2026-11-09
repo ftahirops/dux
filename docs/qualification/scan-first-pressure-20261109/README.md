@@ -116,8 +116,18 @@ has test-only fault checkpoints at observation start, projection-ready, before
 the publication transaction commits, and immediately after commit. The
 scan-first crash matrix selects those checkpoints; event-apply mode retains
 the existing event-flush and atomic-rebuild stages. The checkpoints compile to
-no-ops in production builds. The broader matrix will be rerun against a fresh
-candidate built from this corrected harness and checkpoint set.
+no-ops in production builds.
+
+Release 110 was built from clean commit `6dacdf5`; its static binary, DEB, RPM,
+source archive, debug symbols, and all eight checksum entries verified. The
+manifest and binary agree on source digest `4b24695c…d9356bf51`; both the
+lockfile and exact binary audits passed. On VPS2, the candidate and matching
+fault-injection binary passed all **8 crash/restart rounds**, including each of
+the four in-place checkpoints and four random-timing rounds. Every recovery
+passed SQLite integrity and exact filesystem/index comparison; recovery took
+0.736–1.109 seconds. The worker was limited to 25% CPU and 4 GiB memory on a
+768 MiB disposable ext4 image. This qualifies the exercised crash boundaries,
+not the broader release matrix or long soak.
 
 ## Artifacts
 
@@ -136,6 +146,8 @@ candidate built from this corrected harness and checkpoint set.
 - [`release109-atomic-checkpoint-harness-failure.log`](live/release109-atomic-checkpoint-harness-failure.log)
 - [`release109-inplace-checkpoint-smoke-failure.json`](live/release109-inplace-checkpoint-smoke-failure.json)
 - [`release109-inplace-checkpoint-smoke-failure.log`](live/release109-inplace-checkpoint-smoke-failure.log)
+- [`release110-crash8.json`](live/release110-crash8.json)
+- [`release110-crash8.log`](live/release110-crash8.log)
 
 The temporary loop image, test database, transient candidate units, and copied
 test executables were removed after these records were collected.

@@ -1,6 +1,6 @@
 # Production readiness status
 
-**Updated:** 2026-11-09 01:12 UTC
+**Updated:** 2026-11-09 01:16 UTC
 **Goal:** production reliability, security, performance, and correctness review
 **State:** active; not production-ready sign-off
 
@@ -2050,5 +2050,11 @@ readiness harness to select them only in scan-first mode. The production
 feature build compiles these checkpoint calls to no-ops. The updated source
 passes the 322-test Rust release suite (2 ignored) and all 332 Python tests;
 Clippy with warnings denied, formatting, and diff checks pass. A fresh package
-build and crash-boundary matrix are still required before the expanded
-qualification result is valid.
+build was required before re-running crash boundaries; that build is now
+release 110 from clean commit `6dacdf5`. Its artifacts/checksums, embedded
+source digest, lockfile audit, and exact-binary audit pass. The scan-first
+crash suite passed 8/8 rounds on VPS2, exercising each of the four in-place
+fault boundaries once plus four random-timing restarts. Recovery took
+0.736–1.109 seconds, with SQLite integrity and exact filesystem/index equality
+passing after every crash. This is targeted recovery evidence; the wider
+matrix remains unqualified until its completed report is checked.
