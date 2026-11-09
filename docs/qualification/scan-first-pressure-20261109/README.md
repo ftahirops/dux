@@ -1209,6 +1209,13 @@ restarts. Snapshot:
 [`vps1-readonly-status-20261109T1310Z.json`](live/vps1-readonly-status-20261109T1310Z.json),
 SHA256 `6501d1db471e0a8b7423424898018c34af1f80012f853258403b364ac9257ea3`.
 
+At 13:14:14 UTC, the legacy production daemon remained dirty with no full scan
+active and scan age 347,092 seconds. Overflow notifications rose from 540 to
+549 in four minutes; `events_seen` increased by 830,391. The index is still
+not reconciled. Snapshot:
+[`vps1-readonly-status-20261109T1314Z.json`](live/vps1-readonly-status-20261109T1314Z.json),
+SHA256 `62205e71750042e3a0a3047529e3208d9963f0f95584edbaee780cfea8703199`.
+
 #### Packaged service security policy check — 2026-11-09
 
 The package lifecycle/security policy suite passed **70/70 tests** in a
