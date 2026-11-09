@@ -1,62 +1,77 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 19:44 UTC
+## Latest verified checkpoint — 2026-11-09 21:07 UTC
 
-### Candidate and automated qualification
+### Architecture and candidate
 
-Release candidate 123 remains the static-musl package set built from clean
-source commit `0cad80e6436202fefc2ff385c18872ce2b4a910c`. Artifact identity,
-package hashes, dependency metadata, RustSec audits, CLI smoke checks, unit
-verification, and the package lifecycle harness (**70/70 unit tests**) passed.
-The release suite passed **332/332** with ignored tests included; coverage is
-**73.73% line / 72.67% region / 76.94% function**, with no branch coverage.
-These results do not qualify an r123 installation or production runtime. The
-exact r121→r123 install/upgrade/rollback/purge/clean-install lifecycle remains
-open.
+The selected candidate architecture is scan-first: fanotify supplies lossy
+hints; a full-root observation every 15 minutes is the source of index state,
+with in-place changed-row writes in schema v7. Traversal remains O(number of
+entries). The architecture is implemented in source but is not production
+qualified. Candidate r123 is a static-musl package set built from clean source
+commit `0cad80e6436202fefc2ff385c18872ce2b4a910c`; later work on this branch has
+changed qualification scripts and documents, not that Rust artifact. The best
+current size profile is one 1.37M-path synthetic ext4 run at 50% CPU: 196.3 s
+and 154 MiB scan RSS. This does not prove the 15-minute freshness SLO,
+representative-churn performance, or endurance.
 
-The official Ubuntu 24.04 cloud image is checksum-verified and staged in
-tmpfs. One isolated VM attempt at 19:34 was stopped by the host pressure guard
-within 10 seconds when concurrent Go tests started; SSH and package execution
-never began. A guarded driver is still waiting for 120 continuous seconds of
-clear host admission before retrying. It uses the VM runner's own admission and
-runtime pressure guards and does not alter VPS2.
+### Tests and security evidence
 
-### VPS2 r121 canary
-
-The 24-hour canary remains on r121. **59 formal five-minute monitor samples**
-passed through 18:58 UTC. Subsequent read-only observations recorded successful
-full scans and independent accounting checks at 19:20 and 19:33, each with zero
-coverage issues. At 19:42 the service was active with zero restarts, kernel
-overflows, event drops, or pending updates; the last completed scan was 509
-seconds old. The formal sample stream does not extend past 18:58 in the current
-evidence, and the required 24 hours are not complete.
+- Rust all-features release suite: **332/332 passed**, ignored tests included.
+  LLVM coverage: **73.73% line / 72.67% region / 76.94% function**; branch
+  coverage unavailable. `tui.rs` line coverage is 39.51%, `main.rs` 46.43%,
+  and `containers.rs` 67.25%.
+- Package lifecycle harness units: **70/70**; current VM qualification helper
+  regression suite: **40/40**. The real package lifecycle has **not passed**.
+- Latest Cargo audit: **0 known advisories across 229 dependencies**; the
+  available advisory database was last updated 16:13 UTC. The packaged systemd
+  unit passes `systemd-analyze verify`; offline heuristic exposure is 3.3
+  (“OK”), not a security certification. Root plus `CAP_SYS_ADMIN` remains a
+  material privilege risk; full threat and unsafe-code review remain open.
 
 ### VPS1 production
 
-VPS1 remains on the legacy `0.6.3` executable and is **not production-ready**.
-At 19:43 it was active with four systemd restarts, a dirty index, and a last
-full scan **370,447 seconds old (4.29 days)**. It reported **649 lifetime
-kernel overflows** and **2,518,862 dropped updates**. Thirteen new overflow
-warnings occurred from 19:31:50 to 19:32:51. Concurrent Go tests/builds were
-present, but evidence does not attribute the overflows to a specific process.
-The database occupied 3.26 GB; `/` had about 58 GiB free. No service, database,
-or host configuration was changed.
+At 21:07:19 UTC, production was active on legacy Dux 0.6.3, PID 1073891, with
+four systemd restarts. It remains dirty from fanotify queue overflow; the last
+completed scan was **375,477 seconds old (about 4.35 days)**. Status reported
+**649** lifetime kernel overflows, **2,518,862** dropped updates, **6,014**
+pending updates, and a **3.07 GiB** database. This was a read-only query; no
+service, database, or configuration was changed.
 
-### Remaining release gates
+### VPS2 canary
 
-Current source embeds SQLite 3.54.1 with the WAL-reset fix, but production still
-runs the old SQLite 3.46.0 binary. The current service unit scores 3.3 OK in
-systemd analysis, while root plus `CAP_SYS_ADMIN` remains a material privilege
-risk. The unsafe-block documentation lint passes, but a complete memory-safety
-review is still open.
+The VPS2 service remains on r121, not r123. The formal 24-hour monitor recorded
+**84/84 passing five-minute samples** through 21:03:58 UTC. The latest sample
+had zero errors, restarts, overflows, drops, or pending updates and a completed-
+observation age of 851 seconds. This is about seven hours, not the required
+24-hour soak, and qualifies r121 only.
 
-No production rollout has been performed. r123 package lifecycle and runtime,
-the completed 24-hour canary, live schema migration and rollback, disk-full/OOM
-and filesystem fault qualification, 72-hour endurance, constrained-host
-p95/p99 performance, and full deployment threat review remain open. Production
-sign-off is not met.
+### Package lifecycle and disk
 
-**Updated:** 2026-11-09 19:44 UTC
+The first real r121-to-r123 Debian lifecycle attempt installed the r121 baseline
+and upgraded to r123, but the runtime pressure guard stopped the disposable VM
+during rollback when host Go workloads appeared. It is **not** a package
+failure or pass. A race in pressure-guard cleanup then lost the guest report;
+that qualification harness bug was fixed and its helper regression suite passed
+40/40. The guarded retry process is still waiting for a clear host-load window;
+no VM is currently running. Its safeguards have not been relaxed.
+
+At 21:07 UTC, `/` had about **59 GiB free** and `/dev/shm` about **11 GiB free**.
+Disk is not currently blocking the lifecycle attempt.
+
+### Release decision
+
+**Production sign-off is not met.** Still open: successful exact r123 install,
+upgrade, rollback, purge, and clean install; completed 24-hour r121 canary and
+r123 runtime qualification; live schema migration/rollback; disk-full, OOM, and
+filesystem fault tests; 72-hour endurance; constrained-host p95/p99 performance;
+and complete privilege/threat review. Coverage remains below 100%.
+
+The detailed evidence and historical checkpoints remain in
+[`PRODUCTION_READINESS_AUDIT.md`](PRODUCTION_READINESS_AUDIT.md) and the linked
+qualification folders below.
+
+**Updated:** 2026-11-09 21:07 UTC
 
 **Goal:** production reliability, security, performance, and correctness review
 
