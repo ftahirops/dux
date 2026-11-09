@@ -1146,6 +1146,11 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
             .as_ref()
             .and_then(|w| w.kernel_overflow_notifications),
         "behind_seconds": watch.as_ref().map(|w| w.behind_ms as f64 / 1000.0),
+        // In scan-first mode the event pipeline intentionally does not apply
+        // events into the index, so its time-since-drain counter is not an
+        // index freshness or backlog measurement. Consumers should use
+        // last_scan_age_seconds instead.
+        "behind_seconds_applicable": watch.as_ref().is_some_and(|w| !w.scan_first),
         "dirty": dirty,
         "dirty_since_timestamp_seconds": dirty_since,
         "dirty_reason": dirty_reason,
@@ -1531,6 +1536,7 @@ mod tests {
         assert_eq!(healthy["daemon_live"], true);
         assert_eq!(healthy["watch_status_available"], true);
         assert_eq!(healthy["caught_up"], true);
+        assert_eq!(healthy["behind_seconds_applicable"], true);
         assert_eq!(healthy["kernel_overflow_notifications"], 2);
         assert_eq!(healthy["userspace_updates_dropped"], 0);
         assert_eq!(
@@ -1587,6 +1593,7 @@ mod tests {
         let scan_first_json = status_json(&store, &db).unwrap();
         assert_eq!(scan_first_json["scan_first"], true);
         assert_eq!(scan_first_json["caught_up"], false);
+        assert_eq!(scan_first_json["behind_seconds_applicable"], false);
         let scan_first_status = status(&store, &db).unwrap();
         assert!(scan_first_status.contains("fanotify hints"));
         assert!(scan_first_status.contains("latest view is not real-time"));

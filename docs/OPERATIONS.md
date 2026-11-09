@@ -38,7 +38,14 @@ Healthy steady state requires all of the following:
 
 A nonzero `behind_seconds`, rising pending count, dirty/paused state, missing
 watch status, dropped events, or a stale heartbeat means the index is not
-currently trustworthy as a complete live view. Require valid JSON with
+currently trustworthy as a complete live view **in event-apply mode**. In
+scan-first mode, event batches are hints and are intentionally not applied to
+the index; `behind_seconds` is not an index freshness metric and is omitted
+from Prometheus metrics. JSON status reports `behind_seconds_applicable: false`.
+Use `last_scan_age_seconds` for JSON status and
+`dux_last_scan_age_seconds` plus `dux_scan_first_mode` and
+`dux_last_scan_available` in Prometheus metrics to assess scan-first freshness.
+`caught_up` remains false in scan-first mode by design. Require valid JSON with
 `status_version: 1`; if `dux --json status` prints human-readable text or JSON
 parsing fails, classify health as **unknown**, not healthy. Older clients do not
 expose enough machine-readable state to distinguish a drained event queue from
@@ -46,8 +53,11 @@ an active rebuild or uncertain accounting. Do not infer daemon health from
 systemd `StatusText` alone; it can lag the database-backed status. Upgrade to a
 qualified release or use its independent live observer before treating the
 index as current. `dux metrics` emits Prometheus text exposition suitable for
-the node_exporter textfile collector; alert on pipeline unavailable,
-dirty/paused, dropped events, and sustained backlog.
+the node_exporter textfile collector. In event-apply mode, alert on pipeline
+unavailable, dirty/paused, dropped events, and sustained backlog. In scan-first
+mode, `dirty` and `caught_up=0` are expected while changes await the next full
+observation; alert on missing scan timestamps, scan age beyond the configured
+freshness SLO, repeated scan/accounting failures, or resource exhaustion instead.
 
 ## Triage and recovery
 

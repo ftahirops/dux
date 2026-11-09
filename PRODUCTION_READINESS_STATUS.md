@@ -2877,3 +2877,32 @@ size/reclaimability overlaps stored image layers and should not be added to `du`
 totals. No files, Docker objects, or logs were removed because `/var/tmp`
 contains qualification artifacts and the host runs active services. Snapshot:
 `docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-disk-inventory-20261109T1652Z.json`.
+
+
+### Scan-first observability correctness fix — 2026-11-09
+
+Fixed Prometheus reporting that could label a scan-first daemon caught up when
+its queues were empty. `dux_index_caught_up` now excludes scan-first mode. Added
+scan-first mode, scan-age/availability, and behind-seconds applicability
+metrics; omitted event-apply backlog timing in scan-first mode. JSON status adds
+`behind_seconds_applicable`; operations guidance distinguishes scan-first
+freshness from event-apply backlog. The all-features debug suite passed 330/330
+non-ignored tests; optimized release suite passed 332/332 including both ignored
+scale and ext4 stale-parent tests. Focused status/metrics tests, strict Clippy,
+formatting, diff check, release binary build and CLI smoke passed. Current LLVM
+coverage: 73.67% lines, 72.57% regions, 76.76% functions; branch counters were
+not collected and `main.rs` line coverage is 46.43%. The local candidate is not
+installed on VPS2; package/lifecycle and runtime-canary verification remain
+open. Evidence is in `docs/qualification/scan-first-timestamp-fix-r121-20261109/`.
+
+
+### VPS2 scan-first runtime checkpoint — 2026-11-09 17:07 UTC
+
+At 17:07:19 UTC, VPS2 Dux was active under PID 2561224 with zero restarts,
+overflows, userspace drops, and pending updates. The last scan was 233 seconds
+old; a scan completed at 17:04:17 with independent accounting verification
+passed in 49.529 seconds. Status remained dirty pending its next scheduled
+observation and `caught_up=false` as scan-first requires. The legacy
+`behind_seconds` value is not an applicable scan-first freshness measure. Root
+disk was 93% full with 7.29 GB available. This remains a short runtime
+checkpoint, not soak completion. Current local metrics fix is not deployed.

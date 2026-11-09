@@ -269,3 +269,59 @@ in this checkout. Five release package/source artifacts referenced by the prior
 manifest are not archived here. Their recorded hashes were moved to
 [`UNARCHIVED_RELEASE_ARTIFACT_SHA256.txt`](UNARCHIVED_RELEASE_ARTIFACT_SHA256.txt)
 and are explicitly not verified against artifact bytes in this checkout.
+
+
+## Scan-first status/metrics correctness fix — 2026-11-09
+
+Fixed a Prometheus correctness bug: metrics could report
+`dux_index_caught_up=1` in scan-first mode when the event queue and pending
+count were empty, even though JSON status correctly reports `caught_up=false`
+for that mode. The metric now excludes scan-first mode. Metrics now expose
+`dux_scan_first_mode`, `dux_behind_seconds_applicable`,
+`dux_last_scan_available`, and `dux_last_scan_age_seconds`; the misleading
+`dux_behind_seconds` sample is omitted when it is not applicable. JSON status
+adds `behind_seconds_applicable` while preserving the existing value for API
+compatibility. Operations guidance distinguishes expected scan-first dirty
+state from actionable event-apply backlog.
+
+Validation on this source: debug all-features suite **330 passed, 0 failed, 2
+ignored**; optimized release all-features suite with ignored tests included
+**332 passed, 0 failed** (86.59s), including the 100k scale smoke and ext4
+stale-parent integration. Focused metrics tests passed 3/3 and the related
+machine-status test passed 1/1. Strict all-target/all-feature Clippy, formatting,
+and diff checks passed. The release production executable built successfully
+and its CLI version/help/metrics-help smoke checks passed. It is a local
+candidate only; it has not been installed on VPS2.
+
+Fresh LLVM coverage ran the same 332 tests, including the ignored profiles:
+**73.67% line, 72.57% region, 76.76% function** coverage. Branch coverage was
+not collected (the report has zero branch counters). The new metric paths are
+exercised by the regression tests, but total coverage remains incomplete;
+`main.rs` is 46.43% line-covered. Logs and raw coverage are preserved in
+[`scan-first-metrics-release-all-20261109.log`](scan-first-metrics-release-all-20261109.log),
+[`scan-first-metrics-full-suite-20261109.log`](scan-first-metrics-full-suite-20261109.log),
+[`scan-first-metrics-focused-tests-20261109.log`](scan-first-metrics-focused-tests-20261109.log),
+[`scan-first-metrics-status-test-20261109.log`](scan-first-metrics-status-test-20261109.log),
+[`scan-first-metrics-clippy-20261109.log`](scan-first-metrics-clippy-20261109.log),
+[`scan-first-metrics-fmt-20261109.log`](scan-first-metrics-fmt-20261109.log),
+[`scan-first-metrics-diff-check-20261109.log`](scan-first-metrics-diff-check-20261109.log),
+[`scan-first-metrics-coverage-run-20261109.log`](scan-first-metrics-coverage-run-20261109.log),
+and [`scan-first-metrics-coverage-json-20261109.json`](scan-first-metrics-coverage-json-20261109.json).
+
+Remaining: capture the clean-commit release binary hash, package and lifecycle
+qualify it, then test the new metric output in a canary. Do not treat the
+existing VPS2 process as verification of this source change.
+
+
+### VPS2 scan-first runtime checkpoint — 2026-11-09 17:07 UTC
+
+At 17:07:19 UTC, VPS2 was active under PID 2561224 with zero restarts. Dux
+reported scan-first mode, no scan in progress, zero kernel overflows, zero
+userspace drops, and zero pending updates. The last scan was 233 seconds old;
+status remained `dirty=true` awaiting the next periodic observation and
+`caught_up=false` by design. The legacy `behind_seconds` value was 11,272.851
+and is not applicable to scan-first freshness. The 16:59:26 scan completed
+with accounting verification passed at 17:04:17 in 49.529 seconds. Root disk
+remained 93% full with 7.29 GB available. This is one more passing observation,
+not 24-hour qualification. Raw data is in
+[`vps2-runtime-20261109T1706Z.json`](vps2-runtime-20261109T1706Z.json).

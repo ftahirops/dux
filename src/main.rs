@@ -1218,6 +1218,7 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
     let (nodes, bytes) = query::index_totals(store)?;
     let daemon = util::daemon_live_for(db) as i32;
     let watch = util::read_watch_status(db);
+    let scan_first = watch.as_ref().is_some_and(|w| w.scan_first);
     let kernel_overflow_notifications =
         watch.as_ref().and_then(|w| w.kernel_overflow_notifications);
     let dirty =
@@ -1230,7 +1231,7 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
         && !scanning
         && watch
             .as_ref()
-            .is_some_and(|w| w.kernel_empty && w.pending == 0);
+            .is_some_and(|w| !w.scan_first && w.kernel_empty && w.pending == 0);
 
     let mut s = String::new();
     let mut g = |name: &str, help: &str, val: String| {
@@ -1255,15 +1256,34 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
         ts.to_string(),
     );
     g(
+        "dux_last_scan_available",
+        "1 if a completed full scan timestamp is present.",
+        ((ts > 0) as u8).to_string(),
+    );
+    g(
+        "dux_last_scan_age_seconds",
+        "Age of the last full scan; use this to assess scan-first freshness.",
+        if ts > 0 {
+            util::now_secs().saturating_sub(ts).max(0).to_string()
+        } else {
+            "0".into()
+        },
+    );
+    g(
+        "dux_scan_first_mode",
+        "1 if the daemon uses periodic scan-first observations rather than applying event hints to the index.",
+        (scan_first as u8).to_string(),
+    );
+    g(
         "dux_daemon_up",
         "1 if the live watch daemon is running.",
         daemon.to_string(),
     );
     for (name, help, value) in [
-        ("dux_index_dirty", "1 if coverage or accounting is uncertain, including volatile event loss.", dirty),
+        ("dux_index_dirty", "1 if the index is stale or its coverage/accounting is uncertain, including volatile event loss.", dirty),
         ("dux_index_paused", "1 if index writes are paused by the resource guardian.", paused),
         ("dux_scan_in_progress", "1 if a full scan is publishing live progress.", scanning),
-        ("dux_index_caught_up", "1 if the live daemon reports drained queues, no pending changes and no known uncertainty or scan.", caught_up),
+        ("dux_index_caught_up", "1 if the live event-apply daemon reports drained queues, no pending changes and no known uncertainty or scan; always 0 in scan-first mode.", caught_up),
         ("dux_watch_status_available", "1 if fresh, process-validated event pipeline status is available.", watch.is_some()),
     ] {
         g(name, help, (value as u8).to_string());
@@ -1272,6 +1292,11 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
         "dux_fanotify_overflow_count_available",
         "1 if the current watcher status format includes kernel overflow accounting.",
         (kernel_overflow_notifications.is_some() as u8).to_string(),
+    );
+    g(
+        "dux_behind_seconds_applicable",
+        "1 if dux_behind_seconds measures event-apply backlog; it is not applicable in scan-first mode.",
+        (watch.as_ref().is_some_and(|w| !w.scan_first) as u8).to_string(),
     );
     if let Some(w) = watch {
         g(
@@ -1284,11 +1309,13 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
             "Pending path changes including deferred renames.",
             w.pending.to_string(),
         );
-        g(
-            "dux_behind_seconds",
-            "Seconds since both the kernel and pending queues were drained.",
-            (w.behind_ms as f64 / 1000.0).to_string(),
-        );
+        if !w.scan_first {
+            g(
+                "dux_behind_seconds",
+                "Seconds since both the kernel and pending queues were drained in event-apply mode.",
+                (w.behind_ms as f64 / 1000.0).to_string(),
+            );
+        }
     }
     if let Some(fs) = root_path.as_deref().and_then(util::fs_stat) {
         g(
@@ -1705,6 +1732,10 @@ mod tests {
         let metrics = metrics_text(&store, &db, 0).unwrap();
         assert!(metrics.contains("\ndux_index_dirty 1\n"));
         assert!(metrics.contains("\ndux_index_caught_up 0\n"));
+        assert!(metrics.contains("\ndux_behind_seconds_applicable 1\n"));
+        assert!(metrics
+            .lines()
+            .any(|line| line.starts_with("dux_behind_seconds ")));
         assert!(metrics.contains("dux_fanotify_overflow_count_available 1\n"));
         assert!(metrics.contains("dux_fanotify_overflow_notifications_total 2\n"));
         let legacy_status = format!(
@@ -1732,6 +1763,51 @@ mod tests {
         for suffix in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
         }
+    }
+
+    #[test]
+    fn scan_first_metrics_never_report_event_caught_up_or_applicable_behind_time() {
+        let db = tmp("metrics-scan-first");
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        let store = Store::create_fresh(&db).unwrap();
+        util::write_heartbeat(&db);
+        let scan_timestamp = util::now_secs().saturating_sub(30);
+        store
+            .set_meta("last_scan_ts", &scan_timestamp.to_string())
+            .unwrap();
+        util::write_watch_status_with_mode(
+            &db, 0, true, 12, 0, 0, 0, 0, 0, 500_000, 0, false, true,
+        );
+
+        let status = query::status_json(&store, &db).unwrap();
+        assert_eq!(status["scan_first"], true);
+        assert_eq!(status["caught_up"], false);
+        assert_eq!(status["behind_seconds_applicable"], false);
+
+        let metrics = metrics_text(&store, &db, 0).unwrap();
+        assert!(metrics.contains("\ndux_index_caught_up 0\n"));
+        assert!(metrics.contains("\ndux_scan_first_mode 1\n"));
+        assert!(metrics.contains("\ndux_last_scan_available 1\n"));
+        assert!(metrics.contains("\ndux_behind_seconds_applicable 0\n"));
+        assert!(!metrics
+            .lines()
+            .any(|line| line.starts_with("dux_behind_seconds ")));
+        let age = metrics
+            .lines()
+            .find_map(|line| line.strip_prefix("dux_last_scan_age_seconds "))
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+        assert!((30..=31).contains(&age));
+
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        let _ = std::fs::remove_file(util::runtime_path(&db, "heartbeat"));
+        let _ = std::fs::remove_file(util::runtime_path(&db, "watch.status"));
     }
 
     #[test]
