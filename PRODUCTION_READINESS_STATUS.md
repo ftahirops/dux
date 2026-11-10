@@ -1,5 +1,16 @@
 # Production readiness status
 
+## VPS2 live reconciliation follow-up — 2026-11-10 05:58 UTC
+
+Read-only observation of the installed r121 service found the retry still in
+its database indexing/projection phase: the scan progress heartbeat continued
+to refresh, tree-walk counters had reached 1,681,973 files and 199,525
+directories, and the staged projection was 710,303,744 bytes. The service had
+zero restarts, and fanotify queue pressure/overflow remained zero. Host root
+disk free space was 3.2 GiB (97% used). This is a long, I/O-heavy active scan
+under host pressure, not a confirmed hang. Since the installed binary is r121,
+this does not qualify r131. See [the VPS2 observation](docs/qualification/reconciliation-live-vps2-20261110.md).
+
 ## r131 initial-baseline read guard and runtime qualification — 2026-11-10 05:40 UTC
 
 Review found a regression in r129's read guard: checking whether the database
