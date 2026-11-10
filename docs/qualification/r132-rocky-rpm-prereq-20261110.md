@@ -25,3 +25,14 @@ active; at the latest refusal, load and I/O pressure also exceeded the guard's
 limits. No guard bypass was attempted and no guest was started. The verified
 image is ready for a later retry once host admission is clear. Until then, RPM
 upgrade/rollback/removal/clean-install behavior on Rocky is unqualified.
+
+### Guarded retry — 2026-11-10 09:08 UTC
+
+A later start passed the three-sample startup admission and launched the
+ephemeral guest at 09:08:37 UTC. Eleven seconds later, the independent runtime
+pressure guard detected five Go compiler processes and one Go race-test process
+and stopped only this qualification VM. SSH never became available; all three
+file-copy attempts were refused, and no RPM lifecycle phase ran or package was
+changed. The stopped event and pressure sample are preserved in
+[`the captured guard event`](r132-rocky-rpm-guarded-start-20261110T090848Z.jsonl).
+Retry after the new host workloads finish and admission remains clear.

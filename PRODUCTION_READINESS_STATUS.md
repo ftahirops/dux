@@ -27,6 +27,12 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
+The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
+stopped by its independent host-pressure monitor 11 seconds later when five Go
+compiler processes and one Go race-test process appeared. SSH was not ready and
+no RPM package operation ran. The recorded interruption is in the
+[Rocky prerequisite report](docs/qualification/r132-rocky-rpm-prereq-20261110.md).
+
 ## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
 
 The exact r132 static release binary (SHA-256
