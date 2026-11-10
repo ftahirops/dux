@@ -1,0 +1,30 @@
+{
+  "observed_at_utc": "2026-11-10T23:08Z",
+  "qualification_host": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 131597037568,
+    "root_available_bytes": 57664045056,
+    "root_use_percent": 70,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3751624704,
+    "dev_shm_available_bytes": 9977589760,
+    "load_average_1m": 5.95,
+    "cpu_psi_some_avg10_percent": 2.59,
+    "io_psi_some_avg10_percent": 2.10,
+    "active_host_build_test_workloads": ["go test -race ./engine ./engine/replay ./engine/verifier"],
+    "qualification_vm_started": false
+  },
+  "vps2": {
+    "root_total_bytes": 99012476928,
+    "root_used_bytes": 83556294656,
+    "root_available_bytes": 10876432384,
+    "root_use_percent": 89,
+    "dev_shm_total_bytes": 3221225472,
+    "dev_shm_used_bytes": 1034727424,
+    "dev_shm_available_bytes": 2186498048,
+    "dux_soak_active": true,
+    "dux_soak_restarts": 0,
+    "kvm_device_present": false
+  },
+  "method": "read-only df -B1, /proc/pressure/cpu, /proc/pressure/io, /proc/loadavg, pgrep, systemctl state"
+}

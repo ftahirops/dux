@@ -5823,3 +5823,16 @@ behind; the isolated r132 soak does not change that live service state.
 
 Raw machine-readable status, systemd state, version, and binary hash:
 [`vps1-live-status-20261110T2305Z.json`](docs/qualification/vps1-live-status-20261110T2305Z.json).
+
+## VPS1 production status recheck — 2026-11-10 23:08 UTC
+
+A read-only status query at **23:08:05** confirms the same old production
+binary remains active and dirty with no scan in progress. The `fanotify queue
+overflow` dirty reason persists, the index remains about **279,434 seconds
+(3.23 days) behind**, and its last scan is about **469,123 seconds (5.43 days)
+old**. Since 23:05:29, the overflow counter stayed at **887** and dropped
+updates stayed at **2,518,862**; pending updates drained from **22,819 to 766**
+while the daemon committed more events. This is backlog drainage, not proof of
+index accuracy: `caught_up=false` and the overflow uncertainty remains.
+
+Current sample: [`vps1-live-status-20261110T2307Z.json`](docs/qualification/vps1-live-status-20261110T2307Z.json).
