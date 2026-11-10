@@ -31,7 +31,24 @@ documented in
 [`scan-first-backlog-age-20261110.md`](../scan-first-backlog-age-20261110.md).
 The full all-feature suite, including ignored tests on tmpfs, passed
 **338/338** in 217.40 seconds. Strict Clippy, formatting, and diff checks also
-passed. The run did not produce a new LLVM coverage profile.
+passed. A separate inclusive LLVM run also passed **338/338** in 224.85
+seconds and produced the profile below.
+
+| Scope | Line | Region | Function | Branch |
+|---|---:|---:|---:|---:|
+| Whole Rust binary | 74.08% | 72.99% | 77.14% | Not emitted |
+| `src/watch.rs` | 75.44% | 76.35% | 84.95% | Not emitted |
+| `src/query.rs` | 90.96% | 87.86% | 87.50% | Not emitted |
+| `src/scan.rs` | 93.77% | 90.93% | 91.49% | Not emitted |
+
+Counts: 19,183/25,896 lines, 30,518/41,812 regions, and 1,326/1,719
+functions covered overall. The machine-readable profile is
+[`llvm-cov-338-tests.json`](llvm-cov-338-tests.json), SHA-256
+`e0e5428d02532ea2a17a174fa3394d5324c93226664a75306bb684bb8ab59715`. LLVM
+reported zero branch counters, so this is not branch coverage. The test profile
+still does not exercise successful `fanotify_init`/`fanotify_mark`, the
+event-resolution `open_by_handle_at` call site, or capability-negative
+startup. See the [coverage gap review](../coverage-gaps-20261109.md).
 
 The lockfile audit found 0 known vulnerabilities among 229 dependencies with
 the recorded 1,430-advisory RustSec snapshot, last updated 2026-11-09. The

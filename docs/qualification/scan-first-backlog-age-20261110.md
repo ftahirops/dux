@@ -62,9 +62,14 @@ lifecycle and canary gates remain open. See
 - Strict Clippy passed on all targets/features with warnings and undocumented
   unsafe blocks denied. Formatting and `git diff --check` passed.
 
-No new whole-project coverage profile was collected for this correction.
-Previously reported line/region/function percentages should not be presented
-as a profile of this exact source revision; branch coverage remains unreported.
+A 338-test all-feature LLVM profile was subsequently collected for this exact
+source revision: 74.08% line, 72.99% region, and 77.14% function coverage
+overall; 75.44% line coverage in `src/watch.rs` and 90.96% in `src/query.rs`.
+LLVM emitted no branch counters. The raw profile and counts are recorded in
+[`release-candidate-r126-20261110`](release-candidate-r126-20261110/README.md).
+The profile still does not cover the successful fanotify setup path, actual
+event-resolution `open_by_handle_at` call site, or capability-negative
+startup.
 
 ## Remaining release gates
 
