@@ -163,16 +163,16 @@
     "disposable_key_signature_mechanics_verified": true
   },
   "dependency_audit": {
-    "observed_at_utc": "2026-11-10T18:20:48Z",
+    "observed_at_utc": "2026-11-10T18:55:00Z",
     "locked_dependencies": 229,
     "known_advisories": 0,
     "warnings": 0,
     "advisory_database_commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
-    "advisory_database_commit_time": "2026-11-09T17:13:08+01:00",
+    "advisory_database_commit_time": "2026-11-10T14:45:03+01:00",
     "advisory_database_count": 1446,
     "advisory_database_updated_at": "2026-11-10T14:45:03+01:00",
-    "evidence": "docs/qualification/regression-20261110T1823Z/cargo-audit.json",
-    "advisory_database_freshness_note": "Used cached database last updated 2026-11-10T13:45:03Z; no network refresh occurred"
+    "evidence": "docs/qualification/dependency-audit-20261110T1855Z/evidence.json",
+    "advisory_database_freshness_note": "cargo audit found no advisories/warnings; direct git ls-remote confirmed local database commit equals upstream main at 2026-11-10T18:55Z, so no newer advisory DB update was available"
   },
   "production_canary": "not_started",
   "evidence": {
