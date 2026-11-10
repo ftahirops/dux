@@ -60,3 +60,14 @@ event is preserved in
 This confirms the practical issue: a guest boot takes longer than the gap
 between unrelated host tests. Do not weaken the guard; retry when those tests
 are quiescent long enough for boot and qualification.
+
+### Admission window closed during sampling — 2026-11-10 09:23 UTC
+
+At 09:23 UTC, a fresh host sample showed no build/test workloads, load1 3.72,
+CPU PSI `some` 2.27%, and no admission blockers. A guarded retry using a 75%
+CPU quota was refused on sample 3/3 when a Go test process appeared. An
+immediate retry was refused on sample 2/3 after two more Go test processes
+started. Both refusals happened before VM creation; no package lifecycle step
+ran. This demonstrates that current host test activity is recurring even
+across brief idle snapshots. The qualification guard is functioning as
+designed; wait for a sustained quiet period before another attempt.

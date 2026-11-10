@@ -27,15 +27,16 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:19 UTC
+### Live checkpoint — 2026-11-10 09:23 UTC
 
 The unit remains `active/running`, with **zero restarts**. At elapsed 600.2s,
-the earlier checkpoint was 13,994 mutations. At the latest progress sample,
-elapsed time was 840.3s and the worker had completed **19,815 mutations**. The
-19,000-op exact checkpoint passed in 306ms; no controlled crash, held-reader
-phase, or hourly burst had occurred yet. Final exactness, history, and SQLite
-integrity are still pending. These are early progress measurements, not a soak
-pass. VPS2 had 4.5 GiB free on `/`; the disposable fixture uses `/dev/shm`.
+the earlier checkpoint was 13,994 mutations; at the latest progress sample,
+elapsed time was 1,080.4s and the worker had completed **25,602 mutations**.
+The 25,000-op exact checkpoint passed in 622ms; no controlled crash,
+held-reader phase, or hourly burst had occurred yet. Final exactness, history,
+and SQLite integrity are still pending. These are early progress measurements,
+not a soak pass. VPS2 had 4.1 GiB free on `/`; the disposable fixture uses
+`/dev/shm`, with 2.8 GiB free.
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
@@ -49,6 +50,9 @@ At 09:18 UTC a later start passed admission, but a Go test workload appeared
 while Rocky was booting. The pressure guard stopped the guest at 09:19:17 UTC
 before SSH was ready; no RPM phase ran. The guard event is recorded in
 [`the 09:19 event`](docs/qualification/r132-rocky-rpm-guarded-start-20261110T091917Z.jsonl).
+At 09:23 UTC two more guarded starts were refused before VM creation when Go
+tests appeared during the three-sample admission window. See the
+[Rocky prerequisite report](docs/qualification/r132-rocky-rpm-prereq-20261110.md).
 
 ## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
 
