@@ -5531,3 +5531,32 @@ in-progress observation will finish or pass accounting. Raw status:
 VPS2 root storage was **91% used**, with **9,109,610,496 bytes (8.48 GiB)**
 available. The latest detailed directory attribution remains the 18:06 partial
 inventory; no cleanup was performed.
+
+## Seventeenth VPS2 observation and live soak update — 2026-11-10 18:16 UTC
+
+The observation started at **18:08:55** and completed at **18:14:16** (5m21s).
+It covered **1,753,768 files**, **215,188 directories**, 1,968,956 staged path
+instances, and 83,438,940,160 unique bytes (77.71 GiB). It reported zero
+coverage issues and discarded 24 vanished inode-reuse paths. Independent
+accounting passed at **18:15:41** in **84,725 ms**. Its completion gap from
+17:59:28 was **14m48s**. Seven of sixteen measured completion gaps remain over
+15 minutes; per-path freshness remains unmeasured.
+
+At **18:16:24**, the daemon was live; the last scan was 123 seconds old, and
+there were zero pending updates, overflow notifications, and reported drops.
+The index was dirty because later filesystem hints await the next observation.
+Raw status is [`vps2-live-status-20261110T1816Z.json`](docs/qualification/vps2-live-status-20261110T1816Z.json)
+(SHA-256 `23f4eeca2f840e357f41dec23d9a300b8a25db0fcfcaeb9746190df4eaa8f8c5`).
+
+The soak checkpoint at **18:16:23** records **33,075 seconds** elapsed
+(9h11m15s), **754,401 operations**, **751 exactness samples**, nine mutation
+bursts, one completed held-reader/WAL-reclaim scenario, and zero worker
+restarts. It has completed **12.76%** of the 72-hour run. No controlled crash
+has run; terminal exactness/history and SQLite checks remain pending. It still
+runs only the `soak` suite. Checkpoint:
+[`soak-progress-20261110T1816Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1816Z.json)
+(SHA-256 `f360123f106d28c1ba9c2b76eb6aa4a1cfff3f29b842c0a9e165f0aa369718f2`).
+
+VPS2 root was 90% used with **10,298,707,968 bytes (9.59 GiB)** available.
+The detailed disk inventory remains the partial 18:06 sample; no cleanup was
+performed.
