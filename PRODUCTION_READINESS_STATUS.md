@@ -1,5 +1,35 @@
 # Production readiness status
 
+## VPS2 completed scan-first observation — 2026-11-10 08:05–08:14 UTC
+
+The r121 service on VPS2 completed the scheduled full-root observation that
+started at 08:05:31 UTC. The filesystem walk completed at 08:11:52 UTC
+(approximately **6m21s**) with **1,708,484 files**, **202,663 directories**,
+**1,911,147 staged path instances**, zero directory aliases, and **zero
+coverage issues**. Dux reported **12 vanished inode-reuse paths**, discarded
+from the scan result, with zero unresolved reuse paths. The resulting index
+contained 1,907,665 unique inodes and about 82.47 GiB of unique allocated data.
+
+Post-scan accounting verification passed at 08:13:39 UTC in **106.9 seconds**.
+At the 08:14:21 UTC follow-up, the daemon remained active with zero restarts,
+zero reported dropped updates and kernel overflow notifications, and about
+598 MiB memory use. The index was still marked dirty with reason
+`filesystem changes await the next full observation`: filesystem hints arrived
+while/after the walk, so this is not evidence that the view was caught up to
+the continuously changing filesystem. The scan itself completed and its
+accounting check passed; the dirty marker correctly communicates freshness.
+
+During the walk, telemetry showed roughly 20k–38k hints/second and no growth
+in the drop/overflow counters at the sampled checkpoints. This is useful live
+evidence that the installed r121 scan-first service can complete a 1.9M-node
+walk on VPS2 under heavy churn, but it does not qualify exact r132, guarantee
+zero losses over a long soak, or independently compare every indexed path to
+an external filesystem listing. The measured six-minute scan also consumes a
+substantial share of the configured 15-minute observation interval. Full
+snapshot and intermediate progression data are in
+[`the VPS2 scan cycle report`](docs/qualification/live-vps2-scan-first-cycle-20261110T080841Z.md)
+and its [machine-readable samples](docs/qualification/live-vps2-scan-first-cycle-20261110T080841Z.json).
+
 ## Live VPS1 overflow evidence — 2026-11-10 07:52 UTC
 
 Read-only production sampling found the installed package is still **r66**
