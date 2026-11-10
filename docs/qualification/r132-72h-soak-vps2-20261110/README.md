@@ -86,7 +86,7 @@ Evidence: [progress samples](soak-progress-20261110T1019Z.json) and
 ## Workload and pass criteria
 
 - 25 filesystem mutations per second for 259,200 seconds.
-- Independently compare indexed filesystem state every 1,000 mutations.
+- Every 1,000 mutations, request a full scan-first observation via SIGHUP, wait for scan completion and accounting verification, then independently compare indexed paths and identities against the fixture. Thus this is repeated reconciliation-under-churn endurance testing, not a passive event-only soak; the 256-file seed and small fixture also do not establish production-scale throughput.
 - Inject a 500-file mutation burst each hour and verify exactness/history.
 - Hold a read-only SQLite snapshot for five minutes after six hours; then
   verify the snapshot stays stable and WAL truncation reclaims space.
@@ -111,3 +111,20 @@ and a 4,482,592-byte WAL. No held-reader or controlled-crash phase has run;
 final exactness, history continuity, and SQLite integrity remain pending. This
 is still progress, not a soak pass. See
 [`soak-progress-20261110T1324Z.json`](soak-progress-20261110T1324Z.json).
+
+
+### Exactness cadence and current checkpoint — 2026-11-10 20:22 UTC
+
+Source inspection of `Daemon.exact` and `request_scan_first_observation`
+confirmed that each 1,000-operation exactness sample requests a full scan-first
+observation by SIGHUP and waits for a newer completed generation and accounting
+verification before checking the tree against the index. The soak log's repeated
+“operator requested a full reconciliation” warnings are therefore expected from
+its exactness protocol. This measures repeated reconciliation under concurrent
+mutations; it does not measure 72 hours of event-only indexing. The 20:22
+checkpoint records 40,642.4 seconds, 918,550 operations, 915 exactness samples,
+11 hourly bursts, one successful held-reader/WAL-reclaim scenario, and zero
+controlled crashes. The scheduled crash-recovery phase begins at 12 hours and
+remains pending, as do final exactness, history, and SQLite integrity checks.
+The measured average operation rate is about 22.6/s against the requested 25/s.
+See [`soak-progress-20261110T2022Z.json`](soak-progress-20261110T2022Z.json).
