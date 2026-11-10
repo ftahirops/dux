@@ -1,0 +1,21 @@
+{
+  "observed_at_utc": "2026-11-10T22:08:31Z",
+  "decision": "blocked_no_vm_started",
+  "load_average_1m": 1.69,
+  "cpu_psi_some_avg10_percent": 1.59,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "memory_psi_some_avg10_percent": 0.0,
+  "io_psi_some_avg10_percent": 11.43,
+  "active_host_workload_count": 2,
+  "active_host_workload_types": [
+    "Go test binary",
+    "go test"
+  ],
+  "blocker_categories": [
+    "active host build/test/install/analysis workload",
+    "io PSI some avg10=11.43% exceeds 10%"
+  ],
+  "blocker_count": 3,
+  "vm_started": false,
+  "fault_matrix_started": false
+}

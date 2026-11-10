@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:51:56Z",
+  "snapshot_at_utc": "2026-11-10T22:08:31Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -55,34 +55,31 @@
     "var_lib_dux_bytes": 3799470080
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T21:51:56Z",
-    "load_average_1m": 84.53,
-    "cpu_psi_some_avg10_percent": 87.1,
+    "observed_at_utc": "2026-11-10T22:08:31Z",
+    "load_average_1m": 1.69,
+    "cpu_psi_some_avg10_percent": 1.59,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "32 active Go build/test/vet processes",
-      "load1 exceeds 10",
-      "CPU PSI some exceeds 55%"
+      "2 active Go test processes",
+      "I/O PSI some exceeds 10%"
     ],
-    "active_host_workload_count": 32,
+    "active_host_workload_count": 2,
     "active_host_workload_types": [
-      "Go compiler",
       "Go test binary",
-      "Go vet worker",
-      "go build",
-      "go test",
-      "go vet"
+      "go test"
     ],
-    "evidence": "docs/qualification/vm-admission-20261110T2151Z.json",
+    "evidence": "docs/qualification/vm-admission-20261110T2208Z.json",
     "ubuntu_guest_started": true,
     "ubuntu_guest_state": "started 17:04:20, pressure guard stopped 17:04:29; ephemeral overlay cleaned; guest state missing",
     "cpu_psi_full_avg10_percent": 0.0,
     "active_host_workloads": true,
     "vm_started": false,
-    "fault_matrix_started": false
+    "fault_matrix_started": false,
+    "io_psi_some_avg10_percent": 11.43,
+    "memory_psi_some_avg10_percent": 0.0
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
@@ -112,13 +109,13 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T21:49:33Z",
+    "observed_at_utc": "2026-11-10T22:05:40Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 45883.5,
-    "operations": 1029704,
-    "exact_check_samples": 1026,
-    "completed_hourly_bursts": 12,
+    "elapsed_seconds": 46849.7,
+    "operations": 1049512,
+    "exact_check_samples": 1046,
+    "completed_hourly_bursts": 13,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
     "terminal_exact_history_integrity": "pending",
@@ -127,15 +124,15 @@
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
     "observed_operations_per_second_elapsed": 22.466,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2149Z.json",
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2205Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.17701967592592593,
+    "coverage_duration_fraction": 0.18074729938271603,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "afb5f88a0606b783f3a3d381ee626ac47f37b49a816fae2b4703845117eac028",
+    "latest_checkpoint_sha256": "7fb2a4f93cf21c6adcb237d657bef407f227944372a342f32606bf3a2efcd3c3",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -1123,5 +1120,23 @@
       "/var/tmp/dux-cargo (1005 MiB)",
       "/var/tmp/dux-rustup (842 MiB)"
     ]
+  },
+  "python_qualification_latest": {
+    "observed_at_utc": "2026-11-10T22:05:28Z",
+    "tests_run": 381,
+    "passed": 380,
+    "failed": 0,
+    "skipped": 1,
+    "duration_seconds": 17.8,
+    "status": "passed",
+    "evidence": "docs/qualification/python-suite-rerun-20261110T2205Z.log",
+    "prior_5_percent_cpu_run": {
+      "tests_run": 381,
+      "passed": 369,
+      "errors": 11,
+      "skipped": 1,
+      "duration_seconds": 426.299,
+      "classification": "timeout errors under artificial CPU quota; subsequent full rerun passed without code changes"
+    }
   }
 }
