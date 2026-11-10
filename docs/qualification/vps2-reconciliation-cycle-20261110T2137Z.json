@@ -1,0 +1,35 @@
+{
+  "host": "192.168.5.106",
+  "daemon_pid": 576850,
+  "installed_build": "0.6.3 (8b02799b)",
+  "scan_start_utc": "2026-11-10T21:30:27.416985Z",
+  "scan_complete_utc": "2026-11-10T21:36:57.410932Z",
+  "scan_duration_seconds": 389.993947,
+  "files": 1786223,
+  "directories": 218602,
+  "staged_path_instances": 2004825,
+  "visible_bytes": 83919769600,
+  "unique_bytes": 83787059200,
+  "coverage_issues": 0,
+  "vanished_reuse_paths": 24,
+  "revalidated_reuse_paths": 0,
+  "unresolved_reuse_paths": 0,
+  "accounting_verification": "passed",
+  "accounting_elapsed_ms": 72309,
+  "accounting_completed_utc": "2026-11-10T21:38:09.749439Z",
+  "post_observation_status_at_2138z": {
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "pending_updates": 0,
+    "kernel_overflows": 0,
+    "dropped_updates": 0
+  },
+  "temporary_scan_stage_present_after_completion": false,
+  "root_disk_at_2138z": {
+    "total_bytes": 99012476928,
+    "used_bytes": 84526071808,
+    "available_bytes": 9906655232,
+    "use_percent": 90
+  },
+  "evidence_source": "remote status, systemd journal, filesystem inventory, and df captured over SSH"
+}

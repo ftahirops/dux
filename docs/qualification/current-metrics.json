@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:36:12Z",
+  "snapshot_at_utc": "2026-11-10T21:38:29Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -104,12 +104,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T21:26:25Z",
+    "observed_at_utc": "2026-11-10T21:38:11Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 44495.1,
-    "operations": 1000206,
-    "exact_check_samples": 997,
+    "elapsed_seconds": 45215.5,
+    "operations": 1015829,
+    "exact_check_samples": 1012,
     "completed_hourly_bursts": 12,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 1,
@@ -118,16 +118,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.479,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2126Z.json",
+    "observed_operations_per_second_elapsed": 22.466,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2138Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.17166319444444444,
+    "coverage_duration_fraction": 0.17444251543209877,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "5bea5253a6695e86ca62133707e3176fe48077009f011fbcd08b38afe4b81894",
+    "latest_checkpoint_sha256": "e40fbecceb0c514f30ee01eb139f328a262eaf8c31fdc7ed590c90ce3f70ed27",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -152,7 +152,7 @@
     "latest_live_status_query_at_utc": "2026-11-10T19:38:49Z",
     "latest_full_checkpoint_at_utc": "2026-11-10T20:12:09Z",
     "max_exact_convergence_ms_observed": 17393,
-    "latest_checkpoint_at_utc": "2026-11-10T21:26:25Z",
+    "latest_checkpoint_at_utc": "2026-11-10T21:38:11Z",
     "controlled_crash_recovery_scheduled_at_elapsed_seconds": 43200,
     "exactness_protocol": "Each 1000-operation exactness sample requests a full scan-first observation via SIGHUP, waits for accounting verification, then compares fixture and index.",
     "latest_live_checkpoint_remote_path": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json",
@@ -1051,5 +1051,48 @@
     "tests_failed": 0,
     "full_python_suite_rerun": false,
     "evidence": "docs/qualification/vm-admission-wrapper-detection-20261110.md"
+  },
+  "vps2_reconciliation_cycle_2137z": {
+    "host": "192.168.5.106",
+    "observed_at_utc": "2026-11-10T21:38:29Z",
+    "scan_start_utc": "2026-11-10T21:30:27.416985Z",
+    "scan_complete_utc": "2026-11-10T21:36:57.410932Z",
+    "scan_duration_seconds": 389.993947,
+    "files": 1786223,
+    "directories": 218602,
+    "coverage_issues": 0,
+    "accounting_verification": "passed",
+    "accounting_elapsed_ms": 72309,
+    "accounting_completed_utc": "2026-11-10T21:38:09.749439Z",
+    "pending_updates": 0,
+    "kernel_overflows": 0,
+    "dropped_updates": 0,
+    "dirty_reason_after_observation": "filesystem changes await the next full observation",
+    "temporary_stage_present_after_completion": false,
+    "evidence": "docs/qualification/vps2-reconciliation-cycle-20261110T2137Z.json"
+  },
+  "latest_vm_admission_2137z": {
+    "observed_at_utc": "2026-11-10T21:37:10Z",
+    "load_average_1m": 12.26,
+    "cpu_psi_some_avg10_percent": 9.44,
+    "active_host_workloads": [
+      "Go compiler",
+      "go test"
+    ],
+    "qualification_vm_started": false,
+    "fault_matrix_started": false,
+    "decision": "blocked by active Go build/test workloads and load1 > 10",
+    "evidence": "docs/qualification/vm-admission-20261110T2137Z.json"
+  },
+  "vps2_disk_followup_2138z": {
+    "observed_at_utc": "2026-11-10T21:38:29Z",
+    "root_total_bytes": 99012476928,
+    "root_used_bytes": 84526071808,
+    "root_available_bytes": 9906655232,
+    "root_use_percent": 90,
+    "dux_db_bytes": 854364160,
+    "dux_wal_bytes": 60110832,
+    "scan_stage_present_after_2137_cycle": false,
+    "evidence": "docs/qualification/vps2-reconciliation-cycle-20261110T2137Z.json"
   }
 }

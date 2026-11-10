@@ -1,0 +1,13 @@
+{
+  "observed_at_utc": "2026-11-10T21:37:10Z",
+  "load_average_1m": 12.26,
+  "cpu_psi_some_avg10_percent": 9.44,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "active_host_workloads": [
+    "Go compiler pid=3893044",
+    "go test pid=3892992"
+  ],
+  "qualification_vm_started": false,
+  "fault_matrix_started": false,
+  "decision": "host_pressure_blockers refused VM admission because active Go build/test workloads and load1 > 10"
+}
