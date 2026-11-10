@@ -1,5 +1,15 @@
 # Production readiness status
 
+## Strict dependency audit — 2026-11-10 10:07 UTC
+
+Fresh `cargo audit` and stricter `cargo audit -D warnings` runs both exited 0
+against the current lockfile: **229 dependencies, zero known vulnerabilities,
+zero warnings**. The RustSec database snapshot had 1,430 advisories at commit
+`d9cb059f3217db87aeccd190b81eaffe8cc29cb9`, last updated
+`2026-11-09T17:13:08+01:00`. This is dependency-advisory evidence, not an
+application security certification; its scope and raw result are in the
+[audit record](docs/qualification/cargo-audit-20261110T1007Z/README.md).
+
 ## Exact r132 72-hour soak — running since 2026-11-10 09:04:48 UTC
 
 A dedicated soak is running on the authorized VPS2 using the exact r132 static
