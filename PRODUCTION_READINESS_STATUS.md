@@ -4732,3 +4732,12 @@ changes await the next observation. Its last caught-up state was still about
 accounting verification; the next observation has not yet been observed. The
 machine-readable current metrics were refreshed to reflect these values and
 the updated 381-test result.
+
+## Scan-first freshness metric semantics — 2026-11-10 14:10 UTC
+
+Verified against `src/query.rs`: `behind_seconds_applicable` is false in
+scan-first mode, where `last_scan_age_seconds` is the freshness measure. The
+9.8-hour `behind_seconds` value observed on VPS2 measures the last caught-up
+interval but is explicitly not applicable to scan-first freshness. The
+readiness table and `current-metrics.json` now label this distinction. VPS1
+remains on the event-apply mode where its behind-seconds metric applies.

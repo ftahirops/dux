@@ -18,7 +18,7 @@ The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTIO
 |---|---|
 | Candidate | r132, source `f02ba7a`; binary SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76` |
 | VPS1 production | `dux 0.6.3` build `e0cc915f`, active as root, 4 historical restarts. At 13:54 UTC it was dirty, 68.4 hours behind, with 766 kernel overflows, 2,518,862 dropped updates, 9 pending updates, 1,311,146 indexed nodes, and a 128-MiB WAL; last full scan was about 5.0 days ago. |
-| VPS2 installed service | `dux 0.6.3` build `8b02799b`, scan-first mode, active with zero restarts. A full observation completed at 14:01:30 UTC with zero coverage issues and accounting verification passed. At 14:09 UTC it remained dirty pending the next observation, with 500-second last-scan age, zero overflows/drops, and about 9.8 hours since last caught-up state. |
+| VPS2 installed service | `dux 0.6.3` build `8b02799b`, scan-first mode, active with zero restarts. A full observation completed at 14:01:30 UTC with zero coverage issues and accounting verification passed. At 14:09 UTC it remained dirty pending the next observation, with 500-second last-scan age and zero overflows/drops. `behind_seconds` is explicitly inapplicable in scan-first mode; last-scan age is the freshness measure. |
 | Disk | At 13:53 UTC: `/` 185 GiB total, 55 GiB available; workspace 4.2 GiB (`target/readiness` 1.4 GiB); `/var/lib/dux` 3.4 GiB; `/var/log` 2.0 GiB. Disk is not currently near capacity. |
 | Current root host admission | At 14:07 UTC, the guarded VM refused startup at sample 1/3 because a Vitest worker was active. Earlier samples detected `node tsc`, Go test, and Go compiler workloads. No guest started. |
 
