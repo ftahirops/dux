@@ -27,13 +27,20 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:48 UTC
+### Live checkpoint — 2026-11-10 09:50 UTC
 
 The r132 soak remains `active/running`, with **zero restarts**. At elapsed
-2,581.1s it had completed **61,123 mutations**; the 61,000-op exact checkpoint
-passed in 1,370ms. The hourly burst, held-reader, controlled recovery, and final
+2,701.2s it had completed **63,930 mutations**; the 63,000-op exact checkpoint
+passed in 825ms. The hourly burst, held-reader, controlled recovery, and final
 exactness/history/integrity checks have not run yet. This is early progress,
 not a soak pass. The 72-hour qualification remains in progress.
+
+The Python readiness/release harnesses were rerun at low priority: **189 passed,
+0 failed** across readiness workflow (62), package lifecycle harness (72),
+release builder CLI (13), debug-artifact verifier (1), and qualification VM
+harness (41). These test the qualification tooling, not the Dux Rust binary or
+the actual Rocky RPM lifecycle. Details are in the
+[harness retest report](docs/qualification/r132-harness-retest-20261110T0950Z.md).
 
 ## Current production and disk snapshot — 2026-11-10 09:48 UTC
 
@@ -80,6 +87,8 @@ At 09:48 UTC, host admission for the Rocky RPM VM was blocked: load1 was 13.32
 and multiple Go compiler, test, and vet processes were active. No VM was
 started. The guard remains required because concurrent host builds have
 repeatedly interrupted guest startup.
+At 09:50 UTC, another start was refused on admission sample 2/3 when Go
+compiler, test, and vet processes appeared. No VM was started.
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
