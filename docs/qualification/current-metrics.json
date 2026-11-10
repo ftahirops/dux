@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T23:23Z",
+  "snapshot_at_utc": "2026-11-10T23:30Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T23:23:13Z",
+    "observed_at_utc": "2026-11-10T23:29:36Z",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,25 +16,25 @@
     "kernel_overflows": 887,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 280341.81,
+    "behind_seconds": 280725.024,
     "service_user": "root",
-    "index_nodes": 1321641,
-    "index_bytes_on_disk": 3709329408,
+    "index_nodes": 1321229,
+    "index_bytes_on_disk": 3712323584,
     "wal_bytes": 134217728,
-    "pending_updates": 717,
+    "pending_updates": 52,
     "dirty_reason": "fanotify queue overflow",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 470031,
+    "last_scan_age_seconds": 470414,
     "dirty_since_timestamp_seconds": 1794349023,
     "service_substate": "running",
-    "events_seen": 276665682,
-    "events_resolved": 161377775,
-    "updates_committed": 45030000,
+    "events_seen": 276833120,
+    "events_resolved": 161517951,
+    "updates_committed": 45082480,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
-    "index_bytes": 130282414080,
-    "evidence": "docs/qualification/vps1-live-status-20261110T2322Z.json",
+    "index_bytes": 131055579136,
+    "evidence": "docs/qualification/vps1-live-status-20261110T2329Z.json",
     "dirty": true,
     "paused": false,
     "installed_version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
@@ -94,7 +94,16 @@
       "updates_committed": 114200,
       "kernel_overflows": 0,
       "dropped_updates": 0
-    }
+    },
+    "deltas_since_2026_11_10T2323Z": {
+      "pending_updates": -665,
+      "events_seen": 167438,
+      "events_resolved": 140176,
+      "updates_committed": 52480,
+      "kernel_overflows": 0,
+      "dropped_updates": 0
+    },
+    "critical_io_pause_episode": "docs/qualification/vps1-critical-io-pause-recovery-20261110T2328Z.json"
   },
   "disk": {
     "observed_at_utc": "2026-11-10T21:30:21Z",
@@ -110,33 +119,23 @@
     "tmp_size_gib": 16,
     "var_tmp_size_gib": 2.2,
     "dev_shm_size_gib": 3.3,
-    "var_lib_dux_bytes": 3799470080
+    "var_lib_dux_bytes": 3799470080,
+    "current_root_snapshot": {
+      "observed_at_utc": "2026-11-10T23:30:18Z",
+      "root_total_bytes": 198092431360,
+      "root_used_bytes": 125188055040,
+      "root_available_bytes": 64073027584,
+      "root_use_percent": 67,
+      "dev_shm_available_bytes": 9976512512,
+      "evidence": "docs/qualification/host-capacity-20261110T2330Z.json"
+    }
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T22:35:38Z",
-    "load_average_1m": 7.11,
-    "cpu_psi_some_avg10_percent": 45.78,
-    "active_go_build_or_test_workloads": true,
-    "rocky_guest_started": false,
-    "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
-    "active_host_build_or_test_workloads": true,
-    "admission_blockers": [
-      "pressure guard detected active host build/test/analysis workloads"
-    ],
-    "active_host_workload_count": 4,
-    "active_host_workload_types": [
-      "Go compiler",
-      "go test"
-    ],
-    "evidence": "docs/qualification/vm-admission-20261110T2235Z.json",
-    "ubuntu_guest_started": true,
-    "ubuntu_guest_state": "pressure guard stopped disposable Ubuntu VM 43 seconds after start; ephemeral runtime cleaned; no qualification suite ran",
-    "cpu_psi_full_avg10_percent": 0.0,
-    "active_host_workloads": true,
+    "observed_at_utc": "2026-11-10T23:29:59Z",
     "vm_started": false,
-    "fault_matrix_started": false,
-    "io_psi_some_avg10_percent": 2.99,
-    "memory_psi_some_avg10_percent": 0.0
+    "decision": "blocked_no_vm_started",
+    "reason": "8 active Go compiler processes at admission sample 2/3",
+    "evidence": "docs/qualification/vm-admission-20261110T2329Z.json"
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",

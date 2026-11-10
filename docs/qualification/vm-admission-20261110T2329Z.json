@@ -1,0 +1,13 @@
+{
+  "observed_at_utc": "2026-11-10T23:29:59Z",
+  "decision": "blocked_no_vm_started",
+  "probe": "require_stable_host_admission(samples=3, interval_seconds=10)",
+  "result": "refused at sample 2/3",
+  "blockers": [
+    "8 active Go compiler processes were detected during admission"
+  ],
+  "load1_sample_after_refusal": 11.57,
+  "vm_started": false,
+  "dux_test_suite_started": false,
+  "evidence": "read-only guarded admission probe; active compiler workload left untouched"
+}

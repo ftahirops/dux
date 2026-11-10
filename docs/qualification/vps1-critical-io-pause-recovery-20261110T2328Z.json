@@ -1,0 +1,70 @@
+{
+  "observed_at_utc": "2026-11-10T23:28:37Z",
+  "host": "VPS1 production host",
+  "method": "four read-only dux status --json and /proc/pressure samples, ten seconds apart",
+  "samples": [
+    {
+      "t": "2026-11-10T23:28:07Z",
+      "paused": true,
+      "pause_reason": "io pressure",
+      "pending_updates": 7873,
+      "io_psi_some_avg10_percent": 66.71,
+      "events_seen": 276798550,
+      "events_resolved": 161490833,
+      "updates_committed": 45065543,
+      "kernel_overflows": 887,
+      "dropped_updates": 2518862
+    },
+    {
+      "t": "2026-11-10T23:28:17Z",
+      "paused": true,
+      "pause_reason": "io pressure",
+      "pending_updates": 9654,
+      "io_psi_some_avg10_percent": 35.79,
+      "events_seen": 276803919,
+      "events_resolved": 161495721,
+      "updates_committed": 45065543,
+      "kernel_overflows": 887,
+      "dropped_updates": 2518862
+    },
+    {
+      "t": "2026-11-10T23:28:27Z",
+      "paused": false,
+      "pause_reason": null,
+      "pending_updates": 9588,
+      "io_psi_some_avg10_percent": 13.62,
+      "events_seen": 276806680,
+      "events_resolved": 161498076,
+      "updates_committed": 45065671,
+      "kernel_overflows": 887,
+      "dropped_updates": 2518862
+    },
+    {
+      "t": "2026-11-10T23:28:37Z",
+      "paused": false,
+      "pause_reason": null,
+      "pending_updates": 5280,
+      "io_psi_some_avg10_percent": 5.73,
+      "events_seen": 276806968,
+      "events_resolved": 161498359,
+      "updates_committed": 45070023,
+      "kernel_overflows": 887,
+      "dropped_updates": 2518862
+    }
+  ],
+  "observed_delta_first_to_last": {
+    "pending_updates": -2593,
+    "updates_committed": 4480,
+    "kernel_overflows": 0,
+    "dropped_updates": 0,
+    "events_seen": 8418,
+    "events_resolved": 7526
+  },
+  "interpretation": "At PSI above the code\u2019s critical I/O threshold (>40%), the daemon paused writes and pending work increased. As PSI fell, it cleared the pause and drained part of the backlog; cumulative overflows and drops stayed unchanged over this 30-second window. The index remained dirty and not caught up, so this is recovery of write processing, not index exactness.",
+  "source_threshold": "src/guard.rs: Health::level classifies psi_io10 > 40% as Critical; watch loop persists pause state and resumes when pressure recovers.",
+  "limitations": [
+    "One short natural-load episode only; not a controlled fault injection.",
+    "Does not establish long-run queue capacity or fix the pre-existing dirty baseline.",
+    "No independent filesystem oracle was run."
+  ]
+}

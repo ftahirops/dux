@@ -1,0 +1,11 @@
+{
+  "observed_at_utc": "2026-11-10T23:27:25+00:00",
+  "command": "cargo audit -D warnings",
+  "exit_code": 0,
+  "locked_dependency_count": 229,
+  "advisory_database_head": "28d73fc95e5972af3403225a217def57dcaba3c4",
+  "advisory_database_commit": "2026-11-10T14:45:03+01:00 Assigned RUSTSEC-2026-0473 to openssl, RUSTSEC-2026-0474 to openssl, RUSTSEC-2026-0475 to openssl, RUSTSEC-2026-0476 to openssl, RUSTSEC-2026-0477 to openssl, RUSTSEC-2026-0478 to openssl, RUSTSEC-2026-0479 to openssl",
+  "source_revision": "4b8af2801a50845983ff013dcd89858aa4896c01",
+  "output_file": "cargo-audit.log",
+  "interpretation": "Exit status 0; audit emitted no advisory or warning findings for Cargo.lock. Dependency audit only; it is not a source-code or runtime security review."
+}
