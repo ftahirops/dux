@@ -5358,3 +5358,97 @@ not yet cover the full production P0/fault matrix, 10M scale, all supported
 filesystems, controlled crash recovery, the updated packaged Ubuntu lifecycle,
 Rocky RPM install/upgrade/rollback, or a production canary. See
 [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) for gate-by-gate limits.
+
+
+## Fourteenth verified observation; resource sample and VM admission — 2026-11-10 17:33 UTC
+
+VPS2's fourteenth scheduled observation started at **17:23:54** and finished
+at **17:31:06** (7m12s). It covered 1,746,296 files and 214,213 directories,
+with 1,960,509 staged path instances and 82,979,262,464 unique bytes
+(77.28 GiB). Coverage issues were zero; 72 vanished inode-reuse paths were
+removed, with zero revalidated or unresolved paths. Independent accounting
+passed at **17:32:37** in 90,291 ms. The completion gap from 17:15:27 was
+**15m39s**, 39 seconds beyond target. Seven of thirteen measured completion
+gaps now exceed 15 minutes. Per-path maximum observation age is still not
+measured.
+
+At the 17:33:19 status query, the daemon was active with zero restarts, pending
+updates, kernel overflows, or dropped updates. The latest scan was 133 seconds
+old. The index was dirty only because later filesystem hints await another
+full observation. Raw status:
+[`vps2-live-status-20261110T1732Z.json`](docs/qualification/vps2-live-status-20261110T1732Z.json)
+(SHA-256 `bd72d9f077c079a09336404c667eb1ed408be0a2b4a5b225ae5be24569f7d663`).
+
+A partial cgroup window from **17:25:52 to 17:32:54** covered the later
+scan/indexing work and accounting. It recorded 331.08 CPU-seconds over 422
+wall-seconds, 2.01 GiB read, 1.80 GiB written, and 2.00 GiB peak memory. The
+`memory.events` high counter rose to 204; `max`, `oom`, and `oom_kill` remained
+zero. This window began 1m58s after the scan started and ended 17 seconds after
+accounting passed, so it does not measure the complete scan cost. Raw samples
+are in [`live-vps2-scan-resources-20261110.json`](docs/qualification/live-vps2-scan-resources-20261110.json)
+(SHA-256 `f4e436ba346c10b55117d941ef9a080214add488a18becd27aa860f3e550c08e`).
+
+The r132 soak checkpoint at **17:32:54** shows 30,483.9 seconds elapsed
+(8h28m04s), 696,755 operations, 693 exactness samples, eight mutation bursts,
+one successful 300-second held-reader/WAL-reclaim scenario, zero worker
+restarts, and zero controlled crashes. Terminal exactness/history/SQLite
+assertions remain pending. The worker is running only the `soak` suite; its
+other fifteen scenario suites remain unrun. It has completed 11.8% of the
+72-hour duration. Raw checkpoint:
+[`soak-progress-20261110T1732Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1732Z.json)
+(SHA-256 `82c3b7a898ef02e15f3122cbe9299661950b310930caf5fe7003ad3f46c0e1e9`).
+
+The Ubuntu 24.04 package lifecycle VM was retried at **17:24:30** with the
+standard 2-GiB profile, 10% CPU quota, and ephemeral tmpfs runtime. Admission
+refused at sample 1/3: active Go compiler, test, and vet workloads were present;
+host load1 was 16.81 against a limit of 10, and CPU PSI some avg10 was 40.24%.
+No guest was created and no package command ran. The earlier pressure-guarded
+VM stop and lifecycle evidence remain applicable. Raw disk/admission snapshot:
+[`host-disk-admission-20261110T1733Z.json`](docs/qualification/host-disk-admission-20261110T1733Z.json).
+The root filesystem was 74% used, with 47 GiB available; it is not full, but
+free space declined by about 3.6 GiB from the 17:06 snapshot.
+
+
+## Fifteenth verified observation and guarded VM interruption — 2026-11-10 17:47 UTC
+
+The fifteenth VPS2 observation started at **17:38:55** and completed traversal
+at **17:45:21** (6m26s). It covered 1,748,968 files and 214,539 directories,
+staging 1,963,507 path instances with 83,130,183,680 unique bytes (77.42 GiB).
+There were zero coverage issues, 48 vanished reuse paths, and zero revalidated
+or unresolved paths. Accounting verification passed at **17:46:34** in 73,853
+ms. The completion interval from 17:31:06 was **14m15s**, within the 15-minute
+target. Seven of fourteen measured intervals exceed 15 minutes. The per-path
+freshness limit remains unmeasured.
+
+At 17:47:21 the service was active with zero restarts, pending updates, kernel
+overflows, and dropped updates; the last observation was 120 seconds old. It
+was dirty because hints arrived after the completed walk. Raw status:
+[`vps2-live-status-20261110T1747Z.json`](docs/qualification/vps2-live-status-20261110T1747Z.json)
+(SHA-256 `3b122ce09453b0ffe4a353a8dd7ab2b675f45cd246ed443e06684c79badd7fb5`).
+
+The exact r132 soak remained active. At 17:46:54 it had run 31,324.4 seconds
+(8h42m04s), with 715,535 operations and 712 exactness samples. Eight mutation
+bursts and one held-reader/WAL-reclaim test had completed; the worker had no
+restarts or controlled crashes. Terminal exactness/history/SQLite assertions
+remain pending. The soak runs only one of its sixteen suites and is 12.1% of
+the required 72 hours. Checkpoint:
+[`soak-progress-20261110T1747Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1747Z.json)
+(SHA-256 `ae41cff20cf751631958b2c98cfd7f3857a990110ccef2b36fd06a9f6e0e0c5a`).
+
+A guarded Ubuntu package lifecycle VM started at **17:38:06** with a 10% CPU
+quota, 2 GiB RAM, and an ephemeral tmpfs overlay. The pressure watchdog stopped
+it at **17:39:01** after a Go test started and CPU PSI some avg10 reached
+42.55%. SSH timed out during banner exchange; the guest never became reachable
+and no package commands ran. The QEMU unit became inactive and the private
+overlay/runtime was removed. Evidence:
+[`vm-admission-20261110T1738Z.json`](docs/qualification/vm-admission-20261110T1738Z.json)
+(SHA-256 `836f749beb23667a8e5a7323f2d1f8b2e1b5eb9219beee5ab5331f5e16016516`).
+The same host later showed concurrent Go compilation/tests and CPU PSI some
+avg10 69.66%; I did not stop those unrelated workloads.
+
+Root disk samples fluctuated with temporary build/test activity: 74% used and
+47 GiB available at 17:33, 68% and 57 GiB at 17:39, then 69% and 56 GiB at
+17:47. No directory-level attribution was collected, so this short-lived
+change does not prove which workload created or removed the bytes. The latest
+snapshot is [`host-disk-20261110T1747Z.json`](docs/qualification/host-disk-20261110T1747Z.json)
+(SHA-256 `30cc799fb504ad76a389104ab8e27a5acfd1ac4662a837c79c87b9bbb19d1983`).

@@ -1,0 +1,21 @@
+{
+  "observed_at_utc": "2026-11-10T17:33:19Z",
+  "root_filesystem": {
+    "size": "185G",
+    "used": "130G",
+    "available": "47G",
+    "use_percent": 74
+  },
+  "package_vm_admission": {
+    "guest": "ubuntu24-lifecycle-current",
+    "attempted_at_utc": "2026-11-10T17:24:30Z",
+    "command": "python3 scripts/dux-qualification-vm.py --profile standard --cpu-quota-percent 10 --ephemeral-runtime start ubuntu24-lifecycle-current",
+    "outcome": "refused at first host admission sample; no VM created and no package commands ran",
+    "reasons": [
+      "active Go compiler, go test, test binary, and go vet workloads",
+      "host load1 16.81 exceeded the admission limit of 10",
+      "CPU PSI some avg10 40.24% exceeded the admission limit"
+    ],
+    "state_after_attempt": "missing"
+  }
+}

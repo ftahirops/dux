@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-11-10T17:47:31Z",
+  "root_filesystem": {
+    "size": "185G",
+    "used": "121G",
+    "available": "56G",
+    "use_percent": 69
+  },
+  "recent_samples": [
+    {"observed_at_utc": "2026-11-10T17:33:19Z", "available": "47G", "use_percent": 74},
+    {"observed_at_utc": "2026-11-10T17:39:36Z", "available": "57G", "use_percent": 68},
+    {"observed_at_utc": "2026-11-10T17:47:31Z", "available": "56G", "use_percent": 69}
+  ],
+  "note": "Usage is fluctuating with temporary build/test activity. This short sample does not attribute the changed bytes to specific directories or establish a stable trend."
+}
