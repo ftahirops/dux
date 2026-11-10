@@ -4443,6 +4443,14 @@ package commands ran. Captured evidence:
 [`rocky9-admission-refusal-20261110T1308Z.json`](docs/qualification/rocky9-admission-refusal-20261110T1308Z.json).
 At the same time, VPS1 remained dirty and about 67.6 hours behind with 766
 overflow notices, 2,518,862 dropped updates, and a 128-MiB WAL; disk had 58
-GiB free. The r132 soak had reached 14,598.4 seconds, 339,000 operations, 338
-exact-check samples, and four hourly bursts, with zero restarts; held-reader,
-crash-recovery, and final integrity/exactness gates remained pending.
+GiB free. At 13:09:56 UTC, the r132 soak had reached 14,658.5 seconds, 340,431
+operations, 339 exact-check samples, and four hourly bursts, with zero
+restarts; held-reader, crash-recovery, and final integrity/exactness gates
+remained pending. The matching evidence is
+[`soak-progress-20261110T1310Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1310Z.json).
+
+The readiness snapshot is now corrected to link the actual 13:09:56 UTC soak
+checkpoint instead of the earlier 13:03 snapshot. VPS1's 13:10 UTC read-only
+status remained dirty, about 67.7 hours behind, with the overflow/drop totals
+unchanged, 1,186 pending updates, a 128-MiB WAL, and 58 GiB free. Five host
+Go/Node test processes were active; no Rocky guest was started.

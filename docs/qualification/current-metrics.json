@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T13:08:34Z",
+  "snapshot_at_utc": "2026-11-10T13:10:03Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T13:08:34Z",
+    "observed_at_utc": "2026-11-10T13:10:03Z",
     "installed_release": "0.6.3-66",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,15 +16,15 @@
     "kernel_overflows": 766,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 243462.839,
+    "behind_seconds": 243551.346,
     "service_user": "root",
-    "index_nodes": 1320911,
-    "index_bytes_on_disk": 3463843840,
+    "index_nodes": 1315052,
+    "index_bytes_on_disk": 3465465856,
     "wal_bytes": 134217728,
-    "pending_updates": 13
+    "pending_updates": 1186
   },
   "disk": {
-    "observed_at_utc": "2026-11-10T13:08:34Z",
+    "observed_at_utc": "2026-11-10T13:10:03Z",
     "root_size_gib": 185,
     "root_used_gib": 119,
     "root_available_gib": 58,
@@ -34,23 +34,22 @@
     "target_size_gib": 3.6
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T13:08:34Z",
-    "load_average_1m": 6.2,
+    "observed_at_utc": "2026-11-10T13:10:03Z",
+    "load_average_1m": 7.24,
     "cpu_psi_some_avg10_percent": 70.84,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "Go compiler pid=1977931",
-      "Go compiler pid=1977944",
-      "Go compiler pid=1978041",
-      "go test pid=1977687"
+      "active Go compiler/test and Node Vitest workloads"
     ],
-    "active_host_workload_count": 2,
+    "active_host_workload_count": 5,
     "active_host_workload_types": [
       "Go compiler",
-      "Go test"
+      "Go test binary",
+      "go test",
+      "node vitest"
     ],
     "evidence": "docs/qualification/rocky9-admission-refusal-20261110T1308Z.json"
   },
@@ -79,12 +78,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T13:08:29Z",
+    "observed_at_utc": "2026-11-10T13:09:56Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 14598.4,
-    "operations": 339000,
-    "exact_check_samples": 338,
+    "elapsed_seconds": 14658.5,
+    "operations": 340431,
+    "exact_check_samples": 339,
     "completed_hourly_bursts": 4,
     "held_reader_scenarios": 0,
     "controlled_crash_recovery_scenarios": 0,
@@ -93,8 +92,8 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 23.222,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1303Z.json"
+    "observed_operations_per_second_elapsed": 23.224,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1310Z.json"
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -128,7 +127,8 @@
     "soak_checkpoint_1245z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1245Z.json",
     "soak_checkpoint_1251z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1251Z.json",
     "soak_checkpoint_1256z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1256Z.json",
-    "soak_checkpoint_1303z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1303Z.json"
+    "soak_checkpoint_1303z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1303Z.json",
+    "soak_checkpoint_1310z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1310Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
