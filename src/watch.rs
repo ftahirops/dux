@@ -1,7 +1,7 @@
 use crate::store::Store;
 use crate::util::now_secs;
 use anyhow::{Context, Result};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
@@ -26,6 +26,11 @@ static LAST_WAL_WARNING_AT: AtomicU64 = AtomicU64::new(0);
 static LAST_DIRTY_MARKER_FAILURE_LOG_AT: AtomicU64 = AtomicU64::new(0);
 
 struct RawFdGuard(RawFd);
+
+struct FreshInstallRequest {
+    decision: SyncSender<bool>,
+    installed: Receiver<()>,
+}
 
 impl Drop for RawFdGuard {
     fn drop(&mut self) {
@@ -2523,6 +2528,7 @@ pub fn run_daemon(
     let mut kernel_empty = true; // did the last drain reach EAGAIN (queue empty)?
     let mut throttled_since: Option<i64> = None;
     let mut scan_job: Option<std::thread::JoinHandle<Result<crate::scan::ScanStats>>> = None;
+    let (fresh_install_tx, fresh_install_rx) = mpsc::sync_channel::<FreshInstallRequest>(1);
     let mut accounting_check: Option<AccountingCheck> = None;
     let mut pending_reconciliation_check: Option<bool> = None;
     let mut scan_cancel: Option<Arc<AtomicBool>> = None;
@@ -2563,6 +2569,46 @@ pub fn run_daemon(
     crate::util::write_watch_status(db, 0, true, 0, 0, 0, 0, 0, 0, MAX_PENDING, index_uncertain);
 
     loop {
+        // A fresh-index rename must happen with this daemon's SQLite connection
+        // closed. The scan worker pauses here only for the namespace swap; the
+        // independent fanotify hint reader continues draining kernel events.
+        if let Ok(request) = fresh_install_rx.try_recv() {
+            let placeholder = Connection::open_in_memory()
+                .context("opening temporary SQLite connection for fresh-index handoff")?;
+            let old = std::mem::replace(&mut store.conn, placeholder);
+            match old.close() {
+                Ok(()) => {
+                    let sidecars_absent = ["-wal", "-shm", "-journal"].iter().all(|suffix| {
+                        matches!(
+                            std::fs::symlink_metadata(format!("{}{suffix}", db.display())),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                        )
+                    });
+                    if request.decision.send(sidecars_absent).is_err() {
+                        store = Store::open_rw(db)
+                            .context("restoring SQLite after abandoned install handoff")?;
+                        continue;
+                    }
+                    if sidecars_absent {
+                        // The worker sends this even on a failed rename (via a
+                        // drop guard), so reopening cannot race installation.
+                        let _ = request.installed.recv();
+                        store = Store::open_rw(db)
+                            .context("reopening freshly installed index after atomic rename")?;
+                    } else {
+                        // Existing SQLite sidecars indicate another connection;
+                        // preserve its inode and use the online backup path.
+                        store = Store::open_rw(db)
+                            .context("restoring SQLite connection after install fallback")?;
+                    }
+                }
+                Err((connection, error)) => {
+                    store.conn = connection;
+                    request.decision.send(false).ok();
+                    tracing::warn!(%error, "could not close SQLite connection for fresh-index rename; retaining backup publication");
+                }
+            }
+        }
         if let Some(reader) = hint_reader.as_ref() {
             let observed = reader.observed_events.load(Ordering::Relaxed);
             if observed > sampled_hint_events {
@@ -3558,6 +3604,7 @@ pub fn run_daemon(
                     "RELOADING=1\nSTATUS=Rebuilding index; collecting concurrent changes"
                 });
                 scan_cancel = Some(cancel);
+                let install_tx = fresh_install_tx.clone();
                 // Scan-first mode treats events as hints and does not mutate the
                 // live index while observing. Mark the index uncertain before
                 // the writer opens SQLite so event bursts cannot trigger a
@@ -3579,7 +3626,40 @@ pub fn run_daemon(
                             crate::scan::reconcile_in_place(&mut live, &scan_root, &opts)
                         })()
                     } else {
-                        crate::scan::rebuild_atomic(&scan_db, &scan_root, &opts)
+                        let install_request_tx = install_tx;
+                        let install_done = Arc::new(std::sync::Mutex::new(None));
+                        let install_done_for_gate = Arc::clone(&install_done);
+                        crate::scan::rebuild_atomic_with_install_gate(
+                            &scan_db,
+                            &scan_root,
+                            &opts,
+                            move || {
+                                let (decision, decision_rx) = mpsc::sync_channel(0);
+                                let (installed_tx, installed_rx) = mpsc::sync_channel(0);
+                                if let Ok(mut done) = install_done_for_gate.lock() {
+                                    *done = Some(installed_tx);
+                                } else {
+                                    return false;
+                                }
+                                if install_request_tx
+                                    .send(FreshInstallRequest {
+                                        decision,
+                                        installed: installed_rx,
+                                    })
+                                    .is_err()
+                                {
+                                    return false;
+                                }
+                                decision_rx.recv().unwrap_or(false)
+                            },
+                            move || {
+                                if let Ok(mut done) = install_done.lock() {
+                                    if let Some(done) = done.take() {
+                                        let _ = done.send(());
+                                    }
+                                }
+                            },
+                        )
                     }
                 }));
             }

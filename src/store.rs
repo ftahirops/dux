@@ -624,6 +624,65 @@ impl Store {
         Ok(false)
     }
 
+    /// True only for the daemon's initialized but never-populated v7 database.
+    /// `open_rw` creates a real SQLite schema, so the main file is nonempty
+    /// even though no indexed generation or growth history exists.
+    pub fn is_empty_unindexed_database(path: &Path) -> Result<bool> {
+        if !Self::has_index_artifacts(path)? {
+            return Ok(false);
+        }
+        let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(conn) => conn,
+            // A dangling database symlink is a supported first-install target;
+            // let the established backup path follow/create its destination.
+            Err(_) => return Ok(false),
+        };
+        for table in ["meta", "inodes", "paths", "dirents", "dir_totals", "growth"] {
+            if !sqlite_table_exists(&conn, table)? {
+                return Ok(false);
+            }
+        }
+        let version: Option<String> = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if version.and_then(|value| value.parse::<i64>().ok()) != Some(SCHEMA_VERSION) {
+            return Ok(false);
+        }
+        let roots: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM meta WHERE key IN ('root_dev','root_inode')",
+            [],
+            |row| row.get(0),
+        )?;
+        let (inodes, paths, dirents, dir_totals, growth): (i64, i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM inodes),
+                    (SELECT COUNT(*) FROM paths),
+                    (SELECT COUNT(*) FROM dirents),
+                    (SELECT COUNT(*) FROM dir_totals),
+                    (SELECT COUNT(*) FROM growth)",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )?;
+        Ok(roots == 0
+            && inodes == 0
+            && paths == 0
+            && dirents == 0
+            && dir_totals == 0
+            && growth == 0)
+    }
+
     fn open_ro_versioned(path: &Path, allow_v4: bool, require_v7_path_graph: bool) -> Result<Self> {
         if !Self::has_index_artifacts(path)? {
             // If the FIRST scan is building the index right now, say so (with live

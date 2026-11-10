@@ -1,5 +1,27 @@
 # Production readiness status
 
+## Fresh-index WAL publication prototype — 2026-11-10 04:54 UTC
+
+Implemented a narrow candidate fix for r127's clean-install WAL spike. For a
+current v7 database with no indexed root, inode/path/dirent/totals rows, or
+growth history, the scanner no longer holds an unnecessary read connection;
+the watcher closes its SQLite connection at publication, verifies sidecars
+are absent, and permits atomic rename of the synced staging database. If the
+handoff is unavailable or SQLite sidecars remain, the existing online backup
+path is used. Populated indexes keep SQLite backup publication and its
+concurrent-reader snapshot behavior.
+
+Local all-feature tests passed **338/338**, with two ext4/scale tests ignored;
+the fresh-index path, populated-reader fallback, zero-byte database,
+recovery-sidecar, and dangling-symlink tests passed. Strict Clippy, formatting,
+and `git diff --check` passed. This does **not** yet prove the WAL spike is
+fixed under the daemon: no candidate package or VPS lifecycle has exercised
+the watcher handoff. The prior r127 coverage percentages predate this change
+and are not coverage for it. Details and the required runtime gate are in
+[`fresh-index WAL publication qualification`](docs/qualification/wal-fresh-index-publication-20261110/README.md).
+
+**Release decision remains: not production-ready.**
+
 ## Latest verified checkpoint — 2026-11-10 04:24 UTC
 
 ### Release decision

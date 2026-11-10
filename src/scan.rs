@@ -251,7 +251,20 @@ pub struct ScanStats {
 /// retain complete snapshots; failed installation leaves the previous database
 /// intact (callers hold the exclusive writer lock).
 pub fn rebuild_atomic(db: &Path, root: &Path, opts: &ScanOptions) -> Result<ScanStats> {
-    rebuild_atomic_with_install_observer(db, root, opts, |_| {})
+    rebuild_atomic_with_install_observer(db, root, opts, |_| {}, || false, || {})
+}
+
+/// Daemon-only installation hook. A fresh empty database can be atomically
+/// replaced after the watcher closes its SQLite connection; existing indexes
+/// continue through SQLite backup so concurrent readers retain their snapshot.
+pub(crate) fn rebuild_atomic_with_install_gate(
+    db: &Path,
+    root: &Path,
+    opts: &ScanOptions,
+    on_install: impl FnOnce() -> bool,
+    on_installed: impl FnOnce(),
+) -> Result<ScanStats> {
+    rebuild_atomic_with_install_observer(db, root, opts, |_| {}, on_install, on_installed)
 }
 
 /// Test seam at the point where the fully built staging database is ready to
@@ -262,6 +275,8 @@ fn rebuild_atomic_with_install_observer(
     root: &Path,
     opts: &ScanOptions,
     on_install: impl FnOnce(&Path),
+    on_install_gate: impl FnOnce() -> bool,
+    on_installed: impl FnOnce(),
 ) -> Result<ScanStats> {
     ensure_not_cancelled(&opts.cancel)?;
     let _progress_cleanup = ScanProgressCleanup::start(db.to_path_buf());
@@ -271,14 +286,15 @@ fn rebuild_atomic_with_install_observer(
     Store::has_index_artifacts(db)?;
     // Unknown/future/corrupt sources must not silently lose committed history.
     // A first installation has no source; known v4/v5/v6 upgrades preserve it.
-    let previous = if Store::has_recoverable_database_state(db)? {
-        Some(
-            Store::open_rebuild_source(db)
-                .context("validating previous index and growth history")?,
-        )
-    } else {
-        None
-    };
+    let previous =
+        if Store::has_recoverable_database_state(db)? && !Store::is_empty_unindexed_database(db)? {
+            Some(
+                Store::open_rebuild_source(db)
+                    .context("validating previous index and growth history")?,
+            )
+        } else {
+            None
+        };
     let mut new_os = db.to_path_buf().into_os_string();
     new_os.push(".new");
     let db_new = PathBuf::from(new_os);
@@ -397,7 +413,22 @@ fn rebuild_atomic_with_install_observer(
     // changes; cancellation before this point leaves the old index untouched.
     ensure_not_cancelled(&opts.cancel)?;
     on_install(db);
-    if Store::has_index_artifacts(db)? {
+    // The watcher can close its sole connection for a never-populated index.
+    // Avoid copying every page into its empty WAL database: rename the fully
+    // synced staging file instead. Any pre-existing data or readers retain the
+    // established online-backup publication path.
+    let fresh_empty_target = Store::is_empty_unindexed_database(db)?;
+    let replace_fresh_target = fresh_empty_target && on_install_gate();
+    struct InstallCompletion<F: FnOnce()>(Option<F>);
+    impl<F: FnOnce()> Drop for InstallCompletion<F> {
+        fn drop(&mut self) {
+            if let Some(done) = self.0.take() {
+                done();
+            }
+        }
+    }
+    let _install_completion = InstallCompletion(replace_fresh_target.then_some(on_installed));
+    if Store::has_index_artifacts(db)? && !replace_fresh_target {
         // Never unlink WAL/SHM underneath readers. SQLite's online backup API
         // installs the rebuilt pages in ONE destination transaction; existing
         // WAL readers keep their snapshot, new readers see the committed rebuild.
@@ -4707,8 +4738,11 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("payload"), b"baseline").unwrap();
 
-        let stats =
-            rebuild_atomic_with_install_observer(&db, &root, &ScanOptions::default(), |live_db| {
+        let stats = rebuild_atomic_with_install_observer(
+            &db,
+            &root,
+            &ScanOptions::default(),
+            |live_db| {
                 let progress = crate::util::read_scan_progress_for(live_db)
                     .expect("scan progress must remain visible through publication");
                 assert!(
@@ -4726,8 +4760,11 @@ mod tests {
                     crate::util::read_scan_progress_for(live_db).is_some(),
                     "long atomic publication must keep progress fresh"
                 );
-            })
-            .unwrap();
+            },
+            || false,
+            || {},
+        )
+        .unwrap();
 
         assert_eq!(stats.files, 1);
         assert!(
@@ -4737,6 +4774,61 @@ mod tests {
         assert!(!PathBuf::from(format!("{}.new", db.display())).exists());
         rm_db(&db);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fresh_initialized_index_uses_atomic_file_replacement_gate() {
+        let db = tmp("fresh-index-atomic-replacement");
+        let root = tmp("fresh-index-atomic-replacement-root");
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("payload"), b"baseline").unwrap();
+
+        let live = Store::open_rw(&db).unwrap();
+        assert!(Store::is_empty_unindexed_database(&db).unwrap());
+        let original_inode = fs::metadata(&db).unwrap().ino();
+        let mut live = Some(live);
+        let installed = std::cell::Cell::new(false);
+        let stats = rebuild_atomic_with_install_gate(
+            &db,
+            &root,
+            &ScanOptions::default(),
+            || {
+                live.take()
+                    .expect("watcher connection handed off exactly once")
+                    .conn
+                    .close()
+                    .expect("fresh database connection closes before rename");
+                true
+            },
+            || installed.set(true),
+        )
+        .unwrap();
+
+        assert!(installed.get(), "successful rename signals watcher reopen");
+        assert_eq!(stats.files, 1);
+        assert_ne!(
+            fs::metadata(&db).unwrap().ino(),
+            original_inode,
+            "fresh baseline is installed by replacing the empty database file"
+        );
+        for suffix in ["-wal", "-shm", "-journal"] {
+            assert!(
+                !PathBuf::from(format!("{}{suffix}", db.display())).exists(),
+                "fresh replacement leaves no sidecar attached to the new database"
+            );
+        }
+        assert!(!Store::is_empty_unindexed_database(&db).unwrap());
+        let index = Store::open_ro(&db).unwrap();
+        assert!(
+            crate::store::indexed_path(&index.conn, &root.join("payload"))
+                .unwrap()
+                .is_some()
+        );
+        drop(index);
+        rm_db(&db);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -5044,7 +5136,22 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
             .unwrap();
         std::fs::write(dir.join("new"), b"new").unwrap();
-        rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+        let gate_called = std::cell::Cell::new(false);
+        rebuild_atomic_with_install_gate(
+            &db,
+            &dir,
+            &ScanOptions::default(),
+            || {
+                gate_called.set(true);
+                false
+            },
+            || {},
+        )
+        .unwrap();
+        assert!(
+            !gate_called.get(),
+            "populated indexes retain backup publication"
+        );
         let during: i64 = reader
             .conn
             .query_row("SELECT COUNT(*) FROM inodes", [], |r| r.get(0))
