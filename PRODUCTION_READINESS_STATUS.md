@@ -1,5 +1,9 @@
 # Production readiness status
 
+> Historical qualification log. For the current gate decision and concise
+> metrics, see [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and
+> [`docs/qualification/current-metrics.json`](docs/qualification/current-metrics.json).
+
 ## Release authenticity guard implementation — 2026-11-10
 
 The release builder now fails closed when no release signing fingerprint is

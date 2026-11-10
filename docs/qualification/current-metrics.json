@@ -1,0 +1,98 @@
+{
+  "snapshot_at_utc": "2026-11-10T11:34:00Z",
+  "decision": "not_ready_for_production_rollout",
+  "candidate": {
+    "release": "r132",
+    "source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+    "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
+  },
+  "production_vps1": {
+    "observed_at_utc": "2026-11-10T11:12:55Z",
+    "installed_release": "0.6.3-66",
+    "service_active": true,
+    "historical_restarts": 4,
+    "index_dirty": true,
+    "caught_up": false,
+    "kernel_overflows": 742,
+    "dropped_updates": 2518862,
+    "last_full_scan_utc": "2026-11-05T12:49:22Z"
+  },
+  "disk": {
+    "observed_at_utc": "2026-11-10T11:30:37Z",
+    "root_size_gib": 185,
+    "root_used_gib": 121,
+    "root_available_gib": 56,
+    "root_use_percent": 69,
+    "target_readiness_size_gib": 1.4
+  },
+  "qualification_host_admission": {
+    "observed_at_utc": "2026-11-10T11:34:28Z",
+    "load_average_1m": 27.92,
+    "cpu_psi_some_avg10_percent": 70.84,
+    "active_go_build_or_test_workloads": true,
+    "rocky_guest_started": false
+  },
+  "rust_tests": {
+    "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+    "passed": 341,
+    "failed": 0,
+    "ignored": 2
+  },
+  "llvm_coverage_percent": {
+    "lines": 72.61,
+    "regions": 71.44,
+    "functions": 76.19,
+    "branches": null
+  },
+  "r132_churn": {
+    "baseline_files": 100000,
+    "mutations": 20000,
+    "result": "passed",
+    "exact_comparisons": 10,
+    "sqlite_integrity": "ok",
+    "limitations": ["not 1.9M-node production scale", "not multi-day endurance"]
+  },
+  "r132_72h_soak": {
+    "host": "192.168.5.106",
+    "observed_at_utc": "2026-11-10T11:34:01Z",
+    "state": "active/running",
+    "restarts": 0,
+    "elapsed_seconds": 8951.3,
+    "operations": 210427,
+    "exact_check_samples": 209,
+    "completed_hourly_bursts": 2,
+    "held_reader_scenarios": 0,
+    "controlled_crash_recovery_scenarios": 0,
+    "terminal_exact_history_integrity": "pending",
+    "requested_operations_per_second": 25,
+    "observed_operations_per_second_last_measured": 23.562,
+    "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
+    "running_harness_has_pacing_fix": false
+  },
+  "package_lifecycle": {
+    "ubuntu_deb_r132": "passed",
+    "rocky_rpm_r132": "not_qualified"
+  },
+  "release_authenticity": {
+    "publisher_keyring_available": false,
+    "trusted_publisher_fingerprint_available": false,
+    "rpm_publisher_signature_verified": false,
+    "disposable_key_signature_mechanics_verified": true
+  },
+  "dependency_audit": {
+    "observed_at_utc": "2026-11-10T11:33:00Z",
+    "locked_dependencies": 229,
+    "known_advisories": 0,
+    "warnings": 0,
+    "advisory_database_commit": "d9cb059f3217db87aeccd190b81eaffe8cc29cb9",
+    "advisory_database_commit_time": "2026-11-09T17:13:08+01:00"
+  },
+  "production_canary": "not_started",
+  "evidence": {
+    "live_soak": "docs/qualification/r132-72h-soak-vps2-20261110/",
+    "churn": "docs/qualification/r132-100k-churn-vps2-20261110/README.md",
+    "disk": "docs/qualification/workspace-disk-20261110T1130Z.json",
+    "dependency_audit": "docs/qualification/cargo-audit-20261110T1133Z.json",
+    "coverage_and_full_history": "PRODUCTION_READINESS_STATUS.md"
+  }
+}
