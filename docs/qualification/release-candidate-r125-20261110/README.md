@@ -46,6 +46,16 @@ Ubuntu guest, followed by accounting/path verification and a fresh
 uninterrupted 24-hour canary. VPS1 and VPS2 production services remain
 unchanged. The previous VPS2 canary remains a failed run.
 
+A fresh read-only VPS2 snapshot is retained in
+[`vps2-live-status-20261110T0048Z.json`](vps2-live-status-20261110T0048Z.json).
+At capture the r121 daemon was active with PID 2561224 and zero restarts. It
+had completed a full observation 59 seconds earlier, but accounting
+verification was still pending; the index remained dirty and not caught up,
+with reported lag of about 10.8 hours. The same sample showed zero kernel
+overflows and dropped events. Since VPS2 is in scan-first mode, `events_resolved`
+being zero is expected: fanotify records are hints, and full observations
+reconcile the index. This brief live snapshot is not a new canary pass.
+
 The new `src/watch.rs` changes in this revision are test-only. The bounded
 inode-reuse production change was already included in release 124; release 125
 rebuilds that production code from its committed, clean source and includes
