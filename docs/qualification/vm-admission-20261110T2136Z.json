@@ -1,0 +1,19 @@
+{
+  "observed_at_utc": "2026-11-10T21:36:12Z",
+  "load_average_1m": 17.73,
+  "cpu_psi_some_avg10_percent": 33.45,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "io_psi_some_avg10_percent": 1.21,
+  "io_psi_full_avg10_percent": 0.25,
+  "memory_psi_some_avg10_percent": 0.0,
+  "active_host_workloads": [
+    "Go compiler pid=3890702",
+    "Go compiler pid=3890926",
+    "Go test binary pid=3890256",
+    "go test pid=3888314",
+    "go test pid=3890579"
+  ],
+  "qualification_vm_started": false,
+  "fault_matrix_started": false,
+  "decision": "host_pressure_blockers refused VM admission"
+}

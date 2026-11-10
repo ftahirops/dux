@@ -246,6 +246,13 @@ def active_host_workloads(proc_root=Path('/proc')):
             process_title = Path(argv[0]).name.split()
             executable = process_title[0]
             args = process_title[1:] + argv[1:]
+            # pg_virtualenv runs an entire temporary PostgreSQL test session
+            # from one wrapper process; the nested shell/go command is not a
+            # separate /proc entry until later in the setup. Treat the wrapper
+            # itself as active test work so VM admission cannot race its setup.
+            if executable == 'pg_virtualenv':
+                workloads.append(f'PostgreSQL test wrapper pid={process.name}')
+                continue
             if executable in {'node', 'nodejs'} and args:
                 node_script = Path(args[0]).stem.lower()
                 if node_script in {'tsc', 'tsc.js'}:

@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:30:21Z",
+  "snapshot_at_utc": "2026-11-10T21:36:12Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -1028,5 +1028,28 @@
     "fault_matrix_started": false,
     "decision": "blocked by active Go build/test workloads and load1 > 10",
     "evidence": "docs/qualification/vm-admission-20261110T2129Z.json"
+  },
+  "latest_vm_admission_2136z": {
+    "observed_at_utc": "2026-11-10T21:36:12Z",
+    "load_average_1m": 17.73,
+    "cpu_psi_some_avg10_percent": 33.45,
+    "io_psi_some_avg10_percent": 1.21,
+    "active_host_workloads": [
+      "Go compiler",
+      "Go test binary",
+      "go test"
+    ],
+    "qualification_vm_started": false,
+    "fault_matrix_started": false,
+    "decision": "blocked by active Go test/build workloads and load1 > 10",
+    "evidence": "docs/qualification/vm-admission-20261110T2136Z.json"
+  },
+  "vm_admission_guard_wrapper_fix": {
+    "status": "implemented_and_focused_module_passed",
+    "change": "explicitly detects pg_virtualenv test wrappers",
+    "tests_passed": 41,
+    "tests_failed": 0,
+    "full_python_suite_rerun": false,
+    "evidence": "docs/qualification/vm-admission-wrapper-detection-20261110.md"
   }
 }

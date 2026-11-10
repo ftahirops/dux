@@ -157,6 +157,7 @@ class PressureGuardTests(unittest.TestCase):
                 "129": ["/usr/bin/node", "/home/project/ui/node_modules/.bin/tsc", "--noEmit"],
                 "130": ["/usr/bin/node", "/home/project/ui/node_modules/typescript/bin/tsc", "--build"],
                 "131": ["/root/go/pkg/mod/golang.org/toolchain@go1.26/pkg/tool/linux_amd64/vet", "-unsafeptr=false", "vet.cfg"],
+                "132": ["/usr/bin/pg_virtualenv", "-t", "bash", "-c", "go test ./internal/repository -run TestExample"],
             }
             for pid, argv in processes.items():
                 process = proc_root / pid
@@ -171,6 +172,7 @@ class PressureGuardTests(unittest.TestCase):
                     "Go compiler pid=105",
                     "Go test binary pid=126",
                     "Go vet worker pid=131",
+                    "PostgreSQL test wrapper pid=132",
                     "cargo clippy pid=112",
                     "cargo test pid=103",
                     "cargo test pid=109",
