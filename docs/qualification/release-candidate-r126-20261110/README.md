@@ -60,13 +60,15 @@ script is [`capability-negative-smoke.sh`](capability-negative-smoke.sh). This
 checks missing `CAP_SYS_ADMIN` at startup; it does not yet test missing
 `CAP_DAC_READ_SEARCH` during event-handle resolution.
 
-A dedicated missing-`CAP_DAC_READ_SEARCH` event-resolution harness is now
-available at
-[`capability-handle-resolution-smoke.sh`](capability-handle-resolution-smoke.sh).
-Its shell syntax check passed, but the runtime test has not been run: VPS2 is
-currently performing a full reconciliation under elevated CPU pressure, and
-the guarded lifecycle host is also under heavy unrelated build/test load. Do
-not count this harness as a passed product test until its recorded run passes.
+A dedicated missing-`CAP_DAC_READ_SEARCH` event-resolution smoke passed twice
+on VPS2 using the exact candidate binary. With `CAP_SYS_ADMIN` retained,
+fanotify startup succeeded, `open_by_handle_at` returned `EPERM`, and Dux
+reported uncertainty after unresolved events. See the
+[`test report`](../production-live-followup-20261110T0224Z/README.md),
+[`reproducible harness`](capability-handle-resolution-smoke.sh), and
+[`captured output`](capability-handle-resolution-output.txt). This covers only
+Ubuntu 24.04.3/kernel 6.8.0-147-generic/ext4; other kernels, filesystems, and
+capability combinations remain outside this test.
 
 The lockfile audit found 0 known vulnerabilities among 229 dependencies with
 the recorded 1,430-advisory RustSec snapshot, last updated 2026-11-09. The

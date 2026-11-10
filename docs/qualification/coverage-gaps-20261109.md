@@ -110,9 +110,7 @@ missing-`CAP_DAC_READ_SEARCH` event-handle behavior, broader filesystem race
 cases, and independent-walk comparison remain open. Reproduce with
 [`capability-negative-smoke.sh`](release-candidate-r126-20261110/capability-negative-smoke.sh).
 
-A separate test harness now targets the other capability boundary: fanotify
-startup retains `CAP_SYS_ADMIN` while event-handle resolution lacks
-`CAP_DAC_READ_SEARCH`. Its syntax check passed, but the runtime has not been
-run because VPS2 is reconciling under elevated CPU pressure. It remains an
-open test, not passing evidence:
-[`capability-handle-resolution-smoke.sh`](release-candidate-r126-20261110/capability-handle-resolution-smoke.sh).
+A separate capability boundary test now passes twice: fanotify starts with
+`CAP_SYS_ADMIN`, but event-handle resolution lacks `CAP_DAC_READ_SEARCH`; the
+candidate logs the loss and marks its index dirty. Results and exact limits:
+[`VPS2 observation and capability report`](production-live-followup-20261110T0224Z/README.md).

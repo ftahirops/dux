@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 01:59 UTC
+## Latest verified checkpoint — 2026-11-10 02:26 UTC
 
 ### Release decision
 
@@ -8,9 +8,10 @@
 r126 has a passing full Rust test/coverage run and verified packages, but has
 not been installed on either host. The guarded Debian lifecycle runner has not
 launched its disposable VM because recurring unrelated Go compiler/test jobs
-keep resetting host admission. The required fresh 24-hour candidate canary and
-capability-negative fanotify tests remain open. A small privileged success-path
-smoke passed on VPS2; it does not replace broader churn/inode-race tests.
+keep resetting host admission. The required fresh 24-hour candidate canary
+remains open. Privileged success-path and both tested capability-negative
+fanotify smokes passed on VPS2; they do not replace broader churn/inode-race,
+package lifecycle, or sustained-canary qualification.
 
 ### Production VPS1 — current installed service
 
@@ -100,7 +101,25 @@ confirms the status correction against the production database; it does not
 qualify r126 runtime behavior. See
 [`VPS2 read-only status comparison`](docs/qualification/production-live-followup-20261110T0214Z/README.md).
 
-**Updated:** 2026-11-10 02:14 UTC
+At 02:24 UTC, the installed r121 daemon completed an in-place observation of
+1,640,606 files and 194,545 directories. It reported 0 coverage issues and 0
+unresolved inode-reuse paths after discarding 88 vanished paths. The run took
+about 7m24s, used a 659 MiB disk-backed staging DB at the captured midpoint,
+and cleaned that file on completion. Root free space recovered from 4.7 to 5.8
+GiB; the service remained active with zero restarts, drops, or overflows. The
+follow-up status showed only the normal “changes await next observation” dirty
+reason. Details are in
+[`VPS2 observation and disk report`](docs/qualification/production-live-followup-20261110T0224Z/README.md).
+
+The r126 missing-`CAP_DAC_READ_SEARCH` smoke then passed twice on a disposable
+ext4 loop filesystem in a private mount namespace. `open_by_handle_at` returned
+the expected `EPERM`, which Dux surfaced as dirty/uncertain status after 69
+unresolved events. Final samples showed 90 and 85 events seen, zero resolved,
+dropped, or overflow events. The installed r121 service remained active with
+zero restarts and no write error. Test report and captured output are in the
+same follow-up folder.
+
+**Updated:** 2026-11-10 02:26 UTC
 
 ---
 
