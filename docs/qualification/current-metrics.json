@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T13:10:03Z",
+  "snapshot_at_utc": "2026-11-10T14:09:54Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,8 +7,8 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T13:10:03Z",
-    "installed_release": "0.6.3-66",
+    "observed_at_utc": "2026-11-10T13:54:22Z",
+    "installed_release": "0.6.3 (build e0cc915f)",
     "service_active": true,
     "historical_restarts": 4,
     "index_dirty": true,
@@ -16,42 +16,46 @@
     "kernel_overflows": 766,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 243551.346,
+    "behind_seconds": 246210.643,
     "service_user": "root",
-    "index_nodes": 1315052,
-    "index_bytes_on_disk": 3465465856,
+    "index_nodes": 1311146,
+    "index_bytes_on_disk": 3466829824,
     "wal_bytes": 134217728,
-    "pending_updates": 1186
+    "pending_updates": 9,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+    "scan_in_progress": false
   },
   "disk": {
-    "observed_at_utc": "2026-11-10T13:10:03Z",
+    "observed_at_utc": "2026-11-10T13:53:40Z",
     "root_size_gib": 185,
-    "root_used_gib": 119,
-    "root_available_gib": 58,
-    "root_use_percent": 68,
+    "root_used_gib": 123,
+    "root_available_gib": 55,
+    "root_use_percent": 70,
     "target_readiness_size_gib": 1.4,
-    "workspace_size_gib": 4.08,
-    "target_size_gib": 3.6
+    "workspace_size_gib": 4.2,
+    "target_size_gib": 3.6,
+    "var_lib_dux_size_gib": 3.4,
+    "var_log_size_gib": 2.0
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T13:10:03Z",
-    "load_average_1m": 7.24,
-    "cpu_psi_some_avg10_percent": 70.84,
-    "active_go_build_or_test_workloads": true,
+    "observed_at_utc": "2026-11-10T14:07:50Z",
+    "load_average_1m": 4.18,
+    "cpu_psi_some_avg10_percent": 2.55,
+    "active_go_build_or_test_workloads": false,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "active Go compiler/test and Node Vitest workloads"
+      "node Vitest test worker"
     ],
-    "active_host_workload_count": 5,
+    "active_host_workload_count": 1,
     "active_host_workload_types": [
-      "Go compiler",
-      "Go test binary",
-      "go test",
       "node vitest"
     ],
-    "evidence": "docs/qualification/rocky9-admission-refusal-20261110T1308Z.json"
+    "evidence": "PRODUCTION_READINESS_STATUS.md (14:07 UTC VM guard entry)",
+    "ubuntu_guest_started": false,
+    "ubuntu_guest_state": "inactive; latest guarded start refused at sample 1/3",
+    "cpu_psi_full_avg10_percent": 0.0
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
@@ -78,13 +82,13 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T13:09:56Z",
+    "observed_at_utc": "2026-11-10T14:09:50Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 14658.5,
-    "operations": 340431,
-    "exact_check_samples": 339,
-    "completed_hourly_bursts": 4,
+    "elapsed_seconds": 18264.7,
+    "operations": 424216,
+    "exact_check_samples": 422,
+    "completed_hourly_bursts": 5,
     "held_reader_scenarios": 0,
     "controlled_crash_recovery_scenarios": 0,
     "terminal_exact_history_integrity": "pending",
@@ -92,12 +96,17 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 23.224,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1310Z.json"
+    "observed_operations_per_second_elapsed": 23.22600425958269,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1409Z.json",
+    "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "coverage_duration_fraction": 0.07047
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
-    "rocky_rpm_r132": "not_qualified"
+    "rocky_rpm_r132": "not_qualified",
+    "current_r136_deb_rpm_vm_qualification": "not_qualified; guarded Ubuntu VM start refused before VM creation",
+    "rollback_runbook": "docs/operations/package-rollback.md",
+    "fixture_manifest": "docs/qualification/package-active-rollback-r136-20261110/manifest.json"
   },
   "release_authenticity": {
     "publisher_keyring_available": false,
@@ -128,7 +137,11 @@
     "soak_checkpoint_1251z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1251Z.json",
     "soak_checkpoint_1256z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1256Z.json",
     "soak_checkpoint_1303z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1303Z.json",
-    "soak_checkpoint_1310z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1310Z.json"
+    "soak_checkpoint_1310z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1310Z.json",
+    "latest_soak_checkpoint_1406z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1406Z.json",
+    "package_rollback_fixture": "docs/qualification/package-active-rollback-r136-20261110/manifest.json",
+    "rollback_runbook": "docs/operations/package-rollback.md",
+    "latest_soak_checkpoint_1409z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1409Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -140,7 +153,7 @@
     "fanotify_handle_access_as_dux": "direct kernel API passed; Dux integrated event-handle decode/replay not qualified",
     "production_deployed": false,
     "evidence": "docs/qualification/systemd-hardening-20261110/nonroot-service-followup.md",
-    "full_python_suite_passed": 377,
+    "full_python_suite_passed": 380,
     "full_python_suite_skipped": 1,
     "temporary_rpm_build": "passed; unsigned; not release artifact",
     "temporary_deb_staging_build": "passed; unsigned; source metadata version 0.6.3-12",
@@ -150,14 +163,20 @@
     "small_ext4_rescan_as_dux": "passed_bounded_probe",
     "direct_open_by_handle_at_as_dux": "passed_bounded_probe",
     "full_packaged_systemd_unit": "not_runtime_qualified",
-    "dux_internal_handle_decoder_and_replay": "not_qualified"
+    "dux_internal_handle_decoder_and_replay": "not_qualified",
+    "full_python_suite_observed_at_utc": "2026-11-10T14:09:32Z"
   },
   "python_tests": {
     "modules": 25,
-    "passed": 377,
+    "passed": 380,
     "failed": 0,
     "skipped": 1,
-    "observed_at_utc": "2026-11-10T11:56:23Z"
+    "observed_at_utc": "2026-11-10T14:09:32Z",
+    "tests_run": 381,
+    "full_suite_includes_latest_vm_guard_change": true,
+    "latest_focused_vm_guard_test": "passed",
+    "latest_focused_vm_guard_test_at_utc": "2026-11-10T14:06:16Z",
+    "skip_reason": "Real GPG/RPM signing integration requires DUX_RELEASE_SIGNING_TEST_RPM"
   },
   "python_trace_coverage": {
     "tool": "Python standard-library trace",
@@ -204,5 +223,28 @@
     "handle_type": 1,
     "handle_bytes": 8,
     "dux_internal_handle_decoder": "not qualified"
+  },
+  "vps2_scan_first_runtime": {
+    "observed_at_utc": "2026-11-10T14:09:50Z",
+    "installed_build": "0.6.3 (8b02799b)",
+    "mode": "scan_first",
+    "service_active": true,
+    "service_restarts": 0,
+    "last_full_observation_utc": "2026-11-10T14:01:30Z",
+    "last_observation_age_seconds": 500,
+    "last_observation_coverage_issues": 0,
+    "accounting_verification": "passed",
+    "accounting_verification_elapsed_ms": 61654,
+    "files": 1708691,
+    "directories": 209678,
+    "staged_path_instances": 1918369,
+    "unique_bytes": 83398668288,
+    "zero_overflows": true,
+    "zero_dropped_updates": true,
+    "state_at_1406": "dirty; changes await next full observation; no scan active",
+    "seconds_since_last_caught_up": 35192.546,
+    "next_periodic_observation_confirmed": false,
+    "evidence": "PRODUCTION_READINESS_STATUS.md (14:02 and 14:06 UTC entries)",
+    "state_at_1409": "dirty; changes await next full observation; no scan active"
   }
 }

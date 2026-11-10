@@ -4706,3 +4706,29 @@ vet workers; the targeted host-workload test passes with both Node tsc and Go
 vet cases. A guarded Ubuntu start at 14:05 reached sample 3/3 and refused due
 to an active Go compiler. No VM was launched. The full Python test discovery
 remains pending while host Go test/build workloads are active.
+
+## Full-suite verification and 14:09 live checkpoint — 2026-11-10
+
+After the Go `vet` and Node `tsc` host-workload detectors were added, I reran
+full Python discovery: **381 tests ran, 380 passed, 1 skipped, 0 failed** in
+18.56 seconds. The skip is the real GPG/RPM signing integration case, which
+requires `DUX_RELEASE_SIGNING_TEST_RPM`. The host-workload regression covers Go
+compiler/vet and Node tsc entry paths; the latest targeted case passed as well.
+`py_compile`, `git diff --check`, and JSON parsing of the current metrics file
+passed. Python line/branch coverage for the VM admission helper was not
+measured by this run.
+
+At 14:09:50 UTC, VPS2 reported the r132 soak still running, **18,264.7 seconds**
+elapsed, **424,216 operations**, **422 samples**, five hourly mutation bursts,
+zero restarts, no held-reader or controlled-crash phases, and terminal exactness,
+history, and SQLite checks pending. The evidence is
+[`soak-progress-20261110T1409Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1409Z.json)
+(SHA-256 `e3429e68159c730b74ac239e631cc78e5cd4882766a63747208f13af808e1895`).
+
+VPS2 scan-first status at the same observation: no overflow or dropped updates,
+no active scan, last full observation 500 seconds old, and dirty only because
+changes await the next observation. Its last caught-up state was still about
+9.8 hours ago. The 14:01:30 observation had zero coverage issues and passed
+accounting verification; the next observation has not yet been observed. The
+machine-readable current metrics were refreshed to reflect these values and
+the updated 381-test result.
