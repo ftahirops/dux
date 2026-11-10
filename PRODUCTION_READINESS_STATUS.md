@@ -319,6 +319,17 @@ they contain the current r131/r132 package candidates and qualification
 evidence; available disk is not blocking the pending lifecycle. Full sampled
 inventory: [workspace disk record](docs/qualification/workspace-disk-20261110T1130Z.json).
 
+## Fresh dependency audit — 2026-11-10 11:33 UTC
+
+`cargo audit -D warnings` passed against all **229 locked dependencies** with
+zero known vulnerabilities and zero warnings. Cargo Audit was 0.22.2. The
+advisory database fetch resolved to commit
+`d9cb059f3217db87aeccd190b81eaffe8cc29cb9`, dated 2026-11-09; this is a fresh
+scan against the same available advisory snapshot, not a newer database
+revision. `Cargo.lock` was unchanged. This checks known dependency advisories
+only, not Dux application security. Exact result:
+[cargo-audit-20261110T1133Z.json](docs/qualification/cargo-audit-20261110T1133Z.json).
+
 ## Current production and disk snapshot — 2026-11-10 09:58 UTC
 
 The installed VPS1 production daemon remains **r66** (`0.6.3`, revision
