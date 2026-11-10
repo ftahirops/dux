@@ -35,3 +35,8 @@ passed with exit 0. This validates syntax of the candidate source units, not
 the active production unit's security or successful package rollout. No
 service, daemon, or configuration was changed or restarted. Full root identity
 and the retained `CAP_SYS_ADMIN` remain material threat-model items.
+
+The focused package-policy regression
+`python3 -B scripts/test_dux_package_lifecycle.py -k bpf` passed **1/1**. It
+proves the lifecycle gate rejects an effective filter missing the BPF denial;
+it is not a runtime attempt to invoke BPF from the production service.

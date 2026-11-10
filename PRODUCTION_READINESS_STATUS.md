@@ -70,6 +70,8 @@ UMask warning; the `dux` group was empty and DB/WAL permissions were 0640
 policy-drift evidence, not a production change or candidate rollout. The full
 [effective-unit security review](docs/qualification/vps1-systemd-security-review-20261110T1105Z.md)
 records limits and hashes.
+The focused lifecycle policy regression rejecting a missing BPF denial passed
+**1/1**; it does not execute the syscall in production.
 
 ## VPS1 live production check — 2026-11-10 10:09 UTC
 
