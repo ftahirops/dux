@@ -4812,3 +4812,31 @@ or controlled-crash phases, and terminal exactness/history/SQLite checks
 pending. Snapshot
 [`soak-progress-20261110T1431Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1431Z.json)
 SHA-256: `aea5f8a4f979401e4fc84ea1d00366a7439418db9291ff36bbf5f616cb9c5727`.
+
+## Fourth scan-first observation and SLO miss — 2026-11-10 14:47 UTC
+
+The fourth completed VPS2 scan-first observation finished at **14:45:48 UTC**.
+It covered 1,716,119 files, 210,697 directories, 1,926,816 staged path
+instances, 83,631,431,680 unique bytes (77.89 GiB), with zero coverage issues,
+one vanished inode-reuse path, zero revalidated paths, and zero unresolved
+paths. Accounting verification passed at 14:46:53 in 64,122 ms. At 14:47:13,
+last-observation age was 85 seconds, no scan was active, pending updates were
+zero, and the service had recorded no fanotify overflow or dropped update.
+The index remained dirty awaiting the next full observation.
+
+The four completion gaps now measure **13m48s, 14m51s, and 15m39s**. The first
+two met the 15-minute freshness target; the third **missed by 39 seconds**.
+All four completed scans had zero coverage issues and passed accounting, but
+the target is not reliably met under this workload. The scans start at a fixed
+15-minute interval, and variable scan duration moves the completion-to-
+completion freshness; this is an observed limitation, not just a hypothetical
+risk. The next cycles are needed to assess frequency and margin. This evidence
+supports event-loss recovery but does not support a 15-minute freshness
+production SLO without scheduling/performance changes or a revised target.
+
+At 14:47:13 the separate r132 soak worker remained running with zero restarts,
+20,489.3 seconds elapsed, 474,759 operations, 472 samples, five mutation
+bursts, no held-reader or controlled-crash phases, and terminal checks pending.
+Checkpoint:
+[`soak-progress-20261110T1447Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1447Z.json)
+(SHA-256 `7fe201746955e5562258ef7de61ed5685ebe94c27742426fcb25f0119efe1f50`).
