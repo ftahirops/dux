@@ -15,8 +15,8 @@ revalidated four inode-reuse paths. Accounting verification passed. The final
 status was dirty only because scan-first waits for its next full observation;
 `behind_seconds_applicable=false`, zero dropped events, zero kernel overflows,
 and no write error were recorded. Systemd reported zero service restarts, a
-2 GiB `MemoryHigh`, 4 GiB `MemoryMax`, one-core CPU quota, and 5.67 GiB read /
-7.39 GiB written during that daemon lifetime. No 24-hour canary or independent
+2 GiB `MemoryHigh`, 4 GiB `MemoryMax`, one-core CPU quota, and 5.67 GB read /
+7.39 GB written (decimal units) during that daemon lifetime. No 24-hour canary or independent
 filesystem equality test was part of this lifecycle.
 
 ## WAL finding and interpretation
