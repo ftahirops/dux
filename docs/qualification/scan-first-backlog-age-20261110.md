@@ -35,6 +35,29 @@ old and the dirty reason still said the next observation was pending. Its raw
 but both are inapplicable event-mode values in scan-first. The captured record
 is [`scan-first-backlog-age-20261110-vps2-status-0125Z.json`](scan-first-backlog-age-20261110-vps2-status-0125Z.json).
 
+At 01:31:41 UTC, the next whole-root observation started while the r121 daemon
+remained live. It completed at 01:36:33 with **1,632,117 files**, **193,595
+directories**, **1,825,712 staged path instances**, **1,822,230 unique inodes**,
+**81.27 GiB**, and **0 coverage issues**. Two inode-reuse races were
+revalidated; there were zero unresolved reuse paths and zero pending paths to
+replay. The independent reconciliation accounting check passed at 01:37:43 in
+**69.609 seconds**. At 01:38:31, the daemon was active/running with zero
+restarts, zero kernel overflows, zero reported drops, no scan in progress, and
+no write error. It remained dirty because filesystem hints changed during the
+observation and the next full observation had not yet run. This confirms that
+the dirty marker is conservative; it does not establish that every concurrent
+mutation is visible before that next observation.
+
+During the scan, systemd temporarily reported `reload-notify`; after the
+successful observation it returned to `active/running`. `ActiveEnterTimestamp`
+continued to show the original service activation time, so that field alone
+must not be used to infer that the unit stayed in reload state for that whole
+duration. The daemon's own scan fields and journal show the transition. The
+raw journal is preserved in
+[`scan-first-observation-20261110-vps2-journal-0131-0138Z.txt`](scan-first-observation-20261110-vps2-journal-0131-0138Z.txt),
+and a later status sample is in
+[`scan-first-backlog-age-20261110-vps2-status-0139Z.json`](scan-first-backlog-age-20261110-vps2-status-0139Z.json).
+
 ## Code correction
 
 The watcher previously derived `throttled_since` from `last_caught_up` in both
