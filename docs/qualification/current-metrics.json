@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T23:08Z",
+  "snapshot_at_utc": "2026-11-10T23:15Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T23:08Z",
+    "observed_at_utc": "2026-11-10T23:14:48Z",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,25 +16,25 @@
     "kernel_overflows": 887,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 279433.993,
+    "behind_seconds": 279836.397,
     "service_user": "root",
-    "index_nodes": 1320587,
-    "index_bytes_on_disk": 3705741312,
+    "index_nodes": 1321381,
+    "index_bytes_on_disk": 3707920384,
     "wal_bytes": 134217728,
-    "pending_updates": 766,
+    "pending_updates": 58,
     "dirty_reason": "fanotify queue overflow",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 469123,
+    "last_scan_age_seconds": 469526,
     "dirty_since_timestamp_seconds": 1794349023,
     "service_substate": "running",
-    "events_seen": 275699483,
-    "events_resolved": 160851419,
-    "updates_committed": 44813990,
+    "events_seen": 275850946,
+    "events_resolved": 160967269,
+    "updates_committed": 44860736,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
-    "index_bytes": 128659931136,
-    "evidence": "docs/qualification/vps1-live-status-20261110T2307Z.json",
+    "index_bytes": 129452548096,
+    "evidence": "docs/qualification/vps1-live-status-20261110T2315Z.json",
     "dirty": true,
     "paused": false,
     "installed_version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
@@ -50,11 +50,20 @@
       "events_resolved": 7209184,
       "dropped_updates": 0
     },
-    "deltas_since_2026_11_10T2305Z": {
+    "last_event_commit_timestamp_seconds": 1794352486,
+    "watch_status_updated_at_seconds": 1794352488,
+    "recent_estale_journal_sample": {
+      "sample_file": "docs/qualification/vps1-estale-event-sample-20261110T2314Z.json",
+      "matching_messages_in_latest_500": 430,
+      "fan_attrib_only_mask_0x4": 304,
+      "interpretation": "bounded journal sample; not complete event rate or causal proof"
+    },
+    "deltas_since_2026_11_10T2308Z": {
       "kernel_overflows": 0,
-      "pending_updates": -22053,
-      "events_seen": 245415,
-      "events_resolved": 99507,
+      "pending_updates": -708,
+      "events_seen": 151463,
+      "events_resolved": 115850,
+      "updates_committed": 46746,
       "dropped_updates": 0
     }
   },
