@@ -1,0 +1,95 @@
+{
+  "captured_at_utc": "2026-11-10T10:21:53.111722+00:00",
+  "host": "vps1",
+  "loadavg_1_5_15": [
+    5.39,
+    7.24,
+    7.26
+  ],
+  "cpu_pressure": {
+    "some": {
+      "avg10": 3.21,
+      "avg60": 3.38,
+      "avg300": 6.36,
+      "total": 213114902365.0
+    },
+    "full": {
+      "avg10": 0.0,
+      "avg60": 0.0,
+      "avg300": 0.0,
+      "total": 0.0
+    }
+  },
+  "io_pressure": {
+    "some": {
+      "avg10": 2.25,
+      "avg60": 3.7,
+      "avg300": 4.25,
+      "total": 59486804014.0
+    },
+    "full": {
+      "avg10": 2.09,
+      "avg60": 3.47,
+      "avg300": 3.9,
+      "total": 38787139348.0
+    }
+  },
+  "service": {
+    "MainPID": "1073891",
+    "NRestarts": "4",
+    "ExecMainStatus": "0",
+    "MemoryCurrent": "1193451520",
+    "MemoryPeak": "1430843392",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "installed_binary": {
+    "version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+    "sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060"
+  },
+  "status": {
+    "behind_seconds": 233461.481,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since_timestamp_seconds": 1794299269,
+    "events_dropped": 2518862,
+    "events_resolved": 128791701,
+    "events_seen": 222545134,
+    "index_bytes": 136273104896,
+    "index_bytes_on_disk": 3434123264,
+    "index_nodes": 1336872,
+    "kernel_overflow_notifications": 742,
+    "last_event_commit_timestamp_seconds": 1794306112,
+    "last_scan_age_seconds": 423151,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 29,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794072651,
+    "updates_committed": 36171556,
+    "userspace_updates_dropped": 2518862,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794306113,
+    "write_error": null
+  },
+  "root_filesystem": {
+    "size_bytes": 198092431360,
+    "used_bytes": 138994585600,
+    "available_bytes": 50266497024,
+    "used_percent": "74%"
+  },
+  "recent_log_counts_last_5m": {
+    "stale_handle_resolution_warnings": 150,
+    "slow_flush_warnings": 0,
+    "fanotify_overflow_messages": 0
+  }
+}

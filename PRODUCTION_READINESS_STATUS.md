@@ -37,6 +37,19 @@ read-only observation; it does not show r132 behavior or recovery. Full status,
 unit, binary, disk, and recent-warning counts are in the
 [10:09 VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T1010Z.json).
 
+### VPS1 follow-up — 2026-11-10 10:21 UTC
+
+The service remains active on r66, dirty and not caught up. The last full scan
+is still **2026-11-05 12:49:22 UTC**; the daemon reports 423,151 seconds since
+that scan and 233,461 seconds behind. Cumulative overflow and dropped-event
+counters remain 742 and 2,518,862, while seen/resolved/committed counters
+continue to grow. The latest sample has 1,336,872 index nodes and a 3.43-GB
+database. In its preceding five minutes it logged 150 stale-handle warnings,
+zero slow-flush warnings, and zero new overflow messages. Root is 74% used with
+50.3 GB available. The service still has four historical restarts. Full status
+and pressure telemetry are in the
+[10:21 snapshot](docs/qualification/live-vps1-readiness-20261110T1020Z.json).
+
 ## Exact r132 72-hour soak — running since 2026-11-10 09:04:48 UTC
 
 A dedicated soak is running on the authorized VPS2 using the exact r132 static

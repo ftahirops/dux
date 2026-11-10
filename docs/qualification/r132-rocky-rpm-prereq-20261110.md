@@ -30,6 +30,11 @@ At 10:12:40 UTC, a fresh read-only host sample measured load average **10.77**,
 above the configured start limit of 10. No VM was started or lifecycle attempt
 made in this sample; the guard remains in force.
 
+At 10:23:29 UTC, the guard's read-only admission evaluator still found three
+active Go test workloads and I/O PSI `some avg10=16.84%`, above its
+10% startup limit. No VM was launched. Retry only after both the workload and
+I/O pressure clear through the normal three-sample admission procedure.
+
 ## Static package authenticity inspection — 2026-11-10 10:13 UTC
 
 The exact r132 artifact
