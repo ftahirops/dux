@@ -70,19 +70,19 @@ Simply ignoring the conflict would compromise correctness. A fix needs a
 deterministic reproducer that introduces reuse between validation passes, then
 must prove bounded convergence when churn stops and continued fail-closed
 behavior when it does not. A bounded retry to a fixed point may help, but has
-not been qualified. A bounded three-pass implementation and two deterministic
-synthetic stage-mutation tests are now present in the working tree; they have
-not yet compiled or run. The tests are intended to check convergence after a
-validation-phase race and fail-closed behavior after persistent races. They do
-not prove that VPS2's sample-108 race had the same cause.
+not been qualified. A bounded three-pass implementation and three targeted
+regression tests are now in the working tree. They cover convergence after an
+injected validation-phase race, fail-closed behavior under persistent races,
+and early exit when no candidate is repairable. The tests pass in debug and the
+two race tests also pass in the release suite; they do not prove that VPS2's
+sample-108 race had the same cause. See
+[`inode-reuse-revalidation-20261110`](../inode-reuse-revalidation-20261110/README.md)
+for exact results and coverage.
 
 ## Required follow-up
 
-1. Run the two new deterministic tests; inspect and fix any compile or logic
-   failures before proceeding.
-2. Run the all-features Rust suite, strict Clippy, formatting, and exact
-   independent path/accounting comparison on a disposable ext4 filesystem;
-   measure the added scan cost under a conflict case.
-3. Keep the r121 canary monitor stopped. Qualify a rebuilt candidate through
+1. Keep qualifying the change with a controlled conflict-path overhead test and
+   exact independent path/accounting comparison on a disposable ext4 filesystem.
+2. Keep the r121 canary monitor stopped. Qualify a rebuilt candidate through
    package lifecycle and runtime checks before starting a fresh uninterrupted
    24-hour canary. VPS1 remains on its legacy daemon and was not changed.

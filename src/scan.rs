@@ -1603,6 +1603,51 @@ fn count_conflicting_inode_incarnations(stage: &Connection) -> Result<i64> {
 /// refreshed only after every ancestor and its current file type are verified.
 /// Directory replacement and other ambiguous identities remain incomplete.
 fn revalidate_inode_reuse_paths(stage: &Connection, root: &Path) -> Result<(u64, u64, u64)> {
+    const MAX_REVALIDATION_PASSES: usize = 3;
+    revalidate_inode_reuse_paths_bounded(stage, root, MAX_REVALIDATION_PASSES, |_, _| Ok(()))
+}
+
+/// Repeat inode-reuse validation a small, fixed number of times. The walk and
+/// validation are not an atomic filesystem snapshot: inode reuse can race a
+/// validation pass and create a new conflict among paths already examined.
+/// Rechecking after a pass can converge once that churn settles. If it does
+/// not, leave the remaining conflict visible so the caller fails closed.
+fn revalidate_inode_reuse_paths_bounded<F>(
+    stage: &Connection,
+    root: &Path,
+    max_passes: usize,
+    mut between_passes: F,
+) -> Result<(u64, u64, u64)>
+where
+    F: FnMut(&Connection, usize) -> Result<()>,
+{
+    let mut removed_total = 0u64;
+    let mut revalidated_total = 0u64;
+    let mut unresolved_total = 0u64;
+    let mut conflicts = count_conflicting_inode_incarnations(stage)?;
+    for pass in 1..=max_passes {
+        if conflicts == 0 {
+            break;
+        }
+        let (removed, revalidated, unresolved) = revalidate_inode_reuse_paths_once(stage, root)?;
+        removed_total = removed_total.saturating_add(removed);
+        revalidated_total = revalidated_total.saturating_add(revalidated);
+        // Once any path was ambiguous, keep the scan incomplete. A later pass
+        // may no longer select that path after another candidate clears its
+        // inode conflict group; absence from a later candidate set is not
+        // evidence that the earlier ambiguity disappeared.
+        unresolved_total = unresolved_total.saturating_add(unresolved);
+        between_passes(stage, pass)?;
+
+        conflicts = count_conflicting_inode_incarnations(stage)?;
+        if conflicts == 0 || (removed == 0 && revalidated == 0) {
+            break;
+        }
+    }
+    Ok((removed_total, revalidated_total, unresolved_total))
+}
+
+fn revalidate_inode_reuse_paths_once(stage: &Connection, root: &Path) -> Result<(u64, u64, u64)> {
     use std::os::unix::ffi::OsStringExt;
 
     let mut stmt = stage.prepare(
@@ -3204,6 +3249,203 @@ mod tests {
     }
 
     #[test]
+    fn inode_reuse_revalidation_repeats_after_a_racing_incarnation_change() {
+        use std::os::unix::ffi::OsStrExt;
+
+        fn fixture(root: &Path) -> (Connection, i64) {
+            let first = root.join("first");
+            let second = root.join("second");
+            let _ = fs::remove_dir_all(root);
+            fs::create_dir_all(root).unwrap();
+            fs::write(&first, b"same inode").unwrap();
+            fs::hard_link(&first, &second).unwrap();
+            let root_meta = fs::symlink_metadata(root).unwrap();
+            let file_meta = fs::symlink_metadata(&first).unwrap();
+            let (root_dev, root_inode) = crate::util::indexed_identity(&root_meta).unwrap();
+            let (file_dev, file_inode) = crate::util::indexed_identity(&file_meta).unwrap();
+            let (birth, _) = crate::util::inode_path_metadata_at(&file_meta, &first);
+
+            let conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE scan_nodes(
+                   path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,depth INTEGER,name BLOB,
+                   dev INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT,
+                   mount_id INTEGER,blocks INTEGER DEFAULT 0,uid INTEGER DEFAULT 0,mtime INTEGER DEFAULT 0
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO scan_nodes(path_id,parent_path_id,depth,name,dev,inode,birth_ns,kind)
+                 VALUES(1,-1,0,?1,?2,?3,1,'d')",
+                params![root.as_os_str().as_bytes(), root_dev, root_inode],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO scan_nodes(path_id,parent_path_id,depth,name,dev,inode,birth_ns,kind)
+                 VALUES(2,1,1,?1,?2,?3,?4,'f'),(3,1,1,?5,?2,?3,?6,'f')",
+                params![
+                    b"first".as_slice(),
+                    file_dev,
+                    file_inode,
+                    birth,
+                    b"second".as_slice(),
+                    birth.saturating_add(1)
+                ],
+            )
+            .unwrap();
+            (conn, birth)
+        }
+
+        let root = tmp("reuse-revalidate-between-passes");
+        let (conn, birth) = fixture(&root);
+        let mut injected_race = false;
+        let (removed, refreshed, unresolved) =
+            revalidate_inode_reuse_paths_bounded(&conn, &root, 3, |stage, pass| {
+                if pass == 1 && !injected_race {
+                    // Model the inode being reused again after this pass has
+                    // inspected the path, before the final conflict recount.
+                    stage.execute(
+                        "UPDATE scan_nodes SET birth_ns=?1 WHERE path_id=3",
+                        [birth.saturating_add(2)],
+                    )?;
+                    injected_race = true;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(removed, 0);
+        assert_eq!(refreshed, 2, "the second pass repairs the injected race");
+        assert_eq!(unresolved, 0);
+        assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inode_reuse_revalidation_stops_early_when_no_candidate_can_be_repaired() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = tmp("reuse-revalidate-no-progress");
+        let first = root.join("first-dir");
+        let second = root.join("second-dir");
+        let source = root.join("identity-source");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        fs::write(&source, b"different identity").unwrap();
+        let root_meta = fs::symlink_metadata(&root).unwrap();
+        let source_meta = fs::symlink_metadata(&source).unwrap();
+        let (root_dev, root_inode) = crate::util::indexed_identity(&root_meta).unwrap();
+        let (source_dev, source_inode) = crate::util::indexed_identity(&source_meta).unwrap();
+        let (source_birth, _) = crate::util::inode_path_metadata_at(&source_meta, &source);
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(
+               path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,depth INTEGER,name BLOB,
+               dev INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT,
+               mount_id INTEGER,blocks INTEGER DEFAULT 0,uid INTEGER DEFAULT 0,mtime INTEGER DEFAULT 0
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes(path_id,parent_path_id,depth,name,dev,inode,birth_ns,kind)
+             VALUES(1,-1,0,?1,?2,?3,1,'d')",
+            params![root.as_os_str().as_bytes(), root_dev, root_inode],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes(path_id,parent_path_id,depth,name,dev,inode,birth_ns,kind)
+             VALUES(2,1,1,?1,?2,?3,?4,'d'),(3,1,1,?5,?2,?3,?6,'d')",
+            params![
+                b"first-dir".as_slice(),
+                source_dev,
+                source_inode,
+                source_birth,
+                b"second-dir".as_slice(),
+                source_birth.saturating_add(1)
+            ],
+        )
+        .unwrap();
+
+        let mut passes = 0usize;
+        let (removed, refreshed, unresolved) =
+            revalidate_inode_reuse_paths_bounded(&conn, &root, 3, |_, _| {
+                passes += 1;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(passes, 1, "unrepairable candidates do not spin");
+        assert_eq!((removed, refreshed), (0, 0));
+        assert_eq!(unresolved, 2);
+        assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inode_reuse_revalidation_stays_incomplete_after_bounded_persistent_races() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = tmp("reuse-revalidate-persistent-race");
+        let first = root.join("first");
+        let second = root.join("second");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&first, b"same inode").unwrap();
+        fs::hard_link(&first, &second).unwrap();
+        let root_meta = fs::symlink_metadata(&root).unwrap();
+        let file_meta = fs::symlink_metadata(&first).unwrap();
+        let (root_dev, root_inode) = crate::util::indexed_identity(&root_meta).unwrap();
+        let (file_dev, file_inode) = crate::util::indexed_identity(&file_meta).unwrap();
+        let (birth, _) = crate::util::inode_path_metadata_at(&file_meta, &first);
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scan_nodes(
+               path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,depth INTEGER,name BLOB,
+               dev INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT,
+               mount_id INTEGER,blocks INTEGER DEFAULT 0,uid INTEGER DEFAULT 0,mtime INTEGER DEFAULT 0
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes(path_id,parent_path_id,depth,name,dev,inode,birth_ns,kind)
+             VALUES(1,-1,0,?1,?2,?3,1,'d')",
+            params![root.as_os_str().as_bytes(), root_dev, root_inode],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes(path_id,parent_path_id,depth,name,dev,inode,birth_ns,kind)
+             VALUES(2,1,1,?1,?2,?3,?4,'f'),(3,1,1,?5,?2,?3,?6,'f')",
+            params![
+                b"first".as_slice(),
+                file_dev,
+                file_inode,
+                birth,
+                b"second".as_slice(),
+                birth.saturating_add(1)
+            ],
+        )
+        .unwrap();
+
+        let mut passes = 0usize;
+        let (_, refreshed, _) =
+            revalidate_inode_reuse_paths_bounded(&conn, &root, 3, |stage, _| {
+                passes += 1;
+                stage.execute(
+                    "UPDATE scan_nodes SET birth_ns=?1 WHERE path_id=3",
+                    [birth.saturating_add(passes as i64 + 1)],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(passes, 3, "revalidation work is bounded");
+        assert_eq!(refreshed, 3);
+        assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn unresolved_directory_reuse_stays_incomplete_when_leaf_refresh_clears_conflict_group() {
         use std::os::unix::ffi::OsStrExt;
 
@@ -3211,16 +3453,23 @@ mod tests {
         let directory = root.join("directory");
         let source = root.join("source");
         let replacement = root.join("replacement");
+        let other_first = root.join("other-first");
+        let other_second = root.join("other-second");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&directory).unwrap();
         fs::write(&source, b"old incarnation").unwrap();
         fs::write(&replacement, b"new current file").unwrap();
+        fs::write(&other_first, b"unrelated stable hardlink").unwrap();
+        fs::hard_link(&other_first, &other_second).unwrap();
 
         let root_meta = fs::symlink_metadata(&root).unwrap();
         let source_meta = fs::symlink_metadata(&source).unwrap();
+        let other_meta = fs::symlink_metadata(&other_first).unwrap();
         let (root_dev, root_inode) = crate::util::indexed_identity(&root_meta).unwrap();
         let (source_dev, source_inode) = crate::util::indexed_identity(&source_meta).unwrap();
         let (source_birth, _) = crate::util::inode_path_metadata_at(&source_meta, &source);
+        let (other_dev, other_inode) = crate::util::indexed_identity(&other_meta).unwrap();
+        let (other_birth, _) = crate::util::inode_path_metadata_at(&other_meta, &other_first);
 
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -3259,10 +3508,34 @@ mod tests {
             ],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO scan_nodes(path_id,parent_path_id,depth,name,dev,inode,birth_ns,kind)
+             VALUES(4,1,1,?1,?2,?3,?4,'f'),(5,1,1,?5,?2,?3,?4,'f')",
+            params![
+                b"other-first".as_slice(),
+                other_dev,
+                other_inode,
+                other_birth,
+                b"other-second".as_slice()
+            ],
+        )
+        .unwrap();
         assert_eq!(count_conflicting_inode_incarnations(&conn).unwrap(), 1);
 
-        let (removed, refreshed, unresolved) = revalidate_inode_reuse_paths(&conn, &root).unwrap();
-        assert_eq!((removed, refreshed, unresolved), (0, 1, 1));
+        let mut injected_later_conflict = false;
+        let (removed, refreshed, unresolved) =
+            revalidate_inode_reuse_paths_bounded(&conn, &root, 3, |stage, pass| {
+                if pass == 1 && !injected_later_conflict {
+                    stage.execute(
+                        "UPDATE scan_nodes SET birth_ns=?1 WHERE path_id=5",
+                        [other_birth.saturating_add(1)],
+                    )?;
+                    injected_later_conflict = true;
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!((removed, refreshed, unresolved), (0, 2, 1));
         // Refreshing the leaf removes the duplicate-incarnation SQL signal,
         // but the still-present directory mismatch must independently keep
         // the scan incomplete.
