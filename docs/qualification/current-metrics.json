@@ -1162,5 +1162,14 @@
       "duration_seconds": 426.299,
       "classification": "timeout errors under artificial CPU quota; subsequent full rerun passed without code changes"
     }
+  },
+  "r132_fault_binary_verification": {
+    "observed_at_utc": "2026-11-10T22:42:13Z",
+    "source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+    "embedded_source_digest_matches": true,
+    "production_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "fault_binary_sha256": "3b17b46c2f3c4baf18ed78bc3dc868e4ac92a9fb8ed4241141a12d659fee88b7",
+    "fault_matrix_executed": false,
+    "evidence": "docs/qualification/r132-fault-binary-20261110.json"
   }
 }

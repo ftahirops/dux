@@ -1,0 +1,27 @@
+{
+  "verified_at_utc": "2026-11-10T22:42:13Z",
+  "source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+  "embedded_source_sha256": "5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff",
+  "production_candidate": {
+    "path": "/dev/shm/dux-r132-qualification-20261110/dux-r132",
+    "sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "version_output": "dux 0.6.3 (f02ba7ad235e) [production] source-sha256=5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff"
+  },
+  "fault_injection_binary": {
+    "path": "/dev/shm/dux-r132-qualification-20261110/dux-r132-fault",
+    "sha256": "3b17b46c2f3c4baf18ed78bc3dc868e4ac92a9fb8ed4241141a12d659fee88b7",
+    "version_output": "dux 0.6.3 (f02ba7ad235e) [fault-injection] source-sha256=5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff"
+  },
+  "verification": {
+    "embedded_source_digest_matches": true,
+    "fault_source_worktree_commit_matches": true,
+    "fault_source_worktree_clean": true,
+    "fault_build_completed": true,
+    "fault_matrix_executed": false,
+    "reason_matrix_not_run": "Disposable VM pressure guard stopped the VM after unrelated Go build/test jobs appeared; see vm-admission-20261110T2235Z.json"
+  },
+  "fault_build": {
+    "command": "systemd-run --scope --quiet -p CPUQuota=25% -p IOWeight=10 nice -n 19 ionice -c 3 cargo build --locked --release --features fault-injection --bin dux --target-dir /dev/shm/dux-r132-fault-target",
+    "source_checkout": "/tmp/dux-r132-fault-source"
+  }
+}
