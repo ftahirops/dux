@@ -52,5 +52,28 @@ boundaries.
    Do not set arbitrary global coverage thresholds before critical-path gaps
    are mapped and justified.
 
-These are coverage gaps, not confirmed runtime defects. They remain open
-qualification work; no test was added or claimed as passing in this review.
+These were coverage gaps rather than confirmed runtime defects when this
+review was written. Follow-up test coverage is recorded below; the remaining
+gaps still require qualification.
+
+## Follow-up — fanotify mark error paths (2026-11-10)
+
+Two deterministic negative-path tests were added in `src/watch.rs`:
+
+- `fanotify_mark_rejects_invalid_descriptor_with_ebadf` calls the real
+  `fanotify_mark` wrapper with descriptor `-1` and verifies that `EBADF` is
+  preserved through the `anyhow` error boundary.
+- `fanotify_mark_rejects_mount_path_with_embedded_nul` verifies that a
+  non-C-string mount path is rejected before entering the kernel syscall.
+
+Both passed with:
+`cargo test --locked --all-features --bin dux fanotify_mark_rejects -- --nocapture`
+(2 passed, 0 failed). Strict Clippy passed on all targets/features with
+warnings and undocumented unsafe blocks denied. Formatting and
+`git diff --check` also passed. These tests cover malformed input and the
+invalid-descriptor failure path; they do
+not cover successful `fanotify_mark`, `fanotify_init`, capability-denied
+startup, or actual live event delivery. The privileged disposable-filesystem
+integration and capability-negative tests above remain open. The previous
+whole-project coverage percentages do not include these additions, and no
+branch-coverage claim is made.

@@ -7474,6 +7474,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fanotify_mark_rejects_invalid_descriptor_with_ebadf() {
+        let root =
+            std::env::temp_dir().join(format!("dux-invalid-fanotify-fd-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let error = mark_fs(-1, &root).unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .and_then(std::io::Error::raw_os_error),
+            Some(libc::EBADF),
+            "fanotify_mark on an invalid descriptor must preserve EBADF"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fanotify_mark_rejects_mount_path_with_embedded_nul() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let path = PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/dux\0invalid".to_vec()));
+        let error = mark_fs(-1, &path).unwrap_err();
+        assert!(
+            error.downcast_ref::<std::ffi::NulError>().is_some(),
+            "mount paths with NUL must fail before the syscall: {error:#}"
+        );
+    }
+
+    #[test]
     fn hint_reader_ring_is_bounded_and_reports_user_space_loss() {
         let (tx, rx) = mpsc::sync_channel(2);
         let dropped = AtomicBool::new(false);
