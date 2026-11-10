@@ -264,7 +264,7 @@ def assert_service_security_policy(proc_root=Path("/proc")):
     required_caps = (1 << 2) | (1 << 21)  # CAP_DAC_READ_SEARCH | CAP_SYS_ADMIN
     process_caps = {
         name: int(process_status[name].split()[0], 16)
-        for name in ("CapEff", "CapPrm", "CapBnd", "CapAmb")
+        for name in ("CapEff", "CapPrm", "CapBnd", "CapInh", "CapAmb")
     }
     assert all(value == required_caps for value in process_caps.values()), {
         "property": "process capabilities", "expected_mask": hex(required_caps),

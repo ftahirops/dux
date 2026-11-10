@@ -33,3 +33,9 @@ Before changing the package, verify full-tree read/search coverage, fanotify
 marks, handle resolution, index/runtime directory ownership, lifecycle scripts,
 and rollback on a disposable guest. The current unit deliberately remains root
 with a minimal capability set until that evidence exists.
+
+**Follow-up:** package and unit source was subsequently changed to run as the
+dedicated `dux` UID. Its source checks and limits are recorded in
+[`nonroot-service-followup.md`](nonroot-service-followup.md). This change is
+not yet built into an authenticated release or runtime-qualified; production
+still runs the root-owned installed unit described above.

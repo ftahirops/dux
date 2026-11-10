@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T11:55:09Z",
+  "snapshot_at_utc": "2026-11-10T12:02:00Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T11:54:00Z",
+    "observed_at_utc": "2026-11-10T12:01:00Z",
     "installed_release": "0.6.3-66",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,23 +16,24 @@
     "kernel_overflows": 752,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 238998.746,
+    "behind_seconds": 239416.917,
     "service_user": "root"
   },
   "disk": {
-    "observed_at_utc": "2026-11-10T11:54:00Z",
+    "observed_at_utc": "2026-11-10T12:01:00Z",
     "root_size_gib": 185,
-    "root_used_gib": 121,
-    "root_available_gib": 56,
-    "root_use_percent": 69,
+    "root_used_gib": 117,
+    "root_available_gib": 60,
+    "root_use_percent": 67,
     "target_readiness_size_gib": 1.4
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T11:54:00Z",
-    "load_average_1m": 17.13,
+    "observed_at_utc": "2026-11-10T12:01:00Z",
+    "load_average_1m": 22.57,
     "cpu_psi_some_avg10_percent": 70.84,
     "active_go_build_or_test_workloads": true,
-    "rocky_guest_started": false
+    "rocky_guest_started": false,
+    "rocky_guest_state": "missing"
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
@@ -59,12 +60,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T11:53:20Z",
+    "observed_at_utc": "2026-11-10T12:00:02Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 10091.7,
-    "operations": 236237,
-    "exact_check_samples": 235,
+    "elapsed_seconds": 10511.9,
+    "operations": 245857,
+    "exact_check_samples": 244,
     "completed_hourly_bursts": 2,
     "held_reader_scenarios": 0,
     "controlled_crash_recovery_scenarios": 0,
@@ -98,11 +99,12 @@
     "churn": "docs/qualification/r132-100k-churn-vps2-20261110/README.md",
     "disk": "docs/qualification/workspace-disk-20261110T1130Z.json",
     "dependency_audit": "docs/qualification/cargo-audit-20261110T1133Z.json",
-    "coverage_and_full_history": "PRODUCTION_READINESS_STATUS.md"
+    "coverage_and_full_history": "PRODUCTION_READINESS_STATUS.md",
+    "soak_checkpoint_1200z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1200Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; runtime qualification pending",
-    "focused_tests_passed": 74,
+    "focused_tests_passed": 75,
     "focused_tests_failed": 0,
     "deb_rpm_script_syntax": "passed",
     "systemd_unit_verification": "passed",
@@ -110,14 +112,14 @@
     "fanotify_handle_access_as_dux": "not qualified",
     "production_deployed": false,
     "evidence": "docs/qualification/systemd-hardening-20261110/nonroot-service-followup.md",
-    "full_python_suite_passed": 376,
+    "full_python_suite_passed": 377,
     "full_python_suite_skipped": 1,
     "temporary_rpm_build": "passed; unsigned; not release artifact",
     "temporary_deb_staging_build": "passed; unsigned; source metadata version 0.6.3-12"
   },
   "python_tests": {
     "modules": 25,
-    "passed": 376,
+    "passed": 377,
     "failed": 0,
     "skipped": 1,
     "observed_at_utc": "2026-11-10T11:56:23Z"

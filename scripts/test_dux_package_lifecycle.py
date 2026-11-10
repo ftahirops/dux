@@ -396,7 +396,8 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
         (process_dir / "status").write_text(
             "Uid:\t1001\t1001\t1001\t1001\nGid:\t1002\t1002\t1002\t1002\n"
             "CapEff:\t0000000000200004\nCapPrm:\t0000000000200004\n"
-            "CapBnd:\t0000000000200004\nCapAmb:\t0000000000200004\n"
+            "CapBnd:\t0000000000200004\nCapInh:\t0000000000200004\n"
+            "CapAmb:\t0000000000200004\n"
         )
         self.properties = {
             "User": "dux",
@@ -515,6 +516,14 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
         status_path = Path(self.proc.name) / "4242" / "status"
         status_path.write_text(status_path.read_text().replace(
             "CapEff:\t0000000000200004", "CapEff:\t000000000020000c"
+        ))
+        with self.assertRaises(AssertionError):
+            self.check_properties()
+
+    def test_rejects_unexpected_inheritable_capabilities(self):
+        status_path = Path(self.proc.name) / "4242" / "status"
+        status_path.write_text(status_path.read_text().replace(
+            "CapInh:\t0000000000200004", "CapInh:\t000000000020000c"
         ))
         with self.assertRaises(AssertionError):
             self.check_properties()

@@ -27,11 +27,12 @@ the dedicated UID remain unproven.
 
 ## Local verification
 
-- Full Python discovery: **376 passed, 0 failed, 1 skipped** across 25 modules.
+- Full Python discovery: **377 passed, 0 failed, 1 skipped** across 25 modules.
   The focused lifecycle suite is included in this total and independently
-  passed **74 tests**.
+  passed **75 tests**.
 - `PYTHONPATH=scripts python3 -B -m unittest -q test_dux_package_lifecycle`:
-  **74 passed, 0 failed** after the RPM ordering regression was added.
+  **75 passed, 0 failed** after the RPM ordering and inheritable-capability
+  regressions were added.
 - `sh -n` for Debian maintainer scripts and the state-permission helper:
   passed.
 - `rpmspec -P packaging/dux.spec` and `bash -n` of RPM `%pre`, `%post`, and
