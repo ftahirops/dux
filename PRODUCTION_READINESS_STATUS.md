@@ -27,23 +27,25 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:44 UTC
+### Live checkpoint — 2026-11-10 09:48 UTC
 
 The r132 soak remains `active/running`, with **zero restarts**. At elapsed
-2,341.0s it had completed **55,493 mutations**; the 55,000-op exact checkpoint
-passed in 1,488ms. The hourly burst, held-reader, controlled recovery, and final
+2,581.1s it had completed **61,123 mutations**; the 61,000-op exact checkpoint
+passed in 1,370ms. The hourly burst, held-reader, controlled recovery, and final
 exactness/history/integrity checks have not run yet. This is early progress,
-not a soak pass.
+not a soak pass. The 72-hour qualification remains in progress.
 
-## Current production and disk snapshot — 2026-11-10 09:45 UTC
+## Current production and disk snapshot — 2026-11-10 09:48 UTC
 
 The installed VPS1 production daemon remains **r66** (`0.6.3`, revision
 `e0cc915f8f37`), active with 4 historical restarts. It reports dirty status
 from fanotify overflow: **742 overflow notifications**, **2,518,862 dropped
 updates**, no full scan for about **4d21h**, and `caught_up=false`. It has
-1,330,176 indexed nodes and a 3.42-GB SQLite database. VPS1 has about 51 GiB
-available on its 185-GiB root filesystem (72% used), so production staleness is
-not explained by disk exhaustion. See the
+1,336,338 indexed nodes and a 3.42-GB SQLite database. The 09:38 and 09:45
+snapshots showed the drop and overflow counters unchanged while event counters
+continued increasing; this short interval does not repair the stale index.
+VPS1 has about 50 GiB available on its 185-GiB root filesystem (72% used), so
+production staleness is not explained by disk exhaustion. See the
 [09:45 VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T0945Z.json).
 
 The installed VPS2 **r121** service is separate from the r132 soak. It is active
@@ -73,6 +75,11 @@ new changes await the next full observation. Its temporary scan database is
 gone, so there is no active scan file to delete. The r132 soak stayed active
 with zero restarts. Full before/after details are in the
 [disk cleanup record](docs/qualification/vps2-test-disk-cleanup-20261110.json).
+
+At 09:48 UTC, host admission for the Rocky RPM VM was blocked: load1 was 13.32
+and multiple Go compiler, test, and vet processes were active. No VM was
+started. The guard remains required because concurrent host builds have
+repeatedly interrupted guest startup.
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
