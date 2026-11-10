@@ -490,6 +490,32 @@ class ReadinessHarnessTests(unittest.TestCase):
             "scan_first": False, "uncertain": True,
         }))
 
+    def test_scan_first_churn_requests_only_one_post_batch_observation(self):
+        tree = ast.parse(HARNESS.read_text())
+        churn = next(node for node in tree.body
+                     if isinstance(node, ast.FunctionDef)
+                     and node.name == "production_churn_test")
+        manual_hup_calls = [
+            node for node in ast.walk(churn)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "send_signal"
+            and node.args
+            and ast.unparse(node.args[0]) == "signal.SIGHUP"
+        ]
+        self.assertEqual(len(manual_hup_calls), 1)
+
+        daemon = next(node for node in tree.body
+                      if isinstance(node, ast.ClassDef) and node.name == "Daemon")
+        exact = next(node for node in daemon.body
+                     if isinstance(node, ast.FunctionDef) and node.name == "exact")
+        self.assertTrue(any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "request_scan_first_observation"
+            for node in ast.walk(exact)
+        ))
+
     def test_disk_pause_activity_uses_hint_counts_for_scan_first_mode(self):
         before = {
             "scan_first": True, "status_mtime_ns": 10, "seen": 100,

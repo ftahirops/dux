@@ -1,5 +1,72 @@
 # Production readiness status
 
+## Exact r132 72-hour soak — running since 2026-11-10 09:04:48 UTC
+
+A dedicated soak is running on the authorized VPS2 using the exact r132 static
+binary (SHA-256
+`998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`). It is
+an isolated `soak` readiness suite in transient unit
+`dux-readiness-1304925.service`, with a private mount namespace, 25% CPU quota,
+4-GiB memory ceiling, and low I/O weight. Its 768-MiB ext4 loop fixture and
+database are in `/dev/shm`; progress and the final report are durably written
+under `/var/tmp/dux-r132-soak-20261110/evidence/`.
+
+The suite is configured for 72 hours, 25 operations/second, and independent
+exact checks every 1,000 mutations. It also schedules an hourly mutation burst,
+a held SQLite reader after six hours, and a controlled daemon kill/recovery
+with 64 downtime mutations after twelve hours, followed by exactness, history,
+and SQLite integrity checks. Its first progress snapshot reported 1,441
+mutations at 60 seconds; that is startup progress only and does not count as a
+soak pass. The harness estimates a 73h40m maximum unit runtime to allow final
+qualification and cleanup. Expected 72-hour completion is 2026-11-13 around
+09:04:48 UTC, subject to the final assertions.
+
+The VPS2 r121 service was active with zero restarts when the soak started; it
+has not been upgraded or modified. The soak has not yet passed. The live report
+and progress file are on VPS2 at the path above; a final copy and qualification
+decision will be added here after the worker reaches a terminal result. See
+the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
+
+## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
+
+The exact r132 static release binary (SHA-256
+`998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, source
+commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`) passed the isolated ext4
+production-shaped churn suite on the authorized VPS2. It used a disposable
+2-GiB loop image in `/dev/shm`, a private mount namespace, 100,000 baseline
+files, and a transient systemd unit limited to 25% CPU and 4 GiB memory. The
+unit completed successfully in **38m02s**, used **9m30s CPU**, peaked at about
+**773 MiB memory** and **538 MiB swap**. VPS2's root filesystem remained at
+95% use with 4.7 GiB free; test data was kept on tmpfs.
+
+The suite performed **20,000 mutations in ten 2,000-operation batches**,
+including atomic replacement, rapid delete/recreate, rename-overwrite,
+hardlink write/unlink, in-place write, and transient create/delete. All ten
+batch checkpoints passed an independent exact comparison of paths, inode
+identity, allocation and rollups. The final exact comparison, history
+continuity and SQLite integrity check also passed. The candidate observed
+**91,013 fanotify hints during the mutation workload**, with **zero dropped
+updates and zero kernel overflows**. Scan-first intentionally resolved and
+committed zero per-file hint updates; each batch instead forced a full
+observation and exact comparison. Checkpoint exact-convergence measurements
+were **92.3–323.0 seconds** (median **152.1s**), including the observation and
+oracle-check path; these are not isolated scanner benchmarks. The harness used
+for this run also sent a `SIGHUP` before calling `daemon.exact()`, which itself
+requests the observation, so it performed a redundant extra full scan per
+batch. That inflated test time but did not weaken exactness; the duplicate
+trigger has since been removed and regression-guarded. Every scan reported
+zero coverage issues.
+
+The installed r121 service remained active with zero restarts, and no package
+or live database was changed. This materially improves evidence for exact r132
+under churn, but it is one ext4/6.8-kernel run at 100k files—not the 1.9M-node
+production scale, a multi-day soak, a 72-hour soak, a 24-hour canary, or a
+cross-filesystem test. Full machine-readable results and checkpoint data are
+in the [qualification report](docs/qualification/r132-100k-churn-vps2-20261110/report.json)
+and [progress record](docs/qualification/r132-100k-churn-vps2-20261110/churn-progress.json);
+the [test notes](docs/qualification/r132-100k-churn-vps2-20261110/README.md)
+include the environment and caveats.
+
 ## VPS2 completed scan-first observation — 2026-11-10 08:05–08:14 UTC
 
 The r121 service on VPS2 completed the scheduled full-root observation that
