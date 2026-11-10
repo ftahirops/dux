@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 02:34 UTC
+## Latest verified checkpoint — 2026-11-10 02:53 UTC
 
 ### Release decision
 
@@ -130,6 +130,40 @@ tests. See
 [`systemd hardening review`](docs/qualification/systemd-hardening-20261110/README.md).
 
 **Updated:** 2026-11-10 02:34 UTC
+
+### Follow-up: incomplete scan recovery and non-root feasibility — 2026-11-10 02:53 UTC
+
+On VPS2, the r121 scheduled observation that started at 02:31:46 found one
+conflicting inode birth-time incarnation. It reported one coverage issue and
+scheduled its bounded retry; retry admission was initially deferred under
+elevated CPU pressure. The retry started at 02:38:47, completed at 02:45:04
+with zero coverage issues/unresolved inode-reuse paths, and passed Dux's
+accounting verification at 02:46:07 in 63.147s. It staged 1,837,130 path
+instances. The service had zero restarts, drops, or overflow notifications in
+the recorded samples. This is evidence that this bounded-retry case recovered,
+not proof that all high-churn scans converge. It cost roughly 375.5 CPU-seconds
+over 429 seconds and about 2.42 GiB reads / 1.64 GiB writes during a short
+overlapping host-load window; peak staged DB was about 661 MiB and was removed
+on success. At 02:53:48 a later scheduled observation was in progress, so the
+host was not idle at the latest sample. See
+[`VPS2 retry and capability follow-up`](docs/qualification/production-live-followup-20261110T0231Z/README.md).
+
+The exact r126 candidate also passed an isolated ext4 smoke as UID `nobody`
+with only `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`, `NoNewPrivs` enabled:
+fanotify setup, baseline/accounting verification, and create/rename resolution
+passed. This establishes feasibility for the tested syscall path only; it does
+not validate full-tree access or package/service-account lifecycle. The
+installed unit remains root. The captured output and script are in
+[`release-candidate-r126-20261110`](docs/qualification/release-candidate-r126-20261110/README.md).
+
+At 02:53:48 UTC, VPS2 r121 remained active with zero restarts, drops, and
+kernel overflows; a subsequent scheduled scan was in progress. Root was 94%
+used with 5.6 GiB available. The lifecycle driver process is still alive, but
+host admission is not clear: a Go compiler workload was active at the latest
+local process check. The disposable guest has not launched. r126 remains
+uninstalled; the production decision and open gates above are unchanged.
+
+**Updated:** 2026-11-10 02:53 UTC
 
 ---
 

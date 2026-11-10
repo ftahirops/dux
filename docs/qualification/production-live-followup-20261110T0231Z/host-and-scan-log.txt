@@ -1,0 +1,19 @@
+2026-11-10T02:39:26Z
+ 02:39:26 up 3 days, 10:56,  1 user,  load average: 5.53, 6.21, 5.77
+NRestarts=0
+ActiveState=reloading
+SubState=reload-notify
+some avg10=44.69 avg60=31.83 avg300=27.73 total=59163875115
+Filesystem                         Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-ubuntu--lv   93G   83G  5.7G  94% /
+Nov 10 02:31:46 vps2 dux[2561224]: 2026-11-10T02:31:46.452567Z  INFO dux::watch: selected reconciliation implementation use_in_place_observation=true baseline_ready=true read_only_source=false
+Nov 10 02:31:46 vps2 dux[2561224]: 2026-11-10T02:31:46.452597Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+Nov 10 02:36:15 vps2 dux[2561224]: 2026-11-10T02:36:15.236468Z  WARN dux::scan: discarded staged paths that vanished during inode-reuse races vanished_reuse_paths=360
+Nov 10 02:36:15 vps2 dux[2561224]: 2026-11-10T02:36:15.236835Z  WARN dux::scan: refreshed staged file identities after inode-reuse races revalidated_reuse_paths=2
+Nov 10 02:36:22 vps2 dux[2561224]: 2026-11-10T02:36:22.200829Z ERROR dux::scan: inode numbers were observed with different birth-time incarnations during the scan conflicting_inode_incarnations=1
+Nov 10 02:37:40 vps2 dux[2561224]: 2026-11-10T02:37:40.598782Z  WARN dux::watch: reconciliation incomplete; one bounded automatic retry scheduled failed_attempts=1 scan_errors=1 coverage_incomplete=false resolve_warned=false lost_events=true retry_after_seconds=59
+Nov 10 02:37:40 vps2 dux[2561224]: 2026-11-10T02:37:40.599090Z  INFO dux::watch: rescan complete: 1641594 files, 194878 dirs, 1836472 staged path instances (0 directory alias paths), visible 87995469824 bytes/1836472 entries, unique 87808159744 bytes/1832990 inodes, 81.53 GiB (1 coverage issues); replaying 0 pending paths vanished_reuse_paths=360 revalidated_reuse_paths=2 unresolved_reuse_paths=0
+Nov 10 02:37:45 vps2 dux[2561224]: 2026-11-10T02:37:45.014405Z  WARN dux::watch: deferring full reconciliation until host pressure meets recovery admission criteria pressure=Elevated reason="system pressure" load1=6.93 host_cpus=6.0 psi_cpu_avg10=19.62 psi_memory_avg10=0.14 psi_io_avg10=0.79 available_memory_bytes=3482251264 available_disk_bytes=6099136512
+Nov 10 02:38:37 vps2 dux[2561224]: 2026-11-10T02:38:37.040883Z  WARN dux::watch: deferring full reconciliation until host pressure meets recovery admission criteria pressure=Elevated reason="system pressure" load1=6.46 host_cpus=6.0 psi_cpu_avg10=18.44 psi_memory_avg10=0.0 psi_io_avg10=0.62 available_memory_bytes=3417980928 available_disk_bytes=6092390400
+Nov 10 02:38:47 vps2 dux[2561224]: 2026-11-10T02:38:47.043321Z  INFO dux::watch: selected reconciliation implementation use_in_place_observation=true baseline_ready=true read_only_source=false
+Nov 10 02:38:47 vps2 dux[2561224]: 2026-11-10T02:38:47.043351Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
