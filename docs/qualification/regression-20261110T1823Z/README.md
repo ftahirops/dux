@@ -39,9 +39,12 @@ matching `[fault-injection]` companion was built from a clean detached worktree
 at the same source commit; its embedded source SHA-256 is identical to the
 production candidate. The harness then enforced its marked KVM/QEMU guest
 requirement, so its first run outside a guest created no fixture and did not
-start. A guarded disposable Ubuntu guest start was subsequently refused at
-admission because unrelated host Go/Vitest/staticcheck workloads raised load1
-to 25.99 and CPU PSI some avg10 to 76.79%. No fault-matrix tests have run yet.
+start. The first guarded disposable Ubuntu guest start was refused because unrelated
+Go/Vitest/staticcheck workloads raised load1 to 25.99 and CPU PSI some avg10
+to 76.79%. A later start passed admission, but the runtime guard stopped that
+guest 40 seconds later when Go compiler/test workloads reappeared and CPU PSI
+some reached 42.1%; SSH had not reached the guest banner and no test fixture
+was created. No fault-matrix tests have run yet.
 
 ## Scope limits
 
@@ -52,6 +55,8 @@ separate active run. Exact binary identity and runtime qualification remain
 separate from compiling the Rust source in the workspace.
 
 ## Logs
+
+- [Guard stop evidence](../vm-admission-20261110T1839Z.jsonl)
 
 - [`rust-tests.log`](rust-tests.log)
 - [`python-tests.log`](python-tests.log)

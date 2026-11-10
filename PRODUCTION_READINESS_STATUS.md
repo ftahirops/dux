@@ -5602,3 +5602,56 @@ staticcheck were active; host load1 was 25.99 and CPU PSI some avg10 was
 76.79%. No guest was started. The all-15-suite matrix remains pending until
 host admission clears. Details and binary identities are in the
 [regression evidence record](docs/qualification/regression-20261110T1823Z/README.md).
+
+## Eighteenth VPS2 observation and soak progress — 2026-11-10 18:36 UTC
+
+The eighteenth scan started at **18:23:55** and finished at **18:31:33** in
+**7m38s**. It covered **1,756,281 files**, **215,521 directories**, 1,971,802
+staged path instances, and 83,561,517,056 unique bytes (77.82 GiB). It reported
+zero coverage issues and discarded 2,479 vanished inode-reuse paths.
+Independent accounting passed at **18:33:32** in **119,363 ms**. Completion
+completion-to-completion gap from the prior scan was **17m17s**. The starts
+were exactly 15 minutes apart, so this completion gap alone does not establish
+a missed scheduler interval or per-path freshness. Eight of seventeen
+completion gaps exceed 15m; individual-path freshness remains unmeasured.
+
+At **18:35:53**, Dux was active, with no pending updates, overflow
+notifications, or reported dropped updates; the latest scan was 262 seconds
+old. The index was dirty because later filesystem hints await the next scan.
+Raw status: [`vps2-live-status-20261110T1836Z.json`](docs/qualification/vps2-live-status-20261110T1836Z.json)
+(SHA-256 `17d28810c85112fab6c4873be17191f3700681fe1941aa0eb2cd0a25250e666c`).
+
+The live r132 soak checkpoint at **18:36:00** shows **34,235.3 seconds**
+(9h30m35s), **779,005 operations**, **776 exactness samples**, nine mutation
+bursts, one held-reader/WAL-reclaim scenario, and zero worker restarts. It has
+completed **13.21%** of 72 hours. No controlled crash has run, and terminal
+exactness/history/SQLite checks remain pending. See
+[`soak-progress-20261110T1836Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1836Z.json)
+(SHA-256 `1dac7faa83d327c3217172ab54eb98b409e5a9e533fa85c01e28940b6d2b780f`).
+
+VPS2 root is 90% used, with **10,151,043,072 bytes (9.45 GiB)** available.
+Detailed directory attribution remains the partial 18:06 sample.
+
+
+### Clarification: completion gaps versus freshness SLO
+
+Earlier entries use “missed the 15-minute target” as shorthand for a
+completion-to-completion gap longer than 15 minutes. That is not sufficient to
+conclude a per-path freshness SLO miss. The scheduler is anchored to observation
+start, while each walk takes several minutes; a completion gap therefore includes
+scan-duration variation. In the latest interval the starts were 15 minutes apart
+(18:08:55 and 18:23:55), while completions were 17m17s apart. Dux currently
+stores a global last-completion timestamp, not per-path last-observed times, so
+maximum path age remains unmeasured. The eight long completion gaps are useful
+cycle-duration evidence, not eight proven freshness-SLO violations.
+
+### Guarded matrix guest interrupted before SSH — 2026-11-10 18:39 UTC
+
+A later disposable Ubuntu qualification VM passed three-sample admission and
+started at **18:38:24** with an ephemeral tmpfs overlay. The first SSH attempt
+timed out during banner exchange while cloud-init was still booting. At
+**18:39:04**, the VM runtime guard stopped the guest after unrelated Go
+compiler/test processes appeared and CPU PSI some avg10 reached **42.1%**.
+The VM used 537 MiB peak memory and 19.6 seconds CPU. No harness was run inside
+the guest, no qualification fixture was created, and the pressure guard removed
+the ephemeral runtime. Evidence: [`vm-admission-20261110T1839Z.jsonl`](docs/qualification/vm-admission-20261110T1839Z.jsonl).

@@ -73,6 +73,13 @@
     {
       "result": "vm_admission_refused",
       "reason": "active unrelated Go builds/tests, Vitest, and staticcheck; load1 25.99 and CPU PSI some avg10 76.79 percent"
+    },
+    {
+      "result": "guard_stopped_disposable_guest_before_qualification",
+      "started_at_utc": "2026-11-10T18:38:24Z",
+      "stopped_at_utc": "2026-11-10T18:39:04Z",
+      "reason": "unrelated Go compiler/test appeared; CPU PSI some avg10 42.1%; SSH did not reach guest banner; no test fixture or suite started",
+      "evidence": "docs/qualification/vm-admission-20261110T1839Z.jsonl"
     }
   ]
 }
