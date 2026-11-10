@@ -31,6 +31,12 @@ SQLite connection has closed.
   handle-capable-ext4 stale-parent test.
 - Strict all-target/all-feature Clippy, formatting, and `git diff --check`
   passed.
+- The ignored
+  `watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs`
+  integration test was run separately as root on VPS2's ext4 root filesystem
+  and passed (**1 passed, 0 failed**). The installed service remained active
+  with zero restarts before and after. The manual production-shaped scale
+  test remains unrun.
 
 ## Release package
 
@@ -89,5 +95,8 @@ qualification, independent path equality, and a 24-hour canary remain open.
 - `target/readiness/production-r131-20261110/runtime-smoke.log`
 - `target/readiness/production-r131-20261110/service-before.txt`
 - `target/readiness/production-r131-20261110/service-after.txt`
+- `target/readiness/production-r131-20261110/ext4-stale-parent-test.log`
+- `target/readiness/production-r131-20261110/ext4-service-before.txt`
+- `target/readiness/production-r131-20261110/ext4-service-after.txt`
 - `target/readiness/production-r131-20261110/llvm-cov-summary.json`
 - `target/readiness/production-r131-20261110/build-manifest.json`

@@ -16,6 +16,11 @@ regions, 76.23% functions**; branch counters are unavailable. Strict Clippy,
 formatting, and diff checks passed. The release pipeline and artifact checks
 passed, and the audited lockfile has zero known vulnerabilities.
 
+The suite's ignored ext4 stale-parent integration case was also run separately
+as root on VPS2's ext4 root filesystem and passed. VPS2's installed service
+remained active with zero restarts before and after. Only the manual
+production-shaped scale test remains ignored among those two suite exclusions.
+
 The exact r131 binary passed isolated event-apply and scan-first fanotify
 smokes on VPS2. Accounting verification passed with zero coverage issues,
 drops, or overflow notices. Event-apply resolved 11/11 events. Scan-first
