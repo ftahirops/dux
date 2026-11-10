@@ -1,0 +1,16 @@
+{
+  "observed_at_utc": "2026-11-10T21:29:26Z",
+  "load_average_1m": 11.9,
+  "cpu_psi_some_avg10_percent": 11.21,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "io_psi_some_avg10_percent": 1.25,
+  "io_psi_full_avg10_percent": 1.0,
+  "memory_psi_some_avg10_percent": 0.0,
+  "active_host_workloads": [
+    "Go compiler pid=3868187",
+    "go test pid=3862355"
+  ],
+  "qualification_vm_started": false,
+  "fault_matrix_started": false,
+  "decision": "host_pressure_blockers refused VM admission because unrelated Go compilation and test work remained active"
+}

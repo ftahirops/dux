@@ -166,3 +166,20 @@ It is evidence for a failed run and was retained.
 No data was deleted in this follow-up. Journals, Docker images/volumes, Rust and
 Cargo caches, and qualification failure artifacts have different retention or
 rebuild costs; use their owners' retention policy before pruning.
+
+
+## Follow-up — 2026-11-10 21:21–21:26 UTC
+
+During the installed service's 21:15 full observation, `/var/lib/dux` reached
+about 1.66 GiB. The live `dux.db` was 850,726,912 bytes and its WAL was
+60,110,832 bytes. An in-use `dux.db.scan-<pid>-<nonce>.tmp` staging database
+was 745,762,816 bytes. The status endpoint reported indexing in progress; the
+file was not stale and was left untouched.
+
+The observation finished at 21:23:53 with zero coverage issues. Independent
+accounting passed at 21:25:25. The staging file had been removed, `/var/lib/dux`
+was back to 911,990,784 bytes, and root availability was 10,012,749,824 bytes
+(90% used). This is expected temporary space for the current in-place scan
+implementation, not a leaked file. The peak should still be included in disk
+capacity planning: this scan temporarily needed about 746 MiB beyond the live
+database and WAL. Full evidence: [reconciliation cycle](vps2-reconciliation-cycle-20261110T2125Z.json).

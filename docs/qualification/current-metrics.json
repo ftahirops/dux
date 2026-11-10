@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:06:00Z",
+  "snapshot_at_utc": "2026-11-10T21:29:26Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -103,13 +103,13 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T21:05:24Z",
+    "observed_at_utc": "2026-11-10T21:26:25Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 43224.4,
-    "operations": 973838,
-    "exact_check_samples": 970,
-    "completed_hourly_bursts": 11,
+    "elapsed_seconds": 44495.1,
+    "operations": 1000206,
+    "exact_check_samples": 997,
+    "completed_hourly_bursts": 12,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 1,
     "terminal_exact_history_integrity": "pending",
@@ -117,16 +117,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.53,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2105Z.json",
+    "observed_operations_per_second_elapsed": 22.479,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2126Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.1667608024691358,
+    "coverage_duration_fraction": 0.17166319444444444,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "dfc9a1c7d4c5dd41d2f6fc77932cd0b4a030ba99ab135cbe987bb763eeb6e35f",
+    "latest_checkpoint_sha256": "5bea5253a6695e86ca62133707e3176fe48077009f011fbcd08b38afe4b81894",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -151,7 +151,7 @@
     "latest_live_status_query_at_utc": "2026-11-10T19:38:49Z",
     "latest_full_checkpoint_at_utc": "2026-11-10T20:12:09Z",
     "max_exact_convergence_ms_observed": 17393,
-    "latest_checkpoint_at_utc": "2026-11-10T21:05:24Z",
+    "latest_checkpoint_at_utc": "2026-11-10T21:26:25Z",
     "controlled_crash_recovery_scheduled_at_elapsed_seconds": 43200,
     "exactness_protocol": "Each 1000-operation exactness sample requests a full scan-first observation via SIGHUP, waits for accounting verification, then compares fixture and index.",
     "latest_live_checkpoint_remote_path": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json",
@@ -961,5 +961,71 @@
     "fault_matrix_started": false,
     "decision": "blocked by unrelated active Go build/test workloads and load1 > 10",
     "evidence": "read-only host pressure guard measurement"
+  },
+  "vps2_reconciliation_cycle_2125z": {
+    "host": "192.168.5.106",
+    "observed_at_utc": "2026-11-10T21:26:45Z",
+    "scan_start_utc": "2026-11-10T21:15:22.198365Z",
+    "scan_complete_utc": "2026-11-10T21:23:53.976784Z",
+    "scan_duration_seconds": 511.778419,
+    "files": 1784140,
+    "directories": 218276,
+    "staged_path_instances": 2002416,
+    "coverage_issues": 0,
+    "accounting_verification": "passed",
+    "accounting_elapsed_ms": 91149,
+    "accounting_completed_utc": "2026-11-10T21:25:25.228350Z",
+    "temporary_scan_stage_peak_bytes": 745762816,
+    "temporary_scan_stage_removed": true,
+    "post_observation_dirty_reason": "filesystem changes await the next full observation",
+    "kernel_overflows": 0,
+    "dropped_updates": 0,
+    "pending_updates": 0,
+    "evidence": "docs/qualification/vps2-reconciliation-cycle-20261110T2125Z.json"
+  },
+  "vps2_disk_followup_2121z": {
+    "observed_at_utc": "2026-11-10T21:21:11Z",
+    "root_total_bytes": 99012476928,
+    "root_used_bytes_during_scan": 85120970752,
+    "root_available_bytes_during_scan": 9311756288,
+    "root_use_percent_during_scan": 91,
+    "root_used_bytes_after_scan": 84419977216,
+    "root_available_bytes_after_scan": 10012749824,
+    "root_use_percent_after_scan": 90,
+    "dux_stage_bytes": 745762816,
+    "dux_stage_removed_after_completion": true,
+    "var_lib_dux_bytes_after_scan": 911990784,
+    "var_tmp_bytes": 4487712768,
+    "evidence": "docs/qualification/vps2-disk-audit-20261110.md"
+  },
+  "latest_vm_admission_2126z": {
+    "observed_at_utc": "2026-11-10T21:26:50Z",
+    "load_average_1m": 6.66,
+    "cpu_psi_some_avg10_percent": 2.84,
+    "io_psi_some_avg10_percent": 1.43,
+    "active_host_workloads": [
+      "Go test binary pid=3854194",
+      "go test pid=3854007"
+    ],
+    "qualification_vm_started": false,
+    "fault_matrix_started": false,
+    "fault_build_stopped": true,
+    "decision": "active Go test workload blocked VM admission",
+    "evidence": "docs/qualification/vm-admission-20261110T2126Z.json"
+  },
+  "latest_vm_admission_2129z": {
+    "observed_at_utc": "2026-11-10T21:29:26Z",
+    "load_average_1m": 11.9,
+    "cpu_psi_some_avg10_percent": 11.21,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 1.25,
+    "active_host_workloads": [
+      "Go compiler pid=3868187",
+      "go test pid=3862355"
+    ],
+    "qualification_vm_started": false,
+    "fault_matrix_started": false,
+    "decision": "blocked by active Go build/test workloads and load1 > 10",
+    "evidence": "docs/qualification/vm-admission-20261110T2129Z.json"
   }
 }
