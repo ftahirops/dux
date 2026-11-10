@@ -55,6 +55,13 @@ with reported lag of about 10.8 hours. The same sample showed zero kernel
 overflows and dropped events. Since VPS2 is in scan-first mode, `events_resolved`
 being zero is expected: fanotify records are hints, and full observations
 reconcile the index. This brief live snapshot is not a new canary pass.
+At 00:50 UTC a second read-only sample showed the observation had advanced
+past accounting verification to `filesystem changes await the next full
+observation`; the daemon remained active with zero restarts, overflows, and
+dropped events. The index still reported about 10.8 hours since its last
+fully-caught-up state, so this is evidence of scan completion, not proof the
+lag has recovered. See
+[`vps2-live-status-20261110T0050Z.json`](vps2-live-status-20261110T0050Z.json).
 
 The new `src/watch.rs` changes in this revision are test-only. The bounded
 inode-reuse production change was already included in release 124; release 125
