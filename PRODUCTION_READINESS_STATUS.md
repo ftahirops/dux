@@ -91,7 +91,16 @@ checked-in harness against the exact candidate SHA-256; it passed on Linux
 This does not qualify capability behavior on other kernels or test
 `CAP_DAC_READ_SEARCH` event-handle resolution.
 
-**Updated:** 2026-11-10 02:08 UTC
+At 02:14 UTC, r126's read-only status command opened the live VPS2 r121 database
+and reported `behind_seconds_applicable=false` and no stale throttle marker,
+while the installed r121 status on that same database still reported about
+12.2 hours of behind time despite a scan about six minutes old. Both samples
+showed zero drops/overflows, no pending updates, and no write error. This
+confirms the status correction against the production database; it does not
+qualify r126 runtime behavior. See
+[`VPS2 read-only status comparison`](docs/qualification/production-live-followup-20261110T0214Z/README.md).
+
+**Updated:** 2026-11-10 02:14 UTC
 
 ---
 
