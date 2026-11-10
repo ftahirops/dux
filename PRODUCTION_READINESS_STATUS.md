@@ -4383,3 +4383,19 @@ The next VPS2 soak checkpoint was copied at 12:43:16 UTC to
 It records 13,092.9 seconds, 304,581 operations, 303 periodic samples, three
 mutation bursts, and zero controlled crashes or held-reader scenarios. The
 checkpoint remains `running`; terminal assertions are still pending.
+
+## Live checkpoint — 2026-11-10 12:47 UTC
+
+VPS1 read-only status: r66 active as root; dirty, not caught up; 766 kernel
+overflows; 2,518,862 dropped updates; 649 pending updates; about 67.3 hours
+behind; 1,316,390 indexed nodes; 3,455,291,392-byte index and 128-MiB WAL.
+The last full scan remains Nov 5 12:49 UTC. Root storage has about 52 GiB
+available (69% used); the workspace is about 4.1 GiB.
+
+The r132 VPS2 soak checkpoint at
+[`12:45Z`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1245Z.json)
+records 13,333.1 seconds, 309,921 operations, 308 exact-check samples, three
+bursts, no restarts, no held readers or crash injections, and pending terminal
+checks. Its currently loaded worker predates the pacing harness fix; do not
+interpret its 23.25 operations/second elapsed rate as a run of the corrected
+25-starts/second pacer.

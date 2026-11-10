@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T12:43:16Z",
+  "snapshot_at_utc": "2026-11-10T12:47:20Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T12:42:00Z",
+    "observed_at_utc": "2026-11-10T12:47:20Z",
     "installed_release": "0.6.3-66",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,21 +16,21 @@
     "kernel_overflows": 766,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 241874.613,
+    "behind_seconds": 242188.119,
     "service_user": "root",
-    "index_nodes": 1311465,
-    "index_bytes_on_disk": 3453059072,
+    "index_nodes": 1316390,
+    "index_bytes_on_disk": 3455291392,
     "wal_bytes": 134217728,
-    "pending_updates": 3
+    "pending_updates": 649
   },
   "disk": {
-    "observed_at_utc": "2026-11-10T12:42:00Z",
+    "observed_at_utc": "2026-11-10T12:47:20Z",
     "root_size_gib": 185,
-    "root_used_gib": 119,
-    "root_available_gib": 58,
-    "root_use_percent": 68,
+    "root_used_gib": 120.2,
+    "root_available_gib": 56.0,
+    "root_use_percent": 69,
     "target_readiness_size_gib": 1.4,
-    "workspace_size_gib": 4.1,
+    "workspace_size_gib": 4.08,
     "target_size_gib": 3.6
   },
   "qualification_host_admission": {
@@ -71,12 +71,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T12:43:16Z",
+    "observed_at_utc": "2026-11-10T12:47:20Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 13092.9,
-    "operations": 304581,
-    "exact_check_samples": 303,
+    "elapsed_seconds": 13333.1,
+    "operations": 309921,
+    "exact_check_samples": 308,
     "completed_hourly_bursts": 3,
     "held_reader_scenarios": 0,
     "controlled_crash_recovery_scenarios": 0,
@@ -85,8 +85,8 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 23.263,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1241Z.json"
+    "observed_operations_per_second_elapsed": 23.244,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1245Z.json"
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -116,7 +116,8 @@
     "soak_checkpoint_1200z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1200Z.json",
     "nonroot_runtime": "docs/qualification/nonroot-runtime-r132-vps2-20261110/runtime-report.json",
     "soak_checkpoint_1225z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1225Z.json",
-    "soak_checkpoint_1241z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1241Z.json"
+    "soak_checkpoint_1241z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1241Z.json",
+    "soak_checkpoint_1245z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1245Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
