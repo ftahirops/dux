@@ -4772,3 +4772,17 @@ not applicable based on `scan_first`, records that the flag is absent from the
 running build, and uses last-scan age for freshness. A package upgrade and
 runtime verification are needed before operators receive the clearer status
 contract from this source change.
+
+## Guarded Ubuntu guest stopped before lifecycle test — 2026-11-10 14:23 UTC
+
+At 14:21:38 the three-sample admission gate passed and started the disposable
+Ubuntu 24.04 lifecycle guest with 10% CPU quota, 2 GiB guest RAM, ephemeral
+runtime/overlay, and the package fixture share mounted read-only. The guest
+booted, but SSH/cloud-init was not ready within 105 seconds. At 14:23:23 the
+independent runtime pressure guard detected a newly started Go compiler and
+`go test` (CPU PSI some 41.22%, load1 2.4) and stopped the guest. The QEMU unit
+and guard terminated cleanly; no package commands ran, and the ephemeral
+runtime was cleaned. This is a safely aborted boot, not a package test failure
+or a lifecycle pass. The runtime guard prevented the guest from competing with
+new host tests after startup; retry after host work subsides, using enough
+bounded CPU quota for cloud-init to complete.

@@ -20,7 +20,7 @@ The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTIO
 | VPS1 production | `dux 0.6.3` build `e0cc915f`, active as root, 4 historical restarts. At 13:54 UTC it was dirty, 68.4 hours behind, with 766 kernel overflows, 2,518,862 dropped updates, 9 pending updates, 1,311,146 indexed nodes, and a 128-MiB WAL; last full scan was about 5.0 days ago. |
 | VPS2 installed service | `dux 0.6.3` build `8b02799b`, scan-first mode, active with zero restarts. Two full observations completed at 14:01:30 and 14:15:18 UTC, both with zero coverage issues and accounting verification passed; the gap was 13m48s. At 14:17 UTC it was dirty pending the next observation, with 111-second last-scan age and zero overflows/drops. |
 | Disk | At 13:53 UTC: `/` 185 GiB total, 55 GiB available; workspace 4.2 GiB (`target/readiness` 1.4 GiB); `/var/lib/dux` 3.4 GiB; `/var/log` 2.0 GiB. Disk is not currently near capacity. |
-| Current root host admission | At 14:07 UTC, the guarded VM refused startup at sample 1/3 because a Vitest worker was active. Earlier samples detected `node tsc`, Go test, and Go compiler workloads. No guest started. |
+| Current root host admission | Ubuntu VM admission passed at 14:21:38 UTC, but the independent runtime guard stopped it at 14:23:23 when Go compiler/test processes appeared. The guest had not reached SSH/cloud-init and no package commands ran. |
 
 ## Qualification gates
 

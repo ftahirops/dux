@@ -39,23 +39,24 @@
     "var_log_size_gib": 2.0
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T14:07:50Z",
-    "load_average_1m": 4.18,
-    "cpu_psi_some_avg10_percent": 2.55,
-    "active_go_build_or_test_workloads": false,
+    "observed_at_utc": "2026-11-10T14:23:23Z",
+    "load_average_1m": 2.4,
+    "cpu_psi_some_avg10_percent": 41.22,
+    "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "node Vitest test worker"
+      "Go compiler and go test appeared during guest boot; runtime guard stopped disposable VM"
     ],
-    "active_host_workload_count": 1,
+    "active_host_workload_count": 2,
     "active_host_workload_types": [
-      "node vitest"
+      "Go compiler",
+      "go test"
     ],
-    "evidence": "PRODUCTION_READINESS_STATUS.md (14:07 UTC VM guard entry)",
-    "ubuntu_guest_started": false,
-    "ubuntu_guest_state": "inactive; latest guarded start refused at sample 1/3",
+    "evidence": "PRODUCTION_READINESS_STATUS.md (14:23 UTC VM runtime-guard entry)",
+    "ubuntu_guest_started": true,
+    "ubuntu_guest_state": "started 14:21:38; runtime guard stopped at 14:23:23 before SSH/cloud-init; no package commands ran",
     "cpu_psi_full_avg10_percent": 0.0
   },
   "rust_tests": {
