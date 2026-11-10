@@ -1,0 +1,18 @@
+{
+  "observed_at_utc": "2026-11-10T22:15:00Z",
+  "command": "nice -n 19 ionice -c 3 cargo audit -D warnings",
+  "exit_code": 0,
+  "cargo_audit_version": "0.22.2",
+  "lockfile_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3",
+  "locked_dependencies": 229,
+  "known_advisories": 0,
+  "warnings": 0,
+  "advisory_database_commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
+  "advisory_database_commit_time": "2026-11-10T14:45:03+01:00",
+  "advisory_count": 1446,
+  "source_revision": "22ec734",
+  "scope_limit": "Dependency advisory scan only; not an application code security audit.",
+  "upstream_advisory_database_commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
+  "upstream_checked_at_utc": "2026-11-10T22:15:00Z",
+  "local_matches_upstream_main": true
+}

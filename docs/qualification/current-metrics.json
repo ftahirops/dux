@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T22:11:41Z",
+  "snapshot_at_utc": "2026-11-10T22:15:00Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -202,7 +202,7 @@
     "disposable_key_signature_mechanics_verified": true
   },
   "dependency_audit": {
-    "observed_at_utc": "2026-11-10T18:55:00Z",
+    "observed_at_utc": "2026-11-10T22:15:00Z",
     "locked_dependencies": 229,
     "known_advisories": 0,
     "warnings": 0,
@@ -210,8 +210,11 @@
     "advisory_database_commit_time": "2026-11-10T14:45:03+01:00",
     "advisory_database_count": 1446,
     "advisory_database_updated_at": "2026-11-10T14:45:03+01:00",
-    "evidence": "docs/qualification/dependency-audit-20261110T1855Z/evidence.json",
-    "advisory_database_freshness_note": "cargo audit found no advisories/warnings; direct git ls-remote confirmed local database commit equals upstream main at 2026-11-10T18:55Z, so no newer advisory DB update was available"
+    "evidence": "docs/qualification/cargo-audit-20261110T2215Z/evidence.json",
+    "advisory_database_freshness_note": "Fresh cargo audit passed; the advisory database matched upstream main at 22:15 UTC and was unchanged from the prior check.",
+    "advisory_database_matches_upstream_main": true,
+    "upstream_checked_at_utc": "2026-11-10T22:15:00Z",
+    "lockfile_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3"
   },
   "production_canary": "not_started",
   "evidence": {
