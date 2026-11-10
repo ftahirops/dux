@@ -4482,3 +4482,21 @@ rollback was run after these changes. The focused regression tests verify
 scriptlet wiring and lifecycle-driver assertions; they do not substitute for
 Debian/RPM execution in disposable VMs. The changes are uncommitted and the
 Rocky VM remains subject to its host-pressure admission guard.
+
+## Refreshed soak and package validation — 2026-11-10 13:24 UTC
+
+The VPS2 r132 soak unit was confirmed active and running with `NRestarts=0`.
+Its durable checkpoint at 13:24:11 UTC records 15,561.5 seconds elapsed,
+361,448 operations, 360 exact-check samples, and four mutation bursts. The last
+sample covered operation 361,000 and reported 1,987 ms convergence, 4,328 KiB
+RSS, 14 file descriptors, and a 4,482,592-byte WAL. No held-reader or
+controlled-crash phase has run; terminal exactness/history/SQLite checks remain
+pending. The snapshot is
+[`soak-progress-20261110T1324Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1324Z.json).
+
+After adding Debian `preinst` protection and its regression assertion, the full
+Python qualification discovery was rerun: **377 passed, 0 failed, 1 skipped**.
+Shell syntax, Python byte-compilation, RPM spec expansion, and `git diff
+--check` passed. These results are included in commit `04005b7`, pushed to
+`hardening/stale-dfid-classification-review`. They still do not qualify the
+active package-upgrade/rollback path in a disposable guest.

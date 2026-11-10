@@ -6,8 +6,9 @@ correctness and package checks, but the long soak, Rocky RPM lifecycle,
 publisher authentication, production-scale qualification, and canary gates are
 not complete.
 
-Status snapshot: **13:10 UTC, 2026-11-10**. Machine-readable values and evidence
-timestamps are in [`current-metrics.json`](docs/qualification/current-metrics.json).
+Status snapshot: **13:10 UTC, 2026-11-10**; the VPS2 soak row and checkpoint
+were refreshed at 13:24 UTC. Machine-readable values and evidence timestamps
+are in [`current-metrics.json`](docs/qualification/current-metrics.json).
 The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTION_READINESS_STATUS.md).
 
 ## Candidate and live production
@@ -27,7 +28,7 @@ The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTIO
 | Python qualification harnesses | 377 passed, 0 failed, 1 skipped across 25 modules | Includes the 75-case package lifecycle/security suite. Standard-library statement coverage is 53% for the package lifecycle harness; this is not daemon coverage, and branch coverage is unavailable. One signing integration case is skipped without its dedicated RPM fixture. |
 | Instrumented coverage | 72.61% lines, 71.44% regions, 76.19% functions; branch counters unavailable | Critical untested paths and filesystem/platform coverage remain. |
 | r132 churn | 100k-file ext4 run passed 20k mutations, exact comparisons and SQLite integrity | Not a 1.9M-node production-scale benchmark; convergence ranged 92–323 seconds. |
-| 72-hour soak | Running on VPS2, zero restarts at 13:10 UTC; 14,658.5 seconds, 340,431 operations, 339 periodic samples, 4 bursts | Held-reader, crash/recovery, terminal exactness/history/integrity are pending. This run uses an older pacing harness. |
+| 72-hour soak | Running on VPS2, zero restarts at 13:24 UTC; 15,561.5 seconds, 361,448 operations, 360 periodic samples, 4 bursts | Held-reader, crash/recovery, terminal exactness/history/integrity are pending. This run uses an older pacing harness. |
 | Non-root service hardening | Exact r132 binary passed a bounded `User=dux` ext4 runtime probe; all capability masks matched, fanotify observed a new file, rescan/accounting and SQLite checks passed. A mode-000 file was read through `open_by_handle_at` as UID `dux` (direct kernel API probe). | Temporary packages are unsigned and not release outputs. Package install/upgrade/rollback, Dux's integrated handle decoder/replay, full packaged sandbox, production-scale and multi-day behavior remain unqualified. See [runtime evidence](docs/qualification/nonroot-runtime-r132-vps2-20261110/README.md). |
 | Ubuntu DEB lifecycle | An earlier r132 lifecycle run passed; active-service upgrade/rollback protection has since changed and is not VM-qualified yet | Local package-script regressions pass, but the new DEB `preinst`/rollback path must be rerun on a disposable Ubuntu VM. This does not qualify RPM behavior or production rollout. |
 | Rocky RPM lifecycle | Not qualified; a disposable-key RPM signature was verified in Rocky | Full install/upgrade/rollback did not start; retry only after guarded host admission. |

@@ -100,3 +100,14 @@ test profile. It does not qualify a 24-hour production canary, full 1.9M-node
 production-scale throughput, other filesystems/kernels, or storage power-loss
 recovery. Final evidence will be copied into this directory after the worker
 finishes; until then, the live report and rolling progress file are on VPS2.
+
+### Refreshed progress — 2026-11-10 13:24 UTC
+
+The VPS2 unit was active with zero restarts. The durable progress file records
+15,561.5 seconds elapsed, 361,448 mutations, 360 exact-check samples, and four
+mutation bursts. The latest exact sample covered operation 361,000 and measured
+1,987 ms end-to-end convergence, 4,328 KiB daemon RSS, 14 file descriptors,
+and a 4,482,592-byte WAL. No held-reader or controlled-crash phase has run;
+final exactness, history continuity, and SQLite integrity remain pending. This
+is still progress, not a soak pass. See
+[`soak-progress-20261110T1324Z.json`](soak-progress-20261110T1324Z.json).
