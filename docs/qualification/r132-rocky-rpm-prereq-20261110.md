@@ -75,6 +75,12 @@ release owner's publisher identity or the install/upgrade/rollback lifecycle.
 The temporary key and workspace were removed. Evidence:
 [`the Rocky signature check`](r132-rocky-rpm-signature-test-20261110T1111Z.json).
 
+At approximately 11:14 UTC, a further start was refused at admission sample
+2/3 after targeted Go tests and compiler processes appeared; the subsequent
+CPU PSI some avg10 reached 62.72%, above the hard admission limit. No VM was
+started. The disposable key/workspace was removed. The host pressure sample
+is in [`the 11:14 record`](live-vps1-admission-20261110T1114Z.json).
+
 ## Static package authenticity inspection — 2026-11-10 10:13 UTC
 
 The exact r132 artifact

@@ -1,0 +1,16 @@
+{
+  "captured_at_utc": "2026-11-10T11:14:36Z",
+  "load_average": [9.37, 5.61, 7.17],
+  "pressure_psi_avg10_percent": {
+    "cpu_some": 62.72,
+    "cpu_full": 0.0,
+    "io_some": 1.40,
+    "io_full": 0.23,
+    "memory_some": 0.0,
+    "memory_full": 0.0
+  },
+  "active_host_test": "go test ./internal/service ./agent/core ./internal/router ./internal/handler -run targeted provisioning-authority tests",
+  "rocky_vm_admission": "refused at sample 2/3 before unit start",
+  "vm_started": false,
+  "temporary_test_signing_key_removed": true
+}

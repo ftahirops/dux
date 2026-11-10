@@ -253,6 +253,13 @@ and overflow counts remained 2,518,862 and 742. Root disk use had fallen to
 66%, with 62 GiB free; disk capacity is not blocking recovery. See
 [`the 11:12 VPS1 snapshot`](docs/qualification/live-vps1-readiness-20261110T1112Z.json).
 
+At 11:13:01 UTC, the VPS2 r132 soak was still active with zero restarts,
+7,690.7 seconds elapsed, 181,744 operations, 180 exact samples, and two
+completed hourly bursts. The held-reader, recovery, and terminal assertions
+remain pending. At 11:14 UTC the Rocky VM guard refused startup at sample 2/3
+as host CPU PSI some reached 62.72%; no guest was created. See the
+[`11:14 host admission record`](docs/qualification/live-vps1-admission-20261110T1114Z.json).
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM
