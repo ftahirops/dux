@@ -735,6 +735,20 @@ fn scan_first_hint_invalidates_observation(
     in_scope || (scan_active && scope_unresolved)
 }
 
+fn invalidate_scan_first_pending_reconciliation_check(
+    reconcile_first: bool,
+    scan_active: bool,
+    in_scope: bool,
+    pending_reconciliation_check: &mut Option<bool>,
+) -> bool {
+    let invalidated =
+        reconcile_first && !scan_active && in_scope && *pending_reconciliation_check == Some(true);
+    if invalidated {
+        *pending_reconciliation_check = None;
+    }
+    invalidated
+}
+
 fn automatic_reconciliation_request_allowed(
     retry_paused: bool,
     scan_active: bool,
@@ -2667,7 +2681,31 @@ pub fn run_daemon(
                     if scan_job.is_some() {
                         lost_events = true;
                     }
-                    if let Some(check) = &accounting_check {
+                    let post_observation_hint_invalidates_check =
+                        invalidate_scan_first_pending_reconciliation_check(
+                            reconcile_first,
+                            scan_job.is_some(),
+                            result.seen > 0,
+                            &mut pending_reconciliation_check,
+                        );
+                    if post_observation_hint_invalidates_check {
+                        // This scan-first observation is now older than an
+                        // in-scope hint. Do not let its pending accounting
+                        // check clear dirty state, whether the worker has
+                        // started yet or is already running. Keep the status
+                        // reason aligned with the next required full walk.
+                        if let Some(check) = &accounting_check {
+                            check.cancel.store(true, Ordering::Relaxed);
+                        }
+                        if store.get_meta("dirty_reason")?.as_deref()
+                            == Some(RECONCILIATION_ACCOUNTING_PENDING)
+                        {
+                            store.set_meta(
+                                "dirty_reason",
+                                "filesystem changes await the next full observation",
+                            )?;
+                        }
+                    } else if let Some(check) = &accounting_check {
                         check.cancel.store(true, Ordering::Relaxed);
                         pending_reconciliation_check = None;
                     }
@@ -8707,6 +8745,34 @@ mod tests {
         assert!(!scan_first_hint_invalidates_observation(
             false, false, false
         ));
+    }
+
+    #[test]
+    fn scan_first_post_observation_hint_invalidates_pending_accounting_clear() {
+        let mut pending = Some(true);
+        assert!(invalidate_scan_first_pending_reconciliation_check(
+            true,
+            false,
+            true,
+            &mut pending
+        ));
+        assert_eq!(pending, None);
+
+        for (reconcile_first, scan_active, in_scope, pending_value) in [
+            (true, true, true, Some(true)),
+            (true, false, false, Some(true)),
+            (true, false, true, None),
+            (false, false, true, Some(true)),
+        ] {
+            let mut pending = pending_value;
+            assert!(!invalidate_scan_first_pending_reconciliation_check(
+                reconcile_first,
+                scan_active,
+                in_scope,
+                &mut pending,
+            ));
+            assert_eq!(pending, pending_value);
+        }
     }
 
     #[test]

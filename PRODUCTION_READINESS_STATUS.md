@@ -1,15 +1,32 @@
 # Production readiness status
 
-## VPS2 live reconciliation follow-up — 2026-11-10 05:58 UTC
+## VPS2 live reconciliation follow-up — 2026-11-10 06:14 UTC
 
-Read-only observation of the installed r121 service found the retry still in
-its database indexing/projection phase: the scan progress heartbeat continued
-to refresh, tree-walk counters had reached 1,681,973 files and 199,525
-directories, and the staged projection was 710,303,744 bytes. The service had
-zero restarts, and fanotify queue pressure/overflow remained zero. Host root
-disk free space was 3.2 GiB (97% used). This is a long, I/O-heavy active scan
-under host pressure, not a confirmed hang. Since the installed binary is r121,
-this does not qualify r131. See [the VPS2 observation](docs/qualification/reconciliation-live-vps2-20261110.md).
+The installed r121 service's bounded retry completed at 05:58:50 after about
+9m41s: 1,681,973 files, 199,525 directories, zero coverage issues. Independent
+accounting verification passed at 06:00:42 after 111.5s. Its next scheduled
+observation began at 06:04:09; at 06:11:01 it was indexing after 1,682,574
+files and 199,794 directories. It completed at 06:11:26 with zero coverage
+issues and zero paths to replay, after about 7m17s. Accounting verification
+passed at 06:12:25 after 58.9s. At 06:14:01 the status was dirty because
+filesystem changes had arrived after the observation and another full scan
+was due; no events were dropped and no kernel overflow was reported. The
+service had zero restarts and 4.1 GiB root free. This is live evidence for
+installed r121, not candidate r131; independent filesystem-to-index equality
+remains open. See [the VPS2 observation](docs/qualification/reconciliation-live-vps2-20261110.md).
+
+The r131 code also now invalidates a pending reconciliation-accounting clear
+when a post-observation in-scope hint arrives before the verifier completes.
+It retains dirty status and updates its reason to say a new full observation
+is needed, preventing the older snapshot's check from clearing that marker.
+The focused regression test passed. After this change,
+`cargo test --locked --all-features` passed **341 tests, 0 failed, 2 ignored**;
+strict all-target/all-feature Clippy, formatting, and `git diff --check` passed.
+Coverage on this worktree: **72.64% lines** (19,061/26,240), **71.49% regions**
+(30,295/42,378), **76.26% functions** (1,330/1,744); LLVM reported no branch
+counters. Test and coverage logs are in
+`target/readiness/r132-working-tree-20261110/`. The candidate has not been
+packaged or deployed.
 
 ## r131 initial-baseline read guard and runtime qualification — 2026-11-10 05:40 UTC
 

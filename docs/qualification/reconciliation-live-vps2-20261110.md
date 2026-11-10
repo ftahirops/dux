@@ -5,7 +5,32 @@ the r131 candidate. It extends the live retry observation recorded during the
 r131 qualification work. No service, database, or host configuration was
 changed.
 
-## Observed state
+## Retry and verification outcome
+
+The first scan ended at 05:48:09 UTC with one coverage issue after observing
+conflicting inode incarnations. The host-pressure gate deferred its bounded
+retry, which began at 05:49:09. That retry completed at 05:58:50: 1,681,973
+files, 199,525 directories, 1,881,498 staged path instances, zero coverage
+issues, zero unresolved reuse paths, and zero pending paths to replay. The
+retry therefore took about 9 minutes 41 seconds. It is a successful live
+reconciliation by r121 under load, after one incomplete attempt; it is not a
+candidate r131 qualification.
+
+The daemon then kept the status dirty while its separate accounting verifier
+ran. At 06:00:42 the journal recorded `reconciliation accounting verification
+passed` after 111,528 ms. The next scheduled full observation began at
+06:04:09. At 06:11:01 it was in the indexing phase, with a fresh progress
+heartbeat and 1,682,574 files / 199,794 directories observed. Its staging DB
+was 707,727,360 bytes at 06:10:28 and unchanged in the 06:11:01 sample. It
+completed at 06:11:26 with zero coverage issues and zero paths to replay, in
+about 7m17s. The accounting check passed at 06:12:25 after 58,863 ms. At
+06:14:01 the daemon remained active with zero restarts, dropped events, or
+kernel-overflow notices and 4.1 GiB free on root; status was dirty because
+filesystem changes had arrived after the completed observation. An unchanged
+staging file alone did not show a stall: the heartbeat remained fresh during
+projection.
+
+## Observed state during retry finalization
 
 From 05:49 through 05:57 UTC, the root daemon remained in
 `ActiveState=reloading` with `NRestarts=0`. The scan progress record's counters
@@ -36,10 +61,10 @@ report zero restarts.
 
 ## Interpretation and limits
 
-The retry was still active, its progress publisher was refreshing, and the
-walk counters had entered the indexing phase. This is a long database
-projection/finalization phase under host pressure, not evidence of a deadlock.
-It also shows that zero fanotify overflows alone does not guarantee prompt
+At 05:57 the retry was active, its progress publisher was refreshing, and the
+walk counters had entered the indexing phase. This was a long database
+projection/finalization phase under host pressure, not a deadlock. It also
+shows that zero fanotify overflows alone does not guarantee prompt
 reconciliation. The daemon was r121, so this observation neither validates nor
 falsifies r131 behavior.
 
@@ -49,11 +74,13 @@ size (710,303,744 bytes), with `ActiveState=reloading` and `NRestarts=0`. At
 Root free space had fallen to 3.2 GiB, so disk headroom remains a concern while
 the projection runs.
 
-Do not remove its temporary database or restart the service to clear this
-state: that would destroy evidence and interrupt the installed indexer. The
-next useful observation is whether the replacement DB resumes growth and the
-daemon emits a completion or failure record, followed by an independent
-consistency check if the scan completes.
+Both observed full scans and their accounting verifications have completed:
+the first needed a bounded retry, while the next scheduled scan completed on
+its first attempt. The filesystem-to-index view is still marked stale after
+later filesystem changes, which the next scheduled observation must absorb.
+Independent filesystem-to-index equality has not yet been measured. Do not
+remove live scan files or restart the service to accelerate it; that would
+interrupt the installed indexer and invalidate this observation.
 
 ## Evidence collection
 
@@ -66,6 +93,8 @@ config that maps this host to Forgejo's `git` account on port 2222):
 - `/proc/<pid>/io`, `ps`, process file descriptors, and filesystem free space
 - `journalctl -u dux` filtered to the observation window
 
-Captured key readings: `MainPID=576850`; `ActiveState=reloading`;
-`NRestarts=0`; root filesystem 93 GiB total, 3.5 GiB available; `/dev/shm`
-3.0 GiB total, 2.9 GiB available. The service/database were not modified.
+Captured key readings during the retry: `MainPID=576850`;
+`ActiveState=reloading`; `NRestarts=0`; root filesystem 93 GiB total, 3.5 GiB
+available at the first sample; `/dev/shm` 3.0 GiB total, 2.9 GiB available.
+The later 06:05:45 sample had 4.0 GiB root free. The service/database were not
+modified.
