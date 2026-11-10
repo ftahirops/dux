@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T20:43:00Z",
+  "snapshot_at_utc": "2026-11-10T20:46:25Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -103,12 +103,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T20:42:13Z",
+    "observed_at_utc": "2026-11-10T20:46:25Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 41903.3,
-    "operations": 945178,
-    "exact_check_samples": 942,
+    "elapsed_seconds": 42083.4,
+    "operations": 949120,
+    "exact_check_samples": 946,
     "completed_hourly_bursts": 11,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -117,16 +117,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.556,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2042Z.json",
+    "observed_operations_per_second_elapsed": 22.553,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2046Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.16166396604938274,
+    "coverage_duration_fraction": 0.1623587962962963,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "d443b0f41df7c40e8606915d9132fba7d8275c31a4826931a707972310d5f80a",
+    "latest_checkpoint_sha256": "2444e1c9edad959125ec1bd25ca38fa6dc498daf991a31fb2af2895bad1607eb",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -151,7 +151,7 @@
     "latest_live_status_query_at_utc": "2026-11-10T19:38:49Z",
     "latest_full_checkpoint_at_utc": "2026-11-10T20:12:09Z",
     "max_exact_convergence_ms_observed": 17393,
-    "latest_checkpoint_at_utc": "2026-11-10T20:42:13Z",
+    "latest_checkpoint_at_utc": "2026-11-10T20:46:25Z",
     "controlled_crash_recovery_scheduled_at_elapsed_seconds": 43200,
     "exactness_protocol": "Each 1000-operation exactness sample requests a full scan-first observation via SIGHUP, waits for accounting verification, then compares fixture and index.",
     "latest_live_checkpoint_remote_path": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json"
@@ -235,7 +235,8 @@
     "latest_soak_checkpoint_2022z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2022Z.json",
     "latest_vm_admission_2040z": "docs/qualification/vm-admission-20261110T2040Z.json",
     "latest_soak_checkpoint_at_2042z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2042Z.json",
-    "latest_vps2_disk_audit": "docs/qualification/vps2-disk-audit-20261110.md"
+    "latest_vps2_disk_audit": "docs/qualification/vps2-disk-audit-20261110.md",
+    "latest_soak_checkpoint_at_2046z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2046Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -877,22 +878,22 @@
     "evidence": "docs/qualification/vps2-reconciliation-cycle-20261110T2006Z.log"
   },
   "vps2_live_observation": {
-    "observed_at_utc": "2026-11-10T20:42:56Z",
-    "installed_service_active_state": "active",
-    "installed_service_sub_state": "running",
+    "observed_at_utc": "2026-11-10T20:46:02Z",
+    "installed_service_active_state": "reloading",
+    "installed_service_sub_state": "reload-notify",
     "installed_service_restarts": 0,
-    "installed_service_scan_in_progress": false,
-    "installed_service_dirty_reason": "filesystem changes await the next full observation",
+    "installed_service_scan_in_progress": true,
+    "installed_service_dirty_reason": "periodic filesystem observation in progress",
     "installed_service_kernel_overflows": 0,
     "installed_service_dropped_updates": 0,
     "installed_service_pending_updates": 0,
-    "last_completed_scan_age_seconds": 420,
+    "last_completed_scan_age_seconds": 592,
     "root_use_percent": 90,
-    "root_available_bytes": 9891160064,
-    "cpu_psi_some_avg10_percent": 27.54,
+    "root_available_bytes": 10312097792,
+    "cpu_psi_some_avg10_percent": 44.99,
     "evidence": "read-only VPS2 status and host admission sample via SSH",
-    "io_psi_some_avg10_percent": 1.96,
-    "var_tmp_gib_after_cache_cleanup": 4.7
+    "io_psi_some_avg10_percent": 4.92,
+    "var_tmp_gib_after_cache_cleanup": 4.2
   },
   "vps1_vm_admission_latest": {
     "observed_at_utc": "2026-11-10T20:40:26Z",

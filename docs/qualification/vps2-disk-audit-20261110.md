@@ -127,3 +127,14 @@ removed contents were rebuildable `target` caches. `/var/tmp` fell from 5.2 to
 4.7 GiB. Root measured 90% used with 9.2 GiB available. The VPS2 CPU PSI some
 avg10 was 27.54%, so no additional test VM was started. The active r132 soak
 was left untouched.
+
+
+## Old Rust cache cleanup — 2026-11-10 20:46 UTC
+
+Removed the unused `/var/tmp/dux-perf-target-baseline` Cargo target tree (249
+MiB; no executable was present) and only the `deps`, `build`, `.fingerprint`,
+and `incremental` caches from `/var/tmp/dux-production-build-0b81fa8/release`
+(240 MiB). No Cargo or rustc process was active. The separately built `dux`
+binary, source/reports, Cargo/Rust toolchains, and failure evidence were kept.
+`/var/tmp` fell from 4.7 to 4.2 GiB; root measured 90% used with about 9.6 GiB
+available. CPU PSI some avg10 was 44.99%, so no new test VM was started.
