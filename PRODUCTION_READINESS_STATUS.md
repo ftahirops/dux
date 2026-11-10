@@ -1,6 +1,65 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-09 22:59 UTC
+## Latest verified checkpoint — 2026-11-10 01:42 UTC
+
+### Release decision
+
+**Not production-ready; do not claim release qualification.** Release candidate
+r126 has a passing full Rust test/coverage run and verified packages, but has
+not been installed on either host. The guarded Debian lifecycle runner has not
+launched its disposable VM because recurring unrelated Go compiler/test jobs
+keep resetting host admission. The required fresh 24-hour candidate canary and
+privileged fanotify integration tests remain open.
+
+### Production VPS1 — current installed service
+
+Read-only capture at 01:40:51 UTC: `/usr/bin/dux` is package `0.6.3-66`, source
+commit `e0cc915f8f37`, not the current candidate. PID 1073891 is active with 4
+lifetime restarts and no reconciliation in progress. Status is dirty and not
+caught up, with reason `non-watched filesystem mounts changed; reconciling
+visible paths`, zero pending updates, and no write error. Its last full scan
+was 2026-11-05 12:49:22 UTC (about 4.5 days earlier); event backlog age was
+about 56 hours. Lifetime counters show **649 kernel overflows** and
+**2,518,862 reported dropped updates**. The journal at capture time continues
+to report `open_by_handle_at` `ESTALE` for transient paths. Root storage is
+70% used with 55 GiB free. Evidence: direct status, systemd/process output,
+and the live journal were checked; no service or database changes were made.
+
+### VPS2 — scan-first runtime evidence and capacity
+
+The r121 daemon remained active with zero restarts. A root observation from
+01:31:41 to 01:36:33 UTC scanned 1,632,117 files and 193,595 directories,
+reported **0 coverage issues**, and revalidated two inode-reuse races. The
+accounting verification passed in 69.609 seconds. At 01:39 UTC it had no scan
+in progress, write error, kernel overflows, or reported drops; it remained
+dirty because changes during the walk await the next observation. This is a
+successful observation, not a clean 24-hour canary or proof of freshness under
+continuous mutation. The read-only raw journal and status sample are linked in
+[`scan-first-backlog-age-20261110.md`](docs/qualification/scan-first-backlog-age-20261110.md).
+
+VPS2 root is still 94% used. Removing one unattached, regenerable Go/Node
+`act-toolcache` volume reclaimed about 409 MiB; the latest measured free space
+was 6.0 GiB at 01:32 UTC. ClickHouse telemetry, XGS incident records, active
+Docker data, and Dux rollback/qualification workspaces were preserved. See the
+[`VPS2 disk audit`](docs/qualification/vps2-disk-audit-20261110.md).
+
+### r126 code/test evidence
+
+Built from clean code commit `2a884a8`; the full all-feature Rust suite,
+including ignored tests on tmpfs, passed **338/338**. The separate inclusive
+LLVM run also passed 338/338. Coverage is 74.08% line, 72.99% region, 77.14%
+function; LLVM emitted no branch counters. Strict Clippy, formatting,
+`git diff --check`, package metadata, and artifact hash verification passed.
+Dependency audit: 0 known vulnerabilities in 229 locked packages in the
+recorded advisory snapshot. Privileged fanotify success paths and actual
+event-handle resolution remain untested. Full details and artifacts:
+[`r126 qualification`](docs/qualification/release-candidate-r126-20261110/README.md).
+
+**Updated:** 2026-11-10 01:42 UTC
+
+---
+
+## Prior verified checkpoint — 2026-11-09 22:59 UTC
 
 ### Clean-install lifecycle readiness gate
 
