@@ -177,7 +177,16 @@
     "controlled_crash_recovery_scenarios_remaining": 4,
     "observed_rate_observed_at_utc": "2026-11-10T22:11:41Z",
     "observed_rate_semantics": "Whole-wallclock average includes pauses for synchronous full scan/accounting/oracle checks every 1000 mutations; pacer rebases rather than catching up. Does not establish sustained 25/s capacity.",
-    "sustained_25_per_second_capacity_qualified": false
+    "sustained_25_per_second_capacity_qualified": false,
+    "exact_convergence_profile_at_2026_11_10T2211Z": {
+      "sample_count": 1054,
+      "total_convergence_seconds": 3478.5,
+      "mean_ms": 3300.3,
+      "median_ms": 2671.0,
+      "p95_ms": 7591,
+      "max_ms": 17393,
+      "elapsed_fraction_percent": 7.37
+    }
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",

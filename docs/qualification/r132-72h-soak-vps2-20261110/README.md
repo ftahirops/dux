@@ -94,6 +94,13 @@ Evidence: [progress samples](soak-progress-20261110T1019Z.json) and
   endurance at the observed rate; it does not prove a sustained 25/s workload
   or throughput capacity. A continuous concurrent producer is needed for that
   separate performance gate.
+
+At the 22:11 checkpoint, 1,054 exactness samples had accumulated 3,478.5
+seconds of measured convergence time (mean 3.300 s, median 2.671 s, p95 7.591
+s, maximum 17.393 s). This represents 7.37% of elapsed soak time and excludes
+other work around those synchronous gates, such as history assertions. The
+recorded timings reinforce that the current soak's wall-clock mutation rate is
+reconciliation-limited; they are not a standalone scanner benchmark.
 - Every 1,000 mutations, request a full scan-first observation via SIGHUP, wait for scan completion and accounting verification, then independently compare indexed paths and identities against the fixture. Thus this is repeated reconciliation-under-churn endurance testing, not a passive event-only soak; the 256-file seed and small fixture also do not establish production-scale throughput.
 - Inject a 500-file mutation burst each hour and verify exactness/history.
 - Hold a read-only SQLite snapshot for five minutes after six hours; then
