@@ -5157,3 +5157,37 @@ overflows, zero dropped updates, and scan age 338 seconds. Its dirty state means
 filesystem changes await the next full observation; it does not mean the last
 observation failed. The service remains behind on hints between scheduled
 observations, and per-path maximum age is still unmeasured.
+
+
+## Fresh VPS1 production and disk baseline — 2026-11-10 16:38 UTC
+
+A read-only live query on VPS1 at **16:38:49 UTC** confirms the installed
+`dux 0.6.3` production binary (`e0cc915f8f37`, SHA-256
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`) is still
+active under systemd. It has four historical restarts. The index remains dirty
+from fanotify overflow and is **71.13 hours behind**; the last full scan was
+5.16 days ago. Lifetime counters are 775 kernel overflow notifications and
+2,518,862 dropped updates; 31 updates were pending at the sample. The index had
+1,327,203 nodes, 128,133,079,040 unique bytes, a 3,534,987,264-byte database,
+and a 128-MiB WAL. The daemon was running and had not started a scan. The
+machine-readable status capture is
+[`vps1-live-status-20261110T1638Z.json`](docs/qualification/vps1-live-status-20261110T1638Z.json)
+(SHA-256 `e22bc0f960f343829c164007287618290eeacc68a224e236d959a7edc61e9d1f`).
+
+The root filesystem was 70% used, with 58,229,223,424 bytes (54.24 GiB)
+available. This confirms disk pressure is not the reason the production index
+is stale. The host still runs the older event-apply build; no production service
+or data was changed.
+
+
+## 7.5-hour soak checkpoint — 2026-11-10 16:39 UTC
+
+The exact r132 soak remains live at **16:39:15 UTC**: 27,289.8 seconds
+(7h34m50s), 625,053 operations, 622 exactness samples, seven mutation bursts,
+one successful held-reader/WAL-reclaim phase, zero worker restarts, and zero
+controlled crashes. The terminal exactness/history/SQLite checks remain pending;
+10.5% of the 72-hour duration has elapsed. The measured elapsed average is
+about 22.90 operations/s versus 25 requested. The worker continues to run only
+the `soak` suite, not its other 15 qualification suites. Checkpoint:
+[`soak-progress-20261110T1639Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1639Z.json)
+(SHA-256 `14dda04c9c2b5a5b00ba6a3fb08b02289922601ad059c43ecd0d8cafc1e1a7b8`).
