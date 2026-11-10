@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T22:08:31Z",
+  "snapshot_at_utc": "2026-11-10T22:11:41Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -109,12 +109,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T22:05:40Z",
+    "observed_at_utc": "2026-11-10T22:11:41Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 46849.7,
-    "operations": 1049512,
-    "exact_check_samples": 1046,
+    "elapsed_seconds": 47211.0,
+    "operations": 1057380,
+    "exact_check_samples": 1054,
     "completed_hourly_bursts": 13,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -123,16 +123,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.402,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2205Z.json",
+    "observed_operations_per_second_elapsed": 22.397,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2211Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.18074729938271603,
+    "coverage_duration_fraction": 0.1821412037037037,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "7fb2a4f93cf21c6adcb237d657bef407f227944372a342f32606bf3a2efcd3c3",
+    "latest_checkpoint_sha256": "ece62858aefa886b3d24848a4d90c38bebcb69195aaa08d7eda985e404afa4ab",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -175,7 +175,7 @@
     "next_controlled_crash_due_utc": "2026-11-11T09:04:50Z",
     "controlled_crash_recovery_scenarios_planned": 5,
     "controlled_crash_recovery_scenarios_remaining": 4,
-    "observed_rate_observed_at_utc": "2026-11-10T22:05:40Z",
+    "observed_rate_observed_at_utc": "2026-11-10T22:11:41Z",
     "observed_rate_semantics": "Whole-wallclock average includes pauses for synchronous full scan/accounting/oracle checks every 1000 mutations; pacer rebases rather than catching up. Does not establish sustained 25/s capacity.",
     "sustained_25_per_second_capacity_qualified": false
   },
