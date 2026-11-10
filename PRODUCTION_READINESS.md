@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 20:12 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
+**2026-11-10 20:19 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -17,9 +17,9 @@ machine-readable snapshot is
 | System | Latest verified state |
 |---|---|
 | **VPS1 production** | At 20:08 UTC: Dux 0.6.3 build `e0cc915f`, running as root with four historical systemd restarts; dirty and not caught up, 785 lifetime overflows, 2,518,862 dropped updates, 166 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. Current dirty reason reports non-watched filesystem mounts changed; reconciling visible paths. No OOM events were recorded. See [latest VPS1 status](docs/qualification/vps1-live-status-20261110T2008Z.json). |
-| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 20:12:32 it was active with zero restarts, overflows, drops, or pending updates. Two later full observations completed at 19:50 and 20:06 with zero coverage issues; independent accounting passed in 100.4 and 130.3 seconds. Starts were exactly 15 minutes apart. The latest scan-first status remains dirty because new hints arrived after the scan; last scan age was 343 seconds. Per-path freshness is not measured. |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 20:12 checkpoint is 11h08m19s into a 72-hour run (15.47%), with 906,776 operations, 903 exactness samples, 11 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 20:12:32 the installed service was active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. |
-| **VPS2 disk** | At 20:12, root was 91% used with 8.94 GB available. CPU PSI some avg10 was 14.43%, and ClickHouse used 91.1% CPU; the guarded fault VM was not started. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
+| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 20:19 it had zero restarts, overflows, drops, and pending updates. A periodic full observation was in progress; dirty status was expected during the observation, with the last completed scan 749 seconds old. Two earlier full observations completed at 19:50 and 20:06 with zero coverage issues; independent accounting passed in 100.4 and 130.3 seconds. Starts were exactly 15 minutes apart. Per-path freshness is not measured. |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 20:18 checkpoint is 11h13m19s into a 72-hour run (15.59%), with 913,441 operations, 910 exactness samples, 11 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 20:19 the installed service had zero restarts and was in a periodic observation; status showed zero overflows, dropped updates, and pending updates. The host had 91% disk use and 18.01% CPU PSI some avg10, so the guarded fault VM remains inadmissible. Terminal exactness, history, and SQLite checks remain pending. |
+| **VPS2 disk** | At 20:19, root was 91% used with 8.34 GB available and CPU PSI some avg10 was 18.01%; an earlier 20:16 sample peaked at 45.29%. ClickHouse was using about 91% CPU at 20:17. The guarded fault VM was not started. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
 
 ### Recent live reliability and throughput evidence
 
@@ -44,7 +44,7 @@ Evidence: [latest scheduled scans](docs/qualification/vps2-reconciliation-cycle-
 [next scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log),
 [throughput profile](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json),
 [latest VPS2 status](docs/qualification/vps2-live-status-20261110T1926Z.json),
-[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2012Z.json).
+[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2018Z.json).
 
 ## Tests, coverage, and open release gates
 
