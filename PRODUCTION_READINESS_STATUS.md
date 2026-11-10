@@ -198,6 +198,13 @@ At 10:57:55 UTC, the VPS2 worker was still active with zero restarts, 6,785.3
 seconds elapsed, 160,303 operations, and 160 exact-check samples. The held
 reader, controlled recovery, and terminal checks had not yet run.
 
+At 11:02:00 UTC, the worker remained active with zero restarts, 7,030.4
+seconds elapsed, 165,922 operations, and 165 exact-check samples. One hourly
+burst had completed; the held-reader, controlled-recovery, and final checks
+remained pending. A further Rocky VM attempt was refused at admission sample
+2/3 when unrelated Go build/test work appeared; details are in the
+[`11:01 refusal record`](docs/qualification/r132-rocky-admission-refusal-20261110T1101Z.json).
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM

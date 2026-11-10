@@ -1,0 +1,21 @@
+{
+  "attempted_at_utc": "2026-11-10T11:01Z",
+  "guest": "rocky9-lifecycle-ephemeral",
+  "admission": "refused at sample 2/3",
+  "vm_started": false,
+  "blockers": [
+    "active Go compiler processes",
+    "active go build and go test processes"
+  ],
+  "pressure_observed_after_refusal": {
+    "load1": 7.62,
+    "cpu_psi_some_avg10_percent": 25.37,
+    "io_psi_some_avg10_percent": 1.04,
+    "memory_psi_some_avg10_percent": 0.0
+  },
+  "signed_test_rpm_host_verification": "passed",
+  "test_key_fingerprint": "954E0B83137BAF7564D52475118D7E80FCEA14E1",
+  "signed_test_rpm_sha256": "e30ff2fc14890b6adc0cc0142555143fbe42383c0a17a0822d3f76ef26100069",
+  "package_copied_or_installed": false,
+  "test_key_and_signing_workspace_removed": true
+}

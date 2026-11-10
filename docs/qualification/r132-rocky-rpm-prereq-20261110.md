@@ -57,6 +57,13 @@ appeared. SSH was not confirmed and no package copy or lifecycle phase ran.
 The second disposable signing workspace was removed as well. See
 [`the 10:51 guarded attempt`](r132-rocky-guarded-abort-20261110T1051Z.json).
 
+At approximately 11:01 UTC, another start was refused at admission sample 2/3
+when Go compiler/build/test workloads appeared. CPU PSI some avg10 was 25.37%
+in the subsequent host sample. The disposable-key-signed r132 RPM had passed
+host verification, but no VM started and no package was copied. The
+throwaway key/workspace was removed. See
+[`the 11:01 admission refusal`](r132-rocky-admission-refusal-20261110T1101Z.json).
+
 ## Static package authenticity inspection — 2026-11-10 10:13 UTC
 
 The exact r132 artifact
