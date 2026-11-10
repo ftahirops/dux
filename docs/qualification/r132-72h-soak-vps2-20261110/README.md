@@ -189,3 +189,15 @@ Terminal exactness, history, and SQLite integrity remain pending. This is a
 running checkpoint, not a passed soak. Evidence:
 [`soak-progress-20261110T2244Z.json`](soak-progress-20261110T2244Z.json),
 SHA-256 `6654a73a881f5a121a74deeb3d3bbfb6792063c21e94ca479b56bf9308c535aa`.
+
+### Live checkpoint — 2026-11-10 22:49 UTC
+
+The VPS2 soak supervisor remained active with zero restarts. At 22:49, the
+report recorded **49,448 seconds** (13h44m08s; **19.08%**), **1,103,829
+mutations**, **1,100 exactness samples**, 13 bursts, two held-reader/WAL
+reclaim scenarios, and one controlled restart recovery. Whole-run throughput is
+**22.323 mutations/s**. Sampled exact convergence latency is **3.422 s mean,
+2.792 s median, 7.839 s p95, 17.393 s maximum**. Terminal exactness, history,
+and SQLite integrity remain pending. Evidence:
+[`soak-progress-20261110T2249Z.json`](soak-progress-20261110T2249Z.json),
+SHA-256 `c6f83c761e6ef7fbef81557c4fa6914e1b7d425e0f4d0abe138c58ebc282ba34`.

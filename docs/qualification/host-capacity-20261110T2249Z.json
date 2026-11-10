@@ -1,0 +1,30 @@
+{
+  "observed_at_utc": "2026-11-10T22:50Z",
+  "qualification_host": {
+    "root_total_bytes": 198092431360,
+    "root_available_bytes": 60895338496,
+    "root_use_percent": 69,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_available_bytes": 9977589760,
+    "cpu_psi_some_avg10_percent": 9.86,
+    "cpu_psi_some_avg60_percent": 27.04,
+    "cpu_psi_some_avg300_percent": 34.22,
+    "io_psi_some_avg10_percent": 1.37,
+    "load_average_1m": 15.26,
+    "active_unrelated_go_test_workloads": [
+      "go test -race ./engine/... ./model",
+      "go test -race ./agent/wordpress -count=1"
+    ],
+    "qualification_vm_started": false
+  },
+  "vps2": {
+    "root_total_bytes": 99012476928,
+    "root_available_bytes": 11362746368,
+    "root_use_percent": 88,
+    "dev_shm_total_bytes": 3221225472,
+    "dev_shm_available_bytes": 2186682368,
+    "dux_soak_unit_active": true,
+    "dux_soak_unit_restarts": 0
+  },
+  "method": "read-only df -h, /proc/pressure/cpu, /proc/pressure/io, /proc/loadavg, pgrep, systemctl state; SSH to VPS2"
+}
