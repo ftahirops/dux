@@ -1,5 +1,29 @@
 # Production readiness status
 
+## r129 runtime qualification and refreshed test evidence — 2026-11-10 05:22 UTC
+
+Candidate `8a8b1e3` (`0.6.3-129`) adds a read guard for an initialized empty
+index while the initial scan progress marker is active, preventing Dux read
+clients from opening the target during the atomic publication handoff. Its
+focused regression test passed; the all-features suite and LLVM-instrumented
+suite each passed **339 tests, 0 failed, 2 ignored**. Coverage is **72.66%
+lines, 71.51% regions, 76.25% functions**; branch coverage was not measured.
+Strict Clippy, formatting, and `git diff --check` passed. The release pipeline
+produced and verified static, DEB, RPM, source, and debug artifacts; manifest
+reports a clean tree and zero known lockfile vulnerabilities. Binary version
+and help checks passed, and all eight release checksum entries verified.
+
+The exact r129 static binary passed isolated event-apply and scan-first daemon
+smokes on VPS2 using a 128 MiB tmpfs-backed ext4 fixture. Both paths passed
+accounting checks with zero coverage issues, drops, or overflow notices;
+event-apply resolved 11/11 events, and scan-first indexed its hinted test
+change after an observation. The installed VPS2 service remained untouched,
+at zero restarts; it was in `reloading` state before and after the smoke. The
+fixture is too small to exercise the 256 MiB WAL threshold. No r129 package
+lifecycle, production-size WAL sample, independent path-equality comparison,
+sustained-churn run, or 24-hour canary has passed. **Release decision remains:
+not production-ready.** Full evidence: [`r129 qualification`](docs/qualification/r129-empty-index-read-guard-20261110/README.md).
+
 ## r128 isolated daemon smoke and refreshed coverage — 2026-11-10 05:11 UTC
 
 Committed candidate `dd3573d` as package `0.6.3-128`. The static release
