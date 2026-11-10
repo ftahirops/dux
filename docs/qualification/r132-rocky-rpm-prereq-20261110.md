@@ -46,3 +46,17 @@ The host still had a Go test process consuming substantial CPU. No guest was
 started, no package lifecycle phase ran, and no package or service was changed.
 This is another admission refusal, not a failed RPM lifecycle test. Retry only
 after the guard's three stable samples pass.
+
+### Guest stopped during boot — 2026-11-10 09:19 UTC
+
+A later startup passed admission with a 25% CPU quota and an ephemeral tmpfs
+overlay. The Rocky 9 guest was still booting and SSH had not become available
+when the independent pressure guard stopped it at 09:19:17 UTC, after Go test
+processes appeared on the host. The guard observed load1 2.01, CPU PSI `some`
+45.7% and `full` 0%, and IO PSI `some` 0.82%; its stop reason was the active
+Go test workload. No RPM was copied and no lifecycle phase ran. The exact guard
+event is preserved in
+[`the 09:19 guard event`](r132-rocky-rpm-guarded-start-20261110T091917Z.jsonl).
+This confirms the practical issue: a guest boot takes longer than the gap
+between unrelated host tests. Do not weaken the guard; retry when those tests
+are quiescent long enough for boot and qualification.

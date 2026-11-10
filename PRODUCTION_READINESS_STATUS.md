@@ -45,6 +45,10 @@ no RPM package operation ran. The recorded interruption is in the
 At 09:15 UTC another guarded startup attempt was refused before launch because
 host load1 was 11.73 against the limit of 10; the guest and package state remain
 untouched.
+At 09:18 UTC a later start passed admission, but a Go test workload appeared
+while Rocky was booting. The pressure guard stopped the guest at 09:19:17 UTC
+before SSH was ready; no RPM phase ran. The guard event is recorded in
+[`the 09:19 event`](docs/qualification/r132-rocky-rpm-guarded-start-20261110T091917Z.jsonl).
 
 ## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
 
