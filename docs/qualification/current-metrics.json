@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:45:02Z",
+  "snapshot_at_utc": "2026-11-10T21:47:34Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -111,12 +111,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T21:43:33Z",
+    "observed_at_utc": "2026-11-10T21:47:33Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 45523.2,
-    "operations": 1022121,
-    "exact_check_samples": 1019,
+    "elapsed_seconds": 45763.4,
+    "operations": 1027134,
+    "exact_check_samples": 1024,
     "completed_hourly_bursts": 12,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -126,15 +126,15 @@
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
     "observed_operations_per_second_elapsed": 22.466,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2143Z.json",
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2147Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.1756296296296296,
+    "coverage_duration_fraction": 0.17655632716049383,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "e502446a79bd4494a3e2989dcd481d889130fb385d8a25985e8410702af97fc2",
+    "latest_checkpoint_sha256": "db182d6383425d6bdd1d5095ed33ba7f69e4b54282820723d064042acce8025b",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
