@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:59:24Z",
+  "snapshot_at_utc": "2026-11-10T20:08:07Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T19:54:07Z",
+    "observed_at_utc": "2026-11-10T20:08:07Z",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,25 +16,27 @@
     "kernel_overflows": 785,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 267796.068,
+    "behind_seconds": 268635.993,
     "service_user": "root",
-    "index_nodes": 1322398,
-    "index_bytes_on_disk": 3620618240,
+    "index_nodes": 1313078,
+    "index_bytes_on_disk": 3625377792,
     "wal_bytes": 134217728,
-    "pending_updates": 3905,
+    "pending_updates": 166,
     "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 457485,
+    "last_scan_age_seconds": 458325,
     "dirty_since_timestamp_seconds": 1794324009,
     "service_substate": "running",
-    "events_seen": 251388007,
-    "events_resolved": 146343926,
-    "updates_committed": 41800220,
+    "events_seen": 252530217,
+    "events_resolved": 147337955,
+    "updates_committed": 41983501,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
-    "index_bytes": 126155083776,
-    "evidence": "docs/qualification/vps1-live-status-20261110T1954Z.json"
+    "index_bytes": 123712516096,
+    "evidence": "docs/qualification/vps1-live-status-20261110T2008Z.json",
+    "dirty": true,
+    "paused": false
   },
   "disk": {
     "observed_at_utc": "2026-11-10T17:06:51Z",
@@ -101,13 +103,13 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:54:00Z",
+    "observed_at_utc": "2026-11-10T20:08:07Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 38936.0,
-    "operations": 882000,
-    "exact_check_samples": 879,
-    "completed_hourly_bursts": 10,
+    "elapsed_seconds": 39799.1,
+    "operations": 900404,
+    "exact_check_samples": 897,
+    "completed_hourly_bursts": 11,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
     "terminal_exact_history_integrity": "pending",
@@ -116,15 +118,15 @@
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
     "observed_operations_per_second_elapsed": 22.675,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1954Z.json",
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2008Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.15021604938271604,
+    "coverage_duration_fraction": 0.15354591049382715,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "97be17e4612c45383c4a8b5bf4174ae35ef14583c0ee93eed1819bce8ec28b46",
+    "latest_checkpoint_sha256": "e3de60b8a4da01c2ab9f006de4b32ad2716db82c8e973b68c165e95b0d9a24da",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -147,8 +149,8 @@
       "wal"
     ],
     "latest_live_status_query_at_utc": "2026-11-10T19:38:49Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T19:54:00Z",
-    "max_exact_convergence_ms_observed": 14377
+    "latest_full_checkpoint_at_utc": "2026-11-10T20:08:07Z",
+    "max_exact_convergence_ms_observed": 17393
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -519,11 +521,11 @@
     "completion_gap_semantics": "Completion-to-completion durations include scan duration variation and are not scheduler start intervals or per-path freshness SLO measurements; latest two starts were 15m apart."
   },
   "disk_at_snapshot": {
-    "observed_at_utc": "2026-11-10T19:48:43Z",
+    "observed_at_utc": "2026-11-10T20:08:07Z",
     "root_size_gib_approx": 184.5,
-    "used_gib_approx": 119.8,
-    "available_gib_approx": 56.5,
-    "percent_used": 68,
+    "used_gib_approx": 118.0,
+    "available_gib_approx": 58.3,
+    "percent_used": 67,
     "evidence": "df -B1 / on vps1"
   },
   "vps2_disk_inventory": {
@@ -751,6 +753,98 @@
     "interpretation": "ProtectKernelTunables and ProtectControlGroups produce a private mount namespace in a transient probe; the installed Dux process is also in a namespace distinct from the host despite PrivateMounts=no. The daemon marks FAN_MARK_FILESYSTEM. Whether that mark observes host-namespace changes has not been tested here.",
     "source_mark_flag": "FAN_MARK_FILESYSTEM",
     "source_location": "src/watch.rs:4762",
-    "qualification_status": "open runtime validation; no product defect concluded"
+    "qualification_status": "cross-namespace create/rename/delete visibility passed for ext4 with exact r132 binary and package-equivalent security/syscall properties; actual package-created UID, package lifecycle, other filesystems and kernels remain open"
+  },
+  "systemd_cross_namespace_event_test": {
+    "result": "passed_ext4_cross_namespace_create_rename_delete",
+    "observed_at_utc": "2026-11-10T20:05:23Z",
+    "host": "vps1 / 192.168.5.106 test workstation",
+    "candidate": {
+      "source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+      "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
+    },
+    "execution_identity": {
+      "uid": 65534,
+      "gid": 65534,
+      "user": "nobody",
+      "group": "nogroup",
+      "no_new_privileges": true,
+      "capability_masks": {
+        "CapEff": "0x200004",
+        "CapPrm": "0x200004",
+        "CapBnd": "0x200004",
+        "CapInh": "0x200004",
+        "CapAmb": "0x200004"
+      }
+    },
+    "systemd_sandbox": {
+      "ProtectKernelTunables": true,
+      "ProtectControlGroups": true,
+      "ProtectClock": true,
+      "ProtectHostname": true,
+      "ProtectKernelLogs": true,
+      "RestrictRealtime": true,
+      "RestrictSUIDSGID": true,
+      "RestrictNamespaces": true,
+      "LockPersonality": true,
+      "MemoryDenyWriteExecute": true,
+      "SystemCallArchitectures": "native",
+      "RestrictAddressFamilies": "AF_UNIX",
+      "SystemCallFilter": "~@module @mount @swap @reboot @clock @obsolete @raw-io @debug @cpu-emulation bpf",
+      "CPUQuota": "25%",
+      "MemoryHigh": "256M",
+      "MemoryMax": "512M",
+      "RuntimeMaxSec": "60s"
+    },
+    "mount_namespaces": {
+      "host": "mnt:[4026531841]",
+      "service": "mnt:[4026532817]"
+    },
+    "filesystem": "ext4 on /var/tmp; FAN_MARK_FILESYSTEM; daemon reported one watched filesystem",
+    "event_apply_compatibility_mode": true,
+    "fixture": {
+      "root": "/var/tmp/dux-mntns-event-probe/tree",
+      "initial_files": 1,
+      "host_namespace_create_visible_in_ms": 187,
+      "host_namespace_rename_visible": true,
+      "host_namespace_delete_visible": true
+    },
+    "candidate_status_after_create": {
+      "events_seen": 17825,
+      "events_resolved": 17082,
+      "kernel_overflows": 0,
+      "events_dropped": 0,
+      "dirty": false,
+      "pending_updates": 0
+    },
+    "resource_and_shutdown": {
+      "cpu_time_seconds": 6.37,
+      "memory_peak_bytes": 3880960,
+      "runtime_limit_reached_as_planned": true,
+      "SIGTERM_drained_and_flushed": true,
+      "service_restarts": 0
+    },
+    "cleanup": {
+      "transient_unit_inactive": true,
+      "fixture_removed": true,
+      "candidate_copy_removed": true,
+      "production_service_active": true,
+      "production_service_restarts": 4,
+      "production_kernel_overflows": 785,
+      "production_dropped_updates": 2518862
+    },
+    "limitations": [
+      "Used UID nobody because the dux service account is not installed on the test host; capability masks matched the planned service mask.",
+      "Used compatibility event-apply mode to verify observable paths; production default is reconciliation-first.",
+      "Single ext4 superblock only; other filesystems and kernels remain unqualified.",
+      "Temporary unit matched sandbox properties but did not install or execute the packaged unit with StateDirectory and the package-created UID."
+    ],
+    "evidence": "docs/qualification/systemd-hardening-20261110/cross-namespace-event-test-20261110T2004Z.log",
+    "test_group_event_deltas_rename_delete": {
+      "events_seen": 214,
+      "events_resolved": 206,
+      "kernel_overflows": 0,
+      "events_dropped": 0
+    }
   }
 }

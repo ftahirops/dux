@@ -49,13 +49,12 @@ the host's (`mnt:[4026532520]` vs. `mnt:[4026531841]`). The installed unit has
 properties also entered a distinct mount namespace (`mnt:[4026532817]`). The
 Dux watcher currently uses `FAN_MARK_FILESYSTEM` at `src/watch.rs:4762`.
 
-This observation does **not** establish a Dux defect: filesystem marks may
-have different visibility semantics from mount marks, and no controlled
-host-namespace create/delete event was sent and checked against a Dux instance
-in the packaged sandbox. It does show that `PrivateMounts=no` alone is not
-sufficient evidence that the process shares the host mount namespace. Before
-qualifying the full packaged unit, run a controlled cross-namespace event test
-with the actual binary, capabilities, syscall filter, and protection settings.
-Do not remove hardening properties based on this observation alone.
+This namespace difference alone did **not** establish a Dux defect. A controlled test has since passed for ext4 using the exact r132 binary, non-root credentials, matching capability masks, and the packaged syscall and protection settings: host-namespace create, rename, and delete events were reflected in Dux while its mount namespace differed from the host. This resolves the ext4 namespace-visibility question for this configuration; it does not qualify every filesystem, the package-created UID, or the complete package lifecycle. Do not remove hardening properties based on the earlier namespace observation.
 
 Machine-readable capture: [`mount-namespace-observation-20261110T1959Z.json`](mount-namespace-observation-20261110T1959Z.json).
+
+### Cross-namespace runtime result — 2026-11-10 20:05 UTC
+
+The exact r132 binary ran in a transient systemd unit with the packaged security and syscall restrictions, `ProtectKernelTunables=yes`, `ProtectControlGroups=yes`, non-root UID 65534, and exactly `CAP_SYS_ADMIN | CAP_DAC_READ_SEARCH`. Its mount namespace differed from the host namespace. A host-side create was indexed in 187 ms; host-side rename and delete were also reflected. The daemon saw zero queue overflows or drops. The 60-second runtime cap then sent SIGTERM; the daemon logged that it drained and flushed before exit. The unit, fixture, and copied binary were removed; the installed production service stayed active.
+
+The transient used event-apply compatibility mode to make event visibility observable as path updates. The production default remains reconciliation-first, but both modes use the same filesystem mark and event reader. This was one ext4 filesystem and a temporary unit, not a package install or a cross-kernel test. See [structured result](cross-namespace-event-test-20261110T2004Z.json) and [raw run log](cross-namespace-event-test-20261110T2004Z.log).
