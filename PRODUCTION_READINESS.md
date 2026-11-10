@@ -39,7 +39,7 @@ The latest 1.75M-file observation took 7m12s and passed coverage and independent
 | Ubuntu DEB lifecycle | An earlier r132 lifecycle run passed; active-service upgrade/rollback protection has since changed and is not VM-qualified yet | Local package-script regressions pass, but the new DEB `preinst`/rollback path must be rerun on a disposable Ubuntu VM. This does not qualify RPM behavior or production rollout. |
 | Rocky RPM lifecycle | Not qualified; a disposable-key RPM signature was verified in Rocky | Full install/upgrade/rollback did not start; retry only after guarded host admission. |
 | Release authenticity | Open | Root GPG keyring is empty and `DUX_RELEASE_SIGNING_KEY` is unset. Release owner must provide trusted fingerprint/key; no publisher key has been used. |
-| Dependency audit | Passed at 16:15 UTC: 229 dependencies, zero findings/warnings | RustSec database refreshed Nov 10; dependency audit is not application security certification. |
+| Dependency audit | Re-run at 18:20 UTC: 229 locked dependencies, zero advisories/warnings | Cached RustSec database timestamp is 13:45 UTC; this run did not refresh it. Dependency audit is not application security certification. |
 | Production canary | Not started | Candidate has not been installed on VPS1; first qualify package, rollback, security and production-scale behavior. |
 
 ## Unmerged older source checkout

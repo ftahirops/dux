@@ -76,7 +76,10 @@
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
     "passed": 341,
     "failed": 0,
-    "ignored": 2
+    "ignored": 2,
+    "observed_at_utc": "2026-11-10T18:23:00Z",
+    "source_matches_candidate_commit": true,
+    "run_seconds": 104.66
   },
   "llvm_coverage_percent": {
     "lines": 72.61,
@@ -159,7 +162,7 @@
     "disposable_key_signature_mechanics_verified": true
   },
   "dependency_audit": {
-    "observed_at_utc": "2026-11-10T16:15:00Z",
+    "observed_at_utc": "2026-11-10T18:20:48Z",
     "locked_dependencies": 229,
     "known_advisories": 0,
     "warnings": 0,
@@ -167,7 +170,8 @@
     "advisory_database_commit_time": "2026-11-09T17:13:08+01:00",
     "advisory_database_count": 1446,
     "advisory_database_updated_at": "2026-11-10T14:45:03+01:00",
-    "evidence": "docs/qualification/cargo-audit-20261110T1615Z.json"
+    "evidence": "docs/qualification/regression-20261110T1823Z/cargo-audit.json",
+    "advisory_database_freshness_note": "Used cached database last updated 2026-11-10T13:45:03Z; no network refresh occurred"
   },
   "production_canary": "not_started",
   "evidence": {
@@ -214,7 +218,9 @@
     "latest_soak_checkpoint_1813z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1813Z.json",
     "latest_vps2_status_1813z": "docs/qualification/vps2-live-status-20261110T1813Z.json",
     "latest_soak_checkpoint_1816z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1816Z.json",
-    "latest_vps2_status_1816z": "docs/qualification/vps2-live-status-20261110T1816Z.json"
+    "latest_vps2_status_1816z": "docs/qualification/vps2-live-status-20261110T1816Z.json",
+    "latest_current_workspace_regression": "docs/qualification/regression-20261110T1823Z/README.md",
+    "latest_regression_machine_record": "docs/qualification/regression-20261110T1823Z/test-evidence.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -244,12 +250,13 @@
     "passed": 380,
     "failed": 0,
     "skipped": 1,
-    "observed_at_utc": "2026-11-10T14:09:32Z",
+    "observed_at_utc": "2026-11-10T18:25:37Z",
     "tests_run": 381,
     "full_suite_includes_latest_vm_guard_change": true,
     "latest_focused_vm_guard_test": "passed",
     "latest_focused_vm_guard_test_at_utc": "2026-11-10T14:06:16Z",
-    "skip_reason": "Real GPG/RPM signing integration requires DUX_RELEASE_SIGNING_TEST_RPM"
+    "skip_reason": "Real GPG/RPM signing integration requires DUX_RELEASE_SIGNING_TEST_RPM",
+    "evidence": "docs/qualification/regression-20261110T1823Z/README.md"
   },
   "python_trace_coverage": {
     "tool": "Python standard-library trace",
@@ -533,5 +540,11 @@
     "deletions": 176,
     "patch_sha256": "f0f1347715a43e0d0e213df7784d53af8314b901bfddec13a040395ff3e047ad",
     "disposition": "preserved, not integrated or test-qualified"
+  },
+  "strict_clippy": {
+    "observed_at_utc": "2026-11-10T18:26:00Z",
+    "result": "passed",
+    "command": "cargo clippy --locked --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
+    "evidence": "docs/qualification/regression-20261110T1823Z/clippy.log"
   }
 }

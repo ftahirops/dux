@@ -1,0 +1,78 @@
+{
+  "observed_at_utc": "2026-11-10T18:26:47Z",
+  "workspace_commit": "60761b0fe06b3a51accdb8b4885829238fdb9835",
+  "candidate_release_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+  "candidate_release_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "rust_source_and_lockfile_match_candidate": true,
+  "rust_tests": {
+    "command": "CARGO_BUILD_JOBS=1 cargo test --locked --all-features -- --test-threads=1",
+    "passed": 341,
+    "failed": 0,
+    "ignored": 2,
+    "elapsed_seconds": 104.66
+  },
+  "python_tests": {
+    "command": "PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'",
+    "modules": 25,
+    "total": 381,
+    "passed": 380,
+    "failed": 0,
+    "skipped": 1,
+    "elapsed_seconds": 24.04
+  },
+  "clippy": {
+    "command": "CARGO_BUILD_JOBS=1 cargo clippy --locked --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
+    "result": "passed"
+  },
+  "formatting": {
+    "command": "cargo fmt --all -- --check",
+    "result": "passed"
+  },
+  "cargo_audit": {
+    "command": "cargo audit --json",
+    "dependencies": 229,
+    "vulnerabilities": 0,
+    "warnings": 0,
+    "advisory_database_last_updated": "2026-11-10T13:45:03Z",
+    "database_refreshed_during_run": false
+  },
+  "initial_interrupted_rust_attempt": {
+    "passed_before_stop": 51,
+    "complete": false,
+    "reason": "stopped after shared CPU pressure rose under unrelated Go/security workloads; not counted as a passing run"
+  },
+  "logs_sha256": {
+    "README.md": "929a41ffec5bf2e5c043cb994060f1665925499de5711e550972de6f4d41baeb",
+    "cargo-audit.json": "f04ff3a03ecf3f74a606bc4f937e078283e3ff87705bffbbefc432799ce3e97a",
+    "clippy.log": "364527bf5bf4b54554cc63932239519b09eab70026e34fe8f5f4051c7834eb1e",
+    "python-tests.log": "cf4e281e90755e59db308b0be626fea845f20bf25ff6eaf8855e081f37f48094",
+    "rust-tests.log": "087d0f22a08e535bf0788c2b783427fe5036f5d4a9c1bffdb8f4607df900c4b5"
+  },
+  "limits": [
+    "two ignored Rust tests need a handle-capable ext4 profile",
+    "RPM signing integration skipped without fixture",
+    "audit used locally cached advisory database",
+    "does not replace package lifecycle, production canary, 10M scale, or remaining fault matrix qualification"
+  ],
+  "fault_build": {
+    "source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+    "source_sha256": "5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff",
+    "binary_sha256": "3b17b46c2f3c4baf18ed78bc3dc868e4ac92a9fb8ed4241141a12d659fee88b7",
+    "feature": "fault-injection",
+    "built_from_clean_detached_worktree": true
+  },
+  "fault_matrix_attempts": [
+    {
+      "result": "not_started",
+      "reason": "harness refused startup/pressure/retry/postscan-hint without matching fault binary; fixed by building matching companion"
+    },
+    {
+      "result": "not_started",
+      "reason": "harness refused to run outside a marked disposable KVM/QEMU guest; no qualification side effects occurred"
+    },
+    {
+      "result": "vm_admission_refused",
+      "reason": "active unrelated Go builds/tests, Vitest, and staticcheck; load1 25.99 and CPU PSI some avg10 76.79 percent"
+    }
+  ]
+}

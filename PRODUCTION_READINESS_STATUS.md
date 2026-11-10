@@ -5560,3 +5560,45 @@ runs only the `soak` suite. Checkpoint:
 VPS2 root was 90% used with **10,298,707,968 bytes (9.59 GiB)** available.
 The detailed disk inventory remains the partial 18:06 sample; no cleanup was
 performed.
+
+## Current workspace regression run — 2026-11-10 18:21–18:26 UTC
+
+The current Rust source was confirmed identical to r132 source commit
+`f02ba7ad235ea841a99de27b69fcd402e3c3927c`; documentation and Python tooling
+have changed since that source commit. The serial, locked, all-features Rust
+suite passed **341 tests**, with **0 failures** and **2 ignored** in 104.66s.
+The current Python harness suite passed **380 of 381** tests, with one signing
+integration skipped because its RPM fixture was not configured. Strict Clippy
+(with warnings and undocumented unsafe blocks denied), Rust formatting, and a
+current `cargo audit` invocation also passed. The audit found no vulnerabilities
+or warnings in 229 dependencies, but used the cached advisory database last
+updated at 13:45 UTC; it did not refresh the database over the network.
+
+The first Rust attempt was stopped after 51 passing tests when unrelated Go and
+security workloads drove shared-host CPU pressure sharply higher. It is not
+counted as a pass. The subsequent complete serial run passed after those
+workloads cleared. Full commands, raw logs, hashes, and limits are in the
+[regression evidence directory](docs/qualification/regression-20261110T1823Z/README.md).
+
+The broad fault-matrix harness was not started in this window: the first CLI
+validation correctly rejected the request because `startup`, `pressure`,
+`retry`, and `postscan-hint` suites require an explicitly supplied fault-build
+binary. The exact r132 production binary was copied from VPS2 and its SHA-256
+verified, but a matching fault-injection build still needs to be produced from
+that same candidate source. This is a harness prerequisite, not a product test
+failure. No qualification fixture was created by that rejected command.
+
+### Fault-matrix start prerequisites and admission — 2026-11-10 18:28–18:32 UTC
+
+The exact r132 candidate binary was copied from VPS2 and SHA-256 verified.
+A `[fault-injection]` build was produced from a clean detached worktree at the
+same source commit; its embedded source SHA-256 matches the production
+candidate. The test harness then correctly refused to run directly on the
+host because it requires the dedicated marked KVM/QEMU guest. No test fixture
+was created. The guarded Ubuntu guest start was attempted with an ephemeral
+tmpfs overlay and a read-only share for the verified binaries/harness, but
+admission refused immediately because unrelated Go builds/tests, Vitest and
+staticcheck were active; host load1 was 25.99 and CPU PSI some avg10 was
+76.79%. No guest was started. The all-15-suite matrix remains pending until
+host admission clears. Details and binary identities are in the
+[regression evidence record](docs/qualification/regression-20261110T1823Z/README.md).
