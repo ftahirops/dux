@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T18:08:35Z",
+  "snapshot_at_utc": "2026-11-10T18:52:31Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -100,12 +100,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T18:36:00Z",
+    "observed_at_utc": "2026-11-10T18:51:26Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 34235.3,
-    "operations": 779005,
-    "exact_check_samples": 776,
+    "elapsed_seconds": 35195.8,
+    "operations": 800334,
+    "exact_check_samples": 797,
     "completed_hourly_bursts": 9,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -114,16 +114,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.754437671058817,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1836Z.json",
+    "observed_operations_per_second_elapsed": 22.739474596400704,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1851Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.1320806327160494,
+    "coverage_duration_fraction": 0.1357862654320988,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "1dac7faa83d327c3217172ab54eb98b409e5a9e533fa85c01e28940b6d2b780f",
+    "latest_checkpoint_sha256": "cb9f4529486d9931a4acdceb647a527a7706617ad97bae3add94ddaee3311f9b",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -145,8 +145,9 @@
       "startup",
       "wal"
     ],
-    "latest_live_status_query_at_utc": "2026-11-10T18:35:53Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T18:36:00Z"
+    "latest_live_status_query_at_utc": "2026-11-10T18:52:31Z",
+    "latest_full_checkpoint_at_utc": "2026-11-10T18:51:26Z",
+    "max_exact_convergence_ms_observed": 14012
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -549,5 +550,32 @@
     "result": "passed",
     "command": "cargo clippy --locked --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
     "evidence": "docs/qualification/regression-20261110T1823Z/clippy.log"
+  },
+  "latest_vps2_live_observation": {
+    "host": "192.168.5.106",
+    "observed_at_utc": "2026-11-10T18:52:31Z",
+    "service_active": true,
+    "installed_release": "dux 0.6.3 (8b02799b4132) [production]",
+    "installed_binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+    "service_restarts": 0,
+    "scan_first": true,
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "caught_up": false,
+    "last_scan_age_seconds": 354,
+    "pending_updates": 0,
+    "kernel_overflow_notifications": 0,
+    "events_dropped": 0,
+    "userspace_updates_dropped": 0,
+    "index_nodes": 1971936,
+    "index_bytes": 83722051584,
+    "index_bytes_on_disk": 839053312,
+    "wal_bytes": 60110832,
+    "automatic_reconciliation_paused": false,
+    "write_error": null,
+    "root_disk_size_bytes": 99012476928,
+    "root_disk_used_bytes": 84529086464,
+    "root_disk_available_bytes": 9903640576,
+    "root_disk_use_percent": 90
   }
 }

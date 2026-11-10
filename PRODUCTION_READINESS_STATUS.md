@@ -5655,3 +5655,37 @@ compiler/test processes appeared and CPU PSI some avg10 reached **42.1%**.
 The VM used 537 MiB peak memory and 19.6 seconds CPU. No harness was run inside
 the guest, no qualification fixture was created, and the pressure guard removed
 the ephemeral runtime. Evidence: [`vm-admission-20261110T1839Z.jsonl`](docs/qualification/vm-admission-20261110T1839Z.jsonl).
+
+
+## VPS2 live status and soak refresh — 2026-11-10 18:52 UTC
+
+A direct root SSH observation at **18:52:31 UTC** confirms VPS2 is reachable and
+its systemd Dux service is active with **zero restarts**. The installed service
+is `dux 0.6.3 (8b02799b4132)` with binary SHA-256
+`b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`; this is
+not the separately running r132 soak binary (SHA-256
+`998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`). The
+soak therefore does not mean r132 is the installed VPS2 service.
+
+The installed scan-first daemon reported 1,971,936 indexed path instances and
+83,722,051,584 indexed bytes. Its last scan was 354 seconds old. It was marked
+dirty with `filesystem changes await the next full observation`, while
+`pending_updates=0`, kernel overflow notifications, event drops, and userspace
+drops were all zero; automatic reconciliation was not paused. Root storage was
+90% used with 9,903,640,576 bytes available. The status also reported
+`caught_up=false`; do not interpret this as proven path-level staleness because
+this snapshot has no per-path freshness measurements.
+
+The isolated r132 soak worker was independently confirmed alive. Its checkpoint
+records **35,195.8 seconds** (9h46m36s), **800,334 operations**, **797 exactness
+samples**, nine mutation bursts, one completed 300-second held-reader/WAL-reclaim
+scenario, and no controlled crash scenarios. That is **13.58%** of the 72-hour
+run. It remains active; terminal exactness/history checks and SQLite integrity
+are pending. The largest recorded exact-convergence sample was 14,012 ms. Raw
+checkpoint: [`soak-progress-20261110T1851Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1851Z.json)
+(SHA-256 `cb9f4529486d9931a4acdceb647a527a7706617ad97bae3add94ddaee3311f9b).
+Live daemon evidence: [`vps2-live-status-20261110T1852Z.json`](docs/qualification/vps2-live-status-20261110T1852Z.json).
+
+The complete 15-suite fault matrix is still not started. Concurrent unrelated Go
+tests remain active on VPS1 at this observation, so no guarded VM attempt was
+made.
