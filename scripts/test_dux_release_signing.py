@@ -38,6 +38,15 @@ class ChecksumValidationTests(unittest.TestCase):
                 with self.assertRaises(signing.SigningError):
                     signing.checked_fingerprint(value)
 
+    def test_primary_fingerprint_parser_ignores_subkey_fingerprints(self):
+        primary = "A" * 40
+        subkey = "B" * 40
+        listing = (
+            f"pub:u:::::::\nfpr:::::::::{primary}:\n"
+            f"sub:u:::::::\nfpr:::::::::{subkey}:\n"
+        )
+        self.assertEqual(signing.primary_fingerprints(listing, "pub"), {primary})
+
     def test_checksum_parser_rejects_path_traversal_and_duplicate_names(self):
         with tempfile.TemporaryDirectory(prefix="dux-signing-checksums-") as temp:
             path = Path(temp) / "SHA256SUMS"
@@ -170,8 +179,18 @@ class SigningFlowTests(unittest.TestCase):
             try:
                 signing.sign_release(directory, fingerprint)
                 signing.verify_release(directory, fingerprint)
+                with self.assertRaisesRegex(signing.SigningError, "public signing key fingerprint"):
+                    signing.verify_release(directory, "F" * 40)
+                signed_rpm = rpm.read_bytes()
                 rpm.write_bytes(rpm.read_bytes() + b"tamper")
                 with self.assertRaisesRegex(signing.SigningError, "does not match SHA256SUMS"):
+                    signing.verify_release(directory, fingerprint)
+                rpm.write_bytes(signed_rpm)
+                signature = directory / signing.SIGNATURE_NAME
+                corrupted_signature = bytearray(signature.read_bytes())
+                corrupted_signature[len(corrupted_signature) // 2] ^= 1
+                signature.write_bytes(corrupted_signature)
+                with self.assertRaisesRegex(signing.SigningError, "command failed.*gpgv"):
                     signing.verify_release(directory, fingerprint)
             finally:
                 if previous_home is None:

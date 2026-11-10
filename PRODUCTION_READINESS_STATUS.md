@@ -13,14 +13,15 @@ was not modified; its SHA-256 remains
 `bb1adbd0b2bc5a36c30076bcfd3436e424dbd596aa07a26d78d952a24650af78` and it is
 still unsigned.
 
-Verification for this change: the signing test module passed its 8 non-opt-in
-tests (the real-signing test was skipped in this rerun because its opt-in RPM
-environment variable was unset), and the release-builder CLI passed **13/13**.
-The real GPG/RPM integration test had passed in the preceding run: it generated
-a disposable key, signed and verified a disposable copy of the r132 RPM, then
-rejected a tampered copy. No release-owner key was used. Shell syntax, Python
-byte-compilation, and `git diff --check` passed. The debug-artifact verifier
-suite was not rerun after adding the explicit local unsigned-build override.
+Verification for this change: the signing test module passed **10/10**, with
+the opt-in real-signing case enabled. It generated a disposable key, signed
+and verified a disposable copy of the r132 RPM, confirmed the pinned-key
+check, and rejected both a modified RPM and a corrupted detached signature.
+No release-owner key was used. The release-builder CLI passed **13/13** and
+the debug-artifact verifier passed **1/1**. Shell syntax, Python
+byte-compilation, and `git diff --check` passed. A harmless trailing-byte
+mutation did not invalidate an otherwise valid armored signature, so the
+integration test now corrupts the signature body instead.
 
 The release-authenticity gate remains open until the release owner supplies a
 trusted primary-key fingerprint and the actual signed package verifies in the
