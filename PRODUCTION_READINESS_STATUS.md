@@ -5037,3 +5037,95 @@ compiler and `go test` were active; no guest was created. Host load1 was 2.41
 and CPU PSI some avg10 was 1.75% at 16:16:19. Disk was 71% used with 52 GiB
 available at 16:12:39. `/tmp` was 16 GiB, mostly other project caches and
 artifacts; no potentially active files were removed.
+
+
+## Repeated scan race and guarded VM stop — 2026-11-10 16:25 UTC
+
+The tenth scheduled VPS2 scan-first attempt began at **16:19:07 UTC** and ended
+incomplete at **16:22:54** with one conflicting inode incarnation after two paths were
+revalidated. The scan reported 1 coverage issue; it did not publish
+its candidate. The last verified index remained published at 1,939,289 nodes
+and 83,281,915,904 unique bytes. Dux scheduled a bounded retry, which began at
+**16:23:54**. At 16:24:42 the retry was still running, with 753,557 files and
+127,700 directories seen. The service had zero restarts, overflows, and dropped
+updates, was not paused, and had zero pending updates. This is a second
+incomplete scan from concurrent inode reuse in three scheduled cycles; retry
+recovery remains pending.
+
+A disposable Ubuntu 24.04 lifecycle VM passed its startup admission check at
+16:21:24 under a 10% CPU quota and ephemeral tmpfs overlay. The pressure
+watchdog stopped it at **16:21:51**, before SSH or cloud-init access, after an
+unrelated Go test binary and `go test` appeared. The captured watchdog evidence
+is [`vm-admission-20261110T162151Z.jsonl`](docs/qualification/vm-admission-20261110T162151Z.jsonl)
+(SHA-256 `e286aeb09294953348ca603095c2617df3ebcad0f55a4a07ccb82996d54af717`).
+No package command ran, the QEMU unit is inactive, and the ephemeral overlay
+was cleaned. At 16:25, host load1 was 15.95 and CPU PSI some avg10 was 47.51%;
+this is not a safe admission window.
+
+The root filesystem was 69% used with 56 GiB available at 16:25. The 16-GiB
+`/tmp` remains dominated by other project caches and artifacts; no active
+workload data was removed.
+
+
+## Live retry and soak checkpoint refresh — 2026-11-10 16:28 UTC
+
+A direct VPS2 query at **16:28:04 UTC** confirmed the bounded observation retry
+started at 16:23:54 was still running. Dux reported 1,735,432 files and 212,908
+directories seen, 82,603,618,304 allocated bytes observed so far, zero pending
+updates, zero kernel overflows, zero dropped updates, one failed reconciliation
+attempt, and no automatic-retry pause. The previously verified index remains
+1,939,289 nodes / 83,281,915,904 bytes; this in-progress traversal has not yet
+been published. The daemon is live with zero systemd restarts. `systemctl`
+reported `reloading (reload-notify)` since 04:23:18 while its status says it is
+observing the filesystem; process memory was about 1.6 GiB (2 GiB high, 4 GiB
+max). This long notify state and memory use need review; they are not counted as
+a restart or a completed clean scan. The SSH probe succeeded when explicitly
+using port 22 (`-F /dev/null`); the default SSH config routes this IP to the
+Forgejo port 2222, which caused the earlier permission failure.
+
+The separate r132 soak worker was also confirmed live at 16:28. Its latest
+checkpoint was written at 16:27:32 and records **26,623.3 seconds** elapsed,
+610,000 operations, 607 exactness samples, seven mutation bursts, one passed
+300-second held-reader/WAL-reclaim scenario, zero worker restarts, and zero
+controlled crashes. The exactness/history/SQLite terminal checks have not run.
+Elapsed average is 22.91 operations/s versus the requested 25, about 10.3% of
+72 hours. Importantly, the remote worker invocation runs only the `soak` suite;
+its capability, churn, coverage, CPU, crash, disk, mount, OOM, overflow,
+postscan-hint, pressure, retry, root, startup, and WAL suites are not part of
+this soak run. Some are covered by separate qualification records, but this
+worker does not provide evidence for them. Checkpoint:
+[`soak-progress-20261110T1627Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1627Z.json)
+(SHA-256 `3651429becff98e0d2b5181607a6c6bcc594a79e91749286a1707ff2d76d46c0`).
+
+The Python suite count is corrected here and in the summary: **380 passed, 0
+failed, 1 skipped (381 total)**. The previous summary's phrase “381 passed” was
+incorrect. The 75 focused packaging/security tests are a subset of the Python
+total, not additional tests. Rust has 341 passed and 2 ignored. Thus the two
+language suites together record 721 passing tests, zero failures, two ignored,
+and one skipped; integration, soak, static, and live scan evidence are reported
+separately rather than added to that unit-test count.
+
+
+## Tenth successful live observation recovered by bounded retry — 2026-11-10 16:31 UTC
+
+The retry that started at **16:23:54** completed its filesystem traversal at
+**16:30:21** after 6m27s. It covered 1,735,432 files and 212,908 directories,
+with 1,948,340 staged path instances, 82,416,308,224 unique bytes (76.76 GiB),
+and **zero coverage issues**. The candidate index was published with 1,944,858
+nodes. Independent reconciliation accounting verification passed at
+**16:31:43** in 82,569 ms. At 16:31:45, Dux reported 85-second-old scan results,
+zero pending updates, zero kernel overflows/drops, zero restarts, and no active
+scan. The index remains marked dirty because filesystem/fanotify hints changed
+during the observation and are scheduled for the next full observation. This
+closes the retry recovery, not the freshness qualification: the completion gap
+from the previous successful scan was 17m12s, and per-path observation age is
+still not stored. Across nine successful-completion intervals, four exceeded
+15 minutes.
+
+The exact r132 soak was still running at **16:31:30**: 26,803.4 seconds
+(7h26m43s), 614,054 operations, 611 exactness samples, seven mutation bursts,
+one passed 300-second held-reader/WAL-reclaim phase, zero worker restarts, and
+zero controlled crashes. Final exactness/history/SQLite checks are still
+pending; the worker is only about 10.3% through 72 hours. Its checkpoint is
+[`soak-progress-20261110T1631Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1631Z.json)
+(SHA-256 `a5ccd796a71b1a6232308016c348409b9819411b364969f508ee553bfbabe294`).
