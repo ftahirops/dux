@@ -27,13 +27,16 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:58 UTC
+### Live checkpoint — 2026-11-10 10:03 UTC
 
-The r132 soak remains `active/running`, with **zero restarts**. At elapsed
-3,181.4s it had completed **75,369 mutations**; the 75,000-op exact checkpoint
-passed in 577ms. The hourly burst, held-reader, controlled recovery, and final
-exactness/history/integrity checks have not run yet. This is early progress,
-not a soak pass. The 72-hour qualification remains in progress.
+The r132 soak remains `active/running`, with **zero restarts** at the 10:02:21
+UTC service check. At elapsed 3,481.5s it had completed **82,405 mutations**;
+82 exact-check samples were recorded through 82,000 operations, with the last
+exact check taking 277ms. The hourly burst, held-reader, controlled recovery,
+and final exactness/history/integrity checks have not run yet. This is early
+progress, not a soak pass. The 72-hour qualification remains in progress.
+The copied checkpoint is in
+[`the 10:02 progress snapshot`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1002Z.json).
 
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),

@@ -22,6 +22,19 @@ The installed r121 service is not modified by this test. It was active with
 zero restarts at soak start. The test can add bounded CPU pressure to the guest
 for three days; the dedicated worker's CPU and memory are cgroup-limited.
 
+### Live checkpoint — 2026-11-10 10:03 UTC
+
+The worker and candidate daemon were both still active at the 10:02:21 UTC
+read-only check; the systemd unit reported zero restarts. At 10:02:50 UTC, the
+durable progress file showed **82,405 mutations** after 3,481.5 seconds, with
+82 exact-check samples through operation 82,000. The latest exact comparison
+completed in **277 ms**; sampled daemon RSS was **4,376 KiB**, open file
+descriptors **14**, and WAL size **4,301,312 bytes**. No mutation burst, held
+reader, or controlled crash/recovery event has run yet. Final exactness,
+history, and SQLite integrity are therefore still pending. This is progress,
+not a soak pass. The captured progress JSON is
+[`soak-progress-20261110T1002Z.json`](soak-progress-20261110T1002Z.json).
+
 ## Workload and pass criteria
 
 - 25 filesystem mutations per second for 259,200 seconds.
