@@ -1,0 +1,16 @@
+{
+  "observed_at_utc": "2026-11-10T23:33:56Z",
+  "decision": "blocked_no_vm_started",
+  "probe": "require_stable_host_admission(samples=3, interval_seconds=10)",
+  "result": "refused at sample 1/3",
+  "blockers": [
+    "multiple active Go compiler processes",
+    "active go test process",
+    "active node tsc process",
+    "host load1 39.65 exceeds 10",
+    "CPU PSI some avg10 75.53% exceeds hard admission limit 55%"
+  ],
+  "vm_started": false,
+  "dux_test_suite_started": false,
+  "evidence": "guard refusal captured directly; unrelated workloads left untouched"
+}
