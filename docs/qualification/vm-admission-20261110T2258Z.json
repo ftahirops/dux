@@ -1,0 +1,35 @@
+{
+  "observed_at_utc": "2026-11-10T22:58Z",
+  "decision": "blocked_no_vm_started",
+  "qualification_host": {
+    "load_average_1m": 5.37,
+    "cpu_psi_some_avg10_percent": 3.00,
+    "io_psi_some_avg10_percent": 28.21,
+    "io_psi_full_avg10_percent": 26.89,
+    "root_use_percent": 69,
+    "root_available_gib": 56.0,
+    "dev_shm_available_gib": 9.3,
+    "active_host_workloads": ["go test -race ./agent/emdash -count=1"]
+  },
+  "last_start_attempt": {
+    "at_utc": "2026-11-10T22:57Z",
+    "refused_on_sample": "1/3",
+    "blockers": [
+      "Go test binary and go test process",
+      "four shell test scripts",
+      "io PSI some avg10=19.56% exceeds 10%"
+    ],
+    "vm_started": false
+  },
+  "vps2": {
+    "host": "192.168.5.106",
+    "kvm_device_present": false,
+    "dux_soak_active": true,
+    "dux_soak_restarts": 0,
+    "root_use_percent": 89,
+    "root_available_gib_rounded": 11,
+    "dev_shm_available_gib_rounded": 2.1
+  },
+  "fault_matrix_started": false,
+  "evidence": "host pressure and process snapshot, SSH status on VPS2, and scripts/dux-qualification-vm.py admission refusal"
+}

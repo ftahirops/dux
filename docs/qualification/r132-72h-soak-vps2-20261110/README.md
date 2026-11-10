@@ -201,3 +201,14 @@ reclaim scenarios, and one controlled restart recovery. Whole-run throughput is
 and SQLite integrity remain pending. Evidence:
 [`soak-progress-20261110T2249Z.json`](soak-progress-20261110T2249Z.json),
 SHA-256 `c6f83c761e6ef7fbef81557c4fa6914e1b7d425e0f4d0abe138c58ebc282ba34`.
+
+### Live checkpoint — 2026-11-10 22:58 UTC
+
+The exact-hash candidate remained active on VPS2 with zero service restarts.
+The durable report shows **49,997.1 seconds** (13h53m17s; **19.29%**),
+**1,115,767 mutations**, **1,112 exactness samples**, 13 bursts, two
+held-reader/WAL-reclaim scenarios, and one controlled recovery. Whole-run rate
+is **22.317 mutations/s**. Four more crash-recovery checkpoints and terminal
+exactness/history/SQLite assertions remain pending. Evidence:
+[`soak-progress-20261110T2258Z.json`](soak-progress-20261110T2258Z.json),
+SHA-256 `b9b6b041b428708b40b5a280b2394377790709d7e95fd65e785921093c116dca`.
