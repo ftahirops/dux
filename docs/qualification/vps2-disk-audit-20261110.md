@@ -167,6 +167,14 @@ No data was deleted in this follow-up. Journals, Docker images/volumes, Rust and
 Cargo caches, and qualification failure artifacts have different retention or
 rebuild costs; use their owners' retention policy before pruning.
 
+**Later superseding cleanup:** on 2026-11-10 at 21:50 UTC, the inactive
+`/var/tmp/dux-cargo` (1,005 MiB) and `/var/tmp/dux-rustup` (842 MiB) caches
+were removed after confirming no process referenced them. This recovers space
+but means a future Rust build on VPS2 must restore the toolchain and Cargo
+cache, including downloading dependencies if they are not otherwise cached.
+The active soak used its already-built binary and continued with zero supervisor
+restarts. See the [cleanup record](vps2-disk-cleanup-20261110T2150Z.md).
+
 
 ## Follow-up — 2026-11-10 21:21–21:26 UTC
 
