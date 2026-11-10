@@ -4997,3 +4997,43 @@ no controlled crashes yet. Final exactness, history, and SQLite checks remain
 pending. Evidence is in
 [`soak-progress-20261110T1601Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1601Z.json)
 (SHA-256 `77d4e377d83215bf0a4ff8211a0dbb179c7864ce7a2f0cccade04274a0cd8781`).
+
+
+## Ninth verified scan and refreshed security/host gates — 2026-11-10 16:16 UTC
+
+The ninth successful scan-first observation completed at **16:13:09 UTC**,
+9m02s after its 16:04:07 start. It covered 1,730,276 files, 212,495
+directories, and 1,942,771 staged path instances. It reported zero coverage
+issues, discarded 12 vanished reuse paths, and had zero unresolved paths.
+Unique indexed allocation was 83,281,915,904 bytes (77.56 GiB). Accounting
+verification passed at 16:14:25 in 76,251 ms. At 16:16:15, the service was
+active with zero restarts, zero pending updates, zero kernel overflows/dropped
+updates, no active scan, and dirty state awaiting the next full observation.
+
+The completion gap from the previous successful observation at 15:58:55 was
+14m14s. Across eight successful-completion intervals, three exceeded the
+15-minute target (15m39s, 17m00s, 26m37s). The 26m37s interval includes the
+failed 15:40 attempt and its successful bounded retry. Per-path age remains
+unmeasured because the index does not record per-path last-observed time.
+
+A fresh `cargo audit -D warnings --json` passed at **16:15 UTC** for all 229
+locked dependencies, with zero vulnerabilities and zero warnings. Its 1,446
+advisory database entries were refreshed Nov 10 at 14:45:03 +01:00 (commit
+`28d73fc95e5972af3403225a217def57dcaba3c4`). Raw output is
+[`cargo-audit-20261110T1615Z.json`](docs/qualification/cargo-audit-20261110T1615Z.json).
+This is dependency review, not application security certification.
+
+The r132 soak was still running at 16:16:15: 25,841.4 seconds (7h10m41s),
+592,931 operations, 589 exactness samples, seven mutation bursts, one passed
+held-reader/WAL-reclaim phase, zero restarts, and no controlled crashes. Final
+exactness/history/SQLite checks remain pending. Requested pacing is 25 ops/s;
+elapsed average is 22.95 ops/s. See
+[`soak-progress-20261110T1616Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1616Z.json)
+(SHA-256 `8f61cf448d3c69893457348087058081842cff635f7fae3cb5d18effd611f7a1`).
+
+The guarded Ubuntu lifecycle VM start was attempted with a 10% CPU cap and an
+ephemeral runtime. Admission refused sample 1/3 because an unrelated Go
+compiler and `go test` were active; no guest was created. Host load1 was 2.41
+and CPU PSI some avg10 was 1.75% at 16:16:19. Disk was 71% used with 52 GiB
+available at 16:12:39. `/tmp` was 16 GiB, mostly other project caches and
+artifacts; no potentially active files were removed.
