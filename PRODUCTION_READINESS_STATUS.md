@@ -4544,3 +4544,40 @@ reader, crash/restart, integrity, and final-check evidence. A fresh read-only
 SSH attempt from this workspace failed public-key authentication, so current
 VPS2/VPS1 service state could not be independently refreshed in this entry.
 Production rollout remains NOT READY.
+
+## Direct production-host refresh — 2026-11-10 13:54 UTC
+
+Read-only local inspection of the production host supersedes earlier 13:10
+figures. `dux status --json` reports daemon live, dirty, not caught up, not
+paused, no scan in progress, and no write error. Installed binary is
+`dux 0.6.3 (e0cc915f)` (`perf: repair affected leaves through parent index`);
+systemd reports active with four historical restarts. The dirty reason is
+`non-watched filesystem mounts changed; reconciling visible paths`, with dirty
+state since 13:37:18 UTC. Last full scan timestamp is 2026-11-05 12:49:22 UTC
+(435,900 seconds old); reported lag is 246,211 seconds (68.4 hours). This means
+the daemon is writing events, but its index has not had a recent full scan and
+is not eligible to claim current completeness.
+
+At 13:54:22 UTC the daemon reported 766 kernel overflow notifications,
+2,518,862 dropped updates, 232,188,418 events seen, 134,406,803 resolved,
+9 pending updates, 1,311,146 nodes, 128 MiB WAL, and 3,466,829,824 bytes of
+SQLite database files. Between the 13:53 and 13:54 observations, seen/resolved
+counters advanced while dropped count stayed fixed; this confirms activity but
+does not resolve the 68-hour freshness gap or mount reconciliation state. The
+service unit has `CPUQuota=100%`; its comments say the event-loop governor's
+default is 25% and is not a whole-process CPU cap.
+
+Disk at the same observation: root filesystem 185 GiB total, 123 GiB used,
+55 GiB available (70%); workspace 4.2 GiB; readiness artifacts 1.4 GiB;
+`/var/lib/dux` 3.4 GiB; `/var/log` 2.0 GiB. Large log contributors include
+rotated/current syslog (about 0.75 GiB together), Vault audit log (about 0.18
+GiB), and systemd journal (about 0.69 GiB). The filesystem is not near full;
+no production logs or index artifacts were deleted.
+
+The same 13:54 SSH read-only probe to VPS2 again failed public-key
+authentication. The local source host had Go engine tests and a Dux growth
+query active during the preceding admission observation; no VM was launched.
+No production daemon, package, configuration, or database was changed. The
+reconciliation-first code and its fixture qualifications therefore remain
+candidate evidence only; these live data show the installed older service is
+still the operational blocker.

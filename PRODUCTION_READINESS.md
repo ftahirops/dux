@@ -6,9 +6,11 @@ correctness and package checks, but the long soak, Rocky RPM lifecycle,
 publisher authentication, production-scale qualification, and canary gates are
 not complete.
 
-Status snapshot: **13:10 UTC, 2026-11-10**; the VPS2 soak row and checkpoint
-were refreshed at 13:24 UTC. Machine-readable values and evidence timestamps
-are in [`current-metrics.json`](docs/qualification/current-metrics.json).
+Status snapshot: **13:53 UTC, 2026-11-10** from the local production host;
+the VPS2 soak cannot currently be refreshed because SSH public-key
+authentication failed. Machine-readable values and evidence timestamps are
+in [`current-metrics.json`](docs/qualification/current-metrics.json); the
+latest direct production observation is recorded in the status log.
 The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTION_READINESS_STATUS.md).
 
 ## Candidate and live production
@@ -16,9 +18,9 @@ The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTIO
 | Item | Current evidence |
 |---|---|
 | Candidate | r132, source `f02ba7a`; binary SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76` |
-| VPS1 production | r66, active as root with 4 historical restarts; at 13:10 UTC it was dirty and about 67.7 hours behind, with 766 overflows, 2,518,862 dropped updates, and 1,186 pending updates; last full scan Nov 5 12:49 UTC |
-| Disk | At 13:08 UTC: `/` 185 GiB total, 58 GiB free; workspace is 4.1 GiB (`target` 3.6 GiB; `target/readiness` 1.4 GiB). Disk is not the current blocker. |
-| Current root host admission | At 13:08 UTC: load1 6.2 with two Go compiler/test processes. Two prior Rocky starts were stopped during boot; the latest retry was refused before VM start at admission sample 2/3. |
+| VPS1 production | `dux 0.6.3` build `e0cc915f`, active as root, 4 historical restarts. At 13:54 UTC it was dirty, 68.4 hours behind, with 766 kernel overflows, 2,518,862 dropped updates, 9 pending updates, 1,311,146 indexed nodes, and a 128-MiB WAL; last full scan was about 5.0 days ago. |
+| Disk | At 13:53 UTC: `/` 185 GiB total, 55 GiB available; workspace 4.2 GiB (`target/readiness` 1.4 GiB); `/var/lib/dux` 3.4 GiB; `/var/log` 2.0 GiB. Disk is not currently near capacity. |
+| Current root host admission | At 13:53 UTC: load1 8.14; Go engine tests and Dux growth query active. The guarded VM admission policy must be observed before another guest start. |
 
 ## Qualification gates
 
