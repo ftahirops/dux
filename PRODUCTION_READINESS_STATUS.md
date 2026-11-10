@@ -260,6 +260,20 @@ remain pending. At 11:14 UTC the Rocky VM guard refused startup at sample 2/3
 as host CPU PSI some reached 62.72%; no guest was created. See the
 [`11:14 host admission record`](docs/qualification/live-vps1-admission-20261110T1114Z.json).
 
+At 11:18 UTC, a fresh read-only SSH check found the exact r132 soak still
+`active/running` with zero restarts. Its durable report had advanced to
+7,990.8 seconds, 188,451 mutations, 187 exact-check samples, and two completed
+hourly bursts. The five-minute held reader, controlled crash/recovery, and
+terminal exactness/history/SQLite integrity assertions remain pending. This
+is continued progress, not a soak pass. The checkpoint is preserved in
+[`the 11:18 snapshot`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1118Z.json).
+
+The shared VPS1 had active Go race tests and vet/compiler processes during
+this checkpoint. Its CPU pressure sample was 18.97% `some` over 10 seconds;
+the Rocky lifecycle was not started. This keeps the host admission guard
+intact and avoids treating an unqualified or interrupted guest run as a test
+result.
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM
