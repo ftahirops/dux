@@ -5129,3 +5129,31 @@ zero controlled crashes. Final exactness/history/SQLite checks are still
 pending; the worker is only about 10.3% through 72 hours. Its checkpoint is
 [`soak-progress-20261110T1631Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1631Z.json)
 (SHA-256 `a5ccd796a71b1a6232308016c348409b9819411b364969f508ee553bfbabe294`).
+
+
+## Admission retry blocked by concurrent host tests — 2026-11-10 16:36 UTC
+
+The current r136 Ubuntu package lifecycle guest was not started. The admission
+guard refused it because concurrent Go tests and Node Vitest were active (three
+workloads at the latest sample). The latest host sample was load1 8.76, CPU PSI
+some 9.54%, CPU PSI full 0%, IO PSI some 0.49%, and memory PSI some/full 0%.
+No VM or package command ran. The guard correctly prevented another guest start
+while unrelated host test workloads were using the shared machine.
+
+The r132 soak remains active. Its 16:35:40 checkpoint records 27,043.5 seconds
+(7h30m43s), 619,621 operations, 616 exactness samples, seven mutation bursts,
+one passed held-reader/WAL-reclaim phase, and zero controlled crashes. Final
+exactness/history/SQLite assertions remain pending; 10.4% of 72 hours has
+elapsed. Evidence:
+[`soak-progress-20261110T1635Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1635Z.json)
+(SHA-256 `80777a904ca8da3bf5250cd553367bd66557afbed19e9b776af280242257d7d6`).
+
+At 16:35:58 UTC, systemd reported `dux.service` active/running with zero
+restarts. Its transient `reloading (reload-notify)` state during the scan had
+cleared after the scan and accounting `READY=1` notification. Memory was 511.9
+MiB (peak 1.9 GiB, configured high 2 GiB / max 4 GiB). Dux had 1,944,858
+indexed nodes, 82,416,308,224 unique bytes, zero pending updates, zero kernel
+overflows, zero dropped updates, and scan age 338 seconds. Its dirty state means
+filesystem changes await the next full observation; it does not mean the last
+observation failed. The service remains behind on hints between scheduled
+observations, and per-path maximum age is still unmeasured.

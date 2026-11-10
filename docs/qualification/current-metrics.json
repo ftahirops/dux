@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T16:31:45Z",
+  "snapshot_at_utc": "2026-11-10T16:36:30Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -44,24 +44,25 @@
     "dev_shm_size_gib": 3.3
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T16:25:05Z",
-    "load_average_1m": 15.95,
-    "cpu_psi_some_avg10_percent": 47.51,
+    "observed_at_utc": "2026-11-10T16:36:30Z",
+    "load_average_1m": 8.76,
+    "cpu_psi_some_avg10_percent": 9.54,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "pressure guard stopped admitted guest 27s after start due active Go test binary and go test"
+      "VM admission refused because concurrent host Go tests and Node Vitest were active; no guest started"
     ],
-    "active_host_workload_count": 12,
+    "active_host_workload_count": 3,
     "active_host_workload_types": [
       "Go test binary",
-      "go test"
+      "go test",
+      "Node Vitest"
     ],
     "evidence": "PRODUCTION_READINESS_STATUS.md (14:23 UTC VM runtime-guard entry)",
     "ubuntu_guest_started": true,
-    "ubuntu_guest_state": "started 16:21:24; guard stopped 16:21:51 before SSH/cloud-init; no package commands ran; ephemeral overlay cleaned",
+    "ubuntu_guest_state": "inactive; latest start refused by admission sample 1/3 due active host tests",
     "cpu_psi_full_avg10_percent": 0.0
   },
   "rust_tests": {
@@ -89,12 +90,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T16:31:30Z",
+    "observed_at_utc": "2026-11-10T16:35:40Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 26803.4,
-    "operations": 614054,
-    "exact_check_samples": 611,
+    "elapsed_seconds": 27043.5,
+    "operations": 619621,
+    "exact_check_samples": 616,
     "completed_hourly_bursts": 7,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -103,16 +104,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.90955625032645,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1631Z.json",
+    "observed_operations_per_second_elapsed": 22.912012128607614,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1635Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.10340817901234568,
+    "coverage_duration_fraction": 0.10433449074074073,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "a5ccd796a71b1a6232308016c348409b9819411b364969f508ee553bfbabe294",
+    "latest_checkpoint_sha256": "80777a904ca8da3bf5250cd553367bd66557afbed19e9b776af280242257d7d6",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -192,7 +193,8 @@
     "latest_vm_pressure_guard_162151z": "docs/qualification/vm-admission-20261110T162151Z.jsonl",
     "latest_live_scan_retry": "PRODUCTION_READINESS_STATUS.md (16:31 UTC bounded retry recovered; accounting passed)",
     "latest_soak_checkpoint_1627z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1627Z.json",
-    "latest_soak_checkpoint_1631z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1631Z.json"
+    "latest_soak_checkpoint_1631z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1631Z.json",
+    "latest_soak_checkpoint_1635z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1635Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -276,13 +278,13 @@
     "dux_internal_handle_decoder": "not qualified"
   },
   "vps2_scan_first_runtime": {
-    "observed_at_utc": "2026-11-10T16:31:45Z",
+    "observed_at_utc": "2026-11-10T16:35:58Z",
     "installed_build": "0.6.3 (8b02799b)",
     "mode": "scan_first",
     "service_active": true,
     "service_restarts": 0,
     "last_full_observation_utc": "2026-11-10T16:13:09Z",
-    "last_observation_age_seconds": 85,
+    "last_observation_age_seconds": 338,
     "last_observation_coverage_issues": 0,
     "accounting_verification": "passed",
     "accounting_verification_elapsed_ms": 76251,
@@ -302,7 +304,7 @@
     "behind_seconds_semantics": "not applicable in scan-first mode; use last_scan_age_seconds for observation freshness",
     "completed_observations_since_checkpoint": 10,
     "latest_observation_utc": "2026-11-10T16:30:20Z",
-    "latest_observation_age_seconds": 85,
+    "latest_observation_age_seconds": 338,
     "latest_observation_files": 1735432,
     "latest_observation_directories": 212908,
     "latest_observation_staged_path_instances": 1948340,
@@ -437,11 +439,11 @@
       "index_dirty_after_publish_reason": "filesystem changes await the next full observation"
     },
     "service_daemon_live": true,
-    "systemd_active_state": "reloading (reload-notify); since 2026-11-10T04:23:18Z",
-    "service_memory_mib": 1638.4,
+    "systemd_active_state": "active (running)",
+    "service_memory_mib": 511.9,
     "service_memory_high_mib": 2048,
     "service_memory_max_mib": 4096,
-    "latest_live_observation_at_utc": "2026-11-10T16:31:45Z",
+    "latest_live_observation_at_utc": "2026-11-10T16:35:58Z",
     "latest_live_observation_scan_in_progress": false,
     "latest_live_observation_scan_started_at_utc": "2026-11-10T16:23:54Z",
     "latest_live_observation_files_seen": 1735432,
@@ -453,6 +455,7 @@
     "latest_live_observation_service_restarts": 0,
     "latest_live_observation_accounting_verification": "passed",
     "latest_live_observation_accounting_verification_at_utc": "2026-11-10T16:31:43Z",
-    "latest_live_observation_accounting_verification_elapsed_ms": 82569
+    "latest_live_observation_accounting_verification_elapsed_ms": 82569,
+    "latest_live_observation_dirty_reason": "filesystem changes await the next full observation"
   }
 }
