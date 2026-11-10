@@ -2,7 +2,7 @@
   "observed_at_utc": "2026-11-10T22:50Z",
   "qualification_host": {
     "root_total_bytes": 198092431360,
-    "root_available_bytes": 60895338496,
+    "root_available_bytes": 60069728256,
     "root_use_percent": 69,
     "dev_shm_total_bytes": 13729214464,
     "dev_shm_available_bytes": 9977589760,
@@ -15,7 +15,8 @@
       "go test -race ./engine/... ./model",
       "go test -race ./agent/wordpress -count=1"
     ],
-    "qualification_vm_started": false
+    "qualification_vm_started": false,
+    "root_used_bytes": 129191354368
   },
   "vps2": {
     "root_total_bytes": 99012476928,

@@ -1,0 +1,11 @@
+PYTHONPATH=scripts python3 - <<'PY'
+import importlib.util
+spec=importlib.util.spec_from_file_location('qualification_vm','scripts/dux-qualification-vm.py')
+module=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print('host pressure snapshot:',module.host_pressure())
+module.require_stable_host_admission('dux-readiness-preflight',samples=3,interval_seconds=10)
+print('PASS: three stable admission samples; no VM started by this preflight')
+PY
+host pressure snapshot: {'load1': 2.3, 'cpu': {'some': 6.28, 'full': 0.0}, 'io': {'some': 5.68, 'full': 5.49}, 'memory': {'some': 0.0, 'full': 0.0}, 'active_host_workloads': [], 'telemetry_errors': []}
+refusing to start dux-readiness-preflight: host admission sample 3/3 is blocked: active host build/test/install/analysis workload: shell test script pid=66468

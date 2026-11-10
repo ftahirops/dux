@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T22:51Z",
+  "snapshot_at_utc": "2026-11-10T22:53Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -1193,15 +1193,14 @@
     "qualification_vm_started": false
   },
   "latest_vm_admission_preflight": {
-    "observed_at_utc": "2026-11-10T22:50Z",
+    "observed_at_utc": "2026-11-10T22:53Z",
     "decision": "blocked_no_vm_started",
-    "sample": "1/3",
-    "load_average_1m": 10.58,
+    "sample": "3/3",
     "active_host_workloads": [
-      "Go test binary pid=63277",
-      "go test pid=62902"
+      "shell test script pid=66468"
     ],
+    "load_average_1m_at_followup": 4.32,
     "fault_matrix_started": false,
-    "evidence": "docs/qualification/vm-admission-preflight-20261110T2250Z.json"
+    "evidence": "docs/qualification/vm-admission-preflight-20261110T2253Z.json"
   }
 }

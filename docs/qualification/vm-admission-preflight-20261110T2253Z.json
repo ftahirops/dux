@@ -1,0 +1,23 @@
+{
+  "observed_at_utc": "2026-11-10T22:53Z",
+  "decision": "blocked_no_vm_started",
+  "admission_probe": "require_stable_host_admission(samples=3, interval_seconds=10)",
+  "first_sample": {
+    "load_average_1m": 2.3,
+    "cpu_psi_some_avg10_percent": 6.28,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 5.68,
+    "io_psi_full_avg10_percent": 5.49,
+    "memory_psi_some_avg10_percent": 0.0,
+    "active_host_workloads": []
+  },
+  "rejection": {
+    "sample": "3/3",
+    "active_host_workloads": ["shell test script pid=66468"],
+    "load_average_1m_at_followup": 4.32,
+    "cpu_psi_some_avg10_percent_at_followup": 10.34
+  },
+  "vm_started": false,
+  "fault_matrix_started": false,
+  "evidence_log": "docs/qualification/vm-admission-preflight-20261110T2253Z.log"
+}
