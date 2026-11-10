@@ -4962,3 +4962,38 @@ not yet proven; the next observation result must be checked before counting this
 cycle as recovered. The earlier seven complete scans remain valid evidence, but
 this live failure shows scan-first reconciliation can encounter incomplete
 coverage under concurrent inode reuse and depends on the retry path.
+
+
+## Inode-reuse retry recovery and freshness miss — 2026-11-10 16:01 UTC
+
+The bounded retry that began at **15:49:07 UTC** completed its full-root walk
+at **15:58:55**, after 9m48s. The walk reported 1,727,129 files, 212,181
+directories, 1,939,310 staged path instances, and 83,160,256,512 unique bytes
+(77.45 GiB). It had **zero coverage issues**; 96 vanished inode-reuse paths
+were discarded safely, with zero revalidated or unresolved reuse paths.
+Accounting verification passed at 16:00:28 in 92,298 ms. The new published
+index contains 1,935,828 nodes.
+
+This closes the specific retry attempt: the failed 15:40 scan kept the previous
+index, and the scheduled bounded retry produced a complete verified view. The
+service then returned to dirty state because filesystem events arrived after
+the observation and await the next full walk. At 16:01:50 it was active with
+zero restarts, zero pending updates, zero kernel overflows, and zero dropped
+updates. It was not paused.
+
+The last successful completion before the failed attempt was at 15:32:18; the
+next successful completion was at 15:58:55, a **26m37s** gap (11m37s beyond the
+15-minute completion target). The scheduled 15:40 attempt itself failed with
+three concurrent inode-incarnation conflicts after 7m58s, and retry added
+9m48s plus accounting verification. The previous index was retained during
+that interval. Per-path observation times are not stored, so the actual maximum
+age of individual entries cannot be calculated from `last_scan_age_seconds` or
+completion gaps. Per-path freshness remains unqualified.
+
+The separate r132 soak remained active at 16:01:37 with 24,998.5 seconds
+(6h56m39s) elapsed, 574,377 operations, 572 exactness samples, six mutation
+bursts, one successful held-reader/WAL-reclaim phase, zero worker restarts, and
+no controlled crashes yet. Final exactness, history, and SQLite checks remain
+pending. Evidence is in
+[`soak-progress-20261110T1601Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1601Z.json)
+(SHA-256 `77d4e377d83215bf0a4ff8211a0dbb179c7864ce7a2f0cccade04274a0cd8781`).
