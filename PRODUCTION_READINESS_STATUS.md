@@ -27,43 +27,52 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:38 UTC
+### Live checkpoint — 2026-11-10 09:44 UTC
 
 The r132 soak remains `active/running`, with **zero restarts**. At elapsed
-1,980.9s it had completed **47,291 mutations**; the 47,000-op exact checkpoint
-passed in 476ms. The hourly burst, held-reader, controlled recovery, and final
+2,341.0s it had completed **55,493 mutations**; the 55,000-op exact checkpoint
+passed in 1,488ms. The hourly burst, held-reader, controlled recovery, and final
 exactness/history/integrity checks have not run yet. This is early progress,
-not a soak pass. The machine-readable snapshot is
-[`live-vps2-readiness-20261110T0938Z.json`](docs/qualification/live-vps2-readiness-20261110T0938Z.json).
+not a soak pass.
 
-## Current production and disk snapshot — 2026-11-10 09:38 UTC
+## Current production and disk snapshot — 2026-11-10 09:45 UTC
 
-The installed VPS1 production daemon is still **r66** (`0.6.3`, revision
+The installed VPS1 production daemon remains **r66** (`0.6.3`, revision
 `e0cc915f8f37`), active with 4 historical restarts. It reports dirty status
 from fanotify overflow: **742 overflow notifications**, **2,518,862 dropped
-updates**, no full scan for about **4d20h**, and `caught_up=false`. The index
-has 1,329,923 nodes and a 3.42-GB SQLite database plus 128-MiB WAL. VPS1 has
-about 53 GiB available on its 185-GiB root filesystem (71% used), so current
-production staleness is not explained by disk exhaustion. See the full
-[VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T0938Z.json).
+updates**, no full scan for about **4d21h**, and `caught_up=false`. It has
+1,330,176 indexed nodes and a 3.42-GB SQLite database. VPS1 has about 51 GiB
+available on its 185-GiB root filesystem (72% used), so production staleness is
+not explained by disk exhaustion. See the
+[09:45 VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T0945Z.json).
 
-VPS2 still runs its installed **r121** service, separately from the r132 soak.
-It is active with zero restarts and uses scan-first mode. A full observation is
-in progress: status is dirty for that reason, but reports zero dropped updates
-and zero kernel overflows. The index contains 1,924,740 nodes; its SQLite file
-is 804 MiB. Its latest observation staging file is actively growing (about
-446 MiB at capture), so it must not be treated as an orphan temp file. VPS2's
-root filesystem is **96% used with about 4 GiB available**; `/dev/shm` has
-about 2.8 GiB free. See the full [VPS2 snapshot](docs/qualification/live-vps2-readiness-20261110T0938Z.json).
+The installed VPS2 **r121** service is separate from the r132 soak. It is active
+with zero restarts and scan-first mode. Its most recent full observation
+completed; the index is dirty because filesystem changes await the next
+observation, with **zero dropped updates** and **zero kernel overflows**. It
+indexes 1,928,598 nodes in an 806-MB database. See the
+[09:38 VPS2 snapshot](docs/qualification/live-vps2-readiness-20261110T0938Z.json)
+and [post-cleanup disk/service evidence](docs/qualification/vps2-test-disk-cleanup-20261110.json).
 
-Docker metadata on VPS2 reports 19.51 GiB of images, 3.53 GiB of container
-layers, and 21.86 GiB of volumes. It marks 6.40 GiB of images and 1.96 GiB of
-containers reclaimable, but there are no dangling images; several stopped
-containers are deployment/test helpers, and the large volumes back active
-services. No Docker data was removed because these are not verified disposable
-artifacts. The r132 soak report directory is only about 6.2 MiB on disk; its
-fixture remains on tmpfs. This is a disk-capacity risk on the shared VPS2 test
-host, not evidence that Dux caused the space use.
+### VPS2 disk cleanup — 2026-11-10 09:42 UTC
+
+Before cleanup, the 93-GiB root filesystem was at 97% with 3.1 GiB available.
+Docker metadata identified a stopped ClickHouse container from the
+`xgs-test` test project, exited since Nov 6, with a Docker-reported 1.95-GB
+writable layer. No container in that project was active. I removed that
+container, then removed its separate Docker-reported 5.95-GB anonymous volume
+after verifying it had no attached containers. The old test database in that
+volume was deleted. I preserved the
+other Docker images and volumes, all active application data, and the Dux DB.
+
+Afterward, root use fell to **87%** with **12.5 GB available**. Docker reports
+17.59 GB of images, 1.61 GB of container layers, and 16.01 GB of volumes. The
+installed Dux scan completed during this interval; Dux remains active with zero
+restarts, zero loss/overflow counts, and its index marked dirty only because
+new changes await the next full observation. Its temporary scan database is
+gone, so there is no active scan file to delete. The r132 soak stayed active
+with zero restarts. Full before/after details are in the
+[disk cleanup record](docs/qualification/vps2-test-disk-cleanup-20261110.json).
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
