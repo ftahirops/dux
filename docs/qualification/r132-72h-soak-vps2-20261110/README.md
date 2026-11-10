@@ -85,7 +85,15 @@ Evidence: [progress samples](soak-progress-20261110T1019Z.json) and
 
 ## Workload and pass criteria
 
-- 25 filesystem mutations per second for 259,200 seconds.
+- The mutation pacer targets 25 filesystem mutations per second over 259,200
+  seconds. This is not a guaranteed wall-clock average: each exactness gate
+  synchronously pauses mutations while a full scan, accounting verification,
+  and independent comparison run. The pacer rebases after that pause instead
+  of issuing a catch-up burst. At the 2026-11-10 22:05 checkpoint, the run-wide
+  average was 22.402 mutations/second. The soak can support correctness and
+  endurance at the observed rate; it does not prove a sustained 25/s workload
+  or throughput capacity. A continuous concurrent producer is needed for that
+  separate performance gate.
 - Every 1,000 mutations, request a full scan-first observation via SIGHUP, wait for scan completion and accounting verification, then independently compare indexed paths and identities against the fixture. Thus this is repeated reconciliation-under-churn endurance testing, not a passive event-only soak; the 256-file seed and small fixture also do not establish production-scale throughput.
 - Inject a 500-file mutation burst each hour and verify exactness/history.
 - Hold a read-only SQLite snapshot for five minutes after six hours; then

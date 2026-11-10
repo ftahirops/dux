@@ -123,7 +123,7 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.466,
+    "observed_operations_per_second_elapsed": 22.402,
     "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2205Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
     "coverage_duration_fraction": 0.18074729938271603,
@@ -174,7 +174,10 @@
     },
     "next_controlled_crash_due_utc": "2026-11-11T09:04:50Z",
     "controlled_crash_recovery_scenarios_planned": 5,
-    "controlled_crash_recovery_scenarios_remaining": 4
+    "controlled_crash_recovery_scenarios_remaining": 4,
+    "observed_rate_observed_at_utc": "2026-11-10T22:05:40Z",
+    "observed_rate_semantics": "Whole-wallclock average includes pauses for synchronous full scan/accounting/oracle checks every 1000 mutations; pacer rebases rather than catching up. Does not establish sustained 25/s capacity.",
+    "sustained_25_per_second_capacity_qualified": false
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
