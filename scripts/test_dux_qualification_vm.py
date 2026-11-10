@@ -154,6 +154,9 @@ class PressureGuardTests(unittest.TestCase):
                 "126": ["/tmp/go-build123/b140/recovery.test", "-test.paniconexit0"],
                 "127": ["/bin/bash", "scripts/test-fast.sh"],
                 "128": ["/bin/bash", "-c", "echo test"],
+                "129": ["/usr/bin/node", "/home/project/ui/node_modules/.bin/tsc", "--noEmit"],
+                "130": ["/usr/bin/node", "/home/project/ui/node_modules/typescript/bin/tsc", "--build"],
+                "131": ["/root/go/pkg/mod/golang.org/toolchain@go1.26/pkg/tool/linux_amd64/vet", "-unsafeptr=false", "vet.cfg"],
             }
             for pid, argv in processes.items():
                 process = proc_root / pid
@@ -167,6 +170,7 @@ class PressureGuardTests(unittest.TestCase):
                 [
                     "Go compiler pid=105",
                     "Go test binary pid=126",
+                    "Go vet worker pid=131",
                     "cargo clippy pid=112",
                     "cargo test pid=103",
                     "cargo test pid=109",
@@ -179,6 +183,8 @@ class PressureGuardTests(unittest.TestCase):
                     "gosec pid=113",
                     "node --test pid=125",
                     "node jest pid=122",
+                    "node tsc pid=129",
+                    "node tsc pid=130",
                     "node vitest pid=121",
                     "npm ci pid=115",
                     "npm ci pid=119",

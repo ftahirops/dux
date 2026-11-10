@@ -4581,3 +4581,128 @@ No production daemon, package, configuration, or database was changed. The
 reconciliation-first code and its fixture qualifications therefore remain
 candidate evidence only; these live data show the installed older service is
 still the operational blocker.
+
+## VPS2 soak and scan-first runtime refresh — 2026-11-10 13:59 UTC
+
+Root SSH access to VPS2 succeeded with the existing `/root/.ssh/id_rsa`
+(`root@vm`) key; the ED25519 identity previously tried was rejected. No key or
+server configuration was changed. A read-only query at 13:57 UTC confirmed
+installed Dux build `8b02799b` (`scan_first=true`), active with zero restarts.
+At 13:59:05 it remained in a periodic full-root observation, dirty with reason
+`periodic filesystem observation in progress`, about 9.6 hours behind and
+not caught up. It had zero kernel overflow notifications, zero dropped updates,
+zero pending updates, and approximately 935.6 million lifetime fanotify events.
+The scan began at 13:55:09; latest reported progress was 1,708,790 files and
+209,687 directories. That progress had not advanced between 13:58:26 and
+13:59:05, although the daemon continued running and logged 108 staged paths
+vanishing during inode-reuse races and two identities being revalidated. These
+were warnings handled during the scan, not proof of scan completion. Dux
+continued to report the old index as dirty. `systemctl` showed the main service
+in `reload-notify` since 04:23 UTC with `NRestarts=0`; this long reload/scan
+state is still an operational concern.
+
+A read-only two-sample check around the scan showed fanotify rates roughly
+17k–36k events/sec, a queue near zero, and no queue-pressure episodes. The
+service cgroup has accumulated substantial CPU throttling (about 12,976 s in
+`cpu.stat` at 13:59) and high I/O since service start. That is useful evidence
+for scan-first behavior under load, but this single active scan has not met a
+freshness or completion gate, and the counters are host-specific.
+
+The exact r132 soak remains active with `NRestarts=0`. At 13:59 UTC it reported
+17,663.3 seconds elapsed, 410,000 mutations, 409 exactness samples, four
+mutation bursts, zero held-reader phases, zero controlled-crash phases, and no
+final exactness/history/SQLite result. Latest snapshot:
+[`soak-progress-20261110T1359Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1359Z.json),
+SHA-256 `944f490226848578c5b8c035efd0bd7ca57154385afa6ef8ef2b3a4a48364654`.
+The candidate hash matches the planned r132 binary. Its latest periodic sample
+at operation 410,000 recorded 2,764 ms exact convergence, 4,332 KiB RSS, 14
+file descriptors, and a 4,494,952-byte WAL. The 72-hour test has run only
+about 4 hours 54 minutes; it is not a soak pass.
+
+The attempted Ubuntu lifecycle VM start on the local production host was
+refused by the existing three-sample admission guard on sample 1: load1 30.45,
+CPU PSI some 58.76%, and active Go compiler/test processes. No VM started and
+no package command ran. Do not bypass the guard; retry only when its admission
+checks pass. VPS1 remains the older dirty production service described in the
+13:54 direct observation above. Neither installed service nor either database
+was changed during these observations.
+
+## VM admission guard detection fix — 2026-11-10 14:01 UTC
+
+A live host process observation found a Node.js TypeScript compiler
+(`node .../node_modules/.bin/tsc --noEmit`) consuming about 163% CPU. The VM
+admission probe recognized Node test runners and package managers, but missed
+this direct compiler process. I added explicit detection for `node tsc` and
+regression fixtures for both `.bin/tsc` and `typescript/bin/tsc`; the focused
+probe test passed. A fresh guarded VM start then refused at sample 1 and
+identified the active `node tsc`, Go test binary, and `go test` processes. No
+VM or package command ran. This closes a verified admission-guard blind spot;
+it does not qualify a package transaction. The full Python suite is still
+pending after this small change.
+
+## Scan-first observation completion on VPS2 — 2026-11-10 14:02 UTC
+
+Follow-up to the active scan recorded at 13:59: the VPS2 service log records
+that the full observation completed at **14:01:30 UTC** in `scan-first` mode:
+1,708,691 files, 209,678 directories, 1,918,369 staged path instances,
+83,585,978,368 visible bytes, 83,398,668,288 unique bytes (77.67 GiB), and
+**zero coverage issues**. It reported 108 vanished staged paths, two identities
+revalidated, and zero unresolved inode-reuse paths. Accounting verification
+then passed in 61,654 ms. The log explicitly says filesystem/fanotify hints
+changed during the observation and scheduled the next full observation.
+
+At 14:02:32, `dux status --json` showed no scan in progress, 1,914,887 indexed
+nodes, zero pending updates, zero overflow notifications, and zero dropped
+updates. The last completed scan was 62 seconds old. The service remained dirty
+with `filesystem changes await the next full observation`; `behind_seconds`
+was 34,754 seconds because the index had not been caught up for about 9.65
+hours. The recent successful observation and `behind_seconds` therefore
+measure different things: the scan view was fresh, while the service had not
+reached its caught-up state amid continuous changes. The next scheduled
+observation and status transition still need observation. This is promising
+runtime evidence for the selected architecture under the live workload, but
+not proof of a 15-minute freshness SLO or stable exactness.
+
+The 14:02 soak snapshot is
+[`soak-progress-20261110T1402Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1402Z.json),
+SHA-256 `f8b7ac9e127ab2654917dc6f3f8a5535124e7744509c8323b6c151ecba3282b8`.
+It records the expected binary hash, 17,843.3 seconds elapsed, 414,065
+operations, 413 samples, four mutation bursts, no held readers, no controlled
+crashes, and no final exactness/history/SQLite result. Its status remains
+running, not passed.
+
+A test-harness review found the local VM admission detector missed a live
+`node .../tsc --noEmit` compiler. The detector now reports `node tsc`, with
+fixtures for both common tsc entry paths. The targeted regression test passed.
+A subsequent guarded guest-start attempt recognized `node tsc` alongside Go
+test processes and refused before creating a VM. At the next host sample,
+Vitest was also active. No package transaction ran. The complete Python suite
+is still pending for this change.
+
+## Soak and host guard checkpoint — 2026-11-10 14:06 UTC
+
+VPS2 read-only status at 14:06:16 UTC: scan-first service remained active with
+no restarts; its last full observation was 286 seconds old. It remained dirty
+because file-system changes await the next scheduled full observation, with no
+scan currently active, zero pending updates, and zero overflows or drops. This
+is within the stated 15-minute target so far after the 14:01:30 observation;
+the next periodic cycle and resulting status still need direct confirmation.
+The `behind_seconds` field continued growing from the prior not-caught-up
+period despite the completed scan, so do not present it as a substitute for
+last-observation age.
+
+The r132 soak checkpoint at 14:06:16 UTC recorded **18,084.5 seconds** elapsed,
+**420,000 operations**, **418 samples**, and **five** mutation bursts. The
+worker remained active with zero restarts. Held-reader and controlled-crash
+arrays remained empty and all terminal exactness/history/integrity results were
+pending. Snapshot SHA-256:
+`e74d9bae82c5871c671209f1abba88d92ebd143476a92d615bdea924ece79cf0`; file:
+[`soak-progress-20261110T1406Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1406Z.json).
+
+The VM admission helper was also extended to identify Go `vet` workers, after
+live inspection showed Go tool `vet` processes consuming a core and the guard
+previously only classified `compile`. Regression fixtures cover compiler and
+vet workers; the targeted host-workload test passes with both Node tsc and Go
+vet cases. A guarded Ubuntu start at 14:05 reached sample 3/3 and refused due
+to an active Go compiler. No VM was launched. The full Python test discovery
+remains pending while host Go test/build workloads are active.

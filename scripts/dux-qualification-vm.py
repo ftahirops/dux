@@ -248,6 +248,9 @@ def active_host_workloads(proc_root=Path('/proc')):
             args = process_title[1:] + argv[1:]
             if executable in {'node', 'nodejs'} and args:
                 node_script = Path(args[0]).stem.lower()
+                if node_script in {'tsc', 'tsc.js'}:
+                    workloads.append(f'node tsc pid={process.name}')
+                    continue
                 node_test_runners = {
                     'ava', 'cypress', 'jasmine', 'jest', 'mocha',
                     'playwright', 'tap', 'vitest',
@@ -311,8 +314,11 @@ def active_host_workloads(proc_root=Path('/proc')):
                 )
             ):
                 workloads.append(f'shell test script pid={process.name}')
-            elif executable == 'compile' and '/pkg/tool/' in argv[0]:
-                workloads.append(f'Go compiler pid={process.name}')
+            elif '/pkg/tool/' in argv[0] and executable in {
+                'compile', 'vet',
+            }:
+                label = 'Go vet worker' if executable == 'vet' else 'Go compiler'
+                workloads.append(f'{label} pid={process.name}')
             elif executable in {'rustc', 'rustdoc', 'cc', 'gcc', 'g++',
                                 'clang', 'clang++', 'cc1', 'cc1plus',
                                 'ld', 'ld.lld', 'collect2', 'make', 'ninja',
