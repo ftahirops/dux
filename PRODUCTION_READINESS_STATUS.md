@@ -4432,3 +4432,17 @@ last-scan age is about 5 days. The workspace is 4.08 GiB and the root
 filesystem has 58 GiB free. Host load fell from the earlier peak but remained
 31.5 with nine Go compiler/test processes; the guarded Rocky guest remains
 stopped and no RPM lifecycle tests have run.
+
+## RPM admission refusal — 2026-11-10 13:08 UTC
+
+A fresh Rocky start was attempted only after a single clear sample (load1 2.91,
+no detected builds/tests). The VM controller then applied its built-in three
+sample admission gate and refused the start at sample 2/3 when three Go
+compilers and a Go test process appeared. The VM remained inactive and no
+package commands ran. Captured evidence:
+[`rocky9-admission-refusal-20261110T1308Z.json`](docs/qualification/rocky9-admission-refusal-20261110T1308Z.json).
+At the same time, VPS1 remained dirty and about 67.6 hours behind with 766
+overflow notices, 2,518,862 dropped updates, and a 128-MiB WAL; disk had 58
+GiB free. The r132 soak had reached 14,598.4 seconds, 339,000 operations, 338
+exact-check samples, and four hourly bursts, with zero restarts; held-reader,
+crash-recovery, and final integrity/exactness gates remained pending.

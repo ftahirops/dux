@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T12:57:37Z",
+  "snapshot_at_utc": "2026-11-10T13:08:34Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T12:57:37Z",
+    "observed_at_utc": "2026-11-10T13:08:34Z",
     "installed_release": "0.6.3-66",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,7 +16,7 @@
     "kernel_overflows": 766,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 242805.579,
+    "behind_seconds": 243462.839,
     "service_user": "root",
     "index_nodes": 1320911,
     "index_bytes_on_disk": 3463843840,
@@ -24,7 +24,7 @@
     "pending_updates": 13
   },
   "disk": {
-    "observed_at_utc": "2026-11-10T12:57:37Z",
+    "observed_at_utc": "2026-11-10T13:08:34Z",
     "root_size_gib": 185,
     "root_used_gib": 119,
     "root_available_gib": 58,
@@ -34,24 +34,25 @@
     "target_size_gib": 3.6
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T12:57:37Z",
-    "load_average_1m": 31.5,
+    "observed_at_utc": "2026-11-10T13:08:34Z",
+    "load_average_1m": 6.2,
     "cpu_psi_some_avg10_percent": 70.84,
     "active_go_build_or_test_workloads": true,
-    "rocky_guest_started": true,
-    "rocky_guest_state": "stopped_by_pressure_guard_during_boot",
+    "rocky_guest_started": false,
+    "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "9 active Go compiler/test workloads",
-      "host load1 31.5 exceeds guard limit 10"
+      "Go compiler pid=1977931",
+      "Go compiler pid=1977944",
+      "Go compiler pid=1978041",
+      "go test pid=1977687"
     ],
-    "active_host_workload_count": 9,
+    "active_host_workload_count": 2,
     "active_host_workload_types": [
       "Go compiler",
-      "Go test",
-      "Go test binary"
+      "Go test"
     ],
-    "evidence": "docs/qualification/rocky9-pressure-guard-events-20261110.jsonl"
+    "evidence": "docs/qualification/rocky9-admission-refusal-20261110T1308Z.json"
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
@@ -78,13 +79,13 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T12:57:19Z",
+    "observed_at_utc": "2026-11-10T13:08:29Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 13935.0,
-    "operations": 323293,
-    "exact_check_samples": 322,
-    "completed_hourly_bursts": 3,
+    "elapsed_seconds": 14598.4,
+    "operations": 339000,
+    "exact_check_samples": 338,
+    "completed_hourly_bursts": 4,
     "held_reader_scenarios": 0,
     "controlled_crash_recovery_scenarios": 0,
     "terminal_exact_history_integrity": "pending",
@@ -92,8 +93,8 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 23.2,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1256Z.json"
+    "observed_operations_per_second_elapsed": 23.222,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1303Z.json"
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -126,7 +127,8 @@
     "soak_checkpoint_1241z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1241Z.json",
     "soak_checkpoint_1245z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1245Z.json",
     "soak_checkpoint_1251z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1251Z.json",
-    "soak_checkpoint_1256z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1256Z.json"
+    "soak_checkpoint_1256z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1256Z.json",
+    "soak_checkpoint_1303z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1303Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
