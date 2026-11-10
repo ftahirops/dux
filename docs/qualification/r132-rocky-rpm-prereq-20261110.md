@@ -40,6 +40,23 @@ pressure had fallen. Admission refused on sample 1/3 because five host Go
 compiler/test processes were active. No VM was started and no package phase
 ran. The guard was not bypassed.
 
+At 10:48 UTC, the normal three-sample admission passed and a new ephemeral
+guest booted successfully as Rocky Linux 9.8; SSH and cloud-init completed.
+Before the first package copy, the independent runtime guard stopped the VM at
+10:50:15 UTC when a Go test binary and `go test` process appeared. The first
+SCP was refused because the guest had already stopped. No package/key reached
+the VM and the RPM lifecycle did not start. The stop was not a Dux or RPM
+failure. A disposable-key-signed r132 copy had been generated and verified on
+the host, but it was never installed; its key workspace was removed. The
+guard event and test artifact identity are recorded in
+[`the 10:48 guarded attempt`](r132-rocky-guarded-abort-20261110T1048Z.json).
+
+At 10:51:58 UTC, another startup passed admission, but the runtime guard
+stopped the guest ten seconds later after a Go compiler and `go test` process
+appeared. SSH was not confirmed and no package copy or lifecycle phase ran.
+The second disposable signing workspace was removed as well. See
+[`the 10:51 guarded attempt`](r132-rocky-guarded-abort-20261110T1051Z.json).
+
 ## Static package authenticity inspection — 2026-11-10 10:13 UTC
 
 The exact r132 artifact

@@ -161,6 +161,11 @@ samples, and one completed hourly burst. The held-reader and controlled
 recovery phases have not started; final exactness/history/integrity assertions
 remain pending.
 
+At 10:52:55 UTC, the worker remained active with zero restarts and had reached
+6,485.1 seconds elapsed, 153,305 operations, and 153 exact-check samples. One
+hourly burst was complete; held-reader, controlled recovery, and final checks
+were still pending. This remains a running soak, not a pass.
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM
