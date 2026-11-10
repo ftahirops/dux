@@ -4399,3 +4399,21 @@ bursts, no restarts, no held readers or crash injections, and pending terminal
 checks. Its currently loaded worker predates the pacing harness fix; do not
 interpret its 23.25 operations/second elapsed rate as a run of the corrected
 25-starts/second pacer.
+
+## Guarded Rocky retry and live pressure checkpoint — 2026-11-10 12:52 UTC
+
+After a stable admission sample (load1 7.01, no compiler/test processes), the
+Rocky VM restarted at 12:49:48 UTC. A new `go test` process appeared during
+boot; the pressure guard stopped the guest at 12:49:59 UTC before SSH became
+available. The event is preserved in
+[`rocky9-pressure-guard-events-20261110.jsonl`](docs/qualification/rocky9-pressure-guard-events-20261110.jsonl).
+At 12:52 UTC the host load1 had risen to 105.73 with 28 active Go compiler/test
+processes. No package lifecycle commands ran.
+
+At the same checkpoint, VPS1 r66 remained active but dirty and about 67.4
+hours behind, with 766 overflow notices, 2,518,862 dropped updates, 7,732
+pending updates, and a 128-MiB WAL. Root storage was 67% used with 60 GiB
+available. The r132 soak remained active at 13,573.1 seconds, 315,429
+operations, 314 exact samples, three bursts, and zero restarts. Held-reader,
+crash-recovery, and final integrity/exactness gates remain pending. Snapshot:
+[`soak-progress-20261110T1251Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1251Z.json).
