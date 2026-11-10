@@ -684,6 +684,24 @@ impl Store {
     }
 
     fn open_ro_versioned(path: &Path, allow_v4: bool, require_v7_path_graph: bool) -> Result<Self> {
+        // During first publication the daemon's initialized schema has a real
+        // SQLite file but no committed index. Refuse new Dux readers while that
+        // empty file is eligible for atomic replacement; otherwise a status
+        // query could create sidecars in the gap after the watcher closes its
+        // connection and force publication back onto the expensive backup path.
+        if Self::is_empty_unindexed_database(path)? {
+            if let Some(p) = crate::util::read_scan_progress_for(path) {
+                let elapsed = crate::util::now_secs().saturating_sub(p.started).max(0);
+                anyhow::bail!(
+                    "initial scan in progress — {} files, {} dirs scanned, {}s elapsed. \
+                     The index will be ready when it finishes; re-run then \
+                     (watch with `dux status`).",
+                    p.files,
+                    p.dirs,
+                    elapsed
+                );
+            }
+        }
         if !Self::has_index_artifacts(path)? {
             // If the FIRST scan is building the index right now, say so (with live
             // progress) rather than "no index" — the user just needs to wait.
@@ -1377,6 +1395,25 @@ mod tests {
         assert!(err.contains("schema is v3"));
         for s in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{s}", db.display()));
+        }
+    }
+
+    #[test]
+    fn open_ro_reports_initial_scan_for_initialized_empty_schema() {
+        let db = tmp("initial-scan-empty-schema");
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+        }
+        drop(Store::open_rw(&db).unwrap());
+        crate::util::write_scan_progress(&db, crate::util::now_secs(), 12, 3, 4096, true);
+
+        let error = error_text(Store::open_ro(&db));
+        assert!(error.contains("initial scan in progress"), "{error}");
+        assert!(error.contains("12 files, 3 dirs scanned"), "{error}");
+
+        crate::util::clear_scan_progress(&db);
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
         }
     }
 
