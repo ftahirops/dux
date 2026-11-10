@@ -64,9 +64,9 @@ proved that:
 The suite took 5.235 seconds; the systemd unit ran for 6.536 seconds. The
 installed r121 service remained active with zero restarts. The fixture was
 removed by the harness. Machine-readable evidence is in
-[`passed-report.json`](../../target/readiness/r132-postscan-hint-20261110/passed-report.json);
+[`passed-report.json`](r132-postscan-hint-runtime-20261110/passed-report.json);
 coverage output is in
-[`llvm-cov-summary.json`](../../target/readiness/r132-postscan-hint-20261110/llvm-cov-summary.json).
+[`llvm-cov-summary.json`](r132-postscan-hint-runtime-20261110/llvm-cov-summary.json).
 
 Three earlier harness attempts are also retained beside the passing report.
 They did not establish a production defect: initial placement of the test
