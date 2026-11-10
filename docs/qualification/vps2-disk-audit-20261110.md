@@ -115,3 +115,15 @@ counts, and a 743-second age for the last completed scan. It was not caught up
 during that observation. VPS2 CPU PSI some avg10 was 17.54% and I/O PSI some
 avg10 was 4.67%; nested VM qualification was not started under the host's current
 contention and 91% disk use.
+
+
+## Build-cache cleanup — 2026-11-10 20:43 UTC
+
+Two inactive musl Cargo build-cache directories (`dux-musl-build-0b81fa8` and
+`dux-musl-build-2b02502`, 239 MiB each) were removed after confirming no matching
+build process was running. Their generated outputs under `/var/tmp/dux-musl` and
+the static-musl qualification records in the repository were retained; the
+removed contents were rebuildable `target` caches. `/var/tmp` fell from 5.2 to
+4.7 GiB. Root measured 90% used with 9.2 GiB available. The VPS2 CPU PSI some
+avg10 was 27.54%, so no additional test VM was started. The active r132 soak
+was left untouched.
