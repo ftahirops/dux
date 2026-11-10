@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T22:58Z",
+  "snapshot_at_utc": "2026-11-10T23:03Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -108,12 +108,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T22:58Z",
+    "observed_at_utc": "2026-11-10T23:03Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 49997.1,
-    "operations": 1115767,
-    "exact_check_samples": 1112,
+    "elapsed_seconds": 50306.3,
+    "operations": 1122221,
+    "exact_check_samples": 1119,
     "completed_hourly_bursts": 13,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -122,16 +122,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.317,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2258Z.json",
+    "observed_operations_per_second_elapsed": 22.308,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2303Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.1928900462962963,
+    "coverage_duration_fraction": 0.19408294753086422,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "b9b6b041b428708b40b5a280b2394377790709d7e95fd65e785921093c116dca",
+    "latest_checkpoint_sha256": "a64396895cfd6386a5b4de7033d149cff577d7dce5e6827c7cffa8e0b165a59c",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -153,10 +153,10 @@
       "startup",
       "wal"
     ],
-    "latest_live_status_query_at_utc": "2026-11-10T22:58Z",
+    "latest_live_status_query_at_utc": "2026-11-10T23:03Z",
     "latest_full_checkpoint_at_utc": "2026-11-10T20:12:09Z",
     "max_exact_convergence_ms_observed": 17393,
-    "latest_checkpoint_at_utc": "2026-11-10T22:58Z",
+    "latest_checkpoint_at_utc": "2026-11-10T23:03Z",
     "controlled_crash_recovery_scheduled_at_elapsed_seconds": 43200,
     "exactness_protocol": "Each 1000-operation exactness sample requests a full scan-first observation via SIGHUP, waits for accounting verification, then compares fixture and index.",
     "latest_live_checkpoint_remote_path": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json",
@@ -204,6 +204,15 @@
       "max_ms": 17393,
       "sampled_daemon_rss_peak_kib": 6568,
       "sampled_wal_peak_bytes": 7519032
+    },
+    "exact_convergence_profile_at_2026_11_10T2303Z": {
+      "sample_count": 1119,
+      "mean_ms": 3452.5,
+      "median_ms": 2825,
+      "p95_nearest_rank_ms": 7952,
+      "max_ms": 17393,
+      "sampled_daemon_rss_peak_kib": 6568,
+      "sampled_wal_peak_bytes": 7519032
     }
   },
   "package_lifecycle": {
@@ -220,19 +229,19 @@
     "disposable_key_signature_mechanics_verified": true
   },
   "dependency_audit": {
-    "observed_at_utc": "2026-11-10T22:15:00Z",
+    "observed_at_utc": "2026-11-10T23:03Z",
     "locked_dependencies": 229,
     "known_advisories": 0,
     "warnings": 0,
     "advisory_database_commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
     "advisory_database_commit_time": "2026-11-10T14:45:03+01:00",
     "advisory_database_count": 1446,
-    "advisory_database_updated_at": "2026-11-10T14:45:03+01:00",
-    "evidence": "docs/qualification/cargo-audit-20261110T2215Z/evidence.json",
-    "advisory_database_freshness_note": "Fresh cargo audit passed; the advisory database matched upstream main at 22:15 UTC and was unchanged from the prior check.",
     "advisory_database_matches_upstream_main": true,
-    "upstream_checked_at_utc": "2026-11-10T22:15:00Z",
-    "lockfile_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3"
+    "upstream_checked_at_utc": "2026-11-10T23:03Z",
+    "cargo_audit_version": "0.22.2",
+    "lockfile_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3",
+    "evidence": "docs/qualification/cargo-audit-20261110T2301Z/evidence.json",
+    "advisory_database_freshness_note": "Fresh scan passed; advisory database was current with upstream main, but its head was unchanged from the 22:15 audit."
   },
   "production_canary": "not_started",
   "evidence": {

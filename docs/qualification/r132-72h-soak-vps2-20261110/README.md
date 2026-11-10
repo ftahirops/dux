@@ -212,3 +212,16 @@ is **22.317 mutations/s**. Four more crash-recovery checkpoints and terminal
 exactness/history/SQLite assertions remain pending. Evidence:
 [`soak-progress-20261110T2258Z.json`](soak-progress-20261110T2258Z.json),
 SHA-256 `b9b6b041b428708b40b5a280b2394377790709d7e95fd65e785921093c116dca`.
+
+### Live checkpoint — 2026-11-10 23:03 UTC
+
+The exact-hash candidate remained active with zero supervisor restarts. At
+23:03:24, the durable report recorded **50,306.3 seconds** (13h58m26s;
+**19.41%**), **1,122,221 mutations**, **1,119 exactness samples**, 13 hourly
+bursts, two held-reader/WAL-reclaim scenarios, and one controlled recovery.
+Whole-run rate is **22.307 mutations/s**. Sampled convergence latency is
+**3.453 s mean, 2.825 s median, 7.952 s p95, and 17.393 s maximum**. Four
+controlled crash checkpoints and final exactness/history/SQLite assertions
+remain pending. Evidence:
+[`soak-progress-20261110T2303Z.json`](soak-progress-20261110T2303Z.json),
+SHA-256 `a64396895cfd6386a5b4de7033d149cff577d7dce5e6827c7cffa8e0b165a59c`.
