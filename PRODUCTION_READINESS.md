@@ -1,79 +1,78 @@
 # Dux production readiness
 
-**Decision: NOT READY for production rollout.** The installed VPS1 daemon is
-still r66 with a dirty, stale index. The r132 candidate has passed focused
-correctness and package checks, but the long soak, Rocky RPM lifecycle,
-publisher authentication, production-scale qualification, and canary gates are
-not complete.
+**Decision: NOT READY for production rollout.** This snapshot is current to
+**2026-11-10 19:28 UTC**. VPS1 was last verified running the old event-apply
+daemon at 17:06 UTC and has not been rechecked since. The r132 candidate remains
+in a separate soak, and release, scale, fault-matrix, and canary gates remain
+open. A green unit suite or a successful VPS2 observation does not close those
+gates.
 
-Status snapshot: **18:36 UTC, 2026-11-10**. VPS2 scan/soak evidence is from
-18:36 UTC; disk snapshots are from both vps1 and VPS2; the latest package-VM
-attempt remains the guarded 17:38 UTC interruption. The
-latest evidence is in the status log and
+The detailed evidence trail is
+[`PRODUCTION_READINESS_STATUS.md`](PRODUCTION_READINESS_STATUS.md); the
+machine-readable snapshot is
 [`current-metrics.json`](docs/qualification/current-metrics.json).
-The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTION_READINESS_STATUS.md).
 
-## Candidate and live production
+## Live systems and candidate
 
-| Item | Current evidence |
+| System | Latest verified state |
 |---|---|
-| Candidate | r132, source `f02ba7a`; binary SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76` |
-| VPS1 production | `dux 0.6.3` build `e0cc915f`, active as root, 4 historical restarts. At 17:06 UTC it remained dirty from fanotify overflow and 71.6 hours behind, with 775 lifetime kernel overflows, 2,518,862 dropped updates, 30,500 pending updates, 1,334,760 indexed nodes, a 3.30-GiB DB and 128-MiB WAL; last full scan was 5.17 days ago. The service was active with four historical restarts; the installed binary SHA-256 is recorded in the live evidence file. |
-| VPS2 installed service | `dux 0.6.3` build `8b02799b`, scan-first mode, daemon live with zero restarts. Eighteen verified observations completed. The latest started at 18:23:55 and finished at 18:31:33 (7m38s), covering 1,756,281 files and 215,521 directories; zero coverage issues, 2,479 vanished reuse paths removed, and 83,561,517,056 unique bytes. Independent accounting passed at 18:33:32 in 119.4s. The completion-to-completion interval was 17m17s; the two scan starts were exactly 15m apart. Eight of seventeen completion gaps exceed 15m, but these are not per-path freshness measurements or proof of scheduler misses. At 18:35:53 there were zero pending updates, kernel overflows, and dropped updates; last scan age was 262s. Dirty means filesystem hints await the next observation. Per-path freshness remains unmeasured. See [live status evidence](docs/qualification/vps2-live-status-20261110T1836Z.json). |
-| Disk | vps1 at 18:08 UTC: `/` 184.5 GiB total, 52.6 GiB available (71% used). VPS2 at 18:35 UTC: `/` 92.2 GiB total, 9.45 GiB available (90% used). On VPS2, `/var` was about 59 GiB, `/var/tmp` 5.3 GiB, `/var/log` 4.5 GiB, and systemd journal 4.0 GiB. `/var/tmp` contains old Dux scratch and caches plus an active soak and a dirty source checkout; no cleanup was performed. The full `/var` walk was interrupted due to I/O pressure; see [VPS2 disk inventory](docs/qualification/vps2-disk-inventory-20261110T1806Z.json). |
-| VPS2 package-test capacity | KVM is unavailable on VPS2, and its root filesystem is 90% used with 9.45 GiB free. Do not start a nested package VM or large build there. |
-| Current root host admission | The 17:38:06 Ubuntu package VM passed admission, then the pressure watchdog stopped it at 17:39:01 when a Go test appeared; SSH never became ready, so no package commands ran. A 17:24 attempt had also been refused at admission. Evidence: [17:38 VM attempt](docs/qualification/vm-admission-20261110T1738Z.json). |
+| **VPS1 production** | Last detailed observation at 17:06 UTC: Dux 0.6.3 build `e0cc915f`, running as root, dirty after fanotify overflow, 775 lifetime overflows, 2,518,862 dropped updates, 30,500 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. No newer VPS1 observation is recorded here. |
+| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 19:26 it was active with zero restarts, overflows, pending updates, or reported drops. Its latest full observation completed at 19:21 with zero coverage issues; independent accounting passed in 59.9 seconds. The index was marked dirty because new hints arrived after the scan. Per-path freshness is not measured. |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 19:26 checkpoint is 10h21m45s into a 72-hour run (14.39%), with 847,120 operations, 844 exactness samples, 10 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. Terminal exactness, history, and SQLite checks are pending. |
+| **VPS2 disk** | At 19:26, root was 90% used with 9.96 GB available. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
 
-The latest 1.75M-file observation took 7m12s and passed coverage and independent accounting. The preceding completion gap was 15m39s. A 422-second cgroup window from 17:25:52 to 17:32:54 spans only the later scan/index phase and accounting; it recorded 331.1 CPU-seconds, 2.01 GiB read, 1.80 GiB written, a 2.00-GiB cgroup peak, and 204 memory-high events with no OOM. It began 1m58s after scan start and ended 17 seconds after accounting, so it is not the full scan cost. See [resource-counter samples](docs/qualification/live-vps2-scan-resources-20261110.json).
+### Recent live reliability and throughput evidence
 
-## Qualification gates
+On the installed VPS2 service, one scan at 18:53 found a conflicting inode
+incarnation and was rejected with one coverage issue. The old index was retained.
+The bounded retry completed at 19:09 with zero coverage issues; accounting
+passed at 19:10. The next scheduled scan completed at 19:21 with zero coverage
+issues and accounting passed at 19:22. These results show recovery in this
+observed interval; they do not prove convergence under every sustained-churn
+condition.
 
-| Gate | Result | Remaining evidence |
+A separate 10m45s watcher-log window recorded 65 samples: median 28,298
+fanotify events/s (range 10,437–35,493), maximum queue depth 1,296 bytes, and
+zero queue-pressure episodes. This is live-host evidence for the installed
+VPS2 service, not a controlled capacity test for r132. Dux reported zero event
+resolution in this window, as expected in scan-first mode. The scan-first
+`behind_seconds` field is marked inapplicable; it is not a freshness measure.
+
+Evidence: [scan retry and recovery](docs/qualification/vps2-reconciliation-retry-20261110T1911Z.log),
+[next scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log),
+[throughput profile](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json),
+[latest VPS2 status](docs/qualification/vps2-live-status-20261110T1926Z.json),
+[r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1926Z.json).
+
+## Tests, coverage, and open release gates
+
+| Area | Latest evidence | Still open |
 |---|---|---|
-| Rust correctness | 341 passed, 0 failed, 2 ignored on the recorded r132 source; strict Clippy/format passed | Ignored scale/ext4 cases are not passing evidence; full candidate runtime coverage remains incomplete. |
-| Python qualification harnesses | 380 passed, 0 failed, 1 skipped across 25 modules (381 total) | Includes the 75-case package lifecycle/security suite. Standard-library statement coverage is 53% for the package lifecycle harness; this is not daemon coverage, and branch coverage is unavailable. One signing integration case is skipped without its dedicated RPM fixture. |
-| Instrumented coverage | 72.61% lines, 71.44% regions, 76.19% functions; branch counters unavailable | Critical untested paths and filesystem/platform coverage remain. |
-| r132 churn | 100k-file ext4 run passed 20k mutations, exact comparisons and SQLite integrity | Not a 1.9M-node production-scale benchmark; convergence ranged 92–323 seconds. |
-| 72-hour soak | Running on VPS2 with the expected candidate SHA-256; at 18:36:00 UTC it had run 34,235.3 seconds (9h30m35s), 779,005 operations, 776 exactness samples, 9 mutation bursts, 1 held-reader phase, and zero worker restarts | The 300-second held-reader/WAL-reclaim phase passed. No controlled crashes have run; terminal exactness/history/SQLite checks are pending. Elapsed-average pace is about 22.82 operations/second against a requested 25; this is 13.21% of the required duration. The soak harness is running only its `soak` suite; its other 15 suites are not part of this run. See [18:36 checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1836Z.json). |
-| Non-root service hardening | Exact r132 binary passed a bounded `User=dux` ext4 runtime probe; all capability masks matched, fanotify observed a new file, rescan/accounting and SQLite checks passed. A mode-000 file was read through `open_by_handle_at` as UID `dux` (direct kernel API probe). | Temporary packages are unsigned and not release outputs. Package install/upgrade/rollback, Dux's integrated handle decoder/replay, full packaged sandbox, production-scale and multi-day behavior remain unqualified. See [runtime evidence](docs/qualification/nonroot-runtime-r132-vps2-20261110/README.md). |
-| Ubuntu DEB lifecycle | An earlier r132 lifecycle run passed; active-service upgrade/rollback protection has since changed and is not VM-qualified yet | Local package-script regressions pass, but the new DEB `preinst`/rollback path must be rerun on a disposable Ubuntu VM. This does not qualify RPM behavior or production rollout. |
-| Rocky RPM lifecycle | Not qualified; a disposable-key RPM signature was verified in Rocky | Full install/upgrade/rollback did not start; retry only after guarded host admission. |
-| Release authenticity | Open | Root GPG keyring is empty and `DUX_RELEASE_SIGNING_KEY` is unset. Release owner must provide trusted fingerprint/key; no publisher key has been used. |
-| Dependency audit | Re-run at 18:20 UTC: 229 locked dependencies, zero advisories/warnings | Cached RustSec database timestamp is 13:45 UTC; this run did not refresh it. Dependency audit is not application security certification. |
-| Production canary | Not started | Candidate has not been installed on VPS1; first qualify package, rollback, security and production-scale behavior. |
+| Rust automated tests | 341 passed, 0 failed, 2 ignored on source matching r132; strict Clippy and formatting passed. | Ignored ext4/scale cases are not passes; candidate runtime matrix remains incomplete. |
+| Python qualification harness | 380 passed, 0 failed, 1 skipped (381 total, 25 modules). | Signing integration is skipped without its RPM fixture. Python statement coverage is 53% for the package lifecycle script only; branch coverage is unavailable. |
+| Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
+| Dependency audit | 229 locked dependencies; zero advisories and warnings. Local RustSec database head matched upstream at the 18:55 check. | This is dependency hygiene, not a full application security review. |
+| Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
+| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:28 unrelated Go test workloads were active and host CPU PSI some avg10 was 24.44%; the VM guard must admit a quiet window before launch. |
+| Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
+| Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |
 
-## Unmerged older source checkout
+The latest full language-suite counts are **721 passed, 0 failed, 2 ignored,
+and 1 skipped** across Rust and Python. The 75 package lifecycle/security tests
+are already included in the Python total. See the
+[regression evidence](docs/qualification/regression-20261110T1823Z/README.md)
+and [coverage gap review](docs/qualification/coverage-gaps-20261109.md).
 
-The VPS2 `/var/tmp/claude-dux` checkout is a modified 14-file worktree on base
-`52542d9`, with 1,886 additions and 176 deletions. Its patch is preserved in
-[qualification evidence](docs/qualification/unmerged-claude-dux-worktree-20261110.patch)
-with provenance and hash. `git diff --check` passed in that checkout; no test
-run for those dirty changes is verified. A reverse-apply check against the
-current branch failed in six files, so these changes remain unintegrated and
-must not be counted as tested current code. The checkout is preserved because
-it contains uncommitted work.
+## Next gates
 
-## Test count and coverage summary
+1. Let the exact r132 soak reach 72 hours and require all terminal assertions to
+   pass, including SQLite integrity and history/exactness checks.
+2. Run the 15-suite fault matrix, controlled crash recovery, current DEB/RPM
+   upgrade/rollback tests, and 10M scale in guarded disposable environments.
+3. Obtain the release owner's trusted signing identity and verify publisher
+   signatures on release artifacts.
+4. Refresh VPS1 production evidence, then perform a rollback-ready canary only
+   after the package, security, scale, and recovery gates pass.
 
-The recorded Rust and Python automated suites total **724 cases**: **721 passed,
-0 failed, 2 ignored, and 1 skipped**. Rust had 341 passes and 2 ignored; Python
-had 380 passes and 1 skip across 25 modules. The 75 package lifecycle/security
-cases are already included in the Python total. Measured Rust coverage is
-72.61% lines, 71.44% regions, and 76.19% functions; branch counters were not
-available. The lifecycle script has 53% statement coverage, which is not
-coverage of the Dux daemon. Separate integration and live exercises include
-100k-file ext4 churn, a 1.37M-path scale fixture, forced kernel overflow and
-recovery, a non-root service probe, and 17 live VPS2 observations. The full
-fault matrix, 10M scale, controlled soak crashes, release lifecycle on current
-packages, and production canary remain open. The detailed inventory and limits
-are in [the qualification log](PRODUCTION_READINESS_STATUS.md#test-inventory-and-measured-coverage).
-
-## Required next actions
-
-1. Let the exact r132 soak reach its scheduled end (about **2026-11-13 09:04 UTC**) and require every terminal assertion to pass.
-2. Build and qualify the pending non-root service package change on disposable Ubuntu and Rocky guests, including state migration and rollback.
-3. Obtain the release owner's signing identity; sign and verify the RPM and checksum manifest, then complete the guarded Rocky lifecycle.
-4. Qualify r132 against a production-sized index and WAL budget, then complete privilege/unit review and a controlled rollback-ready canary.
-
-Do not claim zero-error operation, full production readiness, or a completed
-canary until those gates have direct passing evidence.
+Do not claim zero-error operation or production readiness until each required
+gate has direct passing evidence.
