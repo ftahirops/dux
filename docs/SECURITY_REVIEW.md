@@ -1,5 +1,28 @@
 # Dux security and privilege review
 
+## Current source and release artifact check — 2026-11-10
+
+The current source lockfile SHA-256 is
+`fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`. A
+refreshed RustSec database (commit
+`d9cb059f3217db87aeccd190b81eaffe8cc29cb9`, 1,430 advisories) reported zero
+known vulnerabilities and zero warnings among 229 locked crates. The exact
+static-musl release binary for commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`
+was also scanned; cargo-audit recovered 202 dependencies without an
+incompleteness warning. Strict all-target/all-feature Clippy passed with
+warnings denied, including `clippy::undocumented_unsafe_blocks`.
+
+These checks provide current dependency and unsafe-documentation lint evidence;
+they do not establish that Dux has no security vulnerabilities. The binary and
+package artifacts were built and hash-checked, but their install/upgrade/
+rollback lifecycle remains unqualified. The indexer still runs as root with
+`CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`; `CAP_SYS_ADMIN` remains a broad
+kernel privilege and the design has no isolated privileged broker. See the
+[r132 package and runtime qualification](qualification/r132-postscan-hint-runtime-20261110.md)
+and its [machine-readable package evidence](qualification/r132-postscan-hint-runtime-20261110/r132-release/).
+The historical R17 review below is retained as prior evidence, not a statement
+about the current release.
+
 ## Scope and evidence
 
 This review covers the static-musl `0.6.3-17` candidate whose executable SHA-256

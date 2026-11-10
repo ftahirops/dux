@@ -2,8 +2,9 @@
 
 This qualification exercises the scan-first race where a filesystem hint is
 counted after a completed walk but before the walk's pending accounting check
-can clear dirty state. The candidate was built from the current working tree;
-it was not packaged, installed, or used to replace the VPS2 service.
+can clear dirty state. The candidate was built from the current working tree.
+It was packaged later that day, but has not been installed on or used to
+replace the VPS2 service.
 
 ## Change under test
 
@@ -18,6 +19,10 @@ either counter advances after the observation. It cancels the verifier when
 possible and changes the reason to `filesystem changes await the next full
 observation`, so a successful check of the old snapshot cannot clear dirty
 state.
+
+Exact-source package construction completed after this runtime qualification.
+The candidate was not installed or used to replace the VPS2 service; see the
+package evidence in [`r132-release`](r132-postscan-hint-runtime-20261110/r132-release/).
 
 ## Build and test evidence
 
@@ -91,6 +96,49 @@ quota, 4 GiB memory ceiling, and a 128 MiB ext4 loop image on tmpfs. Result:
 VPS2 remained active with zero service restarts; the unit removed the loop mount
 and fixture. Raw output and setup are in
 [`stale-parent-ext4-test.log`](r132-postscan-hint-runtime-20261110/stale-parent-ext4-test.log).
+
+## Exact-source package build
+
+On 2026-11-10, `scripts/build-release.sh` completed successfully from clean
+commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`, source-tree SHA-256
+`5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff`. The
+static-musl executable SHA-256 is
+`998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`; the
+Debian package is `dux_0.6.3-132_amd64.deb` (SHA-256
+`d35236cb0b55cf80ea4750115d6269dea2203b5922942df4f1fec0e4a29d8def`) and the
+RPM is `dux-0.6.3-132.x86_64.rpm` (SHA-256
+`bb1adbd0b2bc5a36c30076bcfd3436e424dbd596aa07a26d78d952a24650af78`). The
+pipeline checked that both package payload executables and backup helpers
+match their qualified source artifacts, embedded dependency metadata exists,
+the static binary matches the checkout revision and source digest, and the
+debug symbols match its Build ID. `sha256sum -c SHA256SUMS`, `--version`, and
+`--help` smoke checks passed. Cargo audit found zero vulnerabilities or
+warnings across 229 locked crates and recovered 202 dependencies from the exact
+binary without warnings. Machine-readable manifest, sums, and audit outputs are
+in this directory's `r132-release/` subdirectory.
+
+Build environment: VPS1 private tmpfs, `CPUQuota=20%`, `MemoryMax=6G`,
+`IOWeight=10`, `Nice=10`; systemd reports 19m20s runtime, 3m52s CPU, and 1.3 GiB
+peak memory. Dux's production service stayed active with its historical
+`NRestarts=4` unchanged. A disposable Ubuntu 24.04 guest started after host
+admission cleared. The r131 DEB baseline install and r132 DEB upgrade stages
+completed; the upgrade left the service disabled and preserved the expected
+binary and backup-helper hashes. However, the baseline status was dirty with
+accounting verification pending (`caught_up=false`). A newly active host Go
+race-test workload triggered the VM pressure guard at 07:37:48 UTC, stopping
+the guest during rollback. Rollback, removal/purge, and clean install did not
+complete. The guard was not bypassed; its ephemeral overlay was cleaned. The
+guest report was lost with that overlay, but host-streamed stage and guard
+evidence is preserved in
+[`deb-lifecycle-attempt.json`](r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-attempt.json).
+Packages were not installed on a production host.
+
+Package harness unit tests passed locally: `test_dux_package_lifecycle.py`
+**72/72**, `test_build_release_cli.py` **13/13**,
+`test_build_release_debug_artifact.py` **1/1**, and
+`test_dux_qualification_vm.py` **41/41**. Together these are 127 harness tests;
+they verify scripts and guards with controlled fixtures; package behavior in
+Ubuntu remains partially qualified, and RPM behavior in Rocky is unqualified.
 
 ## Limits and remaining gates
 

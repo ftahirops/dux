@@ -1,5 +1,47 @@
 # Production readiness status
 
+## r132 exact-source release package build — 2026-11-10 07:29 UTC
+
+The exact current source at commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`
+built successfully as a static-musl release (`x86_64-unknown-linux-musl`). The
+build was isolated on VPS1 in a private tmpfs under a 20% CPU quota and 6 GiB
+memory limit. It completed in 19m20s, consumed 3m52s CPU, and peaked at 1.3 GiB
+memory. The installed Dux service stayed active with its historical restart
+count unchanged at 4.
+
+The build pipeline passed source-digest and revision matching, static-link and
+embedded dependency-metadata checks, exact release-binary RustSec audit, DEB
+and RPM construction, payload executable/helper hash comparisons, and manifest
+generation. The binary reports source SHA-256
+`5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff`; its SHA-256
+is `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`. DEB
+SHA-256: `d35236cb0b55cf80ea4750115d6269dea2203b5922942df4f1fec0e4a29d8def`;
+RPM SHA-256: `bb1adbd0b2bc5a36c30076bcfd3436e424dbd596aa07a26d78d952a24650af78`.
+All entries in the published SHA256SUMS verified; `--version` and `--help`
+smokes passed. The lockfile report covered 229 crates with zero known
+vulnerabilities and zero warnings; the exact static binary audit recovered
+202 dependencies without a warning.
+
+Additional package qualification harness tests passed: lifecycle harness **72**,
+release-builder CLI **13**, debug-artifact verifier **1**, and qualification VM
+harness **41** (127 total). These are local harness/unit tests; they do not
+replace installing packages inside a guest.
+
+The full DEB lifecycle (upgrade, rollback, removal/purge and clean install) is
+still open. A disposable Ubuntu guest started after host admission cleared.
+The r131 baseline install and r132 upgrade stages completed, but the baseline
+status remained dirty with accounting verification pending (`caught_up=false`).
+The host pressure guard then detected a new Go test/compiler workload and
+stopped the VM during rollback. Rollback, removal/purge, and clean install are
+unverified. The guard was not bypassed or interrupted; the guest's ephemeral
+overlay was cleaned. No package was installed on a production host. Partial
+stage and guard evidence is in
+[`the DEB lifecycle attempt`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-attempt.json).
+The build manifest, checksums and audit reports are in
+[`the r132 package evidence`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/).
+This closes artifact construction and integrity checks only; production
+readiness remains open.
+
 ## r132 post-observation accounting race fix — 2026-11-10 06:54 UTC
 
 The deterministic VPS2 regression test exposed that scan-first mode's dedicated
@@ -17,7 +59,8 @@ runtime race suite passed in 5.235s on a disposable 768 MiB ext4 image. It
 proved dirty-state retention, later exact indexing of the new file, and final
 integrity. The current-source ignored ext4 stale-parent integration also
 passed **1/1** on VPS2 in a private mount namespace. The installed r121 service
-stayed active with zero restarts. The candidate was not installed or packaged.
+stayed active with zero restarts. The candidate was not installed; its exact
+source package build is recorded above.
 Details, hashes, and machine-readable evidence are in
 [the race qualification](docs/qualification/r132-postscan-hint-runtime-20261110.md).
 
