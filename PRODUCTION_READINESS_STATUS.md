@@ -4741,3 +4741,34 @@ scan-first mode, where `last_scan_age_seconds` is the freshness measure. The
 interval but is explicitly not applicable to scan-first freshness. The
 readiness table and `current-metrics.json` now label this distinction. VPS1
 remains on the event-apply mode where its behind-seconds metric applies.
+
+## Second scan-first observation and freshness field check — 2026-11-10 14:17 UTC
+
+The next periodic full observation completed at **14:15:18 UTC**, 13 minutes
+48 seconds after the prior completion. This second consecutive full-root result
+reported 1,710,957 files, 210,006 directories, 1,920,963 staged path instances,
+84,509,368,320 unique bytes, zero coverage issues, 84 vanished inode-reuse
+paths discarded, zero identities revalidated, and zero unresolved paths.
+Accounting verification passed at 14:16:37 in 79,181 ms. At 14:17:09 the
+service had no scan active, 111-second last-observation age, zero pending
+updates, zero overflow notifications, and zero dropped updates. It remained
+dirty because changes await the next full observation. Two observations in a
+row completed within the 15-minute interval during this live workload. This is
+stronger evidence than the earlier single cycle, but still only two intervals;
+the next cycle and longer freshness run remain required.
+
+The r132 soak remained active at 14:17:09 with 18,684.9 seconds elapsed,
+433,933 operations, 431 samples, five mutation bursts, zero worker restarts,
+zero held-reader phases, and zero controlled crashes. The exactness/history /
+SQLite terminal checks remain pending. Snapshot
+[`soak-progress-20261110T1417Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1417Z.json)
+has SHA-256 `5741e8c9bb3c755f3249758ddcba1f13962fd6b2b2d38d1d72c1e06e4c3e9a17`.
+
+Metric review found a deployed observability gap: build `8b02799b` reports
+`scan_first=true` but does not include `behind_seconds_applicable` in its status
+JSON. Current source has the applicability field, but this installed binary
+predates it. The readiness record therefore labels the old caught-up timer as
+not applicable based on `scan_first`, records that the flag is absent from the
+running build, and uses last-scan age for freshness. A package upgrade and
+runtime verification are needed before operators receive the clearer status
+contract from this source change.

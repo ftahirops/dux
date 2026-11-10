@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T14:09:54Z",
+  "snapshot_at_utc": "2026-11-10T14:17:09Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -83,12 +83,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T14:09:50Z",
+    "observed_at_utc": "2026-11-10T14:17:09Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 18264.7,
-    "operations": 424216,
-    "exact_check_samples": 422,
+    "elapsed_seconds": 18684.9,
+    "operations": 433933,
+    "exact_check_samples": 431,
     "completed_hourly_bursts": 5,
     "held_reader_scenarios": 0,
     "controlled_crash_recovery_scenarios": 0,
@@ -97,10 +97,10 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 23.22600425958269,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1409Z.json",
+    "observed_operations_per_second_elapsed": 23.2237261103886,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1417Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.07047
+    "coverage_duration_fraction": 0.07208680555555556
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -142,7 +142,8 @@
     "latest_soak_checkpoint_1406z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1406Z.json",
     "package_rollback_fixture": "docs/qualification/package-active-rollback-r136-20261110/manifest.json",
     "rollback_runbook": "docs/operations/package-rollback.md",
-    "latest_soak_checkpoint_1409z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1409Z.json"
+    "latest_soak_checkpoint_1409z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1409Z.json",
+    "latest_soak_checkpoint_1417z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1417Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -226,7 +227,7 @@
     "dux_internal_handle_decoder": "not qualified"
   },
   "vps2_scan_first_runtime": {
-    "observed_at_utc": "2026-11-10T14:09:50Z",
+    "observed_at_utc": "2026-11-10T14:17:09Z",
     "installed_build": "0.6.3 (8b02799b)",
     "mode": "scan_first",
     "service_active": true,
@@ -249,6 +250,22 @@
     "state_at_1409": "dirty; changes await next full observation; no scan active",
     "behind_seconds_applicable": false,
     "behind_seconds_field_value": 35192.546,
-    "behind_seconds_semantics": "not applicable in scan-first mode; use last_observation_age_seconds for observation freshness"
+    "behind_seconds_semantics": "not applicable in scan-first mode; use last_scan_age_seconds for observation freshness",
+    "completed_observations_since_checkpoint": 2,
+    "latest_observation_utc": "2026-11-10T14:15:18Z",
+    "latest_observation_age_seconds": 111,
+    "latest_observation_files": 1710957,
+    "latest_observation_directories": 210006,
+    "latest_observation_staged_path_instances": 1920963,
+    "latest_observation_unique_bytes": 84509368320,
+    "latest_observation_coverage_issues": 0,
+    "latest_vanished_reuse_paths": 84,
+    "latest_revalidated_reuse_paths": 0,
+    "latest_unresolved_reuse_paths": 0,
+    "latest_accounting_verification": "passed",
+    "latest_accounting_verification_elapsed_ms": 79181,
+    "observation_completion_gap_seconds": 828,
+    "state_at_1417": "dirty; changes await next full observation; no scan active",
+    "behind_seconds_field_present_in_running_build": false
   }
 }
