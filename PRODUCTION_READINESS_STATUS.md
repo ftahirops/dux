@@ -27,6 +27,19 @@ updates remained at 2,518,862. Dux remained dirty and its last full scan was
 still November 5. This short interval is not a reliability pass. See the
 [30-second counter comparison](docs/qualification/live-vps1-overflow-window-20261110T075858Z.json).
 
+## Live VPS2 scan-first comparison — 2026-11-10 08:04 UTC
+
+The separately authorized VPS2 currently runs r121 in scan-first mode. It
+indexes 1,905,848 nodes and was active with zero restarts and about 546 MiB
+memory. Over a 30-second read-only window it counted 922,605 fanotify hints
+(about 30.8k/s) with no increase in dropped updates or kernel overflows. Its
+status was dirty because hints arrived after the last observation, completed
+about 8.6 minutes earlier; this sample does not yet prove the next 15-minute
+observation's timing or completion. It is encouraging evidence for the
+scan-first architecture, but it is not the exact r132 binary or a long soak.
+Details are in the
+[VPS2 scan-first window](docs/qualification/live-vps2-scanfirst-window-20261110T080443Z.md).
+
 ## r132 exact-source package and DEB lifecycle qualification — 2026-11-10 07:44 UTC
 
 The exact current source at commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`
