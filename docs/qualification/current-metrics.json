@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:50:08Z",
+  "snapshot_at_utc": "2026-11-10T21:51:56Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -55,27 +55,28 @@
     "var_lib_dux_bytes": 3799470080
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T21:45:02Z",
-    "load_average_1m": 20.96,
-    "cpu_psi_some_avg10_percent": 63.92,
+    "observed_at_utc": "2026-11-10T21:51:56Z",
+    "load_average_1m": 84.53,
+    "cpu_psi_some_avg10_percent": 87.1,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "active host build/test/analysis workloads",
+      "32 active Go build/test/vet processes",
       "load1 exceeds 10",
       "CPU PSI some exceeds 55%"
     ],
-    "active_host_workload_count": 18,
+    "active_host_workload_count": 32,
     "active_host_workload_types": [
       "Go compiler",
+      "Go test binary",
       "Go vet worker",
+      "go build",
       "go test",
-      "go vet",
-      "shell test script"
+      "go vet"
     ],
-    "evidence": "docs/qualification/vm-admission-wrapper-detection-20261110.md (21:45 UTC recheck)",
+    "evidence": "docs/qualification/vm-admission-20261110T2151Z.json",
     "ubuntu_guest_started": true,
     "ubuntu_guest_state": "started 17:04:20, pressure guard stopped 17:04:29; ephemeral overlay cleaned; guest state missing",
     "cpu_psi_full_avg10_percent": 0.0,

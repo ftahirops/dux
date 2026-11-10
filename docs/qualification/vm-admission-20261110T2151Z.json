@@ -1,0 +1,26 @@
+{
+  "observed_at_utc": "2026-11-10T21:51:56Z",
+  "decision": "blocked_no_vm_started",
+  "load_average_1m": 84.53,
+  "cpu_psi_some_avg10_percent": 87.1,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "memory_psi_some_avg10_percent": 1.48,
+  "io_psi_some_avg10_percent": 3.29,
+  "active_host_workload_count": 32,
+  "active_host_workload_types": [
+    "Go compiler",
+    "Go test binary",
+    "Go vet worker",
+    "go build",
+    "go test",
+    "go vet"
+  ],
+  "blocker_categories": [
+    "active host build/test/install/analysis workload",
+    "cpu PSI some avg10=87.10% exceeds hard admission limit 55%",
+    "host load1=84.53 exceeds 10"
+  ],
+  "blocker_count": 34,
+  "vm_started": false,
+  "fault_matrix_started": false
+}
