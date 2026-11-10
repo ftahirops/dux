@@ -30,19 +30,18 @@ Thus the Rust suite tests parser logic and related helpers, but its coverage
 profile does not directly test the daemon's actual fanotify setup and event
 handle-resolution path. The r121 canary and scan-cycle observations provide
 separate live evidence that a real daemon starts, observes a filesystem, and
-completes scans, but they are not instrumented coverage and do not substitute
-for deterministic regression tests of syscall failures and privilege
-boundaries.
+completes scans, but they are not instrumented coverage. Follow-up work below
+adds deterministic invalid-descriptor tests and an isolated successful syscall
+smoke; capability-negative boundaries and broader race coverage remain open.
 
 ## Required test work
 
 1. Add deterministic tests for fanotify setup/mark error paths using invalid
    descriptors and malformed path inputs, checking errno and fail-closed
-   status behavior.
-2. Add a privileged disposable-filesystem integration test that creates a
-   real fanotify mark, generates create/delete/rename/attribute events, resolves
-   live and stale handles, and compares final rows/accounting with an
-   independent filesystem walk.
+   status behavior. **Done** for the two `fanotify_mark` negative cases below.
+2. Expand the privileged disposable-filesystem integration beyond the
+   successful create/rename smoke below: generate delete/attribute and stale
+   handle cases and compare final rows/accounting with an independent walk.
 3. Add capability-negative coverage proving startup fails closed without
    `CAP_SYS_ADMIN` and handle resolution is visibly uncertain without
    `CAP_DAC_READ_SEARCH`; do not treat missing privilege as an empty event
@@ -77,3 +76,23 @@ startup, or actual live event delivery. The privileged disposable-filesystem
 integration and capability-negative tests above remain open. The previous
 whole-project coverage percentages do not include these additions, and no
 branch-coverage claim is made.
+
+## Follow-up — r126 privileged fanotify runtime smoke (2026-11-10)
+
+The r126 binary was run as root in a private mount namespace on VPS2 with a
+128 MiB ext4 loop filesystem backed by tmpfs. `strace` verified successful
+`fanotify_init`, `fanotify_mark`, and event-path `open_by_handle_at` syscalls.
+In compatibility event-apply mode, eight file creates and one rename reached
+the index: 11 events seen/resolved, zero reported drops/overflows, renamed path
+present, and old path absent. In default scan-first mode, a create was seen as
+one hint and zero paths were resolved from it; a manual full observation then
+published the new path. Both observations had zero coverage issues and passed
+accounting checks in about 100 ms. The test did not alter the live r121 service
+or its database, and all temporary mounts/files/databases were cleaned up.
+
+Reproducible harness and detailed results:
+[`r126 fanotify integration smoke`](release-candidate-r126-20261110/fanotify-integration-smoke.md).
+This closes the basic success-path runtime gap for the tested kernel/filesystem,
+not the broader race, deletion, attribute, capability-negative, or independent
+walk cases. The LLVM profile still has no line hits for the production syscall
+call sites, so this runtime evidence does not change its reported percentages.

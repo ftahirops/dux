@@ -62,6 +62,11 @@ can recreate tool caches as jobs request them. The volume was removed with
 `docker volume rm act-toolcache`; root free space increased from 5.8 GiB to
 6.2 GiB in rounded `df` output.
 
+At 01:59 UTC, after the tmpfs-backed fanotify smoke completed and all test
+artifacts were removed, root measured 83 GiB used / 6.0 GiB available (94%);
+`/dev/shm` measured 189 MiB used / 2.9 GiB available. The test filesystem
+image was backed by tmpfs and did not consume root-disk space.
+
 ## Operational note and follow-up
 
 At the time of inspection, `dux` was active and the host also had ClickHouse,

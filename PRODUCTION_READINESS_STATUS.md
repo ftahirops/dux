@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 01:45 UTC
+## Latest verified checkpoint — 2026-11-10 01:59 UTC
 
 ### Release decision
 
@@ -9,7 +9,8 @@ r126 has a passing full Rust test/coverage run and verified packages, but has
 not been installed on either host. The guarded Debian lifecycle runner has not
 launched its disposable VM because recurring unrelated Go compiler/test jobs
 keep resetting host admission. The required fresh 24-hour candidate canary and
-privileged fanotify integration tests remain open.
+capability-negative fanotify tests remain open. A small privileged success-path
+smoke passed on VPS2; it does not replace broader churn/inode-race tests.
 
 ### Production VPS1 — current installed service
 
@@ -49,10 +50,23 @@ successful observation, not a clean 24-hour canary or proof of freshness under
 continuous mutation. The read-only raw journal and status sample are linked in
 [`scan-first-backlog-age-20261110.md`](docs/qualification/scan-first-backlog-age-20261110.md).
 
+At 01:59 UTC, the r126 binary also passed a privileged integration smoke in a
+private mount namespace on an isolated ext4 loop filesystem backed by tmpfs.
+`strace` confirmed successful `fanotify_init`, `fanotify_mark`, and
+`open_by_handle_at`. Event-apply mode indexed eight creates and a rename (11
+events seen/resolved, no drops or overflows); default scan-first recorded one
+event as a hint and published the file after a manual full observation. Both
+observations had zero coverage issues and passed accounting checks in about
+100 ms. The live r121 service remained active with zero restarts, overflows,
+and drops; all test mounts and databases were removed. Details and the
+reproducible harness are in
+[`fanotify-integration-smoke.md`](docs/qualification/release-candidate-r126-20261110/fanotify-integration-smoke.md).
+
 VPS2 root is still 94% used. Removing one unattached, regenerable Go/Node
 `act-toolcache` volume reclaimed about 409 MiB; the latest measured free space
-was 6.0 GiB at 01:32 UTC. ClickHouse telemetry, XGS incident records, active
-Docker data, and Dux rollback/qualification workspaces were preserved. See the
+was 6.0 GiB at 01:59 UTC after the tmpfs-backed smoke. ClickHouse telemetry,
+XGS incident records, active Docker data, and Dux rollback/qualification
+workspaces were preserved. See the
 [`VPS2 disk audit`](docs/qualification/vps2-disk-audit-20261110.md).
 
 ### r126 code/test evidence
@@ -63,11 +77,13 @@ LLVM run also passed 338/338. Coverage is 74.08% line, 72.99% region, 77.14%
 function; LLVM emitted no branch counters. Strict Clippy, formatting,
 `git diff --check`, package metadata, and artifact hash verification passed.
 Dependency audit: 0 known vulnerabilities in 229 locked packages in the
-recorded advisory snapshot. Privileged fanotify success paths and actual
-event-handle resolution remain untested. Full details and artifacts:
+recorded advisory snapshot. The basic privileged fanotify success path now has
+an isolated runtime smoke; capability-negative startup, broader stale-handle
+churn, and production-scale qualification remain open. Full details and
+artifacts are in the
 [`r126 qualification`](docs/qualification/release-candidate-r126-20261110/README.md).
 
-**Updated:** 2026-11-10 01:45 UTC
+**Updated:** 2026-11-10 01:59 UTC
 
 ---
 

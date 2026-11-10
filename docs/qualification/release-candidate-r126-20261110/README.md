@@ -46,9 +46,12 @@ functions covered overall. The machine-readable profile is
 [`llvm-cov-338-tests.json`](llvm-cov-338-tests.json), SHA-256
 `e0e5428d02532ea2a17a174fa3394d5324c93226664a75306bb684bb8ab59715`. LLVM
 reported zero branch counters, so this is not branch coverage. The test profile
-still does not exercise successful `fanotify_init`/`fanotify_mark`, the
+still does not instrument successful `fanotify_init`/`fanotify_mark`, the
 event-resolution `open_by_handle_at` call site, or capability-negative
-startup. See the [coverage gap review](../coverage-gaps-20261109.md).
+startup. A separate privileged runtime smoke now exercises the successful
+syscall path; see
+[`fanotify-integration-smoke.md`](fanotify-integration-smoke.md). This runtime
+trace is not LLVM coverage.
 
 The lockfile audit found 0 known vulnerabilities among 229 dependencies with
 the recorded 1,430-advisory RustSec snapshot, last updated 2026-11-09. The
@@ -67,7 +70,9 @@ disposable guest; host admission has repeatedly detected active Go/Vitest
 workloads and high pressure. No candidate was installed on VPS1 or VPS2.
 
 Still required: guarded clean install/upgrade/rollback/purge, independent
-path-and-accounting comparison, a fresh uninterrupted 24-hour canary, and
-privileged fanotify success-path plus capability-negative tests. The prior
-r121 canary remains failed. Root execution and `CAP_SYS_ADMIN` remain material
-security exposure.
+path-and-accounting comparison, and a fresh uninterrupted 24-hour canary. The
+isolated smoke closes the basic privileged success-path gap, but broader
+create/delete/attribute/stale-handle churn and independent-walk comparison
+remain open. Capability-negative startup/handle-resolution tests also remain
+open. The prior r121 canary remains failed. Root execution and `CAP_SYS_ADMIN`
+remain material security exposure.
