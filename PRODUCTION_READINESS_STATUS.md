@@ -5452,3 +5452,82 @@ Root disk samples fluctuated with temporary build/test activity: 74% used and
 change does not prove which workload created or removed the bytes. The latest
 snapshot is [`host-disk-20261110T1747Z.json`](docs/qualification/host-disk-20261110T1747Z.json)
 (SHA-256 `30cc799fb504ad76a389104ab8e27a5acfd1ac4662a837c79c87b9bbb19d1983`).
+
+
+## Sixteenth verified observation and VPS2 disk/source inventory — 2026-11-10 18:08 UTC
+
+VPS2's sixteenth observation started at **17:53:55** and completed traversal at
+**17:59:28** (5m34s). It covered 1,752,177 files and 214,871 directories,
+staging 1,967,048 path instances with 83,424,903,168 unique bytes (77.70 GiB).
+Coverage issues were zero; 60 vanished inode-reuse paths were removed, with no
+revalidations or unresolved paths. Independent accounting passed at **18:00:45**
+in 76,221 ms. The completion interval from 17:45:21 was **14m08s**, within the
+15-minute target. Seven of fifteen intervals still exceed 15 minutes, and the
+per-path maximum age is not measured.
+
+At **18:06:36**, Dux was live with no pending updates, kernel overflows, or
+reported dropped updates. The last scan was 426 seconds old. Raw status:
+[`vps2-live-status-20261110T1806Z.json`](docs/qualification/vps2-live-status-20261110T1806Z.json)
+(SHA-256 `a6548d0138d835c5de124109af780537854d1a9d1bed147a783eefb5e5ec8b7a`).
+The r132 soak checkpoint around **18:06:04** reports 32,474.2 seconds elapsed
+(9h01m14s), 740,947 operations, 737 exactness samples, nine mutation bursts,
+one held-reader/WAL-reclaim pass, zero restarts, and zero controlled crashes.
+Terminal assertions remain pending; only the `soak` suite has run. That is
+12.5% of 72 hours. Checkpoint:
+[`soak-progress-20261110T1806Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1806Z.json)
+(SHA-256 `8aebf7365cfc44641cb6e0067f5587a282caf933a0c0759a8dedb4f3242af25a`).
+
+### VPS2 disk capacity and cleanup safety
+
+At 18:06:36, the 92.2-GiB root filesystem was 89% used, with 9.7 GiB available.
+A low-priority top-level walk put `/var` at about 59 GiB, `/root` at 8 GiB,
+`/usr` at 6.2 GiB, and `/srv` at 1.1 GiB. Within the partial `/var` inventory,
+`/var/tmp` was about 5.3 GiB, `/var/log` about 4.5 GiB, and systemd journals
+alone occupied 4.0 GiB. The `/var` traversal was interrupted after I/O pressure
+rose; these are not a complete attribution of the 59 GiB. Raw inventory:
+[`vps2-disk-inventory-20261110T1806Z.json`](docs/qualification/vps2-disk-inventory-20261110T1806Z.json)
+(SHA-256 `2a91d1604b1f74324fd07d1e64fecfc759c41290d8c30928ceccf83955bf0c51`).
+
+The `/var/tmp` Dux directories include 1.0 GiB of Cargo cache, 0.84 GiB of
+Rust toolchain/cache, multiple old build/qualification trees, a 0.59-GiB old
+readiness fixture, the active 6.3-MiB r132 soak runner, and a 0.38-GiB dirty
+`claude-dux` source checkout. The latter is on `claude/stale-dfid-classification`
+at base `52542d9` and has 14 modified tracked files (1,886 insertions, 176
+deletions). I preserved its 134-KiB patch and provenance in
+[`unmerged-claude-dux-worktree-20261110.patch`](docs/qualification/unmerged-claude-dux-worktree-20261110.patch)
+and its sidecar record. The patch passes `git diff --check` in its source
+checkout; no tests for that dirty tree are verified. Reverse application to
+the current branch failed in six files, so it is not integrated or counted as
+tested. Active soak inputs, systemd-private directories, operational logs,
+and the modified checkout were left untouched. No files were deleted.
+
+VPS2 has no `/dev/kvm`, so it cannot host the package lifecycle guest. Its
+root filesystem is also too full for another large build without first
+recovering space. On vps1, root usage at 18:08 was 71% with 52.6 GiB available;
+active Go tests were running, so no new package-VM attempt was made in this
+snapshot.
+
+## Live qualification update — 2026-11-10 18:13 UTC
+
+The VPS2 r132 soak process is still running. Its checkpoint at **18:13:05**
+records **32,894.9 seconds** elapsed (9h08m15s), **750,355 operations**,
+**747 exactness samples**, nine mutation bursts, one completed 300-second
+held-reader/WAL-reclaim scenario, and zero worker restarts. The soak has
+completed **12.69%** of its 72-hour duration. The controlled-crash list is
+empty; final exactness/history checks are false/pending and SQLite integrity
+has not yet been recorded. The harness is still configured to run only the
+`soak` suite. Raw checkpoint:
+[`soak-progress-20261110T1813Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1813Z.json)
+(SHA-256 `4641b4c9944de08426479479ca61496c618ff04e95d66de74bdf1cbaae54f281`).
+
+At **18:13:05**, the installed VPS2 Dux service was live in scan-first mode,
+with a full observation in progress. It had seen 1,753,790 files and 215,190
+directories; pending updates, kernel overflow notifications, and reported
+dropped updates were all zero. This status sample does not establish that the
+in-progress observation will finish or pass accounting. Raw status:
+[`vps2-live-status-20261110T1813Z.json`](docs/qualification/vps2-live-status-20261110T1813Z.json)
+(SHA-256 `dceb58d36d4e67e348960d2f504838707e679ead177ad07f972a602cdf2cb59f).
+
+VPS2 root storage was **91% used**, with **9,109,610,496 bytes (8.48 GiB)**
+available. The latest detailed directory attribution remains the 18:06 partial
+inventory; no cleanup was performed.

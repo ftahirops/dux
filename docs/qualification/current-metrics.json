@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T17:47:31Z",
+  "snapshot_at_utc": "2026-11-10T18:08:35Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -97,13 +97,13 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T17:46:54Z",
+    "observed_at_utc": "2026-11-10T18:13:05Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 31324.4,
-    "operations": 715535,
-    "exact_check_samples": 712,
-    "completed_hourly_bursts": 8,
+    "elapsed_seconds": 32894.9,
+    "operations": 750355,
+    "exact_check_samples": 747,
+    "completed_hourly_bursts": 9,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
     "terminal_exact_history_integrity": "pending",
@@ -111,16 +111,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.842736014097635,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1747Z.json",
+    "observed_operations_per_second_elapsed": 22.81067885903286,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1813Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.12085030864197531,
+    "coverage_duration_fraction": 0.1269093364197531,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "ae41cff20cf751631958b2c98cfd7f3857a990110ccef2b36fd06a9f6e0e0c5a",
+    "latest_checkpoint_sha256": "4641b4c9944de08426479479ca61496c618ff04e95d66de74bdf1cbaae54f281",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -142,8 +142,8 @@
       "startup",
       "wal"
     ],
-    "latest_live_status_query_at_utc": "2026-11-10T17:46:54Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T17:46:54Z"
+    "latest_live_status_query_at_utc": "2026-11-10T18:13:05Z",
+    "latest_full_checkpoint_at_utc": "2026-11-10T18:13:05Z"
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -210,7 +210,9 @@
     "latest_scan_resource_sample": "docs/qualification/live-vps2-scan-resources-20261110.json",
     "latest_vm_admission": "docs/qualification/vm-admission-20261110T1704Z.json",
     "latest_live_scan": "PRODUCTION_READINESS_STATUS.md (17:00 UTC twelfth successful scan, accounting passed)",
-    "latest_soak_checkpoint_1700z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1700Z.json"
+    "latest_soak_checkpoint_1700z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1700Z.json",
+    "latest_soak_checkpoint_1813z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1813Z.json",
+    "latest_vps2_status_1813z": "docs/qualification/vps2-live-status-20261110T1813Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -294,13 +296,13 @@
     "dux_internal_handle_decoder": "not qualified"
   },
   "vps2_scan_first_runtime": {
-    "observed_at_utc": "2026-11-10T17:47:21Z",
+    "observed_at_utc": "2026-11-10T18:13:05Z",
     "installed_build": "0.6.3 (8b02799b)",
     "mode": "scan_first",
     "service_active": true,
     "service_restarts": 0,
     "last_full_observation_utc": "2026-11-10T16:13:09Z",
-    "last_observation_age_seconds": 414,
+    "last_observation_age_seconds": 852,
     "last_observation_coverage_issues": 0,
     "accounting_verification": "passed",
     "accounting_verification_elapsed_ms": 76251,
@@ -313,25 +315,25 @@
     "state_at_1406": "dirty; changes await next full observation; no scan active",
     "seconds_since_last_caught_up": 35192.546,
     "next_periodic_observation_confirmed": false,
-    "evidence": "docs/qualification/vps2-live-status-20261110T1747Z.json",
+    "evidence": "docs/qualification/vps2-live-status-20261110T1806Z.json",
     "state_at_1409": "dirty; changes await next full observation; no scan active",
     "behind_seconds_applicable": false,
     "behind_seconds_field_value": 35192.546,
     "behind_seconds_semantics": "not applicable in scan-first mode; use last_scan_age_seconds for observation freshness",
-    "completed_observations_since_checkpoint": 15,
-    "latest_observation_utc": "2026-11-10T17:45:21Z",
-    "latest_observation_age_seconds": 120,
-    "latest_observation_files": 1748968,
-    "latest_observation_directories": 214539,
-    "latest_observation_staged_path_instances": 1963507,
-    "latest_observation_unique_bytes": 83130183680,
+    "completed_observations_since_checkpoint": 16,
+    "latest_observation_utc": "2026-11-10T17:59:28Z",
+    "latest_observation_age_seconds": 426,
+    "latest_observation_files": 1752177,
+    "latest_observation_directories": 214871,
+    "latest_observation_staged_path_instances": 1967048,
+    "latest_observation_unique_bytes": 83424903168,
     "latest_observation_coverage_issues": 0,
-    "latest_vanished_reuse_paths": 48,
+    "latest_vanished_reuse_paths": 60,
     "latest_revalidated_reuse_paths": 0,
     "latest_unresolved_reuse_paths": 0,
     "latest_accounting_verification": "passed",
-    "latest_accounting_verification_elapsed_ms": 73853,
-    "observation_completion_gap_seconds": 855,
+    "latest_accounting_verification_elapsed_ms": 76221,
+    "observation_completion_gap_seconds": 848,
     "state_at_1417": "dirty; changes await next full observation; no scan active",
     "behind_seconds_field_present_in_running_build": false,
     "recent_observation_completion_gaps_seconds": [
@@ -348,7 +350,8 @@
       919,
       950,
       939,
-      855
+      855,
+      848
     ],
     "state_at_1431": "dirty; changes await next full observation; no scan active",
     "recent_15m_completion_target_results": [
@@ -365,6 +368,7 @@
       "miss_by_19_seconds",
       "miss_by_50_seconds",
       "miss_by_39_seconds",
+      "pass",
       "pass"
     ],
     "state_at_1447": "dirty; changes await next full observation; no scan active",
@@ -396,7 +400,7 @@
       "2026-11-10T15:10:09Z",
       "2026-11-10T15:25:09Z"
     ],
-    "freshness_slo_assessment": "per-path maximum age is not directly measured; seven of fourteen completion-to-completion intervals exceeded 15 minutes",
+    "freshness_slo_assessment": "per-path maximum age is not directly measured; seven of fifteen completion-to-completion intervals exceeded 15 minutes",
     "scan_in_progress_at_1543": true,
     "scan_progress_files_seen": 753557,
     "scan_progress_directories_seen": 127700,
@@ -426,7 +430,7 @@
     },
     "state_at_1601": "dirty; filesystem changes await next full observation; no scan active; zero pending, overflow, or dropped updates",
     "per_path_freshness_slo": "unqualified; maximum path age cannot be derived because per-path last-observed timestamps are not stored",
-    "last_scan_age_seconds": 120,
+    "last_scan_age_seconds": 426,
     "scan_in_progress_at_1601": false,
     "failed_scheduled_observation_started_at_utc": "2026-11-10T15:40:09Z",
     "latest_successful_observation_started_at_utc": "2026-11-10T15:49:07Z",
@@ -469,21 +473,21 @@
     "service_memory_mib": 511.9,
     "service_memory_high_mib": 2048,
     "service_memory_max_mib": 4096,
-    "latest_live_observation_at_utc": "2026-11-10T17:47:21Z",
-    "latest_live_observation_scan_in_progress": false,
+    "latest_live_observation_at_utc": "2026-11-10T18:13:05Z",
+    "latest_live_observation_scan_in_progress": true,
     "latest_live_observation_scan_started_at_utc": "2026-11-10T16:23:54Z",
-    "latest_live_observation_files_seen": 1735432,
-    "latest_live_observation_directories_seen": 212908,
+    "latest_live_observation_files_seen": 1753790,
+    "latest_live_observation_directories_seen": 215190,
     "latest_live_observation_allocated_bytes_seen": 82603618304,
     "latest_live_observation_pending_updates": 0,
     "latest_live_observation_kernel_overflows": 0,
     "latest_live_observation_dropped_updates": 0,
     "latest_live_observation_service_restarts": 0,
     "latest_live_observation_accounting_verification": "passed",
-    "latest_live_observation_accounting_verification_at_utc": "2026-11-10T17:46:34Z",
-    "latest_live_observation_accounting_verification_elapsed_ms": 73853,
-    "latest_live_observation_dirty_reason": "filesystem changes await the next full observation",
-    "latest_accounting_verification_at_utc": "2026-11-10T17:46:34Z",
+    "latest_live_observation_accounting_verification_at_utc": "2026-11-10T18:00:45Z",
+    "latest_live_observation_accounting_verification_elapsed_ms": 76221,
+    "latest_live_observation_dirty_reason": "periodic filesystem observation in progress",
+    "latest_accounting_verification_at_utc": "2026-11-10T18:00:45Z",
     "latest_scan_resource_evidence": "docs/qualification/live-vps2-scan-resources-20261110.json (partial 17:25:52\u201317:32:54 window spanning scan/index and accounting, not entire scan)",
     "resource_counter_sha256": "f4e436ba346c10b55117d941ef9a080214add488a18becd27aa860f3e550c08e",
     "latest_scan_resource_sample": {
@@ -497,14 +501,35 @@
       "memory_high_events_at_end": 204,
       "oom_events_at_end": 0,
       "notes": "Partial window; started 1m58s into the 17:23:54 observation and ended 17s after accounting passed, so not a whole-scan cost."
-    }
+    },
+    "latest_live_status_evidence": "docs/qualification/vps2-live-status-20261110T1813Z.json"
   },
   "disk_at_snapshot": {
-    "observed_at_utc": "2026-11-10T17:47:31Z",
-    "root_size_gib_approx": 185,
-    "used_gib_approx": 121,
-    "available_gib_approx": 56,
-    "percent_used": 69,
-    "evidence": "docs/qualification/host-disk-20261110T1747Z.json"
+    "observed_at_utc": "2026-11-10T18:08:35Z",
+    "root_size_gib_approx": 184.5,
+    "used_gib_approx": 123.6,
+    "available_gib_approx": 52.6,
+    "percent_used": 71,
+    "evidence": "df -B1 on vps1"
+  },
+  "vps2_disk_inventory": {
+    "observed_at_utc": "2026-11-10T18:13:05Z",
+    "root_total_bytes": 99012476928,
+    "root_used_bytes": 85323116544,
+    "root_available_bytes": 9109610496,
+    "root_use_percent": 91,
+    "var_tmp_gib_approx": 5.3,
+    "var_log_gib_approx": 4.5,
+    "systemd_journal_gib_approx": 4.0,
+    "kvm_available": false,
+    "evidence": "df -B1 on VPS2 at 18:13 UTC; latest detailed attribution remains 18:06 UTC"
+  },
+  "unmerged_candidate_worktree": {
+    "base_commit": "52542d9639a5da52e3703f521e4aff67e2d5e8a3",
+    "files_modified": 14,
+    "insertions": 1886,
+    "deletions": 176,
+    "patch_sha256": "f0f1347715a43e0d0e213df7784d53af8314b901bfddec13a040395ff3e047ad",
+    "disposition": "preserved, not integrated or test-qualified"
   }
 }
