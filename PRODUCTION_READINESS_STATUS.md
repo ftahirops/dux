@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 03:44 UTC
+## Latest verified checkpoint — 2026-11-10 03:54 UTC
 
 ### Release decision
 
@@ -188,6 +188,37 @@ harness passed despite this guard activation, so WAL behavior under sustained
 churn remains a reliability/freshness gate rather than a release pass.
 
 **Updated:** 2026-11-10 03:44 UTC
+
+### WAL checkpointing during active reconciliation — 2026-11-10 03:54 UTC
+
+The lifecycle run showed the WAL guard activate during both r126 and the
+restored r121 full-root scans. Source review found that the main watcher
+explicitly skipped PASSIVE checkpoints whenever a scan worker existed, even
+though the incremental reconciler commits bounded batches and SQLite PASSIVE
+checkpoints can make progress between writer transactions. The watcher now
+attempts checkpoints during a scan when the normal interval is due or the WAL
+is oversized/guarded. WAL guard activation is logged as a warning because it
+is protective throttling, not itself a database write failure.
+
+The focused concurrent-writer checkpoint test passed. Full all-feature tests
+passed **337/337** with two ignored, and the ext4 stale-parent ignored test
+passed separately. Inclusive LLVM coverage then passed **339/339**, including
+the 100,000-entry reconciliation scale smoke on `/dev/shm` and the ext4
+stale-parent integration. Updated totals: **74.13% line, 73.05% region,
+77.15% function; branch counters unavailable**. Strict Clippy, formatting,
+and `git diff --check` passed.
+
+This is code-level and SQLite concurrency evidence, not yet proof that the
+256 MiB guard stays inactive during a real large reconciliation. The changed
+source was built as an optimized local production-profile binary and passed
+`--version` and `--help` smoke checks (SHA-256
+`e06d7c3bc3a8722a414b5a37978afffd7932609d059c1f8a6200a902ac52e5c9`). It has
+not yet been rebuilt into a Debian package or exercised through the VPS2
+lifecycle/canary. The previously qualified r126 package does not contain this
+change. Production remains unqualified; the WAL guard behavior remains an
+open runtime gate.
+
+**Updated:** 2026-11-10 03:54 UTC
 
 ---
 

@@ -4184,10 +4184,9 @@ pub fn run_daemon(
                 10
             };
             let mut checkpoint_result = None;
-            if scan_job.is_none()
-                && ((pressure != crate::guard::Pressure::Critical && due)
-                    || oversized
-                    || wal_write_guarded)
+            if ((pressure != crate::guard::Pressure::Critical && due)
+                || oversized
+                || wal_write_guarded)
                 && last_ckpt.elapsed() >= Duration::from_secs(checkpoint_interval)
             {
                 match wal_checkpoint_progress(&store.conn) {
@@ -4220,7 +4219,7 @@ pub fn run_daemon(
                 wal_write_guard_transition(wal_write_guarded, wal_bytes, checkpoint_result);
             if wal_write_guarded != was_wal_guarded {
                 if wal_write_guarded {
-                    tracing::error!(wal_bytes = ?wal_bytes,
+                    tracing::warn!(wal_bytes = ?wal_bytes,
                         "SQLite WAL exceeded its budget; event writes are paused until checkpointing resumes");
                 } else {
                     tracing::info!(wal_bytes = ?wal_bytes,
@@ -8015,6 +8014,39 @@ mod tests {
         );
         drop(reader);
         drop(writer);
+        cleanup(Path::new("/nonexistent/dux-test-root"), &db);
+    }
+
+    #[test]
+    fn passive_checkpoint_can_run_during_scan_writer_transaction() {
+        let db = tmp("wal-checkpoint-during-scan-write");
+        cleanup(Path::new("/nonexistent/dux-test-root"), &db);
+        let mut scan_writer = rusqlite::Connection::open(&db).unwrap();
+        scan_writer
+            .execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE t(value INTEGER);")
+            .unwrap();
+        scan_writer.execute("INSERT INTO t VALUES(1)", []).unwrap();
+        let checkpoint_conn = rusqlite::Connection::open(&db).unwrap();
+
+        // Reconciliation commits batches while walking. A PASSIVE checkpoint
+        // from the watcher must remain safe while one of those batches is open.
+        let tx = scan_writer.transaction().unwrap();
+        tx.execute("INSERT INTO t VALUES(2)", []).unwrap();
+        let checkpoint = wal_checkpoint_progress(&checkpoint_conn);
+        assert!(
+            checkpoint.is_ok(),
+            "PASSIVE checkpoint failed: {checkpoint:?}"
+        );
+        tx.commit().unwrap();
+
+        let (_, log_frames, checkpointed_frames) =
+            wal_checkpoint_progress(&checkpoint_conn).unwrap();
+        assert!(
+            checkpointed_frames >= log_frames,
+            "checkpoint should catch up after the scan batch commits"
+        );
+        drop(checkpoint_conn);
+        drop(scan_writer);
         cleanup(Path::new("/nonexistent/dux-test-root"), &db);
     }
 
