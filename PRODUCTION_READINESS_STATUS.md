@@ -27,17 +27,43 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:34 UTC
+### Live checkpoint — 2026-11-10 09:38 UTC
 
-The unit remains `active/running`, with **zero restarts**. At elapsed 600.2s,
-the earlier checkpoint was 13,994 mutations; at the latest progress sample,
-elapsed time was 1,500.6s and the worker had completed **35,777 mutations**.
-At the latest progress sample, elapsed time was 1,740.6s and the worker had
-completed **41,552 mutations**. The 41,000-op exact checkpoint passed in
-466ms; no controlled crash, held-reader phase, or hourly burst had occurred
-yet. Final exactness, history, and SQLite integrity are still pending. These
-are progress measurements, not a soak pass. VPS2 had 4.3 GiB free on `/`; the
-disposable fixture uses `/dev/shm`, with 2.8 GiB free.
+The r132 soak remains `active/running`, with **zero restarts**. At elapsed
+1,980.9s it had completed **47,291 mutations**; the 47,000-op exact checkpoint
+passed in 476ms. The hourly burst, held-reader, controlled recovery, and final
+exactness/history/integrity checks have not run yet. This is early progress,
+not a soak pass. The machine-readable snapshot is
+[`live-vps2-readiness-20261110T0938Z.json`](docs/qualification/live-vps2-readiness-20261110T0938Z.json).
+
+## Current production and disk snapshot — 2026-11-10 09:38 UTC
+
+The installed VPS1 production daemon is still **r66** (`0.6.3`, revision
+`e0cc915f8f37`), active with 4 historical restarts. It reports dirty status
+from fanotify overflow: **742 overflow notifications**, **2,518,862 dropped
+updates**, no full scan for about **4d20h**, and `caught_up=false`. The index
+has 1,329,923 nodes and a 3.42-GB SQLite database plus 128-MiB WAL. VPS1 has
+about 53 GiB available on its 185-GiB root filesystem (71% used), so current
+production staleness is not explained by disk exhaustion. See the full
+[VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T0938Z.json).
+
+VPS2 still runs its installed **r121** service, separately from the r132 soak.
+It is active with zero restarts and uses scan-first mode. A full observation is
+in progress: status is dirty for that reason, but reports zero dropped updates
+and zero kernel overflows. The index contains 1,924,740 nodes; its SQLite file
+is 804 MiB. Its latest observation staging file is actively growing (about
+446 MiB at capture), so it must not be treated as an orphan temp file. VPS2's
+root filesystem is **96% used with about 4 GiB available**; `/dev/shm` has
+about 2.8 GiB free. See the full [VPS2 snapshot](docs/qualification/live-vps2-readiness-20261110T0938Z.json).
+
+Docker metadata on VPS2 reports 19.51 GiB of images, 3.53 GiB of container
+layers, and 21.86 GiB of volumes. It marks 6.40 GiB of images and 1.96 GiB of
+containers reclaimable, but there are no dangling images; several stopped
+containers are deployment/test helpers, and the large volumes back active
+services. No Docker data was removed because these are not verified disposable
+artifacts. The r132 soak report directory is only about 6.2 MiB on disk; its
+fixture remains on tmpfs. This is a disk-capacity risk on the shared VPS2 test
+host, not evidence that Dux caused the space use.
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
@@ -63,6 +89,8 @@ binary started; the decision is preserved in
 At 09:35:06 UTC a further start was refused on sample 3/3 after three Go
 compiler processes and a Go test process appeared; no VM was created. See
 [`the 09:35 refusal record`](docs/qualification/r132-rocky-rpm-admission-refusal-20261110T093506Z.jsonl).
+At 09:38 UTC, host load1 was 10.72 with Go compiler/test processes active, so
+the RPM VM was not retried.
 
 ## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
 
