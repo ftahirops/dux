@@ -16,8 +16,13 @@ cleanup.
 
 Root usage changed from **90%** (about **9.0 GiB available**) to **89%**
 (about **11 GiB available**). `/var/tmp` fell from **4.2 GiB** to **2.4 GiB**.
-The system journal remained at 4.1 GiB. No journal files, repositories,
-qualification evidence, or soak data were removed.
+The system journal remained at 4.1 GiB (**4.0 GiB reported by
+`journalctl --disk-usage`**). Its archived boot list spans 2026-08-17 through
+2026-11-10. No explicit storage or retention override appeared in the
+journald configuration. I left these logs intact because they may contain
+incident evidence; reclaiming them should follow an agreed retention policy
+and any required export of Dux incident logs. No repositories, qualification
+evidence, or soak data were removed.
 
 The r132 soak at 21:49 UTC was still running after 12h44m43s, with 1,029,704
 mutations, 1,026 exactness samples, 12 mutation bursts, two held-reader/WAL
