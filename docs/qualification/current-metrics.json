@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:45:00Z",
+  "snapshot_at_utc": "2026-11-10T19:49:00Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T19:44:05Z",
+    "observed_at_utc": "2026-11-10T19:48:43Z",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,25 +16,25 @@
     "kernel_overflows": 785,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 267193.593,
+    "behind_seconds": 267472.144,
     "service_user": "root",
-    "index_nodes": 1324453,
-    "index_bytes_on_disk": 3618058240,
+    "index_nodes": 1321104,
+    "index_bytes_on_disk": 3619057664,
     "wal_bytes": 134217728,
-    "pending_updates": 1376,
+    "pending_updates": 384,
     "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 456883,
+    "last_scan_age_seconds": 457161,
     "dirty_since_timestamp_seconds": 1794324009,
     "service_substate": "running",
-    "events_seen": 249553952,
-    "events_resolved": 145077840,
-    "updates_committed": 41566322,
+    "events_seen": 249883676,
+    "events_resolved": 145325291,
+    "updates_committed": 41615782,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
-    "index_bytes": 125383118848,
-    "evidence": "docs/qualification/vps1-live-status-20261110T1944Z.json"
+    "index_bytes": 125509828608,
+    "evidence": "docs/qualification/vps1-live-status-20261110T1948Z.json"
   },
   "disk": {
     "observed_at_utc": "2026-11-10T17:06:51Z",
@@ -101,12 +101,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:42:00Z",
+    "observed_at_utc": "2026-11-10T19:48:43Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 38208.1,
-    "operations": 866389,
-    "exact_check_samples": 863,
+    "elapsed_seconds": 38568.3,
+    "operations": 874524,
+    "exact_check_samples": 871,
     "completed_hourly_bursts": 10,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -115,16 +115,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.676,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1942Z.json",
+    "observed_operations_per_second_elapsed": 22.675,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1948Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.14740779320987654,
+    "coverage_duration_fraction": 0.1487974537037037,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "30709e3d7e55f133d7064d292c584bc8193a03b30ec2954de2da12af1a44f259",
+    "latest_checkpoint_sha256": "1c7fed90043fa293f8c5fc80701179649bfd5cb3874754f42330c0d48cb24dda",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -147,7 +147,7 @@
       "wal"
     ],
     "latest_live_status_query_at_utc": "2026-11-10T19:38:49Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T19:42:00Z",
+    "latest_full_checkpoint_at_utc": "2026-11-10T19:48:43Z",
     "max_exact_convergence_ms_observed": 14012
   },
   "package_lifecycle": {
@@ -519,24 +519,24 @@
     "completion_gap_semantics": "Completion-to-completion durations include scan duration variation and are not scheduler start intervals or per-path freshness SLO measurements; latest two starts were 15m apart."
   },
   "disk_at_snapshot": {
-    "observed_at_utc": "2026-11-10T19:44:05Z",
+    "observed_at_utc": "2026-11-10T19:48:43Z",
     "root_size_gib_approx": 184.5,
-    "used_gib_approx": 119.6,
-    "available_gib_approx": 56.6,
+    "used_gib_approx": 119.8,
+    "available_gib_approx": 56.5,
     "percent_used": 68,
     "evidence": "df -B1 / on vps1"
   },
   "vps2_disk_inventory": {
-    "observed_at_utc": "2026-11-10T19:41:55Z",
+    "observed_at_utc": "2026-11-10T19:50:08Z",
     "root_total_bytes": 99012476928,
-    "root_used_bytes": 84750471168,
-    "root_available_bytes": 9682255872,
-    "root_use_percent": 90,
+    "root_used_bytes": 85854912512,
+    "root_available_bytes": 8577814528,
+    "root_use_percent": 91,
     "var_tmp_gib_approx": 5.3,
     "var_log_gib_approx": 4.5,
     "systemd_journal_gib_approx": 4.0,
     "kvm_available": false,
-    "evidence": "df -B1 / on VPS2 at 19:41:55 UTC; latest detailed directory attribution remains 18:06 UTC"
+    "evidence": "df -B1 / on VPS2 at 19:50:08 UTC; detailed directory attribution remains 18:06 UTC"
   },
   "unmerged_candidate_worktree": {
     "base_commit": "52542d9639a5da52e3703f521e4aff67e2d5e8a3",
@@ -658,5 +658,68 @@
     "fault_matrix_started": false,
     "decision": "do not start guarded qualification VM while unrelated Go test workload remains active",
     "evidence": "docs/qualification/host-admission-20261110T1931Z.json"
+  },
+  "focused_rust_qualification": {
+    "observed_at_utc": "2026-11-10T19:47:51Z",
+    "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+    "test_binary_sha256": "01729c28f7ee9822c641531e33fdf24a0ad95963cacfcd3c9c06c97e78e90d27",
+    "previously_ignored_cases_run": 2,
+    "passed": 2,
+    "failed": 0,
+    "tests": {
+      "stale_parent_ext4": {
+        "result": "passed",
+        "runs": 2,
+        "evidence": "docs/qualification/r132-focused-qualification-20261110/stale-parent-ext4.log"
+      },
+      "scale_100k": {
+        "result": "passed",
+        "entries": 100000,
+        "baseline_seconds": 7.521,
+        "unchanged_reconcile_seconds": 8.44,
+        "database_bytes_before": 30072832,
+        "database_bytes_after": 30072832,
+        "profile": "debug",
+        "evidence": "docs/qualification/r132-focused-qualification-20261110/scale-100k.log"
+      }
+    },
+    "combined_unique_case_totals": {
+      "rust_passed": 343,
+      "rust_failed": 0,
+      "rust_unrun": 0,
+      "all_languages_passed": 723,
+      "all_languages_failed": 0,
+      "skipped": 1
+    },
+    "coverage_profile_refreshed": false,
+    "limits": [
+      "ext4 test uses real handles and constructed event records, not live fanotify delivery",
+      "scale test asserts row count and stable database size, not independent per-path equality",
+      "scale timings are debug-profile and not production estimates"
+    ]
+  },
+  "latest_vps2_qualification_admission": {
+    "host": "192.168.5.106",
+    "observed_at_utc": "2026-11-10T19:50:08Z",
+    "load_average_1m": 7.21,
+    "cpu_psi_some_avg10_percent": 20.58,
+    "cpu_psi_some_avg60_percent": 21.77,
+    "cpu_psi_some_avg300_percent": 22.54,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "memory_total_bytes": 6111617024,
+    "memory_available_bytes": 3239317504,
+    "root_disk_used_bytes": 85854912512,
+    "root_disk_available_bytes": 8577814528,
+    "root_disk_use_percent": 91,
+    "dominant_process": {
+      "pid": 2651,
+      "name": "clickhouse-server",
+      "cpu_percent": 90.8,
+      "elapsed": "4-04:06:49"
+    },
+    "qualification_vm_started": false,
+    "fault_matrix_started": false,
+    "decision": "do not start guarded VM: VPS2 is under sustained CPU pressure with root disk at 91 percent; fault matrix requires a guarded disposable VM",
+    "method": "read-only /proc/pressure/cpu, /proc/loadavg, free -b, df -B1 /, ps"
   }
 }

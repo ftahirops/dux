@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 19:45 UTC**. VPS1 was rechecked at 19:44 UTC and remains on the old event-apply
+**2026-11-10 19:49 UTC**. VPS1 was rechecked at 19:48 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -16,10 +16,10 @@ machine-readable snapshot is
 
 | System | Latest verified state |
 |---|---|
-| **VPS1 production** | At 19:44 UTC: Dux 0.6.3 build `e0cc915f`, running as root with four historical systemd restarts; dirty and not caught up, 785 lifetime overflows, 2,518,862 dropped updates, 1,376 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. Current dirty reason reports non-watched filesystem mounts changed; reconciling visible paths. No OOM events were recorded. See [VPS1 status](docs/qualification/vps1-live-status-20261110T1944Z.json). |
-| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 19:41:55 it was active with zero restarts. The latest full scan/accounting evidence remains from 19:37–19:38. Its latest full observation completed at 19:37 with zero coverage issues; independent accounting passed in 66.0 seconds. The index was marked dirty because new hints arrived after the scan. Per-path freshness is not measured. |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 19:42 checkpoint is 10h36m48s into a 72-hour run (14.76%), with 866,389 operations, 863 exactness samples, 10 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 19:41:55 the installed service was active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. |
-| **VPS2 disk** | At 19:41:55, root was 90% used with 9.68 GB available. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
+| **VPS1 production** | At 19:48 UTC: Dux 0.6.3 build `e0cc915f`, running as root with four historical systemd restarts; dirty and not caught up, 785 lifetime overflows, 2,518,862 dropped updates, 384 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. Current dirty reason reports non-watched filesystem mounts changed; reconciling visible paths. No OOM events were recorded. See [latest VPS1 status](docs/qualification/vps1-live-status-20261110T1948Z.json). |
+| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 19:41:55 it was active with zero restarts; VPS2 host admission was rechecked at 19:50. The latest full scan/accounting evidence remains from 19:37–19:38. Its latest full observation completed at 19:37 with zero coverage issues; independent accounting passed in 66.0 seconds. The index was marked dirty because new hints arrived after the scan. Per-path freshness is not measured. |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 19:48 checkpoint is 10h42m48s into a 72-hour run (14.88%), with 874,524 operations, 871 exactness samples, 10 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 19:41:55 the installed service was active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. |
+| **VPS2 disk** | At 19:50, root was 91% used with 8.58 GB available. CPU PSI some avg10 was 20.58%, and ClickHouse used 90.8% CPU; the guarded fault VM was not started. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
 
 ### Recent live reliability and throughput evidence
 
@@ -42,23 +42,22 @@ Evidence: [latest scheduled scan](docs/qualification/vps2-reconciliation-cycle-2
 [next scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log),
 [throughput profile](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json),
 [latest VPS2 status](docs/qualification/vps2-live-status-20261110T1926Z.json),
-[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1942Z.json).
+[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1948Z.json).
 
 ## Tests, coverage, and open release gates
 
 | Area | Latest evidence | Still open |
 |---|---|---|
-| Rust automated tests | 341 passed, 0 failed, 2 ignored on source matching r132; strict Clippy and formatting passed. | Ignored ext4/scale cases are not passes; candidate runtime matrix remains incomplete. |
+| Rust automated tests | Full suite: 341 passed, 0 failed, 2 ignored on source matching r132. Both ignored cases then passed in targeted runs: ext4 stale-parent classification and 100k-entry reconciliation. Strict Clippy and formatting passed. | The full suite was not rerun after those focused cases; 100k timing is debug-profile and does not prove large-scale production performance. |
 | Python qualification harness | 380 passed, 0 failed, 1 skipped (381 total, 25 modules). | Signing integration is skipped without its RPM fixture. Python statement coverage is 53% for the package lifecycle script only; branch coverage is unavailable. |
 | Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
 | Dependency audit | 229 locked dependencies; zero advisories and warnings. Local RustSec database head matched upstream at the 18:55 check. | This is dependency hygiene, not a full application security review. |
 | Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
-| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:39 an unrelated Go test was still active, despite CPU PSI some avg10 easing to 1.23%. No VM was started. See [latest host sample](docs/qualification/current-metrics.json) and [earlier high-pressure sample](docs/qualification/host-admission-20261110T1931Z.json). |
+| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:50 VPS2 admission showed CPU PSI some avg10 20.58%, load1 7.21, root disk 91% used, and ClickHouse at 90.8% CPU. No VM was started. See [latest VPS2 admission sample](docs/qualification/vm-admission-20261110T1950Z.json). |
 | Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |
 
-The latest full language-suite counts are **721 passed, 0 failed, 2 ignored,
-and 1 skipped** across Rust and Python. The 75 package lifecycle/security tests
+The full Rust and Python runs plus the two targeted Rust cases cover **723 distinct passing cases, 0 failures, and 1 skipped**. The ordinary Rust full-run output still lists its two manual cases as ignored; both were separately executed and passed. See the [focused qualification report](docs/qualification/r132-focused-qualification-20261110/README.md). The 75 package lifecycle/security tests
 are already included in the Python total. See the
 [regression evidence](docs/qualification/regression-20261110T1823Z/README.md)
 and [coverage gap review](docs/qualification/coverage-gaps-20261109.md).

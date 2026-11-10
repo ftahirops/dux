@@ -1,0 +1,9 @@
+START=2026-11-10T19:47:50Z
+01729c28f7ee9822c641531e33fdf24a0ad95963cacfcd3c9c06c97e78e90d27  target/debug/deps/dux-fc0f5b20131235c5
+
+running 1 test
+test watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 342 filtered out; finished in 0.64s
+
+END=2026-11-10T19:47:51Z

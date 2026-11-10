@@ -1,0 +1,10 @@
+START=2026-11-10T19:46:56Z
+01729c28f7ee9822c641531e33fdf24a0ad95963cacfcd3c9c06c97e78e90d27  target/debug/deps/dux-fc0f5b20131235c5
+
+running 1 test
+reconciliation scale evidence: entries=100000, baseline_s=7.521, unchanged_reconcile_s=8.440, baseline_db_bytes=30072832, final_db_bytes=30072832
+test scan::tests::reconciliation_scale_smoke_reports_scan_cost ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 342 filtered out; finished in 17.05s
+
+END=2026-11-10T19:47:13Z
