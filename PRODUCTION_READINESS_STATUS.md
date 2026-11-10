@@ -5191,3 +5191,39 @@ about 22.90 operations/s versus 25 requested. The worker continues to run only
 the `soak` suite, not its other 15 qualification suites. Checkpoint:
 [`soak-progress-20261110T1639Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1639Z.json)
 (SHA-256 `14dda04c9c2b5a5b00ba6a3fb08b02289922601ad059c43ecd0d8cafc1e1a7b8`).
+
+
+## Eleventh successful scan-first observation and live resource sample — 2026-11-10 16:46 UTC
+
+The next scheduled VPS2 observation began at **16:38:54** and completed at
+**16:44:18** after 5m24s. It covered 1,738,201 files, 213,234 directories, and
+1,951,435 staged path instances (76.91 GiB unique), with zero coverage issues.
+It discarded 39 vanished inode-reuse paths and found no unresolved reuse paths.
+Accounting verification passed at **16:45:42** in 84,064 ms. The completion gap
+from the preceding verified observation was **13m57s**, within the 15-minute
+target. At 16:46:24 the service was active with zero restarts, zero pending
+updates, zero overflows, and zero drops. The index is dirty only because changes
+await the next observation. This is the eleventh successful observation and the
+tenth measured completion interval; four of those ten intervals exceeded 15
+minutes. Per-path maximum age remains unmeasured.
+
+Cgroup counters captured around the late indexing phase show that from
+16:41:38 to 16:44:10 the daemon used 143.56 CPU-seconds over 152 wall-seconds
+(~94% of one core). On the backing disk (`sda`, not double-counting its LVM
+mapping), it read 0.88 GiB and wrote 1.25 GiB during that interval. Process
+memory rose from 1.12 GiB to 1.46 GiB in the sampled interval; cgroup peak was
+1.93 GiB. These measurements cover the late indexing phase, not the entire
+5m24s scan; earlier and later samples and raw counters are in
+[`live-vps2-scan-resources-20261110.json`](docs/qualification/live-vps2-scan-resources-20261110.json).
+This substantiates a material write/CPU cost in the reconciliation path and
+supports a dedicated performance investigation before increasing scan cadence.
+
+At 16:40:46, VM admission remained blocked by four concurrent unrelated host
+workloads (Go compiler/test, Node TypeScript compiler, and npm build). Host load
+was 5.33 and CPU PSI some was 5.55%; no VM was created and no package command
+ran. The exact r132 soak remained active at 16:46:10 with 27,710 seconds
+(7h41m50s), 634,479 operations, 631 exactness samples, seven mutation bursts,
+one passed held-reader/WAL-reclaim phase, and zero worker restarts or controlled
+crashes. Final exactness/history/SQLite checks remain pending. Checkpoint:
+[`soak-progress-20261110T1646Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1646Z.json)
+(SHA-256 `926d500acadfb2b3b5225da28924154458407af490f89971ac42b084ede59c9a`).
