@@ -21,6 +21,10 @@ RustSec audit reports, and SHA256SUMS in OUTPUT_DIRECTORY (default: dist).
 Set DUX_RELEASE_BINARY to package an already-built production binary.
 Its embedded version, Git revision, and source-tree digest must match this checkout.
 Set DUX_PACKAGE_RELEASE to choose the numeric DEB/RPM package revision.
+Set DUX_RELEASE_SIGNING_KEY to a full GPG primary-key fingerprint to sign the
+RPM and SHA256SUMS. Release builds require signatures by default. Set
+DUX_ALLOW_UNSIGNED_RELEASE=1 only for local, non-distribution qualification
+builds that have no release signing key.
 USAGE
 }
 
@@ -38,6 +42,16 @@ esac
 if (( $# > 1 )); then
     printf 'ERROR: expected at most one output directory\n' >&2
     usage >&2
+    exit 2
+fi
+
+ALLOW_UNSIGNED_RELEASE=${DUX_ALLOW_UNSIGNED_RELEASE:-0}
+if [[ $ALLOW_UNSIGNED_RELEASE != 0 && $ALLOW_UNSIGNED_RELEASE != 1 ]]; then
+    echo 'ERROR: DUX_ALLOW_UNSIGNED_RELEASE must be 0 or 1' >&2
+    exit 2
+fi
+if [[ -z ${DUX_RELEASE_SIGNING_KEY:-} && $ALLOW_UNSIGNED_RELEASE != 1 ]]; then
+    echo 'ERROR: DUX_RELEASE_SIGNING_KEY is required; set DUX_ALLOW_UNSIGNED_RELEASE=1 only for local qualification builds' >&2
     exit 2
 fi
 
@@ -367,6 +381,14 @@ with (out / 'SHA256SUMS').open('w') as sums:
         sums.write(f'{sha(path)}  {path.name}\n')
 PY
 
+if [[ -n ${DUX_RELEASE_SIGNING_KEY:-} ]]; then
+    echo '>> signing RPM and checksum manifest with the configured release key'
+    python3 scripts/dux_release_signing.py sign "$STAGING_OUT" \
+        --fingerprint "$DUX_RELEASE_SIGNING_KEY"
+else
+    echo 'WARNING: building unsigned qualification artifacts by explicit DUX_ALLOW_UNSIGNED_RELEASE=1 override' >&2
+fi
+
 # Keep the previous release files untouched until every payload, source input,
 # and manifest assertion succeeds. Back up same-named files and journal each
 # destination before the rename so EXIT cleanup can roll back a partial publish.
@@ -385,4 +407,4 @@ PUBLISH_ACTIVE=0
 rm -rf -- "$PUBLISH_BACKUP"
 PUBLISH_BACKUP=
 echo ">> done — artifacts in $OUT/:"
-find "$OUT" -maxdepth 1 -type f \( -name 'dux_*_amd64.deb' -o -name 'dux-*.rpm' -o -name 'dux-*-x86_64-linux-static' -o -name 'dux.debug' -o -name 'source.tar.gz' -o -name 'build-manifest.json' -o -name 'SHA256SUMS' \) -printf '%f\n' | sort
+find "$OUT" -maxdepth 1 -type f \( -name 'dux_*_amd64.deb' -o -name 'dux-*.rpm' -o -name 'dux-*-x86_64-linux-static' -o -name 'dux.debug' -o -name 'source.tar.gz' -o -name 'build-manifest.json' -o -name 'SHA256SUMS' -o -name 'SHA256SUMS.asc' -o -name 'release-signing-key.asc' \) -printf '%f\n' | sort

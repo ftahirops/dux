@@ -79,6 +79,23 @@ def add_fake_release_binary(root):
 
 
 class BuildReleaseCliTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._saved_signing_env = {
+            name: os.environ.get(name)
+            for name in ("DUX_ALLOW_UNSIGNED_RELEASE", "DUX_RELEASE_SIGNING_KEY")
+        }
+        os.environ.pop("DUX_RELEASE_SIGNING_KEY", None)
+        os.environ["DUX_ALLOW_UNSIGNED_RELEASE"] = "1"
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, value in cls._saved_signing_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
     def run_cli(self, *args):
         return subprocess.run(
             ["bash", str(SCRIPT), *args],

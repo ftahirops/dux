@@ -1,5 +1,31 @@
 # Production readiness status
 
+## Release authenticity guard implementation — 2026-11-10
+
+The release builder now fails closed when no release signing fingerprint is
+configured. A local qualification build must explicitly set
+`DUX_ALLOW_UNSIGNED_RELEASE=1`; setting `DUX_RELEASE_SIGNING_KEY` signs the RPM
+with `rpmsign`, updates the artifact manifest/checksums, exports the public
+key, and detached-signs `SHA256SUMS`. The verifier checks artifact hashes,
+manifest identity, the pinned primary-key fingerprint, the detached signature,
+and the RPM signature in a temporary RPM database. The production r132 RPM
+was not modified; its SHA-256 remains
+`bb1adbd0b2bc5a36c30076bcfd3436e424dbd596aa07a26d78d952a24650af78` and it is
+still unsigned.
+
+Verification for this change: the signing test module passed its 8 non-opt-in
+tests (the real-signing test was skipped in this rerun because its opt-in RPM
+environment variable was unset), and the release-builder CLI passed **13/13**.
+The real GPG/RPM integration test had passed in the preceding run: it generated
+a disposable key, signed and verified a disposable copy of the r132 RPM, then
+rejected a tampered copy. No release-owner key was used. Shell syntax, Python
+byte-compilation, and `git diff --check` passed. The debug-artifact verifier
+suite was not rerun after adding the explicit local unsigned-build override.
+
+The release-authenticity gate remains open until the release owner supplies a
+trusted primary-key fingerprint and the actual signed package verifies in the
+Rocky lifecycle guest.
+
 ## Strict dependency audit — 2026-11-10 10:07 UTC
 
 Fresh `cargo audit` and stricter `cargo audit -D warnings` runs both exited 0

@@ -24,6 +24,23 @@ SCRIPT = REPO / "scripts" / "build-release.sh"
     "requires a C compiler and binutils",
 )
 class ReleaseDebugArtifactTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._saved_signing_env = {
+            name: os.environ.get(name)
+            for name in ("DUX_ALLOW_UNSIGNED_RELEASE", "DUX_RELEASE_SIGNING_KEY")
+        }
+        os.environ.pop("DUX_RELEASE_SIGNING_KEY", None)
+        os.environ["DUX_ALLOW_UNSIGNED_RELEASE"] = "1"
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, value in cls._saved_signing_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
     def test_native_release_path_publishes_build_id_bound_symbols(self):
         with tempfile.TemporaryDirectory(prefix="dux-release-debug-artifact-") as temp:
             root = Path(temp)
