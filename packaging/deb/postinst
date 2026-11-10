@@ -29,8 +29,12 @@ fi
 # database to the service UID. Preserve inactive state; only restart a daemon
 # that was active before this migration.
 was_active=no
+upgrade_marker=/run/dux-deb-upgrade-was-active
 if [ -d /run/systemd/system ]; then
-    if systemctl is-active --quiet dux.service; then
+    if [ -f "$upgrade_marker" ] && [ ! -L "$upgrade_marker" ]; then
+        was_active=yes
+        rm -f "$upgrade_marker"
+    elif systemctl is-active --quiet dux.service; then
         was_active=yes
     fi
     systemctl stop dux.service

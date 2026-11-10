@@ -4454,3 +4454,31 @@ checkpoint instead of the earlier 13:03 snapshot. VPS1's 13:10 UTC read-only
 status remained dirty, about 67.7 hours behind, with the overflow/drop totals
 unchanged, 1,186 pending updates, a 128-MiB WAL, and 58 GiB free. Five host
 Go/Node test processes were active; no Rocky guest was started.
+
+## Package rollback race fix — 2026-11-10 13:22 UTC
+
+Review of the package transaction order found that rollback tests only downgraded
+while the service was disabled. That left an active writer race untested: the
+legacy package can change `/var/lib/dux` ownership and invoke `try-restart`
+while the new daemon still has the database open. Debian also applies incoming
+file ownership before `postinst`, so stopping only in `postinst` is too late
+for the first upgrade to the hardened package.
+
+The working tree now adds a Debian `preinst` stop before unpack, preserves
+pre-upgrade service state through a root-only `/run` marker, stops before
+ownership changes during downgrade, and leaves rollback inactive until an
+operator restores a compatible index snapshot. RPM uses `%preuntrans` to stop
+before transaction payload changes, records the installed EVR in its marker,
+and clears stale markers on later upgrades. The disposable lifecycle driver now
+starts the candidate before rollback and asserts it is inactive before
+restoring the saved database. The release builder includes Debian `preinst`.
+
+Local validation on this source: **377 Python qualification tests passed, 0
+failed, 1 skipped** across 25 modules; the focused 75-test package
+lifecycle/security suite passed separately (it is a subset, not 75 additional
+unique tests). `bash -n`, Python byte-compilation, `git diff --check`, and
+`rpmspec -P packaging/dux.spec` passed. No guest package install/upgrade/active
+rollback was run after these changes. The focused regression tests verify
+scriptlet wiring and lifecycle-driver assertions; they do not substitute for
+Debian/RPM execution in disposable VMs. The changes are uncommitted and the
+Rocky VM remains subject to its host-pressure admission guard.

@@ -232,7 +232,7 @@ cp packaging/deb/control "$STAGE/DEBIAN/control"
     exit 1
 }
 sed -i "s/^Version:.*/Version: ${DEB_VER}/" "$STAGE/DEBIAN/control"
-for s in postinst prerm postrm; do install -m0755 "packaging/deb/$s" "$STAGE/DEBIAN/$s"; done
+for s in preinst postinst prerm postrm; do install -m0755 "packaging/deb/$s" "$STAGE/DEBIAN/$s"; done
 install -m0755 "$BIN" "$STAGE/usr/bin/dux"
 install -m0755 packaging/secure-index-permissions.sh "$STAGE/usr/lib/dux/secure-index-permissions.sh"
 install -m0755 scripts/dux-backup-index.py "$STAGE/usr/lib/dux/dux-backup-index.py"

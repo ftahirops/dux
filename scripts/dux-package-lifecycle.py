@@ -744,6 +744,18 @@ def main():
                                                         "rollback_index_backup": rollback_backup,
                                                         "service": service_state()})
 
+        # Exercise rollback with the candidate actively using its database.
+        # Package scriptlets must stop it before the incoming legacy package
+        # changes ownership; the backup is restored only after it is confirmed
+        # inactive, then the legacy daemon is started explicitly.
+        progress("rollback_active_service_start")
+        command("systemctl", "start", "--no-block", "dux.service", check=False)
+        active_candidate = wait_service_active(
+            LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "rollback_active_candidate"
+        )
+        record("rollback_active_candidate", {"service_runtime_verified": active_candidate,
+                                               "service": service_state()})
+
         progress("rollback", target_version=old_version)
         install(args.kind, old_package, downgrade=True)
         rolled_back = installed_version(args.kind)
@@ -757,6 +769,10 @@ def main():
         }
         assert _sha256_file(rollback_binary) == old_payload_hash
         rollback_restore = None
+        assert rollback_service_after_install["active"] in {"inactive", "failed"}, {
+            "stage": "rollback_service_stopped_before_index_restore",
+            "service": rollback_service_after_install,
+        }
         if rollback_backup:
             # Rollback follows the documented procedure: restore a verified
             # pre-upgrade SQLite snapshot before starting the older executable.

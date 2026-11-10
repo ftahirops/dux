@@ -75,10 +75,17 @@ fi
 # This scriptlet runs before RPM applies ownership from %files. Stop the old
 # daemon before the state directory can change from root:dux to dux:dux.
 dux_upgrade_marker=/run/dux-rpm-upgrade-was-active
-rm -f "$dux_upgrade_marker"
+installed_evr=$(rpm -q --qf '%%{EPOCHNUM}:%%{VERSION}-%%{RELEASE}' dux 2>/dev/null || true)
+if [ -L "$dux_upgrade_marker" ] || { [ -f "$dux_upgrade_marker" ] \
+   && [ "$(cat "$dux_upgrade_marker")" != "$installed_evr" ]; }; then
+    # A marker left behind by rollback names the package that was stopped,
+    # while the installed package now has the older EVR. Do not let a later
+    # upgrade mistake that stale marker for an active service.
+    rm -f "$dux_upgrade_marker"
+fi
 if [ -d /run/systemd/system ] && systemctl is-active --quiet dux.service; then
     umask 077
-    : > "$dux_upgrade_marker"
+    rpm -q --qf '%%{EPOCHNUM}:%%{VERSION}-%%{RELEASE}\n' dux > "$dux_upgrade_marker"
     systemctl stop dux.service
 fi
 exit 0
@@ -133,6 +140,28 @@ exit 0
 %postun
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
+fi
+exit 0
+
+# Stop the currently installed daemon before an incoming package can apply
+# ownership from its %files list. This matters on rollback: the incoming older
+# package has no hardened %pre, and its %post changes the index back to
+# root:dux before try-restart. The marker is consumed by the new package's
+# %posttrans for normal upgrades. Legacy rollback packages cannot consume it,
+# so their service intentionally stays stopped until an operator restores a
+# compatible index snapshot and starts it.
+%preuntrans
+set -e
+# Do not stop the daemon on a final erase; only protect package replacement.
+if [ "$1" = "0" ]; then
+    exit 0
+fi
+dux_upgrade_marker=/run/dux-rpm-upgrade-was-active
+rm -f "$dux_upgrade_marker"
+if [ -d /run/systemd/system ] && systemctl is-active --quiet dux.service; then
+    umask 077
+    rpm -q --qf '%%{EPOCHNUM}:%%{VERSION}-%%{RELEASE}\n' dux > "$dux_upgrade_marker"
+    systemctl stop dux.service
 fi
 exit 0
 

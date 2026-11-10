@@ -1,0 +1,24 @@
+#!/bin/sh
+set -e
+
+# This runs before dpkg unpacks the incoming package and applies ownership
+# from its file list. Stop an active legacy daemon before /var/lib/dux can
+# change from root:dux to dux:dux. The postinst consumes the marker and
+# restores the prior active state after repairing permissions.
+case "$1" in
+    upgrade)
+        if [ -d /run/systemd/system ]; then
+            upgrade_marker=/run/dux-deb-upgrade-was-active
+            if [ -L "$upgrade_marker" ] || [ ! -f "$upgrade_marker" ]; then
+                rm -f "$upgrade_marker"
+            fi
+            if [ ! -e "$upgrade_marker" ] && systemctl is-active --quiet dux.service; then
+                umask 077
+                : > "$upgrade_marker"
+                systemctl stop dux.service
+            fi
+        fi
+        ;;
+esac
+
+exit 0

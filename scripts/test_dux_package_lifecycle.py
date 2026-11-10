@@ -347,8 +347,11 @@ class SecureIndexPermissionsHelperTests(unittest.TestCase):
 
     def test_deb_rpm_and_release_builder_install_the_same_helper(self):
         root = Path(__file__).resolve().parents[1]
+        deb_preinst = (root / "packaging/deb/preinst").read_text()
         deb = (root / "packaging/deb/postinst").read_text()
+        deb_prerm = (root / "packaging/deb/prerm").read_text()
         spec = (root / "packaging/dux.spec").read_text()
+        lifecycle = (root / "scripts/dux-package-lifecycle.py").read_text()
         builder = (root / "scripts/build-release.sh").read_text()
         self.assertIn("/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux dux", deb)
         self.assertIn("/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux dux", spec)
@@ -363,6 +366,14 @@ class SecureIndexPermissionsHelperTests(unittest.TestCase):
         deb_restart = deb.index('if [ "$was_active" = yes ]')
         self.assertLess(deb_stop, deb_migrate)
         self.assertLess(deb_migrate, deb_restart)
+        self.assertIn("systemctl stop dux.service", deb_preinst)
+        self.assertIn("/run/dux-deb-upgrade-was-active", deb_preinst)
+        self.assertIn('if [ -L "$upgrade_marker" ]', deb_preinst)
+        self.assertIn("for s in preinst postinst prerm postrm", builder)
+        deb_upgrade = deb_prerm.split('    upgrade)', 1)[1].split('    remove|deconfigure)', 1)[0]
+        self.assertIn("dpkg --compare-versions", deb_upgrade)
+        self.assertIn("systemctl stop dux.service", deb_upgrade)
+        self.assertIn("/run/dux-deb-upgrade-was-active", deb_upgrade)
         rpm_stop = spec.index("systemctl stop dux.service")
         rpm_migrate = spec.index("secure-index-permissions.sh /var/lib/dux dux dux")
         rpm_restart = spec.index('if [ "$was_active" = yes ]')
@@ -377,6 +388,13 @@ class SecureIndexPermissionsHelperTests(unittest.TestCase):
         self.assertIn("secure-index-permissions.sh /var/lib/dux dux dux", rpm_post)
         self.assertIn("/run/dux-rpm-upgrade-was-active", rpm_posttrans)
         self.assertIn('if [ "$was_active" = yes ]', rpm_posttrans)
+        rpm_preuntrans = spec.split("%preuntrans\n", 1)[1].split("\n%changelog", 1)[0]
+        self.assertIn("systemctl stop dux.service", rpm_preuntrans)
+        self.assertIn("rpm -q --qf", rpm_preuntrans)
+        self.assertIn("installed_evr", rpm_pre)
+        self.assertIn("stale marker", rpm_pre)
+        self.assertIn('rollback_service_after_install["active"] in {"inactive", "failed"}', lifecycle)
+        self.assertIn('progress("rollback_active_service_start")', lifecycle)
         self.assertIn("packaging/secure-index-permissions.sh", builder)
         self.assertIn("Depends: adduser, python3", (root / "packaging/deb/control").read_text())
         self.assertIn("Requires:       python3", spec)

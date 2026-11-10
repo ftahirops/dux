@@ -2,6 +2,31 @@
 set -e
 
 case "$1" in
+    upgrade)
+        if [ -d /run/systemd/system ]; then
+            upgrade_marker=/run/dux-deb-upgrade-was-active
+            rm -f "$upgrade_marker"
+            if systemctl is-active --quiet dux.service; then
+                installed_version=$(dpkg-query -W -f='${Version}' dux)
+                new_version=${2:-}
+                if [ -n "$new_version" ] \
+                    && dpkg --compare-versions "$new_version" lt "$installed_version"; then
+                    # Older package scriptlets may change state ownership before
+                    # try-restarting the old service. Stop first and leave the
+                    # rollback service stopped; the operator must restore a
+                    # compatible index snapshot before starting it again.
+                    echo "dux: stopping service before downgrade; restore the pre-upgrade index and start it manually after rollback."
+                    systemctl stop dux.service
+                else
+                    # The new postinst consumes this marker after migration and
+                    # restarts only a service that was active before upgrade.
+                    umask 077
+                    : > "$upgrade_marker"
+                    systemctl stop dux.service
+                fi
+            fi
+        fi
+        ;;
     remove|deconfigure)
         if [ -d /run/systemd/system ]; then
             systemctl stop dux.service dux-tunnel.service || true
