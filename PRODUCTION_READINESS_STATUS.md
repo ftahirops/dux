@@ -1,5 +1,29 @@
 # Production readiness status
 
+## r128 isolated daemon smoke and refreshed coverage — 2026-11-10 05:11 UTC
+
+Committed candidate `dd3573d` as package `0.6.3-128`. The static release
+pipeline passed; build manifest is clean, dependency audit reports zero known
+vulnerabilities, and binary/DEB/RPM/source/checksum verification passed. The
+all-feature suite passed **338 tests, 0 failed, 2 ignored**. Refreshed LLVM
+coverage for this revision is **72.68% lines, 71.50% regions, 76.24% functions**;
+branch counters are unavailable. Strict Clippy, formatting, and diff checks
+passed.
+
+The exact candidate binary also passed an isolated ext4 fanotify daemon smoke
+on VPS2 in a private mount namespace. Both event-apply and scan-first paths
+completed observations with zero coverage issues and passing accounting; the
+smoke reported zero drops, zero overflows, and no WAL guard warning. The
+installed r121 service stayed active with zero restarts. The fixture was only
+128 MiB, so it does not exercise the 256 MiB WAL threshold or establish that
+the r127 production-scale spike is fixed. A full clean-install lifecycle and
+large-root WAL sampling remain required. The prior local VM lifecycle attempt
+was refused by host admission while unrelated Go tests were active; admission
+was not bypassed.
+
+Detailed evidence: [`r128 fresh-index publication qualification`](docs/qualification/r128-fresh-publication-20261110/README.md).
+**Release decision remains: not production-ready.**
+
 ## Fresh-index WAL publication prototype — 2026-11-10 04:54 UTC
 
 Implemented a narrow candidate fix for r127's clean-install WAL spike. For a
