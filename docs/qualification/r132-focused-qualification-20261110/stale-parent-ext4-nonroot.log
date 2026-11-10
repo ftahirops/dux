@@ -1,0 +1,53 @@
+START=2026-11-10T19:53:30Z
+Running as unit: dux-r132-ext4-nonroot-qualification-nobody.service
+Uid:	65534	65534	65534	65534
+Gid:	65534	65534	65534	65534
+CapInh:	0000000000200004
+CapPrm:	0000000000200004
+CapEff:	0000000000200004
+CapBnd:	0000000000200004
+CapAmb:	0000000000200004
+
+running 1 test
+
+thread 'watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs' (3446539) panicked at src/watch.rs:9428:52:
+called `Result::unwrap()` on an `Err` value: Os { code: 13, kind: PermissionDenied, message: "Permission denied" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs ... FAILED
+
+failures:
+
+failures:
+    watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 342 filtered out; finished in 0.00s
+
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=101
+Service runtime: 3ms
+CPU time consumed: 3ms
+Memory peak: 1.4M
+Memory swap peak: 0B
+EXIT=101 END=2026-11-10T19:53:30Z
+RETRY_START=2026-11-10T19:53:51Z
+Running as unit: dux-r132-ext4-nonroot-qualification-retry.service; invocation ID: 601a77a81e7245ffa0c245c0577bba06
+Uid:	65534	65534	65534	65534
+Gid:	65534	65534	65534	65534
+CapInh:	0000000000200004
+CapPrm:	0000000000200004
+CapEff:	0000000000200004
+CapBnd:	0000000000200004
+CapAmb:	0000000000200004
+
+running 1 test
+test watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 342 filtered out; finished in 0.71s
+
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 730ms
+CPU time consumed: 63ms
+Memory peak: 512.0K
+Memory swap peak: 0B
+EXIT=0 END=2026-11-10T19:53:52Z

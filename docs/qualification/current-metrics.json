@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:49:00Z",
+  "snapshot_at_utc": "2026-11-10T19:55:00Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T19:48:43Z",
+    "observed_at_utc": "2026-11-10T19:54:07Z",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,25 +16,25 @@
     "kernel_overflows": 785,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 267472.144,
+    "behind_seconds": 267796.068,
     "service_user": "root",
-    "index_nodes": 1321104,
-    "index_bytes_on_disk": 3619057664,
+    "index_nodes": 1322398,
+    "index_bytes_on_disk": 3620618240,
     "wal_bytes": 134217728,
-    "pending_updates": 384,
+    "pending_updates": 3905,
     "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 457161,
+    "last_scan_age_seconds": 457485,
     "dirty_since_timestamp_seconds": 1794324009,
     "service_substate": "running",
-    "events_seen": 249883676,
-    "events_resolved": 145325291,
-    "updates_committed": 41615782,
+    "events_seen": 251388007,
+    "events_resolved": 146343926,
+    "updates_committed": 41800220,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
-    "index_bytes": 125509828608,
-    "evidence": "docs/qualification/vps1-live-status-20261110T1948Z.json"
+    "index_bytes": 126155083776,
+    "evidence": "docs/qualification/vps1-live-status-20261110T1954Z.json"
   },
   "disk": {
     "observed_at_utc": "2026-11-10T17:06:51Z",
@@ -101,12 +101,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:48:43Z",
+    "observed_at_utc": "2026-11-10T19:54:00Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 38568.3,
-    "operations": 874524,
-    "exact_check_samples": 871,
+    "elapsed_seconds": 38936.0,
+    "operations": 882000,
+    "exact_check_samples": 879,
     "completed_hourly_bursts": 10,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -116,15 +116,15 @@
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
     "observed_operations_per_second_elapsed": 22.675,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1948Z.json",
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1954Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.1487974537037037,
+    "coverage_duration_fraction": 0.15021604938271604,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "1c7fed90043fa293f8c5fc80701179649bfd5cb3874754f42330c0d48cb24dda",
+    "latest_checkpoint_sha256": "97be17e4612c45383c4a8b5bf4174ae35ef14583c0ee93eed1819bce8ec28b46",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -147,8 +147,8 @@
       "wal"
     ],
     "latest_live_status_query_at_utc": "2026-11-10T19:38:49Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T19:48:43Z",
-    "max_exact_convergence_ms_observed": 14012
+    "latest_full_checkpoint_at_utc": "2026-11-10T19:54:00Z",
+    "max_exact_convergence_ms_observed": 14377
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -660,7 +660,7 @@
     "evidence": "docs/qualification/host-admission-20261110T1931Z.json"
   },
   "focused_rust_qualification": {
-    "observed_at_utc": "2026-11-10T19:47:51Z",
+    "observed_at_utc": "2026-11-10T19:53:52Z",
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
     "test_binary_sha256": "01729c28f7ee9822c641531e33fdf24a0ad95963cacfcd3c9c06c97e78e90d27",
     "previously_ignored_cases_run": 2,
@@ -696,7 +696,26 @@
       "ext4 test uses real handles and constructed event records, not live fanotify delivery",
       "scale test asserts row count and stable database size, not independent per-path equality",
       "scale timings are debug-profile and not production estimates"
-    ]
+    ],
+    "nonroot_reexecution": {
+      "result": "passed",
+      "uid": 65534,
+      "gid": 65534,
+      "user": "nobody",
+      "no_new_privileges": true,
+      "capability_masks": {
+        "CapEff": "0x200004",
+        "CapPrm": "0x200004",
+        "CapBnd": "0x200004",
+        "CapInh": "0x200004",
+        "CapAmb": "0x200004"
+      },
+      "filesystem": "ext4",
+      "tmpdir": "/var/tmp",
+      "duration_seconds": 0.71,
+      "attempt_with_tmpdir_tmp": "setup_failed_permission_denied_because_tmp_is_0755",
+      "evidence": "docs/qualification/r132-focused-qualification-20261110/stale-parent-ext4-nonroot.log"
+    }
   },
   "latest_vps2_qualification_admission": {
     "host": "192.168.5.106",

@@ -11,8 +11,16 @@ The test binary SHA-256 was
 ## Stale-parent event classification on ext4
 
 `watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs`
-passed twice, with 0 failures. It ran as root using `/tmp`, whose filesystem
-was accepted by the test's ext4 and file-handle capability checks. It obtained
+passed with 0 failures in two root runs and one non-root run. Root runs used
+`/tmp`, whose filesystem was accepted by the test's ext4 and file-handle
+capability checks. The non-root run used a disposable systemd unit as UID/GID
+65534 (`nobody:nogroup`) with `NoNewPrivileges=yes` and exactly
+`CAP_SYS_ADMIN | CAP_DAC_READ_SEARCH` in the effective, permitted, bounding,
+inheritable, and ambient sets. `/tmp` on this host is mode 0755, so the first
+non-root setup could not create the fixture; rerunning with `/var/tmp` on ext4
+passed. The target `dux` account is not installed on this host, so this run
+checks the non-root/capability boundary rather than the package-created UID.
+It obtained
 real ext4 directory handles with `name_to_handle_at`, deleted test directories,
 and passed constructed DFID_NAME records to the event parser. It verified:
 
@@ -28,7 +36,13 @@ and passed constructed DFID_NAME records to the event parser. It verified:
 
 This exercises the classification logic with real ext4 handles; it does not
 exercise live fanotify delivery or kernel queue overflow. The command output is
-in [`stale-parent-ext4.log`](stale-parent-ext4.log).
+in [`stale-parent-ext4.log`](stale-parent-ext4.log) and
+[`stale-parent-ext4-nonroot.log`](stale-parent-ext4-nonroot.log). The first
+non-root attempt is retained in that log and is a fixture-permission setup
+error, not a Dux test failure. After all focused runs, the local production
+daemon remained active with four historical restarts; its overflow and dropped
+update counters were unchanged and its cgroup recorded no OOM events. This is
+a short post-test observation, not a soak result.
 
 ## 100k-entry unchanged reconciliation smoke
 
