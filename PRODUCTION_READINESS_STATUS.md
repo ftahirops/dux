@@ -1,5 +1,38 @@
 # Production readiness status
 
+## r131 initial-baseline read guard and runtime qualification — 2026-11-10 05:40 UTC
+
+Review found a regression in r129's read guard: checking whether the database
+was empty opened SQLite and created a `-wal` sidecar. r131 adds an
+`initial_baseline` bit to scan progress and checks it before opening SQLite.
+Legacy five-field progress records remain readable. A regression test now
+calls the reader during the publication handoff, after the daemon closes its
+connection, and verifies the reader fails with the progress message without
+creating SQLite sidecars. The progress-bit compatibility test also passes.
+
+The r131 all-features suite passed **340 tests, 0 failed, 2 ignored**; the
+coverage run passed the same tests. Coverage is **72.66% lines, 71.51%
+regions, 76.23% functions**; branch counters are unavailable. Strict Clippy,
+formatting, and diff checks passed. The release pipeline and artifact checks
+passed, and the audited lockfile has zero known vulnerabilities.
+
+The exact r131 binary passed isolated event-apply and scan-first fanotify
+smokes on VPS2. Accounting verification passed with zero coverage issues,
+drops, or overflow notices. Event-apply resolved 11/11 events. Scan-first
+published its hinted file after observation but correctly remained `dirty`
+pending the next scheduled observation. VPS2's installed service stayed
+active with zero restarts. This 128 MiB fixture does not test the 256 MiB WAL
+guard or production-scale behavior. Full lifecycle remains unrun because the
+disposable-VM admission guard sees unrelated Go build/test workloads; it was
+not bypassed. **Release decision remains: not production-ready.** Details:
+[`r131 qualification`](docs/qualification/r131-initial-baseline-read-guard-20261110/README.md).
+
+Disk sample: local root has 55 GiB free (185 GiB total); readiness artifacts
+use 1.3 GiB. VPS2 root has 3.8 GiB free (93 GiB total, 96% used); `/var/tmp`
+uses 5.3 GiB and system journal uses 4.1 GiB. These VPS2 paths contain old
+qualification/build material and retained logs and were not removed without
+retention review.
+
 ## r129 runtime qualification and refreshed test evidence — 2026-11-10 05:22 UTC
 
 Candidate `8a8b1e3` (`0.6.3-129`) adds a read guard for an initialized empty
