@@ -11,6 +11,7 @@ from pathlib import Path
 import signal
 import sqlite3
 import stat
+import subprocess
 import sys
 import shutil
 import tempfile
@@ -36,10 +37,10 @@ def _record_interrupt(signum: int, _frame: object) -> None:
     _INTERRUPTED_SIGNAL = signum
 
 
-def _check_interrupted() -> None:
+def _check_interrupted(operation: str = "backup") -> None:
     if _INTERRUPTED_SIGNAL is not None:
         name = signal.Signals(_INTERRUPTED_SIGNAL).name
-        raise InterruptedError(f"backup interrupted by {name}")
+        raise InterruptedError(f"{operation} interrupted by {name}")
 
 
 def _validate_dux_schema(connection: sqlite3.Connection, schema_version: int) -> None:
@@ -350,10 +351,225 @@ def create_backup(database: Path, output: Path) -> dict[str, object]:
             )
 
 
+def _require_daemon_stopped(database: Path) -> None:
+    """Refuse replacement while systemd or any process still has the index open."""
+    if os.geteuid() != 0:
+        raise PermissionError("index restore requires root to preserve database ownership")
+    if not Path("/run/systemd/system").is_dir():
+        raise RuntimeError("cannot verify Dux is stopped: systemd is not available")
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "dux.service"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError as error:
+        raise RuntimeError(f"cannot verify Dux service state: {error}") from error
+    state = result.stdout.strip()
+    if result.returncode == 0 and state == "active":
+        raise RuntimeError("dux.service is active; stop it before restoring the index")
+    if result.returncode != 3 or state not in {"inactive", "failed"}:
+        raise RuntimeError(
+            f"cannot prove dux.service is stopped (systemctl state={state!r}, "
+            f"exit={result.returncode})"
+        )
+    database = Path(database)
+    watched = set()
+    for candidate in (
+        database,
+        Path(f"{database}-wal"),
+        Path(f"{database}-shm"),
+        Path(f"{database}-journal"),
+    ):
+        try:
+            info = candidate.stat()
+        except FileNotFoundError:
+            continue
+        watched.add((info.st_dev, info.st_ino))
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        raise RuntimeError("cannot verify open index handles: /proc is unavailable")
+    for process in proc_root.iterdir():
+        if not process.name.isdecimal():
+            continue
+        fd_directory = process / "fd"
+        try:
+            descriptors = fd_directory.iterdir()
+        except OSError:
+            continue
+        try:
+            for descriptor in descriptors:
+                try:
+                    info = descriptor.stat()
+                except (FileNotFoundError, PermissionError, ProcessLookupError):
+                    continue
+                if (info.st_dev, info.st_ino) in watched:
+                    raise RuntimeError(
+                        f"index or SQLite sidecar is still open by pid {process.name}; "
+                        "stop that process before restoring"
+                    )
+        except FileNotFoundError:
+            continue
+
+
+def restore_backup(database: Path, backup: Path) -> dict[str, object]:
+    """Atomically restore a manifest-verified Dux backup while the daemon is stopped."""
+    backup = _validate_source(backup)
+    backup_info_before = backup.stat()
+    manifest_path = Path(f"{backup}.json")
+    try:
+        manifest_info = manifest_path.lstat()
+    except FileNotFoundError as error:
+        raise ValueError(f"backup manifest does not exist: {manifest_path}") from error
+    if (stat.S_ISLNK(manifest_info.st_mode) or not stat.S_ISREG(manifest_info.st_mode)
+            or manifest_info.st_uid != os.geteuid()
+            or manifest_info.st_mode & 0o077 or manifest_info.st_nlink != 1):
+        raise ValueError("backup manifest must be a private, singly linked regular file")
+    if (backup_info_before.st_uid != os.geteuid()
+            or backup_info_before.st_mode & 0o077
+            or backup_info_before.st_nlink != 1):
+        raise ValueError("backup must be owned by the current user, private, and singly linked")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read backup manifest: {error}") from error
+    if manifest.get("format") != 1 or manifest.get("quick_check") != "ok":
+        raise ValueError("unsupported or unverified backup manifest")
+    backup_hash = _sha256(backup)
+    if manifest.get("backup_sha256") != backup_hash:
+        raise ValueError("backup SHA-256 does not match its manifest")
+
+    requested_database = Path(os.path.abspath(database))
+    parent = requested_database.parent.resolve(strict=True)
+    if parent != requested_database.parent:
+        raise ValueError("database parent must not contain symlinks")
+    destination = parent / requested_database.name
+    if destination == backup:
+        raise ValueError("restore source and database destination must differ")
+    try:
+        destination_info = destination.lstat()
+    except FileNotFoundError as error:
+        raise ValueError(f"index database does not exist: {destination}") from error
+    if stat.S_ISLNK(destination_info.st_mode) or not stat.S_ISREG(destination_info.st_mode):
+        raise ValueError(f"index database must be a regular, non-symlink file: {destination}")
+    if destination_info.st_nlink != 1:
+        raise ValueError("index database must not have hard links during restore")
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(f"{destination}{suffix}")
+        try:
+            sidecar_info = sidecar.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(sidecar_info.st_mode) or not stat.S_ISREG(sidecar_info.st_mode):
+            raise ValueError(f"SQLite sidecar must be a regular, non-symlink file: {sidecar}")
+    _require_daemon_stopped(destination)
+
+    source_uri = f"file:{quote(os.fspath(backup), safe='/')}?mode=ro"
+    source_conn: sqlite3.Connection | None = None
+    target_conn: sqlite3.Connection | None = None
+    temporary: Path | None = None
+    try:
+        source_conn = sqlite3.connect(source_uri, uri=True, timeout=10.0)
+        source_conn.execute("PRAGMA busy_timeout=10000")
+        check = source_conn.execute("PRAGMA quick_check").fetchone()
+        if check != ("ok",):
+            raise ValueError(f"backup quick_check failed: {check!r}")
+        schema_row = source_conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()
+        if schema_row is None or not str(schema_row[0]).isdecimal():
+            raise ValueError("backup has missing or invalid meta.schema_version")
+        schema_version = int(schema_row[0])
+        if manifest.get("schema_version") != schema_version:
+            raise ValueError("backup schema version does not match its manifest")
+        _validate_dux_schema(source_conn, schema_version)
+        source_page_count = int(source_conn.execute("PRAGMA page_count").fetchone()[0])
+        source_page_size = int(source_conn.execute("PRAGMA page_size").fetchone()[0])
+        backup_bytes = source_page_count * source_page_size
+        _require_backup_space(parent, backup_bytes, "before restore")
+        _check_interrupted("restore")
+
+        fd, temporary = _exclusive_temp(parent, f".{destination.name}.restore.")
+        os.close(fd)
+        target_conn = sqlite3.connect(temporary, timeout=10.0)
+        target_conn.execute("PRAGMA busy_timeout=10000")
+        target_conn.execute("PRAGMA synchronous=FULL")
+
+        def progress(status: int, remaining: int, total: int) -> None:
+            _check_interrupted("restore")
+            if status not in (
+                sqlite3.SQLITE_OK,
+                sqlite3.SQLITE_BUSY,
+                sqlite3.SQLITE_LOCKED,
+                sqlite3.SQLITE_DONE,
+            ):
+                raise RuntimeError(
+                    f"SQLite restore failed (status={status}, remaining={remaining}, total={total})"
+                )
+            _require_backup_space(
+                parent, remaining * source_page_size, "during restore"
+            )
+
+        source_conn.backup(
+            target_conn, pages=BACKUP_PAGES, progress=progress, sleep=0.05
+        )
+        target_conn.execute("PRAGMA journal_mode=DELETE")
+        check = target_conn.execute("PRAGMA quick_check").fetchone()
+        if check != ("ok",):
+            raise RuntimeError(f"restored database quick_check failed: {check!r}")
+        _validate_dux_schema(target_conn, schema_version)
+        target_conn.close()
+        target_conn = None
+        source_conn.close()
+        source_conn = None
+        _check_interrupted("restore")
+
+        backup_info_after = backup.stat()
+        if (backup_info_before.st_dev, backup_info_before.st_ino,
+                backup_info_before.st_size, backup_info_before.st_mtime_ns) != (
+                backup_info_after.st_dev, backup_info_after.st_ino,
+                backup_info_after.st_size, backup_info_after.st_mtime_ns):
+            raise RuntimeError("backup path changed during restore")
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.chown(temporary, destination_info.st_uid, destination_info.st_gid)
+        os.chmod(temporary, stat.S_IMODE(destination_info.st_mode))
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = Path(f"{destination}{suffix}")
+            if sidecar.exists():
+                sidecar.unlink()
+        os.replace(temporary, destination)
+        temporary = None
+        _fsync_directory(parent)
+        return {
+            "database": os.fspath(destination),
+            "backup": os.fspath(backup),
+            "schema_version": schema_version,
+            "backup_sha256": backup_hash,
+            "database_sha256": _sha256(destination),
+            "quick_check": "ok",
+        }
+    finally:
+        if target_conn is not None:
+            target_conn.close()
+        if source_conn is not None:
+            source_conn.close()
+        if temporary is not None:
+            for candidate in (
+                temporary, Path(f"{temporary}-wal"), Path(f"{temporary}-shm"),
+                Path(f"{temporary}-journal"),
+            ):
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", type=Path, default=Path("/var/lib/dux/dux.db"))
-    parser.add_argument("--output", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--output", type=Path, help="create a verified backup at this path")
+    mode.add_argument("--restore-from", type=Path, help="restore a verified backup created by this tool")
     args = parser.parse_args()
     global _INTERRUPTED_SIGNAL
     _INTERRUPTED_SIGNAL = None
@@ -363,9 +579,14 @@ def main() -> int:
     }
     try:
         try:
-            result = create_backup(args.database, args.output)
+            if args.restore_from is not None:
+                result = restore_backup(args.database, args.restore_from)
+            else:
+                assert args.output is not None
+                result = create_backup(args.database, args.output)
         except (OSError, sqlite3.Error, RuntimeError, ValueError) as error:
-            print(f"dux backup: {error}", file=sys.stderr)
+            operation = "restore" if args.restore_from is not None else "backup"
+            print(f"dux {operation}: {error}", file=sys.stderr)
             return 1
     finally:
         for signum, handler in previous_handlers.items():

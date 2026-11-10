@@ -137,6 +137,13 @@ class ReleaseDebugArtifactTests(unittest.TestCase):
                 ": > \"$top/RPMS/x86_64/dux-$version-$release.x86_64.rpm\"\n"
             )
             (tools / "rpm2cpio").write_text("#!/bin/sh\nexit 0\n")
+            (tools / "rpm").write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' 'preinstall scriptlet (using /bin/sh):' "
+                "'systemctl stop dux.service' '/run/dux-rpm-upgrade-was-active' "
+                "'posttrans scriptlet (using /bin/sh):' "
+                "'systemctl start --no-block dux.service'\n"
+            )
             (tools / "cpio").write_text(
                 "#!/bin/sh\nmkdir -p ./usr/bin ./usr/lib/dux\n"
                 "cp \"$FAKE_RPM_BINARY\" ./usr/bin/dux\n"

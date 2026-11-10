@@ -745,9 +745,6 @@ def main():
                                                         "service": service_state()})
 
         # Exercise rollback with the candidate actively using its database.
-        # Package scriptlets must stop it before the incoming legacy package
-        # changes ownership; the backup is restored only after it is confirmed
-        # inactive, then the legacy daemon is started explicitly.
         progress("rollback_active_service_start")
         command("systemctl", "start", "--no-block", "dux.service", check=False)
         active_candidate = wait_service_active(
@@ -755,6 +752,15 @@ def main():
         )
         record("rollback_active_candidate", {"service_runtime_verified": active_candidate,
                                                "service": service_state()})
+
+        rpm_rollback_pre_stop = None
+        if args.kind == "rpm":
+            # Rollback to a legacy RPM cannot rely on a hook in the incoming
+            # package. Stop explicitly before its %files metadata can restore
+            # the old state-directory ownership.
+            command("systemctl", "stop", "dux.service")
+            rpm_rollback_pre_stop = service_state()
+            assert rpm_rollback_pre_stop["active"] in {"inactive", "failed"}, rpm_rollback_pre_stop
 
         progress("rollback", target_version=old_version)
         install(args.kind, old_package, downgrade=True)
@@ -793,7 +799,23 @@ def main():
                              "index_restore": rollback_restore,
                              "service_after_install": rollback_service_after_install,
                              "service_runtime_verified": legacy_rollback_service,
+                             "operator_pre_stopped_for_rpm_rollback": rpm_rollback_pre_stop,
                              "legacy_package_service_behavior": legacy_rollback_service})
+
+        # Prove an active service survives a forward upgrade. The incoming
+        # hardened package has a pre-install hook on both package families.
+        progress("active_forward_upgrade", target_version=upgraded)
+        install(args.kind, new_package)
+        assert installed_version(args.kind) == upgraded
+        assert _sha256_file(Path("/usr/bin/dux")) == new_payload_hash
+        active_forward_upgrade = wait_service_active(
+            LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "active_forward_upgrade"
+        )
+        record("active_forward_upgrade", {"version": upgraded,
+                                           "binary_sha256": new_payload_hash,
+                                           "service_runtime_verified": active_forward_upgrade,
+                                           "service": service_state()})
+
         # Legacy releases may enable/start the service from their install
         # scriptlet during downgrade. Normalize that test-only state before
         # checking that the new package preserves an operator's disabled choice.

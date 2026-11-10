@@ -388,13 +388,19 @@ class SecureIndexPermissionsHelperTests(unittest.TestCase):
         self.assertIn("secure-index-permissions.sh /var/lib/dux dux dux", rpm_post)
         self.assertIn("/run/dux-rpm-upgrade-was-active", rpm_posttrans)
         self.assertIn('if [ "$was_active" = yes ]', rpm_posttrans)
-        rpm_preuntrans = spec.split("%preuntrans\n", 1)[1].split("\n%changelog", 1)[0]
-        self.assertIn("systemctl stop dux.service", rpm_preuntrans)
-        self.assertIn("rpm -q --qf", rpm_preuntrans)
+        self.assertNotIn("%preuntrans", spec)
         self.assertIn("installed_evr", rpm_pre)
         self.assertIn("stale marker", rpm_pre)
         self.assertIn('rollback_service_after_install["active"] in {"inactive", "failed"}', lifecycle)
         self.assertIn('progress("rollback_active_service_start")', lifecycle)
+        self.assertIn('if args.kind == "rpm":', lifecycle)
+        self.assertIn('command("systemctl", "stop", "dux.service")', lifecycle)
+        self.assertIn('progress("active_forward_upgrade",', lifecycle)
+        rollback_test = lifecycle.split('rpm_rollback_pre_stop = None', 1)[1]
+        self.assertLess(
+            rollback_test.index('command("systemctl", "stop", "dux.service")'),
+            rollback_test.index('install(args.kind, old_package, downgrade=True)'),
+        )
         self.assertIn("packaging/secure-index-permissions.sh", builder)
         self.assertIn("Depends: adduser, python3", (root / "packaging/deb/control").read_text())
         self.assertIn("Requires:       python3", spec)
@@ -402,6 +408,8 @@ class SecureIndexPermissionsHelperTests(unittest.TestCase):
         self.assertIn("scripts/dux-backup-index.py", builder)
         self.assertIn("deb_payload_backup_helper_sha256", builder)
         self.assertIn("rpm_payload_backup_helper_sha256", builder)
+        self.assertIn("rpm -qp --scripts", builder)
+        self.assertIn("%preuntrans", builder)
 
 
 class EffectiveUnitPolicyTests(unittest.TestCase):

@@ -266,6 +266,30 @@ RPM_ARTIFACT=$(find "$TOP/RPMS" -name '*.rpm' -print -quit)
 RPM_PAYLOAD=$TMPROOT/rpm-payload
 mkdir -p "$RPM_PAYLOAD"
 (cd "$RPM_PAYLOAD" && rpm2cpio "$RPM_ARTIFACT" | cpio -id --quiet ./usr/bin/dux ./usr/lib/dux/dux-backup-index.py)
+# Inspect the built RPM, not only the spec source: unsupported scriptlet
+# directives can be silently absorbed into the preceding script body.
+RPM_SCRIPTLETS=$TMPROOT/rpm-scriptlets.txt
+rpm -qp --scripts "$RPM_ARTIFACT" > "$RPM_SCRIPTLETS"
+python3 - "$RPM_SCRIPTLETS" <<'PY'
+import pathlib
+import sys
+
+scripts = pathlib.Path(sys.argv[1]).read_text()
+if "preinstall scriptlet" not in scripts or "posttrans scriptlet" not in scripts:
+    raise SystemExit("ERROR: RPM artifact is missing required install transaction scriptlets")
+preinstall = scripts.split("preinstall scriptlet", 1)[1].split(
+    "\npostinstall scriptlet", 1
+)[0]
+posttrans = scripts.split("posttrans scriptlet", 1)[1]
+if "systemctl stop dux.service" not in preinstall:
+    raise SystemExit("ERROR: built RPM %pre does not stop an active daemon before unpack")
+if "/run/dux-rpm-upgrade-was-active" not in preinstall:
+    raise SystemExit("ERROR: built RPM %pre does not preserve prior active state")
+if "systemctl start --no-block dux.service" not in posttrans:
+    raise SystemExit("ERROR: built RPM %posttrans does not restore an active service")
+if "%preuntrans" in scripts:
+    raise SystemExit("ERROR: unsupported %preuntrans text leaked into an RPM scriptlet")
+PY
 
 install -m0755 "$BIN" "$STAGING_OUT/dux-${VER}-x86_64-linux-static"
 python3 - "$VER" "$PKGREL" "$BIN" "$STAGING_OUT" "$SOURCE_TREE_SHA256" "$DEB_PAYLOAD/usr/bin/dux" "$RPM_PAYLOAD/usr/bin/dux" "$CARGO_AUDITABLE_VERSION" "$CARGO_AUDIT_VERSION" "$LOCK_AUDIT_REPORT" "$BINARY_AUDIT_LOG" "$DEBUG_ARTIFACT" "$DEB_PAYLOAD/usr/lib/dux/dux-backup-index.py" "$RPM_PAYLOAD/usr/lib/dux/dux-backup-index.py" scripts/dux-backup-index.py <<'PY'

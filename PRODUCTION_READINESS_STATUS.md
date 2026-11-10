@@ -4500,3 +4500,47 @@ Shell syntax, Python byte-compilation, RPM spec expansion, and `git diff
 --check` passed. These results are included in commit `04005b7`, pushed to
 `hardening/stale-dfid-classification-review`. They still do not qualify the
 active package-upgrade/rollback path in a disposable guest.
+
+## Correction and refreshed local package evidence — 2026-11-10 13:51 UTC
+
+The 13:22 entry above incorrectly stated that RPM `%preuntrans` stopped the
+service during transaction changes. Artifact inspection showed local RPM
+4.18.2 does not register that tag: the text was embedded in `%preun`. The spec
+now removes it. The release builder queries the built RPM with `rpm -qp
+--scripts` and rejects missing registered `%pre`/`%posttrans` hooks or a
+stray literal `%preuntrans`. This is artifact-level validation, not a Rocky
+guests lifecycle pass. RPM rollback explicitly stops the service before
+downgrade; Debian rollback stops it through `prerm`.
+
+The packaged backup helper now supports `--restore-from`. It verifies backup
+manifest/hash, Dux schema and SQLite integrity, checks service/process handles
+are inactive, reserves space, and restores through a same-directory temporary
+database with atomic replacement. Four regression cases cover successful
+restore, active-service refusal, tamper rejection without database mutation,
+and CLI wiring. A live-host safety probe verified restore is refused while
+`dux.service` is active and the target database hash stays unchanged; the
+production database itself was not modified.
+
+The full Python discovery was rerun after the final helper change:
+**381 tests ran, 380 passed, 1 skipped, 0 failed**. Focused runs were backup/
+restore **19 passed**, package lifecycle **75 passed**, and release builder
+**14 passed**; these suites overlap with the full count. Shell syntax,
+Python compilation, RPM spec preprocessing and `git diff --check` passed
+before the last helper change; backup and full Python suites passed after it.
+No line/branch coverage measurement was run for this change.
+
+Unsigned test-only package fixtures are documented at
+[`package-active-rollback-r136-20261110`](docs/qualification/package-active-rollback-r136-20261110/).
+They pair package revision 136 scripts and helper with the unchanged r132
+binary. Their hashes are in `manifest.json`. They have not completed a DEB/RPM
+transaction in Ubuntu/Rocky VMs. The guarded Ubuntu boot did not reach a ready
+guest; Rocky admission refused while host Go workloads were present. No package
+commands ran in either attempt. The RPM stop limitation is captured in the
+[rollback runbook](docs/operations/package-rollback.md).
+
+The r132 72-hour soak is still not qualified. The latest local qualification
+snapshot marks guest progress stale and lists missing duration, exactness,
+reader, crash/restart, integrity, and final-check evidence. A fresh read-only
+SSH attempt from this workspace failed public-key authentication, so current
+VPS2/VPS1 service state could not be independently refreshed in this entry.
+Production rollout remains NOT READY.

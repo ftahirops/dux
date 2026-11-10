@@ -143,28 +143,6 @@ if [ -d /run/systemd/system ]; then
 fi
 exit 0
 
-# Stop the currently installed daemon before an incoming package can apply
-# ownership from its %files list. This matters on rollback: the incoming older
-# package has no hardened %pre, and its %post changes the index back to
-# root:dux before try-restart. The marker is consumed by the new package's
-# %posttrans for normal upgrades. Legacy rollback packages cannot consume it,
-# so their service intentionally stays stopped until an operator restores a
-# compatible index snapshot and starts it.
-%preuntrans
-set -e
-# Do not stop the daemon on a final erase; only protect package replacement.
-if [ "$1" = "0" ]; then
-    exit 0
-fi
-dux_upgrade_marker=/run/dux-rpm-upgrade-was-active
-rm -f "$dux_upgrade_marker"
-if [ -d /run/systemd/system ] && systemctl is-active --quiet dux.service; then
-    umask 077
-    rpm -q --qf '%%{EPOCHNUM}:%%{VERSION}-%%{RELEASE}\n' dux > "$dux_upgrade_marker"
-    systemctl stop dux.service
-fi
-exit 0
-
 %changelog
 * Fri Oct 23 2026 dux maintainers <root@localhost> - 0.6.3-8
 - Verify full directory accounting before reporting reconciliation caught up

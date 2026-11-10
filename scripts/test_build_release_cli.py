@@ -584,6 +584,13 @@ class BuildReleaseCliTests(unittest.TestCase):
                 f": > \"$TOP/RPMS/x86_64/dux-{version}-17.x86_64.rpm\"\n"
             )
             (fake_tools / "rpm2cpio").write_text("#!/bin/sh\ncat /dev/null\n")
+            (fake_tools / "rpm").write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' 'preinstall scriptlet (using /bin/sh):' "
+                "'systemctl stop dux.service' '/run/dux-rpm-upgrade-was-active' "
+                "'posttrans scriptlet (using /bin/sh):' "
+                "'systemctl start --no-block dux.service'\n"
+            )
             (fake_tools / "cpio").write_text(
                 "#!/bin/bash\nmkdir -p ./usr/bin ./usr/lib/dux\n"
                 "cp \"$DUX_RELEASE_BINARY\" ./usr/bin/dux\n"

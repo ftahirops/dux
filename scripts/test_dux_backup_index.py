@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import importlib.util
 import json
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import signal
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -110,6 +111,88 @@ class DuxBackupIndexTests(unittest.TestCase):
             finally:
                 backup.close()
                 writer.close()
+
+    def test_restore_replaces_index_atomically_from_verified_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "dux.db"
+            writer = self.make_index(database)
+            writer.close()
+            original = database.stat()
+            backup = root / "pre-upgrade.sqlite"
+            backup_result = BACKUP.create_backup(database, backup)
+            writer = sqlite3.connect(database)
+            writer.execute("UPDATE payload SET value='post-upgrade'")
+            writer.commit()
+            writer.close()
+
+            with mock.patch.object(BACKUP, "_require_daemon_stopped"):
+                restored = BACKUP.restore_backup(database, backup)
+
+            self.assertEqual(restored["backup_sha256"], backup_result["backup_sha256"])
+            self.assertEqual(restored["quick_check"], "ok")
+            self.assertEqual(database.stat().st_uid, original.st_uid)
+            self.assertEqual(database.stat().st_gid, original.st_gid)
+            self.assertEqual(database.stat().st_mode & 0o777, original.st_mode & 0o777)
+            check = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+            try:
+                self.assertEqual(check.execute("PRAGMA quick_check").fetchone(), ("ok",))
+                self.assertEqual(
+                    check.execute("SELECT value FROM payload").fetchall(),
+                    [("committed",)],
+                )
+            finally:
+                check.close()
+
+    def test_restore_rejects_active_service_before_touching_database(self):
+        database = Path("/tmp/test-dux-active.db")
+        active = subprocess.CompletedProcess(
+            ["systemctl", "is-active", "dux.service"], 0, "active\n", ""
+        )
+        with (
+            mock.patch.object(BACKUP.Path, "is_dir", return_value=True),
+            mock.patch.object(BACKUP.subprocess, "run", return_value=active),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop it before restoring"):
+                BACKUP._require_daemon_stopped(database)
+
+    def test_restore_rejects_backup_hash_mismatch_without_changing_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "dux.db"
+            writer = self.make_index(database)
+            writer.close()
+            backup = root / "pre-upgrade.sqlite"
+            BACKUP.create_backup(database, backup)
+            original_hash = BACKUP._sha256(database)
+            with backup.open("ab") as stream:
+                stream.write(b"tampered")
+
+            with mock.patch.object(BACKUP, "_require_daemon_stopped"):
+                with self.assertRaisesRegex(ValueError, "does not match its manifest"):
+                    BACKUP.restore_backup(database, backup)
+
+            self.assertEqual(BACKUP._sha256(database), original_hash)
+
+    def test_restore_cli_uses_verified_restore_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "dux.db"
+            writer = self.make_index(database)
+            writer.close()
+            backup = root / "pre-upgrade.sqlite"
+            BACKUP.create_backup(database, backup)
+            with (
+                mock.patch.object(sys, "argv", [
+                    "dux-backup-index.py", "--database", str(database),
+                    "--restore-from", str(backup),
+                ]),
+                mock.patch.object(BACKUP, "_require_daemon_stopped"),
+                redirect_stderr(io.StringIO()),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(BACKUP.main(), 0)
+            self.assertEqual(json.loads(stdout.getvalue())["quick_check"], "ok")
 
     def test_refuses_to_overwrite_backup_or_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
