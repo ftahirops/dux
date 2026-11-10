@@ -1,0 +1,14 @@
+{
+  "observed_at_utc": "2026-11-10T23:47:45Z",
+  "qualification_host": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 128972845056,
+    "root_available_bytes": 60288237568,
+    "root_use_percent": 69,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3751624704,
+    "dev_shm_available_bytes": 9977589760,
+    "dev_shm_use_percent": 28
+  },
+  "method": "read-only df -B1"
+}

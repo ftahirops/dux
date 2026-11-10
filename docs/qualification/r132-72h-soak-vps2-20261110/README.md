@@ -263,3 +263,25 @@ The remote progress file (176,691 bytes) had SHA-256
 `0917eb7e7e1320e2e7cd9b37d96ad9b88ee5f6521b6570151d6bcddb808fd46f` at the
 checkpoint. The machine-readable summary is
 [`soak-progress-20261110T2340Z.json`](soak-progress-20261110T2340Z.json).
+
+
+### Live checkpoint — 2026-11-10 23:47 UTC
+
+The exact-hash candidate remains active on VPS2 with zero supervisor restarts.
+At 23:46:25 UTC, the progress file showed **52,894.8 seconds** elapsed
+(14h41m35s; **20.41%**), **1,178,091 operations**, **1,175 exactness
+samples**, 14 mutation bursts, two held-reader/WAL-reclaim passes, and one
+controlled crash/recovery. Sampled convergence was **3.524 s mean, 2.958 s
+median, 8.105 s p95, and 17.393 s maximum**. Whole-run rate was **22.266
+operations/s**, below 25/s because synchronous reconciliation/accounting checks
+pause the producer. This does not qualify sustained producer capacity. Final
+exactness/history and SQLite integrity remain pending, as do four scheduled
+crash checkpoints.
+
+VPS2 remains at 89% root use with 10.1 GiB free and no KVM device. The active
+soak's 706 MiB tmpfs workspace and 6.4 MiB persistent folder do not explain
+the system's 4.1 GiB journal and 2.4 GiB `/var/tmp`; no cleanup was done because
+those retained paths have not been shown to be disposable copies. The
+qualification host admission guard also refused the fault matrix because Go
+build/test and Node Vitest workloads were active. Evidence summary:
+[`soak-progress-20261110T2346Z.json`](soak-progress-20261110T2346Z.json).

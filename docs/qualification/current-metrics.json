@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T23:44Z",
+  "snapshot_at_utc": "2026-11-10T23:48Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T23:43:48Z",
+    "observed_at_utc": "2026-11-10T23:47:45+00:00",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,25 +16,25 @@
     "kernel_overflows": 887,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 281564.837,
+    "behind_seconds": 281813.73,
     "service_user": "root",
-    "index_nodes": 1316519,
-    "index_bytes_on_disk": 3719430144,
+    "index_nodes": 1314692,
+    "index_bytes_on_disk": 3720048640,
     "wal_bytes": 134217728,
-    "pending_updates": 3,
+    "pending_updates": 68,
     "dirty_reason": "fanotify queue overflow",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 471254,
+    "last_scan_age_seconds": 471503,
     "dirty_since_timestamp_seconds": 1794349023,
     "service_substate": "running",
-    "events_seen": 277195430,
-    "events_resolved": 161740875,
-    "updates_committed": 45196835,
+    "events_seen": 277251802,
+    "events_resolved": 161786634,
+    "updates_committed": 45213263,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
-    "index_bytes": 124761382912,
-    "evidence": "docs/qualification/vps1-live-status-20261110T2343Z.json",
+    "index_bytes": 125833678848,
+    "evidence": "docs/qualification/vps1-live-status-20261110T2347Z.json",
     "dirty": true,
     "paused": false,
     "installed_version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
@@ -121,10 +121,10 @@
       "dropped_updates": 0
     },
     "deltas_since_2026_11_10T2334Z": {
-      "pending_updates": -7209,
-      "events_seen": 182110,
-      "events_resolved": 137403,
-      "updates_committed": 65459,
+      "pending_updates": -7144,
+      "events_seen": 238482,
+      "events_resolved": 183162,
+      "updates_committed": 81887,
       "kernel_overflows": 0,
       "dropped_updates": 0
     }
@@ -145,36 +145,36 @@
     "dev_shm_size_gib": 3.3,
     "var_lib_dux_bytes": 3799470080,
     "current_root_snapshot": {
-      "observed_at_utc": "2026-11-10T23:43:48Z",
+      "observed_at_utc": "2026-11-10T23:47:45Z",
       "root_total_bytes": 198092431360,
-      "root_used_bytes": 127856345088,
-      "root_available_bytes": 61404737536,
-      "root_use_percent": 68,
-      "evidence": "docs/qualification/host-capacity-20261110T2343Z.json"
+      "root_used_bytes": 128972845056,
+      "root_available_bytes": 60288237568,
+      "root_use_percent": 69,
+      "evidence": "docs/qualification/host-capacity-20261110T2347Z.json"
     },
     "vps2_current_snapshot": {
-      "observed_at_utc": "2026-11-10T23:40Z",
-      "root_total_bytes": 99012476928,
-      "root_used_bytes": 83599192064,
-      "root_available_bytes": 10833534976,
+      "root_size_bytes": 99012476928,
+      "root_used_bytes": 83635527680,
+      "root_available_bytes": 10797199360,
       "root_use_percent": 89,
-      "dev_shm_total_bytes": 3221225472,
-      "dev_shm_used_bytes": 1034874880,
-      "dev_shm_available_bytes": 2186350592,
-      "journalctl_disk_usage_human": "4.0G",
+      "dev_shm_size_bytes": 3221225472,
+      "dev_shm_used_bytes": 1034903552,
+      "dev_shm_available_bytes": 2186321920,
+      "soak_tmpfs_workspace_human": "706M",
+      "journalctl_disk_usage": "4.0G",
       "var_log_journal_human": "4.1G",
       "var_tmp_human": "2.4G",
-      "active_soak_persistent_dir_human": "6.4M",
-      "active_soak_tmpfs_workspace_human": "706M",
-      "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2340Z.json"
+      "kvm_device_present": false,
+      "observed_at_utc": "2026-11-10T23:46Z",
+      "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2346Z.json"
     }
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T23:43Z",
+    "observed_at_utc": "2026-11-10T23:47Z",
     "vm_started": false,
     "decision": "blocked_no_vm_started",
-    "reason": "active Go compiler, go test, and go vet workloads",
-    "evidence": "docs/qualification/vm-admission-20261110T2343Z.json"
+    "reason": "active Go build/test and Node Vitest workloads; load1 and CPU PSI over limits",
+    "evidence": "docs/qualification/vm-admission-20261110T2347Z.json"
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
@@ -204,12 +204,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T23:40:12Z",
+    "observed_at_utc": "2026-11-10T23:47:14Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 52471.7,
-    "operations": 1168716,
-    "exact_check_samples": 1165,
+    "elapsed_seconds": 52894.8,
+    "operations": 1178091,
+    "exact_check_samples": 1175,
     "completed_hourly_bursts": 14,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -218,16 +218,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.274,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2340Z.json",
+    "observed_operations_per_second_elapsed": 22.272,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2346Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.20243711419753085,
+    "coverage_duration_fraction": 0.20406944444444444,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "0917eb7e7e1320e2e7cd9b37d96ad9b88ee5f6521b6570151d6bcddb808fd46f",
+    "latest_checkpoint_sha256": "9d3d3104dd345fab4a3e69fc19fbea8bd38ed9d3b4891a39504b7158339d1ec3",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -249,10 +249,10 @@
       "startup",
       "wal"
     ],
-    "latest_live_status_query_at_utc": "2026-11-10T23:40Z",
+    "latest_live_status_query_at_utc": "2026-11-10T23:47Z",
     "latest_full_checkpoint_at_utc": "2026-11-10T20:12:09Z",
     "max_exact_convergence_ms_observed": 17393,
-    "latest_checkpoint_at_utc": "2026-11-10T23:40Z",
+    "latest_checkpoint_at_utc": "2026-11-10T23:47Z",
     "controlled_crash_recovery_scheduled_at_elapsed_seconds": 43200,
     "exactness_protocol": "Each 1000-operation exactness sample requests a full scan-first observation via SIGHUP, waits for accounting verification, then compares fixture and index.",
     "latest_live_checkpoint_remote_path": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json",
@@ -335,6 +335,13 @@
       "journalctl_disk_usage": "4.0G",
       "var_tmp_human": "2.4G",
       "kvm_present": false
+    },
+    "sampled_exact_convergence_profile_at_2026_11_10T2347Z": {
+      "sample_count": 1175,
+      "mean_ms": 3524.066,
+      "median_ms": 2958,
+      "p95_nearest_rank_ms": 8105,
+      "max_ms": 17393
     }
   },
   "package_lifecycle": {
