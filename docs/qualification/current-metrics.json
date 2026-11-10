@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:55:00Z",
+  "snapshot_at_utc": "2026-11-10T19:59:24Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -740,5 +740,17 @@
     "fault_matrix_started": false,
     "decision": "do not start guarded VM: VPS2 is under sustained CPU pressure with root disk at 91 percent; fault matrix requires a guarded disposable VM",
     "method": "read-only /proc/pressure/cpu, /proc/loadavg, free -b, df -B1 /, ps"
+  },
+  "systemd_mount_namespace_observation": {
+    "observed_at_utc": "2026-11-10T19:59:24Z",
+    "service_properties": "MainPID=1073891\nProtectKernelTunables=yes\nProtectControlGroups=yes\nPrivateMounts=no",
+    "service_pid": 1073891,
+    "service_mount_namespace": "mnt:[4026532520]",
+    "host_mount_namespace": "mnt:[4026531841]",
+    "transient_probe_result": "mnt:[4026532817]",
+    "interpretation": "ProtectKernelTunables and ProtectControlGroups produce a private mount namespace in a transient probe; the installed Dux process is also in a namespace distinct from the host despite PrivateMounts=no. The daemon marks FAN_MARK_FILESYSTEM. Whether that mark observes host-namespace changes has not been tested here.",
+    "source_mark_flag": "FAN_MARK_FILESYSTEM",
+    "source_location": "src/watch.rs:4762",
+    "qualification_status": "open runtime validation; no product defect concluded"
   }
 }

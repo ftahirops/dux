@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 19:55 UTC**. VPS1 was rechecked at 19:54 UTC and remains on the old event-apply
+**2026-11-10 19:59 UTC**. VPS1 was rechecked at 19:54 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -55,6 +55,7 @@ Evidence: [latest scheduled scan](docs/qualification/vps2-reconciliation-cycle-2
 | Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
 | Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:50 VPS2 admission showed CPU PSI some avg10 20.58%, load1 7.21, root disk 91% used, and ClickHouse at 90.8% CPU. No VM was started. See [latest VPS2 admission sample](docs/qualification/vm-admission-20261110T1950Z.json). |
 | Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
+| Full systemd sandbox | Package unit syntax and bounded non-root runtime checks passed, but the full packaged sandbox is not qualified. The running daemon and a transient unit using `ProtectKernelTunables`/`ProtectControlGroups` occupy mount namespaces distinct from the host; Dux uses `FAN_MARK_FILESYSTEM`. | Verify a controlled host-namespace create/delete event reaches Dux under the exact packaged unit capabilities, syscall filters, and protection properties. No defect is concluded until this check runs. See [namespace observation](docs/qualification/systemd-hardening-20261110/mount-namespace-observation-20261110T1959Z.json). |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |
 
 The full Rust and Python runs plus the two targeted Rust cases cover **723 distinct passing cases, 0 failures, and 1 skipped**. The ordinary Rust full-run output still lists its two manual cases as ignored; both were separately executed and passed. See the [focused qualification report](docs/qualification/r132-focused-qualification-20261110/README.md). The 75 package lifecycle/security tests

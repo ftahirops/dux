@@ -1,0 +1,12 @@
+{
+  "observed_at_utc": "2026-11-10T19:59:24Z",
+  "service_properties": "MainPID=1073891\nProtectKernelTunables=yes\nProtectControlGroups=yes\nPrivateMounts=no",
+  "service_pid": 1073891,
+  "service_mount_namespace": "mnt:[4026532520]",
+  "host_mount_namespace": "mnt:[4026531841]",
+  "transient_probe_result": "mnt:[4026532817]",
+  "interpretation": "ProtectKernelTunables and ProtectControlGroups produce a private mount namespace in a transient probe; the installed Dux process is also in a namespace distinct from the host despite PrivateMounts=no. The daemon marks FAN_MARK_FILESYSTEM. Whether that mark observes host-namespace changes has not been tested here.",
+  "source_mark_flag": "FAN_MARK_FILESYSTEM",
+  "source_location": "src/watch.rs:4762",
+  "qualification_status": "open runtime validation; no product defect concluded"
+}

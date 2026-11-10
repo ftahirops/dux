@@ -39,3 +39,23 @@ dedicated `dux` UID. Its source checks and limits are recorded in
 [`nonroot-service-followup.md`](nonroot-service-followup.md). This change is
 not yet built into an authenticated release or runtime-qualified; production
 still runs the root-owned installed unit described above.
+
+## Mount-namespace behavior to qualify — 2026-11-10 19:59 UTC
+
+A read-only check found that the running service's mount namespace differs from
+the host's (`mnt:[4026532520]` vs. `mnt:[4026531841]`). The installed unit has
+`ProtectKernelTunables=yes` and `ProtectControlGroups=yes`, while
+`PrivateMounts=no`. A transient `systemd-run` probe with those two protection
+properties also entered a distinct mount namespace (`mnt:[4026532817]`). The
+Dux watcher currently uses `FAN_MARK_FILESYSTEM` at `src/watch.rs:4762`.
+
+This observation does **not** establish a Dux defect: filesystem marks may
+have different visibility semantics from mount marks, and no controlled
+host-namespace create/delete event was sent and checked against a Dux instance
+in the packaged sandbox. It does show that `PrivateMounts=no` alone is not
+sufficient evidence that the process shares the host mount namespace. Before
+qualifying the full packaged unit, run a controlled cross-namespace event test
+with the actual binary, capabilities, syscall filter, and protection settings.
+Do not remove hardening properties based on this observation alone.
+
+Machine-readable capture: [`mount-namespace-observation-20261110T1959Z.json`](mount-namespace-observation-20261110T1959Z.json).
