@@ -5294,3 +5294,67 @@ held-reader/WAL-reclaim phase, zero worker restarts, and zero controlled crashes
 Final exactness/history/SQLite checks remain pending; this is 11.1% of the
 72-hour duration. The latest full raw checkpoint is still the 17:00 UTC file;
 the 17:06 values above are from a direct live status query.
+
+
+## Thirteenth verified observation and 17:16 soak checkpoint — 2026-11-10 17:18 UTC
+
+The VPS2 scan-first service started its thirteenth scheduled observation at
+**17:08:54** and completed the traversal at **17:15:27** (6m33s). It covered
+1,743,558 files and 213,882 directories, staging 1,957,440 path instances.
+Unique allocation was 82,984,394,752 bytes (77.29 GiB); the observation
+reported zero coverage issues, zero vanished/revalidated/unresolved reuse
+paths, and zero pending paths to replay. Independent accounting passed at
+**17:16:36** in 68,813 ms. The completion-to-completion gap from 16:59:37 was
+**15m50s**, 50 seconds beyond the 15-minute target. Across twelve measured
+completion intervals, six now exceed 15 minutes. Per-path maximum age is not
+stored or measured, so this does not establish a per-path freshness bound.
+
+At 17:18 UTC, the service was active with zero restarts, pending updates,
+kernel overflows, or dropped updates. It remained dirty because filesystem
+hints arrived after the completed observation and await the next full walk.
+The last completed observation was 220 seconds old. Raw status:
+[`vps2-live-status-20261110T1718Z.json`](docs/qualification/vps2-live-status-20261110T1718Z.json)
+(SHA-256 `0ecb51a9a449044352a57d63021f4b5bab11307c50c80e7f2ca802ddd40f9a94`).
+
+Cgroup samples during the last indexing/verification window, 17:13:54 to
+17:15:58, span 124 seconds. CPU usage increased by about 91.2 seconds, the
+backing device read about 0.99 GiB and wrote 0.45 GiB, and memory returned from
+1.35 GB to 0.43 GB after scan completion; cgroup peak remained 2.07 GB. These
+counters cover only this late window, not the full observation. Raw samples:
+[`live-vps2-scan-resources-20261110.json`](docs/qualification/live-vps2-scan-resources-20261110.json)
+(SHA-256 `4dc64172052899ebe7ea365b5bf628711f870c30da644eff18e5cec898ae4562`).
+
+The r132 soak checkpoint captured at 17:16 reports 29,511.5 seconds elapsed
+(8h11m52s), 675,218 operations, 672 exactness samples, eight mutation bursts,
+one passed 300-second held-reader/WAL-reclaim scenario, zero worker restarts,
+and zero controlled crashes. Terminal exactness/history/SQLite assertions
+remain pending. The worker runs the `soak` harness suite only; fifteen other
+scenario suites are not covered by the soak. This is 11.4% of the required
+72-hour duration. Raw checkpoint:
+[`soak-progress-20261110T1716Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1716Z.json)
+(SHA-256 `cf22bc272d7a60d752fc75a8e3effaec3eed8baee7dfc4ddd87565ff83b23e48`).
+
+### Test inventory and measured coverage
+
+The recorded automated suite totals 724 cases: 341 Rust tests passed, with two
+ignored; and 381 Python harness tests, of which 380 passed and one was skipped.
+That is 721 passed, zero failed, two ignored, and one skipped. The 75 package
+lifecycle/security tests are included in the Python count, not additional.
+The skip is the real GPG/RPM signing integration test, which requires a
+dedicated RPM fixture. Strict Rust formatting and Clippy passed. The
+instrumented Rust coverage report recorded 72.61% line, 71.44% region, and
+76.19% function coverage; branch counters were unavailable. Python standard
+library statement tracing recorded 53% coverage of the 691 statements in the
+package lifecycle script; it is not daemon coverage, and Python branch
+coverage was not measured.
+
+Additional qualification exercises are reported separately from unit-test
+counts: two 100k-file ext4 churn runs with 20k mutations each and exactness
+checks; one 1.37M-path exact scale profile; a forced ext4 kernel queue overflow
+that recovered to an exact match in 7.147 seconds; targeted event-reader tests;
+a bounded non-root ext4 service probe; live VPS2 full observations with
+accounting; and a 229-dependency audit with zero advisories/warnings. These do
+not yet cover the full production P0/fault matrix, 10M scale, all supported
+filesystems, controlled crash recovery, the updated packaged Ubuntu lifecycle,
+Rocky RPM install/upgrade/rollback, or a production canary. See
+[`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) for gate-by-gate limits.

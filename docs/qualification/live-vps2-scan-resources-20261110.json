@@ -419,6 +419,188 @@
         "write_error": null
       },
       "observed_at_utc": "2026-11-10T17:00:46Z"
+    },
+    {
+      "cpu": {
+        "usage_usec": 27054999288,
+        "user_usec": 11945211588,
+        "system_usec": 15109787700,
+        "core_sched.force_idle_usec": 0,
+        "nr_periods": 442907,
+        "nr_throttled": 167100,
+        "throttled_usec": 17333830129,
+        "nr_bursts": 0,
+        "burst_usec": 0
+      },
+      "memory_bytes": {
+        "current": 1353601024,
+        "peak": 2071248896
+      },
+      "io_by_device": [
+        {
+          "device": "8:0",
+          "rbytes": 159722995712,
+          "wbytes": 103117537280,
+          "rios": 25860384,
+          "wios": 2237912,
+          "dbytes": 0,
+          "dios": 0
+        },
+        {
+          "device": "252:0",
+          "rbytes": 159720124416,
+          "wbytes": 103117537280,
+          "rios": 25859854,
+          "wios": 2186872,
+          "dbytes": 0,
+          "dios": 0
+        }
+      ],
+      "memory_events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "dux": {
+        "automatic_reconciliation_paused": false,
+        "behind_seconds": 1691.661,
+        "caught_up": false,
+        "daemon_live": true,
+        "dirty": true,
+        "dirty_reason": "periodic filesystem observation in progress",
+        "dirty_since_timestamp_seconds": 1794330534,
+        "events_dropped": 0,
+        "events_resolved": 0,
+        "events_seen": 1235126242,
+        "failed_reconciliation_attempts": null,
+        "index_bytes": 82718134272,
+        "index_bytes_on_disk": 828604416,
+        "index_nodes": 1951531,
+        "kernel_overflow_notifications": 0,
+        "last_event_commit_timestamp_seconds": 0,
+        "last_scan_age_seconds": 857,
+        "last_scan_timestamp_seconds": 1794329977,
+        "max_automatic_reconciliation_retries": 1,
+        "max_pending_updates": 500000,
+        "pause_reason": null,
+        "paused": false,
+        "paused_since_timestamp_seconds": null,
+        "pending_updates": 0,
+        "reconciliation_retry_backoff_seconds": null,
+        "reconciliation_retry_due": false,
+        "reconciliation_retry_remaining_seconds": null,
+        "reconciliation_retry_state_corrupt": false,
+        "root": "/",
+        "scan_first": true,
+        "scan_in_progress": true,
+        "scan_progress": {
+          "allocated_bytes_seen": 83171704832,
+          "directories_seen": 213882,
+          "files_seen": 1743558,
+          "indexing": true,
+          "started_at_seconds": 1794330534
+        },
+        "status_version": 1,
+        "throttled_since_timestamp_seconds": 1794329143,
+        "updates_committed": 0,
+        "userspace_updates_dropped": 0,
+        "wal_bytes": 60110832,
+        "watch_status_available": true,
+        "watch_status_updated_at_seconds": 1794330834,
+        "write_error": null
+      },
+      "observed_at_utc": "2026-11-10T17:13:54Z"
+    },
+    {
+      "cpu": {
+        "usage_usec": 27146171382,
+        "user_usec": 12004131928,
+        "system_usec": 15142039453,
+        "core_sched.force_idle_usec": 0,
+        "nr_periods": 444143,
+        "nr_throttled": 167558,
+        "throttled_usec": 17354160083,
+        "nr_bursts": 0,
+        "burst_usec": 0
+      },
+      "memory_bytes": {
+        "current": 429686784,
+        "peak": 2071248896
+      },
+      "io_by_device": [
+        {
+          "device": "8:0",
+          "rbytes": 160785985536,
+          "wbytes": 103603568640,
+          "rios": 25942805,
+          "wios": 2241761,
+          "dbytes": 0,
+          "dios": 0
+        },
+        {
+          "device": "252:0",
+          "rbytes": 160783114240,
+          "wbytes": 103603568640,
+          "rios": 25942275,
+          "wios": 2190506,
+          "dbytes": 0,
+          "dios": 0
+        }
+      ],
+      "memory_events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "dux": {
+        "automatic_reconciliation_paused": false,
+        "behind_seconds": 1814.64,
+        "caught_up": false,
+        "daemon_live": true,
+        "dirty": true,
+        "dirty_reason": "reconciliation accounting verification pending",
+        "dirty_since_timestamp_seconds": 1794330927,
+        "events_dropped": 0,
+        "events_resolved": 0,
+        "events_seen": 1238114439,
+        "failed_reconciliation_attempts": null,
+        "index_bytes": 82984394752,
+        "index_bytes_on_disk": 831442944,
+        "index_nodes": 1953958,
+        "kernel_overflow_notifications": 0,
+        "last_event_commit_timestamp_seconds": 0,
+        "last_scan_age_seconds": 31,
+        "last_scan_timestamp_seconds": 1794330927,
+        "max_automatic_reconciliation_retries": 1,
+        "max_pending_updates": 500000,
+        "pause_reason": null,
+        "paused": false,
+        "paused_since_timestamp_seconds": null,
+        "pending_updates": 0,
+        "reconciliation_retry_backoff_seconds": null,
+        "reconciliation_retry_due": false,
+        "reconciliation_retry_remaining_seconds": null,
+        "reconciliation_retry_state_corrupt": false,
+        "root": "/",
+        "scan_first": true,
+        "scan_in_progress": false,
+        "scan_progress": null,
+        "status_version": 1,
+        "throttled_since_timestamp_seconds": 1794329143,
+        "updates_committed": 0,
+        "userspace_updates_dropped": 0,
+        "wal_bytes": 60110832,
+        "watch_status_available": true,
+        "watch_status_updated_at_seconds": 1794330957,
+        "write_error": null
+      },
+      "observed_at_utc": "2026-11-10T17:15:58Z"
     }
   ]
 }
