@@ -80,3 +80,38 @@ retention settings, and the Dux canary/rollback workspaces. Next safe options
 are to inspect age/retention policies and identify unused Docker artifacts by
 owner; do not prune active data volumes or rollback evidence based only on
 Docker's reclaimable estimate.
+
+## Follow-up inventory — 2026-11-10 20:34 UTC
+
+A read-only follow-up found `/var/tmp` at **5.3 GiB** before cleanup. Three
+inactive release-output directories for Dux 0.6.3 builds 98, 99, and 100 were
+checked against their `SHA256SUMS` files; every listed package, binary, source
+archive, manifest, and audit artifact passed. Qualified build 99 and 100
+manifests and lifecycle results are preserved under [`package-lifecycle-20261108`](package-lifecycle-20261108/); build 98 was
+a baseline output, not a qualified release. The three regenerated output
+directories (about **100 MiB allocated**) were removed after
+confirming no process referenced them. `/var/tmp` then measured **5.2 GiB**.
+Root remained at **91% used**, with **8.3 GiB available** at the 20:33 sample;
+rounding and concurrent writes mean the displayed free-space change did not
+track the removed bytes exactly.
+
+The remaining `/var/tmp` entries include toolchain material needed to build
+(Dux Cargo/Rust caches and a 579 MiB release-tools archive), old failed test
+workspaces intentionally preserved for reproducibility, and a modified
+`claude-dux` clone with 14 local changes. These were retained. The active r132
+soak binary and report were also retained.
+
+At 20:34, top-level Dux state occupied **1.3 GiB**; `dux.db` was 846,786,560
+bytes and its WAL 60,110,832 bytes. `/var/log` occupied **4.5 GiB**, including
+4.1 GiB of journal data. Docker reported 18.05 GB of images (7.074 GB classified
+as reclaimable), 17.86 GB of active local volumes, and only 1.119 MB reclaimable
+volumes. ClickHouse was using about 193% CPU and 1.34 GiB memory; its volume is
+active. These are host/application-owned data stores. Do not vacuum journals,
+prune images, or delete volumes without retention and service-owner approval.
+
+At the same observation, the installed Dux service had zero restarts and its
+status reported a full observation in progress, zero overflow/drop/pending
+counts, and a 743-second age for the last completed scan. It was not caught up
+during that observation. VPS2 CPU PSI some avg10 was 17.54% and I/O PSI some
+avg10 was 4.67%; nested VM qualification was not started under the host's current
+contention and 91% disk use.
