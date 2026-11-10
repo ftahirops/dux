@@ -160,3 +160,19 @@ At this checkpoint the run had 43,224 seconds elapsed, 973,838 mutations, and
 ext4 fixture; four more scheduled 12-hour checkpoints and the final exactness,
 history, and SQLite integrity gates remain pending. Evidence:
 [`soak-progress-20261110T2105Z.json`](soak-progress-20261110T2105Z.json).
+
+### Live checkpoint — 2026-11-10 22:38 UTC
+
+A fresh read-only query of VPS2 at 22:38:11 found the exact-hash candidate and
+its worker active; the outer systemd unit had zero restarts. The durable report
+records **48,847.6 seconds** (13h34m08s; **18.85%** of 72 hours), **1,091,827
+mutations**, **1,088 exactness samples**, 13 hourly bursts, two successful
+held-reader/WAL-reclaim scenarios, and one controlled crash/recovery. The
+whole-run average is **22.352 mutations/s**, below the requested 25/s because
+synchronous exactness gates pause the producer. Across the recorded samples,
+end-to-end convergence mean is **3.385 s**, median **2.767 s**, p95 **7.738 s**,
+and max **17.393 s**. Sampled candidate RSS peaked at **6,568 KiB** and WAL at
+**7,519,032 bytes**. Final exactness/history and SQLite integrity are still
+pending. This is continued progress, not a passed soak. Snapshot:
+[`soak-progress-20261110T2238Z.json`](soak-progress-20261110T2238Z.json),
+SHA-256 `22d006fae545c22abcec1d4a92acc167a210813a2a8b6cd41873a4662332f36c`.
