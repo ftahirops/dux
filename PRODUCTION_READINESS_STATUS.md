@@ -4417,3 +4417,18 @@ available. The r132 soak remained active at 13,573.1 seconds, 315,429
 operations, 314 exact samples, three bursts, and zero restarts. Held-reader,
 crash-recovery, and final integrity/exactness gates remain pending. Snapshot:
 [`soak-progress-20261110T1251Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1251Z.json).
+
+## Refreshed live checkpoint — 2026-11-10 12:57 UTC
+
+The soak process is healthy and its progress file advanced at 12:57 UTC. It has
+run 13,935 seconds and 323,293 operations, with 322 exact-check samples, three
+bursts, no restarts, no held-reader/crash scenarios, and terminal checks
+pending. The full checkpoint is
+[`12:56Z`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1256Z.json).
+
+VPS1 r66 remains active but dirty and not caught up, with 766 overflows,
+2,518,862 dropped updates, 13 pending updates, and a 128-MiB WAL; its
+last-scan age is about 5 days. The workspace is 4.08 GiB and the root
+filesystem has 58 GiB free. Host load fell from the earlier peak but remained
+31.5 with nine Go compiler/test processes; the guarded Rocky guest remains
+stopped and no RPM lifecycle tests have run.
