@@ -9,8 +9,9 @@ r126 has a passing full Rust test/coverage run and verified packages, but has
 not been installed on either host. The guarded Debian lifecycle runner has not
 launched its disposable VM because recurring unrelated Go compiler/test jobs
 keep resetting host admission. The required fresh 24-hour candidate canary
-remains open. Privileged success-path and both tested capability-negative
-fanotify smokes passed on VPS2; they do not replace broader churn/inode-race,
+remains open. The privileged success-path and missing-`CAP_DAC_READ_SEARCH`
+event-resolution smokes passed on VPS2; missing-`CAP_SYS_ADMIN` startup failed
+closed on VPS1. These targeted checks do not replace broader churn/inode-race,
 package lifecycle, or sustained-canary qualification.
 
 ### Production VPS1 — current installed service
@@ -87,8 +88,8 @@ artifacts are in the
 [`r126 qualification`](docs/qualification/release-candidate-r126-20261110/README.md).
 
 At 02:08 UTC, the missing-capability startup smoke was repeated from the
-checked-in harness against the exact candidate SHA-256; it passed on Linux
-6.8.0-147-generic. The temporary `/dev/shm` fixture was automatically removed.
+checked-in harness against the exact candidate SHA-256; it passed on VPS1
+(Linux 6.8.0-147-generic). The temporary `/dev/shm` fixture was automatically removed.
 This does not qualify capability behavior on other kernels or test
 `CAP_DAC_READ_SEARCH` event-handle resolution.
 
@@ -107,8 +108,9 @@ unresolved inode-reuse paths after discarding 88 vanished paths. The run took
 about 7m24s, used a 659 MiB disk-backed staging DB at the captured midpoint,
 and cleaned that file on completion. Root free space recovered from 4.7 to 5.8
 GiB; the service remained active with zero restarts, drops, or overflows. The
-follow-up status showed only the normal “changes await next observation” dirty
-reason. Details are in
+daemon's accounting verification passed in 75.079 seconds. The follow-up
+status showed only the normal “changes await next observation” dirty reason.
+An independent filesystem-walk comparison is still required. Details are in
 [`VPS2 observation and disk report`](docs/qualification/production-live-followup-20261110T0224Z/README.md).
 
 The r126 missing-`CAP_DAC_READ_SEARCH` smoke then passed twice on a disposable

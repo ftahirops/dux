@@ -29,6 +29,9 @@ write error. Root storage was 94% used with 5.8 GiB available. Status and host
 evidence are in
 [`vps2-status-after-observation.json`](vps2-status-after-observation.json) and
 [`host-observation.txt`](host-observation.txt).
+The daemon's reconciliation accounting verification passed at 02:25:25 in
+75.079 seconds. This is the daemon's internal accounting check; an independent
+filesystem-walk comparison is still required for release qualification.
 
 ## Missing `CAP_DAC_READ_SEARCH` event-resolution smoke
 
