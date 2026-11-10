@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 19:28 UTC**. VPS1 was last verified running the old event-apply
+**2026-11-10 19:31 UTC**. VPS1 was last verified running the old event-apply
 daemon at 17:06 UTC and has not been rechecked since. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -53,7 +53,7 @@ Evidence: [scan retry and recovery](docs/qualification/vps2-reconciliation-retry
 | Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
 | Dependency audit | 229 locked dependencies; zero advisories and warnings. Local RustSec database head matched upstream at the 18:55 check. | This is dependency hygiene, not a full application security review. |
 | Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
-| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:28 unrelated Go test workloads were active and host CPU PSI some avg10 was 24.44%; the VM guard must admit a quiet window before launch. |
+| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:31 unrelated Go compile/test and migration workloads were active; load1 was 18.46 and CPU PSI some avg10 was 44.72%. No VM was started. See [host admission sample](docs/qualification/host-admission-20261110T1931Z.json). |
 | Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |
 

@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:26:51Z",
+  "snapshot_at_utc": "2026-11-10T19:31:11Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -634,5 +634,31 @@
     "memory_events_oom": 0,
     "root_disk_use_percent": 90,
     "root_disk_available_bytes": 9958559744
+  },
+  "latest_qualification_host_sample": {
+    "observed_at_utc": "2026-11-10T19:31:11Z",
+    "load_average_1m": 18.46,
+    "cpu_psi_some_avg10_percent": 44.72,
+    "cpu_psi_some_avg60_percent": 33.57,
+    "cpu_psi_some_avg300_percent": 17.4,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "active_unrelated_workloads": [
+      {
+        "type": "Go compiler",
+        "worktree": "/home/xtop/engine"
+      },
+      {
+        "type": "go test",
+        "scope": "/home/xtop/engine and /home/xtop/engine/replay"
+      },
+      {
+        "type": "go run",
+        "scope": "/home/xtop/cmd/migrate"
+      }
+    ],
+    "qualification_vm_started": false,
+    "fault_matrix_started": false,
+    "decision": "do not start guarded qualification VM while shared host has active unrelated build/test workloads and severe CPU pressure",
+    "evidence": "docs/qualification/host-admission-20261110T1931Z.json"
   }
 }
