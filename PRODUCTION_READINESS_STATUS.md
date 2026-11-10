@@ -76,6 +76,13 @@ controlled recovery, and final exactness/history/integrity checks remain
 pending. This is early progress, not a soak pass. Both progress snapshots are
 [preserved here](docs/qualification/r132-72h-soak-vps2-20261110/).
 
+At 10:16 UTC, the exact r132 soak crossed **100,000 operations**: 101,438
+mutations after 4,262.4 seconds, with 101 exact-check samples. The 101,000-op
+check passed in 1,082ms; the unit remained active with zero restarts. The
+six-hour reader, twelve-hour controlled recovery, and final assertions are
+still pending. See the
+[10:16 progress snapshot](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1016Z.json).
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM

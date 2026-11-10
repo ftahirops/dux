@@ -48,6 +48,17 @@ and a **4,301,312-byte WAL**. The six-hour held-reader and twelve-hour crash
 recovery remain pending. See
 [`soak-progress-20261110T1005Z.json`](soak-progress-20261110T1005Z.json).
 
+### 100k-operation checkpoint — 2026-11-10 10:16 UTC
+
+At elapsed **4,262.4 seconds** (about 71 minutes), the soak had completed
+**101,438 mutations**. The last exact check, at 101,000 operations, passed in
+**1,082 ms**; the progress file contained 101 exact-check samples. The worker
+remained `running` with zero restarts. One hourly burst had passed, while the
+held-reader, controlled crash/recovery, and final exact/history/integrity
+assertions remain pending. This is a 100k-operation soak milestone, not a
+72-hour pass. The full snapshot is
+[`soak-progress-20261110T1016Z.json`](soak-progress-20261110T1016Z.json).
+
 ## Workload and pass criteria
 
 - 25 filesystem mutations per second for 259,200 seconds.
