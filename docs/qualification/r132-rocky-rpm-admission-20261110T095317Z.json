@@ -1,0 +1,21 @@
+{
+  "captured_at_utc": "2026-11-10T09:53:17Z",
+  "action": "no_vm_start",
+  "host_pressure": {
+    "load1": 4.75,
+    "cpu_psi_some_avg10_percent": 7.87,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 2.27,
+    "io_psi_full_avg10_percent": 2.14,
+    "memory_psi_some_avg10_percent": 0.0,
+    "memory_psi_full_avg10_percent": 0.0,
+    "active_host_workloads": [
+      "Go test binary pid=1171598",
+      "go test pid=1170881"
+    ]
+  },
+  "admission_blockers": [
+    "active host build/test/install/analysis workload: Go test binary pid=1171598",
+    "active host build/test/install/analysis workload: go test pid=1170881"
+  ]
+}

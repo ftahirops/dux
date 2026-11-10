@@ -27,11 +27,11 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:50 UTC
+### Live checkpoint — 2026-11-10 09:54 UTC
 
 The r132 soak remains `active/running`, with **zero restarts**. At elapsed
-2,701.2s it had completed **63,930 mutations**; the 63,000-op exact checkpoint
-passed in 825ms. The hourly burst, held-reader, controlled recovery, and final
+2,941.3s it had completed **69,696 mutations**; the 69,000-op exact checkpoint
+passed in 644ms. The hourly burst, held-reader, controlled recovery, and final
 exactness/history/integrity checks have not run yet. This is early progress,
 not a soak pass. The 72-hour qualification remains in progress.
 
@@ -42,25 +42,28 @@ harness (41). These test the qualification tooling, not the Dux Rust binary or
 the actual Rocky RPM lifecycle. Details are in the
 [harness retest report](docs/qualification/r132-harness-retest-20261110T0950Z.md).
 
-## Current production and disk snapshot — 2026-11-10 09:48 UTC
+## Current production and disk snapshot — 2026-11-10 09:54 UTC
 
 The installed VPS1 production daemon remains **r66** (`0.6.3`, revision
 `e0cc915f8f37`), active with 4 historical restarts. It reports dirty status
 from fanotify overflow: **742 overflow notifications**, **2,518,862 dropped
 updates**, no full scan for about **4d21h**, and `caught_up=false`. It has
-1,336,338 indexed nodes and a 3.42-GB SQLite database. The 09:38 and 09:45
+1,335,056 indexed nodes and a 3.42-GB SQLite database. The 09:38, 09:45, and
+09:54
 snapshots showed the drop and overflow counters unchanged while event counters
 continued increasing; this short interval does not repair the stale index.
 VPS1 has about 50 GiB available on its 185-GiB root filesystem (72% used), so
 production staleness is not explained by disk exhaustion. See the
-[09:45 VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T0945Z.json).
+[09:54 VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T0954Z.json).
 
-The installed VPS2 **r121** service is separate from the r132 soak. It is active
-with zero restarts and scan-first mode. Its most recent full observation
-completed; the index is dirty because filesystem changes await the next
-observation, with **zero dropped updates** and **zero kernel overflows**. It
-indexes 1,928,598 nodes in an 806-MB database. See the
-[09:38 VPS2 snapshot](docs/qualification/live-vps2-readiness-20261110T0938Z.json)
+The installed VPS2 **r121** service is separate from the r132 soak. It remains
+active with zero restarts and scan-first mode. A new periodic observation is
+in progress; the daemon is `reloading`, and status is dirty for that reason,
+with **zero dropped updates** and **zero kernel overflows**. The current index
+has 1,928,598 nodes in an 806-MB database; the new staging database is about
+665 MiB and growing. VPS2 has about 11.7 GB available on `/` (88% used), so do
+not remove that active scan file. See the
+[09:54 VPS2 snapshot](docs/qualification/live-vps2-readiness-20261110T0954Z.json)
 and [post-cleanup disk/service evidence](docs/qualification/vps2-test-disk-cleanup-20261110.json).
 
 ### VPS2 disk cleanup — 2026-11-10 09:42 UTC
@@ -89,6 +92,8 @@ started. The guard remains required because concurrent host builds have
 repeatedly interrupted guest startup.
 At 09:50 UTC, another start was refused on admission sample 2/3 when Go
 compiler, test, and vet processes appeared. No VM was started.
+At 09:53 UTC, the host still had active Go test processes; no VM was started.
+See [the 09:53 admission sample](docs/qualification/r132-rocky-rpm-admission-20261110T095317Z.json).
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
