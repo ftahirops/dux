@@ -1,6 +1,6 @@
 # Production readiness status
 
-## r132 exact-source release package build — 2026-11-10 07:29 UTC
+## r132 exact-source package and DEB lifecycle qualification — 2026-11-10 07:44 UTC
 
 The exact current source at commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`
 built successfully as a static-musl release (`x86_64-unknown-linux-musl`). The
@@ -27,20 +27,28 @@ release-builder CLI **13**, debug-artifact verifier **1**, and qualification VM
 harness **41** (127 total). These are local harness/unit tests; they do not
 replace installing packages inside a guest.
 
-The full DEB lifecycle (upgrade, rollback, removal/purge and clean install) is
-still open. A disposable Ubuntu guest started after host admission cleared.
-The r131 baseline install and r132 upgrade stages completed, but the baseline
-status remained dirty with accounting verification pending (`caught_up=false`).
-The host pressure guard then detected a new Go test/compiler workload and
-stopped the VM during rollback. Rollback, removal/purge, and clean install are
-unverified. The guard was not bypassed or interrupted; the guest's ephemeral
-overlay was cleaned. No package was installed on a production host. Partial
-stage and guard evidence is in
+The complete r132 DEB lifecycle passed in a disposable Ubuntu 24.04 KVM guest
+in **87.943 seconds**: r131 baseline install, r132 upgrade, rollback, re-upgrade,
+remove/purge, and clean install. The report verifies package binary and backup
+helper hashes, rollback DB backup/restore quick-checks, service enablement,
+effective systemd policy, state-directory/database permissions, and that clean
+install does not create a tunnel identity. On clean install, Dux was active and
+enabled with the tunnel disabled; status was dirty because post-observation
+filesystem hints awaited the next full observation, with zero dropped events
+and zero kernel overflows. The legacy r131 baseline itself was dirty with
+accounting verification pending (`caught_up=false`), so this lifecycle test
+does not claim an exact clean legacy baseline or independent filesystem/index
+equality. A first attempt was stopped during rollback by the host guard when a
+Go race-test workload started; the rerun passed after admission cleared. The
+guard was not bypassed or interrupted. The guest used an ephemeral overlay and
+was stopped cleanly. No package was installed on a production host. The
+complete report is
+[`deb-lifecycle-passed-report.json`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-passed-report.json); the interrupted attempt and guard evidence is in
 [`the DEB lifecycle attempt`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-attempt.json).
-The build manifest, checksums and audit reports are in
+RPM lifecycle on Rocky remains unqualified. The build manifest, checksums and audit reports are in
 [`the r132 package evidence`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/).
-This closes artifact construction and integrity checks only; production
-readiness remains open.
+Package artifact and Ubuntu DEB lifecycle gates pass; production readiness
+remains open.
 
 ## r132 post-observation accounting race fix — 2026-11-10 06:54 UTC
 

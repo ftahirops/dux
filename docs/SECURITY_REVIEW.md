@@ -14,8 +14,9 @@ warnings denied, including `clippy::undocumented_unsafe_blocks`.
 
 These checks provide current dependency and unsafe-documentation lint evidence;
 they do not establish that Dux has no security vulnerabilities. The binary and
-package artifacts were built and hash-checked, but their install/upgrade/
-rollback lifecycle remains unqualified. The indexer still runs as root with
+package artifacts were built and hash-checked. The exact r132 DEB passed the
+full lifecycle on a disposable Ubuntu 24.04 guest; the RPM lifecycle on Rocky
+remains unqualified. The indexer still runs as root with
 `CAP_SYS_ADMIN` and `CAP_DAC_READ_SEARCH`; `CAP_SYS_ADMIN` remains a broad
 kernel privilege and the design has no isolated privileged broker. See the
 [r132 package and runtime qualification](qualification/r132-postscan-hint-runtime-20261110.md)

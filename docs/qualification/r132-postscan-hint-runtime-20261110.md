@@ -120,18 +120,27 @@ in this directory's `r132-release/` subdirectory.
 Build environment: VPS1 private tmpfs, `CPUQuota=20%`, `MemoryMax=6G`,
 `IOWeight=10`, `Nice=10`; systemd reports 19m20s runtime, 3m52s CPU, and 1.3 GiB
 peak memory. Dux's production service stayed active with its historical
-`NRestarts=4` unchanged. A disposable Ubuntu 24.04 guest started after host
-admission cleared. The r131 DEB baseline install and r132 DEB upgrade stages
-completed; the upgrade left the service disabled and preserved the expected
-binary and backup-helper hashes. However, the baseline status was dirty with
-accounting verification pending (`caught_up=false`). A newly active host Go
-race-test workload triggered the VM pressure guard at 07:37:48 UTC, stopping
-the guest during rollback. Rollback, removal/purge, and clean install did not
-complete. The guard was not bypassed; its ephemeral overlay was cleaned. The
-guest report was lost with that overlay, but host-streamed stage and guard
-evidence is preserved in
-[`deb-lifecycle-attempt.json`](r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-attempt.json).
-Packages were not installed on a production host.
+`NRestarts=4` unchanged. The full r132 DEB lifecycle passed in a disposable
+Ubuntu 24.04 KVM guest in 87.943 seconds: r131 baseline, r132 upgrade, rollback,
+re-upgrade, remove/purge, and clean install. The machine-readable report is
+[`deb-lifecycle-passed-report.json`](r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-passed-report.json)
+(SHA-256 `b2cbd62986871805de27e2f1cd9a1ec504e924efdb8ceac66f9472c8fb88b617`).
+It verified the package binaries and backup helpers, rollback snapshot and
+restore integrity, disabled-service preservation on upgrade, the effective
+systemd policy and index permissions after clean install, and no default
+tunnel identity. The final service was active/enabled and tunnel inactive/
+disabled. The candidate status was dirty because filesystem hints arrived
+after its full observation; there were zero dropped events and zero kernel
+overflows. The old r131 baseline was also dirty, with accounting verification
+pending (`caught_up=false`), so this does not qualify exact legacy baseline
+convergence or independent filesystem/index equality.
+
+A first lifecycle attempt was stopped during rollback by the host pressure
+guard after an unrelated Go race-test workload began. The evidence is preserved
+in [`deb-lifecycle-attempt.json`](r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-attempt.json).
+The retry passed after admission cleared; the guest used an ephemeral overlay
+and was stopped cleanly. No candidate package was installed on a production
+host. RPM lifecycle on Rocky remains unqualified.
 
 Package harness unit tests passed locally: `test_dux_package_lifecycle.py`
 **72/72**, `test_build_release_cli.py` **13/13**,
@@ -144,7 +153,8 @@ Ubuntu remains partially qualified, and RPM behavior in Rocky is unqualified.
 
 This is one deterministic race regression on ext4 and one kernel. It is not a
 long-duration production canary, overload throughput test, crash/power-loss
-test, cross-filesystem matrix, package upgrade/rollback test, or large-index
-performance qualification. The 72-hour soak, 24-hour canary, package and
-privilege review, and broader filesystem/kernel matrix remain open. This
-result does not constitute production-readiness sign-off.
+test, cross-filesystem matrix, or large-index performance qualification. The
+DEB package lifecycle passed on Ubuntu; RPM lifecycle on Rocky remains open.
+The 72-hour soak, 24-hour canary, privilege review, and broader
+filesystem/kernel matrix remain open. This result does not constitute
+production-readiness sign-off.
