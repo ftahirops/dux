@@ -579,6 +579,9 @@ pub struct ScanProgress {
     pub dirs: u64,
     pub bytes: i64,
     pub indexing: bool, // false = still walking, true = building the index
+    /// True when no prior indexed baseline exists. Readers must not open the
+    /// placeholder database while its first atomic publication is in progress.
+    pub initial_baseline: bool,
 }
 
 /// Publish scan progress (best-effort; format: "<started> <files> <dirs> <bytes> <indexing>").
@@ -590,11 +593,31 @@ pub fn write_scan_progress(
     bytes: i64,
     indexing: bool,
 ) {
+    let initial_baseline =
+        read_scan_progress_for(db).is_some_and(|progress| progress.initial_baseline);
+    write_scan_progress_with_baseline(db, started, files, dirs, bytes, indexing, initial_baseline);
+}
+
+/// Publish progress while explicitly retaining whether this scan is creating
+/// the first usable index. Older progress records without the final field are
+/// treated as non-initial for compatibility.
+pub fn write_scan_progress_with_baseline(
+    db: &std::path::Path,
+    started: i64,
+    files: u64,
+    dirs: u64,
+    bytes: i64,
+    indexing: bool,
+    initial_baseline: bool,
+) {
     let _ = std::fs::create_dir_all("/run/dux");
     let progress_path = runtime_path(db, "scan.progress");
     if let Err(error) = publish_runtime(
         &progress_path,
-        format!("{started} {files} {dirs} {bytes} {}", indexing as u8),
+        format!(
+            "{started} {files} {dirs} {bytes} {} {}",
+            indexing as u8, initial_baseline as u8
+        ),
     ) {
         warn_runtime_publish_failure(&progress_path, &error);
     }
@@ -647,12 +670,14 @@ pub fn read_scan_progress_for(db: &std::path::Path) -> Option<ScanProgress> {
     let dirs: u64 = it.next()?.parse().ok()?;
     let bytes: i64 = it.next()?.parse().ok()?;
     let indexing = it.next()? == "1";
+    let initial_baseline = it.next().is_some_and(|value| value == "1");
     Some(ScanProgress {
         started,
         files,
         dirs,
         bytes,
         indexing,
+        initial_baseline,
     })
 }
 
@@ -1109,6 +1134,26 @@ mod tests {
             read_scan_progress_for(&db).is_none(),
             "future scan-progress timestamp must fail closed"
         );
+        let _ = std::fs::remove_file(progress_path);
+    }
+
+    #[test]
+    fn scan_progress_preserves_initial_baseline_and_reads_legacy_records() {
+        let db = std::env::temp_dir().join(format!(
+            "dux-scan-progress-initial-{}.db",
+            std::process::id()
+        ));
+        let progress_path = runtime_path(&db, "scan.progress");
+        std::fs::write(&progress_path, "123 1 1 4096 0").unwrap();
+        assert!(!read_scan_progress_for(&db).unwrap().initial_baseline);
+
+        write_scan_progress_with_baseline(&db, now_secs(), 1, 1, 4096, false, true);
+        assert!(read_scan_progress_for(&db).unwrap().initial_baseline);
+        write_scan_progress(&db, now_secs(), 2, 1, 8192, true);
+        let progress = read_scan_progress_for(&db).unwrap();
+        assert!(progress.indexing);
+        assert!(progress.initial_baseline);
+
         let _ = std::fs::remove_file(progress_path);
     }
 

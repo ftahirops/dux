@@ -279,7 +279,6 @@ fn rebuild_atomic_with_install_observer(
     on_installed: impl FnOnce(),
 ) -> Result<ScanStats> {
     ensure_not_cancelled(&opts.cancel)?;
-    let _progress_cleanup = ScanProgressCleanup::start(db.to_path_buf());
     // Inspect directory entries without following them before SQLite opens the
     // source. A dangling main-database symlink is an existing install target;
     // sidecar symlinks are rejected by Store's artifact check.
@@ -295,6 +294,9 @@ fn rebuild_atomic_with_install_observer(
         } else {
             None
         };
+    // The initial-baseline bit lets read-only clients recognize the brief
+    // atomic-publication window without opening SQLite and creating WAL files.
+    let _progress_cleanup = ScanProgressCleanup::start(db.to_path_buf(), previous.is_none());
     let mut new_os = db.to_path_buf().into_os_string();
     new_os.push(".new");
     let db_new = PathBuf::from(new_os);
@@ -487,23 +489,33 @@ struct ScanProgressCleanup {
 }
 
 impl ScanProgressCleanup {
-    fn start(db: PathBuf) -> Self {
+    fn start(db: PathBuf, initial_baseline: bool) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let refresh = Arc::new(AtomicBool::new(false));
         let thread_refresh = Arc::clone(&refresh);
         let thread_db = db.clone();
+        crate::util::write_scan_progress_with_baseline(
+            &db,
+            crate::util::now_secs(),
+            0,
+            0,
+            0,
+            false,
+            initial_baseline,
+        );
         let handle = std::thread::spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
                 if thread_refresh.load(Ordering::Relaxed) {
                     if let Some(progress) = crate::util::read_scan_progress_for(&thread_db) {
-                        crate::util::write_scan_progress(
+                        crate::util::write_scan_progress_with_baseline(
                             &thread_db,
                             progress.started,
                             progress.files,
                             progress.dirs,
                             progress.bytes,
                             progress.indexing,
+                            initial_baseline,
                         );
                     }
                 }
@@ -4795,6 +4807,9 @@ mod tests {
             &root,
             &ScanOptions::default(),
             || {
+                let progress = crate::util::read_scan_progress_for(&db)
+                    .expect("initial baseline marker remains visible through publication");
+                assert!(progress.initial_baseline);
                 live.take()
                     .expect("watcher connection handed off exactly once")
                     .conn

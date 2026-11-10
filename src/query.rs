@@ -1450,6 +1450,7 @@ mod tests {
             dirs: 56,
             bytes: 4096,
             indexing: false,
+            initial_baseline: false,
         };
         let s = format_scan_progress(&p);
         assert!(s.contains("IN PROGRESS (scanning)"), "{s}");

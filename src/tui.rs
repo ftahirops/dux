@@ -4578,6 +4578,7 @@ mod tests {
             dirs: 56,
             bytes: 4096,
             indexing: false,
+            initial_baseline: false,
         });
 
         let status = freshness_text(&app);
