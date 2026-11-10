@@ -58,6 +58,19 @@ fingerprint, and verify both in the Rocky lifecycle guest. The exact artifact
 inspection and hashes are recorded in the
 [Rocky RPM qualification record](docs/qualification/r132-rocky-rpm-prereq-20261110.md).
 
+### Effective production unit drift — 2026-11-10 11:05 UTC
+
+A read-only comparison confirmed that VPS1's installed `dux 0.6.3-66` unit is
+not byte-identical to the current package unit. The effective production
+filter does not deny `bpf`, while the checked-in unit does; effective restart
+backoff also differs for Rocky systemd 252 compatibility. The installed unit
+passes `systemd-analyze security` at 3.3 (OK), with the expected group-readable
+UMask warning; the `dux` group was empty and DB/WAL permissions were 0640
+`root:dux` at this snapshot. Candidate unit syntax verification passed. This is
+policy-drift evidence, not a production change or candidate rollout. The full
+[effective-unit security review](docs/qualification/vps1-systemd-security-review-20261110T1105Z.md)
+records limits and hashes.
+
 ## VPS1 live production check — 2026-11-10 10:09 UTC
 
 The installed production binary is still Dux **0.6.3 / r66** (SHA-256
