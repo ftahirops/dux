@@ -1,0 +1,23 @@
+{
+  "captured_at_utc": "2026-11-10T09:57:31Z",
+  "action": "no_vm_start",
+  "host_pressure": {
+    "load1": 9.39,
+    "cpu_psi_some_avg10_percent": 6.11,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 1.75,
+    "io_psi_full_avg10_percent": 1.26,
+    "memory_psi_some_avg10_percent": 0.0,
+    "memory_psi_full_avg10_percent": 0.0,
+    "active_host_workloads": [
+      "Go compiler pid=1182943",
+      "go test pid=1182899",
+      "node vitest pid=1182847"
+    ]
+  },
+  "admission_blockers": [
+    "active host build/test/install/analysis workload: Go compiler pid=1182943",
+    "active host build/test/install/analysis workload: go test pid=1182899",
+    "active host build/test/install/analysis workload: node vitest pid=1182847"
+  ]
+}

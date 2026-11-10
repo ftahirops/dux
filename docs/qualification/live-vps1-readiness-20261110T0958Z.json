@@ -1,0 +1,75 @@
+{
+  "captured_at_utc": "2026-11-10T09:58:07.425123Z",
+  "disk": {
+    "/": {
+      "free_bytes": 52277731328,
+      "total_bytes": 198092431360,
+      "used_bytes": 136983351296
+    },
+    "/dev/shm": {
+      "free_bytes": 10251714560,
+      "total_bytes": 13729214464,
+      "used_bytes": 3477499904
+    }
+  },
+  "host": "vps1",
+  "service": {
+    "ActiveState": "active",
+    "MainPID": "1073891",
+    "NRestarts": "4",
+    "SubState": "running"
+  },
+  "state_files": {
+    "dux.db": {
+      "bytes": 3425796096,
+      "mtime_utc": "2026-11-10T09:58:07.100818Z"
+    },
+    "dux.db-shm": {
+      "bytes": 950272,
+      "mtime_utc": "2026-11-10T09:57:53.048636Z"
+    },
+    "dux.db-wal": {
+      "bytes": 134217728,
+      "mtime_utc": "2026-11-10T09:58:07.060818Z"
+    },
+    "dux.db.lock": {
+      "bytes": 0,
+      "mtime_utc": "2026-09-12T11:55:11.616485Z"
+    }
+  },
+  "status": {
+    "behind_seconds": 232035.562,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since_timestamp_seconds": 1794299269,
+    "events_dropped": 2518862,
+    "events_resolved": 128025160,
+    "events_seen": 221150967,
+    "index_bytes": 133636988928,
+    "index_bytes_on_disk": 3425796096,
+    "index_nodes": 1336569,
+    "kernel_overflow_notifications": 742,
+    "last_event_commit_timestamp_seconds": 1794304687,
+    "last_scan_age_seconds": 421725,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 8980,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794072651,
+    "updates_committed": 35847929,
+    "userspace_updates_dropped": 2518862,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794304687,
+    "write_error": null
+  },
+  "version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882"
+}
