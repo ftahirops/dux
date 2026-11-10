@@ -10,6 +10,17 @@ zero warnings**. The RustSec database snapshot had 1,430 advisories at commit
 application security certification; its scope and raw result are in the
 [audit record](docs/qualification/cargo-audit-20261110T1007Z/README.md).
 
+## Release artifact authenticity — open gate
+
+Static inspection of the exact r132 RPM confirmed its payload hashes and
+embedded Dux binary hash, but `rpm --checksig -v` showed **no RPM signature**
+(`SIGPGP` and `SIGGPG` are both absent). The local SHA256SUMS file is not itself
+publisher-authenticated. Before production distribution, sign the RPM and the
+checksum manifest using the release owner's key, publish the trusted
+fingerprint, and verify both in the Rocky lifecycle guest. The exact artifact
+inspection and hashes are recorded in the
+[Rocky RPM qualification record](docs/qualification/r132-rocky-rpm-prereq-20261110.md).
+
 ## VPS1 live production check — 2026-11-10 10:09 UTC
 
 The installed production binary is still Dux **0.6.3 / r66** (SHA-256

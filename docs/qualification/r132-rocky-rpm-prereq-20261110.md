@@ -26,6 +26,31 @@ limits. No guard bypass was attempted and no guest was started. The verified
 image is ready for a later retry once host admission is clear. Until then, RPM
 upgrade/rollback/removal/clean-install behavior on Rocky is unqualified.
 
+At 10:12:40 UTC, a fresh read-only host sample measured load average **10.77**,
+above the configured start limit of 10. No VM was started or lifecycle attempt
+made in this sample; the guard remains in force.
+
+## Static package authenticity inspection — 2026-11-10 10:13 UTC
+
+The exact r132 artifact
+`target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm` has SHA-256
+`bb1adbd0b2bc5a36c30076bcfd3436e424dbd596aa07a26d78d952a24650af78`. RPM
+metadata inspection confirmed version `0.6.3-132`, x86_64 architecture, the
+expected `/usr/bin/dux` and service/helper payload, and the embedded executable
+hash matching the qualified r132 binary. `rpm --checksig -v` verified header
+and payload digests, but both RPM signature fields are `(none)`: **the package
+is unsigned**. A checksum detects accidental or post-publication changes only
+when the checksum itself is trusted; it does not establish publisher identity.
+
+This is not a failed lifecycle test. No package was installed. Before
+production distribution, the release owner needs to sign the RPM and provide
+an independently trusted signing-key fingerprint; the detached checksum
+manifest should also be signed and verified in the Rocky guest. RPM lifecycle
+qualification remains pending separately.
+
+The command transcript is preserved in
+[`the static RPM inspection`](r132-rocky-rpm-static-inspection-20261110T1014Z.txt).
+
 ### Guarded retry — 2026-11-10 09:08 UTC
 
 A later start passed the three-sample startup admission and launched the
