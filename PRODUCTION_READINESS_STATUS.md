@@ -280,6 +280,28 @@ the Rocky lifecycle was not started. This keeps the host admission guard
 intact and avoids treating an unqualified or interrupted guest run as a test
 result.
 
+### Soak pacing correction — 2026-11-10 11:27 UTC
+
+Review found that the soak harness slept for a full `1 / rate` after each
+mutation, adding mutation execution time to the configured interval. I changed
+the harness to pace against monotonic start deadlines, rebase after a slow
+mutation (so it does not create catch-up bursts), and report requested and
+observed throughput. The readiness workflow suite now passes **64/64** tests,
+including deterministic tests for normal pacing and overload; Python
+byte-compilation and `git diff --check` pass.
+
+This change does **not** modify the already-running VPS2 process: its copied
+harness hash is `653573dcf8a706f68b5db21d3f9d7277fd037494742951a7cefed1b9ba49f523`,
+while the updated local harness is
+`eadc239b6c2d3824f2dfa5c486b0444a9950822d164d335a001011a5cfd689c3`. At the
+11:27:01 UTC durable checkpoint, the old run had 201,012 operations in 8,531.1
+seconds (23.56/s including two 500-operation bursts; 23.45/s excluding those
+bursts), 200 exact-check samples, and zero restarts. That is about 6.2% below
+the configured 25/s for the paced stream. It remains useful endurance and
+exactness evidence, but must not be described as a full-rate 25/s run. The
+checkpoint and harness hashes are in
+[`soak-rate-pacing-20261110.json`](docs/qualification/soak-rate-pacing-20261110.json).
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM

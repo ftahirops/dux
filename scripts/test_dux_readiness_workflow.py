@@ -22,6 +22,54 @@ READINESS_SPEC.loader.exec_module(READINESS)
 
 
 class ReadinessHarnessTests(unittest.TestCase):
+    def test_operation_pacer_accounts_for_mutation_time(self):
+        class FakeClock:
+            def __init__(self):
+                self.now = 0.0
+                self.sleeps = []
+
+            def monotonic(self):
+                return self.now
+
+            def sleep(self, seconds):
+                self.sleeps.append(seconds)
+                self.now += seconds
+
+        clock = FakeClock()
+        pacer = READINESS.OperationPacer(10, clock.monotonic, clock.sleep)
+        clock.now += 0.02  # mutation execution
+        pacer.wait()
+        self.assertAlmostEqual(clock.now, 0.1)
+        clock.now += 0.04  # next mutation execution
+        pacer.wait()
+        self.assertAlmostEqual(clock.now, 0.2)
+        self.assertEqual(len(clock.sleeps), 2)
+        self.assertAlmostEqual(sum(clock.sleeps), 0.14)
+
+    def test_operation_pacer_does_not_catch_up_with_a_burst_after_overload(self):
+        class FakeClock:
+            def __init__(self):
+                self.now = 0.0
+                self.sleeps = []
+
+            def monotonic(self):
+                return self.now
+
+            def sleep(self, seconds):
+                self.sleeps.append(seconds)
+                self.now += seconds
+
+        clock = FakeClock()
+        pacer = READINESS.OperationPacer(10, clock.monotonic, clock.sleep)
+        clock.now += 0.25  # one mutation exceeded multiple target intervals
+        pacer.wait()
+        self.assertAlmostEqual(clock.now, 0.25)
+        clock.now += 0.01
+        pacer.wait()
+        self.assertAlmostEqual(clock.now, 0.35)
+        self.assertEqual(len(clock.sleeps), 1)
+        self.assertAlmostEqual(clock.sleeps[0], 0.09)
+
     def test_scan_first_mode_uses_startup_log_if_status_record_is_legacy(self):
         self.assertTrue(READINESS.daemon_uses_scan_first(
             {"scan_first": False},

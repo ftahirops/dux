@@ -76,6 +76,31 @@ def validate_overflow_recovery_headroom(available_bytes):
     return available_bytes
 
 
+class OperationPacer:
+    """Pace mutation starts by deadline without adding work-time delay.
+
+    When a mutation runs longer than its interval, rebase the schedule on the
+    current time instead of issuing catch-up bursts that exceed the limit.
+    """
+
+    def __init__(self, operations_per_second, clock=time.monotonic,
+                 sleeper=time.sleep):
+        if operations_per_second <= 0:
+            raise ValueError("operations_per_second must be positive")
+        self.interval = 1.0 / operations_per_second
+        self.clock = clock
+        self.sleeper = sleeper
+        self.next_deadline = clock()
+
+    def wait(self):
+        self.next_deadline += self.interval
+        now = self.clock()
+        if self.next_deadline > now:
+            self.sleeper(self.next_deadline - now)
+        else:
+            self.next_deadline = now
+
+
 def snapshot(db, immutable=False, attachments=()):
     uri = db.as_uri() + "?mode=ro" + ("&immutable=1" if immutable else "")
     connection = sqlite3.connect(uri, uri=True, timeout=1)
@@ -1501,10 +1526,15 @@ def soak_test(case, args, evidence):
     progress_path = args.report.with_name('soak-progress.json')
     candidate_binary_sha256 = hashlib.sha256(case.binary.read_bytes()).hexdigest()
     final_checks = {'exact': False, 'history': False, 'sqlite_integrity': None}
+    pacer = OperationPacer(args.operations_per_second)
 
-    def checkpoint(status):
+    def checkpoint(status, elapsed_seconds=None):
+        elapsed = (time.monotonic() - started if elapsed_seconds is None
+                   else elapsed_seconds)
         progress = {'status': status, 'started_at': started_at,
-                    'elapsed_seconds': round(time.monotonic() - started, 1), 'operations': count,
+                    'elapsed_seconds': round(elapsed, 1), 'operations': count,
+                    'requested_operations_per_second': args.operations_per_second,
+                    'observed_operations_per_second': round(count / max(elapsed, 0.001), 3),
                     'controlled_crashes': crashes, 'held_readers': readers, 'mutation_bursts': bursts,
                     'candidate_binary_sha256': candidate_binary_sha256,
                     'exact_check_interval_operations': args.soak_check_interval,
@@ -1602,11 +1632,8 @@ def soak_test(case, args, evidence):
         if time.monotonic() >= next_checkpoint:
             checkpoint('running')
             next_checkpoint = time.monotonic() + 60
-        # The configured rate is operations per second. Sleeping only once in
-        # each 100-operation exactness batch multiplies the actual mutation
-        # rate by roughly 100 and makes endurance reports misleading. Pace each
-        # mutation so the requested workload is reproducible and comparable.
-        time.sleep(1 / args.operations_per_second)
+        pacer.wait()
+    workload_elapsed_seconds = time.monotonic() - started
     daemon.exact(timeout=180)
     final_checks['exact'] = True
     case.history()
@@ -1622,13 +1649,24 @@ def soak_test(case, args, evidence):
     daemon.stop()
     integrity(case.db)
     final_checks['sqlite_integrity'] = 'ok'
-    evidence.update(duration_seconds=args.duration_seconds, operations=count, samples=samples,
+    evidence.update(duration_seconds=args.duration_seconds,
+                    workload_elapsed_seconds=round(workload_elapsed_seconds, 3),
+                    requested_operations_per_second=args.operations_per_second,
+                    observed_operations_per_second=round(
+                        count / max(workload_elapsed_seconds, 0.001), 3),
+                    operations=count, samples=samples,
                     exact_convergence_ms=exact_convergence_ms,
                     max_exact_convergence_ms=max(exact_convergence_ms, default=0),
                     exact_check_interval_operations=args.soak_check_interval,
                     controlled_crashes=crashes, held_readers=readers, mutation_bursts=bursts)
-    checkpoint('passed')
-    print(f"PASS bounded soak: {count} operations over {args.duration_seconds}s, {len(crashes)} restarts, {len(readers)} reader holds", flush=True)
+    checkpoint('passed', elapsed_seconds=workload_elapsed_seconds)
+    observed_rate = count / max(workload_elapsed_seconds, 0.001)
+    print(
+        f"PASS bounded soak: {count} operations over {args.duration_seconds}s, "
+        f"{observed_rate:.3f}/{args.operations_per_second} operations/s, "
+        f"{len(crashes)} restarts, {len(readers)} reader holds",
+        flush=True,
+    )
 
 
 class ManagedProcess:
