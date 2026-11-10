@@ -79,15 +79,22 @@ pending. The most recent exact convergence sample was 1,470 ms. The run still
 uses the older copied pacing harness and remains an active soak, not a pass.
 The captured checkpoint is [`soak-progress-20261110T1200Z.json`](../r132-72h-soak-vps2-20261110/soak-progress-20261110T1200Z.json).
 
+A later bounded runtime probe started the exact candidate as UID `dux` on a
+512 MiB ext4 loop filesystem, verified all five process capability masks,
+observed a fanotify event, rescanned, found the created file, and passed
+SQLite `quick_check`. See the separate [runtime qualification record](../nonroot-runtime-r132-vps2-20261110/README.md)
+for its exact scope and cleanup evidence.
+
 ## Remaining qualification
 
 1. Build authenticated release DEB and RPM artifacts containing this source
    and verify their checksums and scriptlet content.
 2. On disposable Ubuntu and Rocky guests, test clean install, upgrade from the
    old root-owned state, inactive-service preservation, rollback, and removal.
-3. Run the candidate as UID `dux`; verify fanotify, handle reads, full-tree
-   scan, DB/WAL permissions, and exact comparisons under concurrent churn.
-4. Measure effective capabilities and systemd sandbox policy from the running
-   process, then assess the residual `CAP_SYS_ADMIN` exposure.
+3. Extend runtime checks to direct handle reads, DB/WAL permissions, a
+   production-sized tree, and concurrent churn; the small ext4 probe is not a
+   substitute for these cases.
+4. Qualify the full packaged systemd sandbox and assess residual
+   `CAP_SYS_ADMIN` exposure after install and upgrade.
 5. Complete the existing 72-hour soak and production-scale qualification
    before any production rollout.

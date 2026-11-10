@@ -1,0 +1,65 @@
+{
+  "result": "passed_bounded_runtime_probe",
+  "observed_at_utc": "2026-11-10T12:22:13Z",
+  "host": "192.168.5.106",
+  "candidate": {
+    "release": "r132",
+    "source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+    "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
+  },
+  "fixture": {
+    "filesystem": "ext4 loop image backed by /dev/shm",
+    "filesystem_size_mib": 512,
+    "initial_files": 32,
+    "initial_directories": 2,
+    "post_baseline_file_create": true
+  },
+  "transient_unit": {
+    "name": "dux-nonroot-qualification-1794313328.service",
+    "user": "dux",
+    "uid": 996,
+    "group": "dux",
+    "gid": 115,
+    "cpu_quota_percent_one_core": 10,
+    "memory_max_mib": 256,
+    "runtime_max_seconds": 120,
+    "umask": "0027",
+    "no_new_privileges": true
+  },
+  "runtime_capability_masks": {
+    "CapEff": "0x200004",
+    "CapPrm": "0x200004",
+    "CapBnd": "0x200004",
+    "CapInh": "0x200004",
+    "CapAmb": "0x200004",
+    "expected": "CAP_DAC_READ_SEARCH | CAP_SYS_ADMIN"
+  },
+  "assertions": {
+    "fanotify_watch_available": true,
+    "event_counter_advanced_after_create": true,
+    "explicit_rescan_accounting_verified": true,
+    "scan_coverage_issues": 0,
+    "staged_paths_after_change": 35,
+    "new_file_returned_by_find": true,
+    "sqlite_quick_check": "ok",
+    "steady_state_clean": false
+  },
+  "cleanup": {
+    "temporary_user_removed": true,
+    "original_dux_group_restored": "dux:x:115:",
+    "loop_mount_removed": true,
+    "loop_device_detached": true,
+    "existing_dux_service_restarts": 0,
+    "soak_service_restarts": 0
+  },
+  "scope_limits": [
+    "No DEB/RPM install, upgrade, rollback, or removal was run",
+    "No direct open_by_handle_at test under UID dux was run",
+    "Small fixture only; not production-scale or multi-day qualification",
+    "Transient unit reproduced identity/capabilities, not the full packaged systemd sandbox"
+  ],
+  "evidence": {
+    "unit_journal": "unit-journal.log",
+    "cleanup_state": "cleanup-state.txt"
+  }
+}
