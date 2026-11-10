@@ -78,12 +78,20 @@ function; LLVM emitted no branch counters. Strict Clippy, formatting,
 `git diff --check`, package metadata, and artifact hash verification passed.
 Dependency audit: 0 known vulnerabilities in 229 locked packages in the
 recorded advisory snapshot. The basic privileged fanotify success path now has
-an isolated runtime smoke; capability-negative startup, broader stale-handle
-churn, and production-scale qualification remain open. Full details and
+an isolated runtime smoke. A separate run as `nobody` with no capabilities
+confirmed startup fails closed at `fanotify_mark` (`EPERM`); broader
+`CAP_DAC_READ_SEARCH` handle-resolution behavior, stale-handle churn, and
+production-scale qualification remain open. Full details and
 artifacts are in the
 [`r126 qualification`](docs/qualification/release-candidate-r126-20261110/README.md).
 
-**Updated:** 2026-11-10 01:59 UTC
+At 02:08 UTC, the missing-capability startup smoke was repeated from the
+checked-in harness against the exact candidate SHA-256; it passed on Linux
+6.8.0-147-generic. The temporary `/dev/shm` fixture was automatically removed.
+This does not qualify capability behavior on other kernels or test
+`CAP_DAC_READ_SEARCH` event-handle resolution.
+
+**Updated:** 2026-11-10 02:08 UTC
 
 ---
 

@@ -53,6 +53,13 @@ syscall path; see
 [`fanotify-integration-smoke.md`](fanotify-integration-smoke.md). This runtime
 trace is not LLVM coverage.
 
+A capability-negative smoke was also run against the exact candidate binary:
+as `nobody`, with an empty capability bounding set, startup failed closed when
+fanotify marking returned `EPERM` (`no watchable filesystem`). The reproducible
+script is [`capability-negative-smoke.sh`](capability-negative-smoke.sh). This
+checks missing `CAP_SYS_ADMIN` at startup; it does not yet test missing
+`CAP_DAC_READ_SEARCH` during event-handle resolution.
+
 The lockfile audit found 0 known vulnerabilities among 229 dependencies with
 the recorded 1,430-advisory RustSec snapshot, last updated 2026-11-09. The
 binary audit found auditable metadata for 202 dependencies. See
@@ -73,6 +80,7 @@ Still required: guarded clean install/upgrade/rollback/purge, independent
 path-and-accounting comparison, and a fresh uninterrupted 24-hour canary. The
 isolated smoke closes the basic privileged success-path gap, but broader
 create/delete/attribute/stale-handle churn and independent-walk comparison
-remain open. Capability-negative startup/handle-resolution tests also remain
-open. The prior r121 canary remains failed. Root execution and `CAP_SYS_ADMIN`
-remain material security exposure.
+remain open. Broader capability-negative handle-resolution tests remain open;
+the missing-`CAP_SYS_ADMIN` startup smoke passed on the tested Linux host. The
+prior r121 canary remains failed. Root execution and `CAP_SYS_ADMIN` remain
+material security exposure.

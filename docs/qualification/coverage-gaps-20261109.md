@@ -96,3 +96,16 @@ This closes the basic success-path runtime gap for the tested kernel/filesystem,
 not the broader race, deletion, attribute, capability-negative, or independent
 walk cases. The LLVM profile still has no line hits for the production syscall
 call sites, so this runtime evidence does not change its reported percentages.
+
+## Follow-up — r126 missing-capability startup smoke (2026-11-10)
+
+The exact r126 candidate binary (SHA-256
+`9428b49d5d9ee5935cf77e3042eb0a321cd7fb106de6d4464ddaaf4d3951a92b`) was
+started as `nobody` with an empty capability bounding set and `no_new_privs`.
+On the local Linux host, fanotify marking returned `EPERM`; Dux exited with
+`no watchable filesystem` rather than staying live without coverage. The test
+used a temporary `/dev/shm` directory which was automatically removed. This
+closes only the missing-`CAP_SYS_ADMIN` startup smoke for that host. The
+missing-`CAP_DAC_READ_SEARCH` event-handle behavior, broader filesystem race
+cases, and independent-walk comparison remain open. Reproduce with
+[`capability-negative-smoke.sh`](release-candidate-r126-20261110/capability-negative-smoke.sh).
