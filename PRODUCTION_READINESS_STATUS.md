@@ -4840,3 +4840,35 @@ bursts, no held-reader or controlled-crash phases, and terminal checks pending.
 Checkpoint:
 [`soak-progress-20261110T1447Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1447Z.json)
 (SHA-256 `7fe201746955e5562258ef7de61ed5685ebe94c27742426fcb25f0119efe1f50`).
+
+## Six-hour soak reader phase and fifth scan-first result — 2026-11-10 15:10 UTC
+
+The r132 soak crossed six hours and completed its first held-reader phase.
+At 15:10:01 the live progress record showed 21,901.5 seconds elapsed, 507,264
+operations, 505 exactness samples, six mutation bursts, **one 300-second held
+reader**, 2,502 snapshot inodes, and `wal_reclaimed=true`. The worker has zero
+restarts. No controlled-crash phase has run; final exactness/history/SQLite
+checks remain pending. This is a passed sub-phase, not a completed soak. The
+retained checkpoint is
+[`soak-progress-20261110T1510Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1510Z.json)
+(SHA-256 `ad77f03e896e02857cdc0100de6551f16166d07437c270a09efda7c1eeb3d254`).
+
+The fifth completed VPS2 scan-first observation finished at 15:00:35 with
+1,719,222 files, 211,007 directories, 1,930,229 staged path instances,
+83,787,022,336 unique bytes (78.03 GiB), zero coverage issues, two revalidated
+inode-reuse paths, zero unresolved paths, and zero vanished paths. Accounting
+verification passed at 15:01:53 in 78,442 ms. The completion gap from the
+previous scan was 14m47s, within the 15-minute target by 13 seconds. At
+15:10:19 the sixth observation had started (15:10:09); the last completed scan
+was 584 seconds old. No overflows or dropped updates had been reported.
+
+Across the five completed observations, completion gaps are 13m48s, 14m51s,
+15m39s, and 14m47s: one miss by 39 seconds. The sixth cycle is still running,
+so this remains mixed early evidence, not a sustained freshness qualification.
+The machine-readable metrics now include both the last completed scan and the
+active scan start.
+
+The local host admission check at 15:10:49 remained blocked: load1 16.34,
+CPU PSI some 58.08%, multiple Go compiler workers, Go vet, Go build/test, and a
+shell test. The Ubuntu guest remains inactive after the 14:23 runtime-guard
+stop; no package installation, upgrade, or rollback command has run.

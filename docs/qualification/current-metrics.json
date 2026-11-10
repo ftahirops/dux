@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T14:47:13Z",
+  "snapshot_at_utc": "2026-11-10T15:10:49Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,7 +7,7 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T13:54:22Z",
+    "observed_at_utc": "2026-11-10T15:02:18Z",
     "installed_release": "0.6.3 (build e0cc915f)",
     "service_active": true,
     "historical_restarts": 4,
@@ -16,22 +16,24 @@
     "kernel_overflows": 766,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 246210.643,
+    "behind_seconds": 250286.595,
     "service_user": "root",
-    "index_nodes": 1311146,
-    "index_bytes_on_disk": 3466829824,
+    "index_nodes": 1299525,
+    "index_bytes_on_disk": 3478581248,
     "wal_bytes": 134217728,
     "pending_updates": 9,
     "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
     "scan_in_progress": false,
-    "behind_seconds_applicable": true
+    "behind_seconds_applicable": true,
+    "last_scan_age_seconds": 439976,
+    "dirty_since_timestamp_seconds": 1794321547
   },
   "disk": {
-    "observed_at_utc": "2026-11-10T13:53:40Z",
+    "observed_at_utc": "2026-11-10T15:02:18Z",
     "root_size_gib": 185,
-    "root_used_gib": 123,
-    "root_available_gib": 55,
-    "root_use_percent": 70,
+    "root_used_gib": 119,
+    "root_available_gib": 59,
+    "root_use_percent": 67,
     "target_readiness_size_gib": 1.4,
     "workspace_size_gib": 4.2,
     "target_size_gib": 3.6,
@@ -39,15 +41,22 @@
     "var_log_size_gib": 2.0
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T14:23:23Z",
-    "load_average_1m": 2.4,
-    "cpu_psi_some_avg10_percent": 41.22,
+    "observed_at_utc": "2026-11-10T15:10:49Z",
+    "load_average_1m": 16.34,
+    "cpu_psi_some_avg10_percent": 58.08,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "Go compiler and go test appeared during guest boot; runtime guard stopped disposable VM"
+      "multiple Go compiler workers",
+      "Go vet worker",
+      "go build",
+      "go test",
+      "go vet",
+      "shell test script",
+      "load1 > 10",
+      "CPU PSI some > 55%"
     ],
     "active_host_workload_count": 2,
     "active_host_workload_types": [
@@ -56,7 +65,7 @@
     ],
     "evidence": "PRODUCTION_READINESS_STATUS.md (14:23 UTC VM runtime-guard entry)",
     "ubuntu_guest_started": true,
-    "ubuntu_guest_state": "started 14:21:38; runtime guard stopped at 14:23:23 before SSH/cloud-init; no package commands ran",
+    "ubuntu_guest_state": "started 14:21:38; runtime guard stopped at 14:23:23 before SSH/cloud-init; no package commands ran; no guest currently active",
     "cpu_psi_full_avg10_percent": 0.0
   },
   "rust_tests": {
@@ -84,24 +93,29 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T14:47:13Z",
+    "observed_at_utc": "2026-11-10T15:10:01Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 20489.3,
-    "operations": 474759,
-    "exact_check_samples": 472,
-    "completed_hourly_bursts": 5,
-    "held_reader_scenarios": 0,
+    "elapsed_seconds": 21901.5,
+    "operations": 507264,
+    "exact_check_samples": 505,
+    "completed_hourly_bursts": 6,
+    "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
     "terminal_exact_history_integrity": "pending",
     "requested_operations_per_second": 25,
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 23.171069777884068,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1447Z.json",
+    "observed_operations_per_second_elapsed": 23.161153345661255,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1510Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.07904822530864197
+    "coverage_duration_fraction": 0.08449652777777777,
+    "held_reader_result": {
+      "held_seconds": 300,
+      "snapshot_inodes": 2502,
+      "wal_reclaimed": true
+    }
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -146,7 +160,8 @@
     "latest_soak_checkpoint_1409z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1409Z.json",
     "latest_soak_checkpoint_1417z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1417Z.json",
     "latest_soak_checkpoint_1431z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1431Z.json",
-    "latest_soak_checkpoint_1447z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1447Z.json"
+    "latest_soak_checkpoint_1447z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1447Z.json",
+    "latest_soak_checkpoint_1510z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1510Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -230,7 +245,7 @@
     "dux_internal_handle_decoder": "not qualified"
   },
   "vps2_scan_first_runtime": {
-    "observed_at_utc": "2026-11-10T14:47:13Z",
+    "observed_at_utc": "2026-11-10T15:10:19Z",
     "installed_build": "0.6.3 (8b02799b)",
     "mode": "scan_first",
     "service_active": true,
@@ -254,33 +269,38 @@
     "behind_seconds_applicable": false,
     "behind_seconds_field_value": 35192.546,
     "behind_seconds_semantics": "not applicable in scan-first mode; use last_scan_age_seconds for observation freshness",
-    "completed_observations_since_checkpoint": 4,
-    "latest_observation_utc": "2026-11-10T14:45:48Z",
-    "latest_observation_age_seconds": 85,
-    "latest_observation_files": 1716119,
-    "latest_observation_directories": 210697,
-    "latest_observation_staged_path_instances": 1926816,
-    "latest_observation_unique_bytes": 83631431680,
+    "completed_observations_since_checkpoint": 5,
+    "latest_observation_utc": "2026-11-10T15:00:35Z",
+    "latest_observation_age_seconds": 584,
+    "latest_observation_files": 1719222,
+    "latest_observation_directories": 211007,
+    "latest_observation_staged_path_instances": 1930229,
+    "latest_observation_unique_bytes": 83787022336,
     "latest_observation_coverage_issues": 0,
-    "latest_vanished_reuse_paths": 1,
-    "latest_revalidated_reuse_paths": 0,
+    "latest_vanished_reuse_paths": 0,
+    "latest_revalidated_reuse_paths": 2,
     "latest_unresolved_reuse_paths": 0,
     "latest_accounting_verification": "passed",
-    "latest_accounting_verification_elapsed_ms": 64122,
+    "latest_accounting_verification_elapsed_ms": 78442,
     "observation_completion_gap_seconds": 828,
     "state_at_1417": "dirty; changes await next full observation; no scan active",
     "behind_seconds_field_present_in_running_build": false,
     "recent_observation_completion_gaps_seconds": [
       828,
       891,
-      939
+      939,
+      887
     ],
     "state_at_1431": "dirty; changes await next full observation; no scan active",
     "recent_15m_completion_target_results": [
       "pass",
       "pass",
-      "miss_by_39_seconds"
+      "miss_by_39_seconds",
+      "pass"
     ],
-    "state_at_1447": "dirty; changes await next full observation; no scan active"
+    "state_at_1447": "dirty; changes await next full observation; no scan active",
+    "state_at_1510": "sixth observation in progress; zero pending updates/overflow/drops",
+    "in_progress_observation_started_at_utc": "2026-11-10T15:10:09Z",
+    "in_progress_scan_age_seconds_at_observation": 584
   }
 }
