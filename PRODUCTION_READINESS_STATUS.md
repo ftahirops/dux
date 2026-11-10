@@ -133,6 +133,16 @@ isolated performance benchmark, and the 9-second outlier cannot be attributed
 to host pressure from the available samples. See the
 [10:19 progress and pressure evidence](docs/qualification/r132-72h-soak-vps2-20261110/).
 
+At 10:42 UTC, the worker was still `active/running` with zero restarts. Its
+latest progress file recorded 5,884.9 seconds elapsed, 139,069 operations, 139
+exact-check samples, and one completed hourly burst. Sampled convergence was
+229ms minimum, 913ms median, 1,285ms mean, 3,443ms p95, and 9,028ms maximum;
+sampled RSS peaked at 6,568 KiB and WAL at 4.41 MB. The six-hour held-reader
+and twelve-hour controlled recovery have not run yet; final exactness, history,
+and SQLite integrity results are still pending. This is continued progress,
+not a soak pass. VPS2 was queried read-only over SSH; the full live evidence
+remains at `/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json`.
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM
