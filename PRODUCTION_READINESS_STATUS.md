@@ -27,15 +27,15 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:15 UTC
+### Live checkpoint — 2026-11-10 09:19 UTC
 
 The unit remains `active/running`, with **zero restarts**. At elapsed 600.2s,
-the worker had completed **13,994 mutations**. The latest recorded 1,000-op
-exact checkpoint (13,000 operations) passed in 1.856s; no controlled crash,
-held-reader phase, or hourly burst had occurred yet. Final exactness, history,
-and SQLite integrity are still pending. These are early progress measurements,
-not a soak pass. VPS2 had 4.5 GiB free on `/`; the disposable fixture uses
-`/dev/shm`, with 2.8 GiB free there.
+the earlier checkpoint was 13,994 mutations. At the latest progress sample,
+elapsed time was 840.3s and the worker had completed **19,815 mutations**. The
+19,000-op exact checkpoint passed in 306ms; no controlled crash, held-reader
+phase, or hourly burst had occurred yet. Final exactness, history, and SQLite
+integrity are still pending. These are early progress measurements, not a soak
+pass. VPS2 had 4.5 GiB free on `/`; the disposable fixture uses `/dev/shm`.
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
