@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:47:34Z",
+  "snapshot_at_utc": "2026-11-10T21:50:08Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -111,12 +111,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T21:47:33Z",
+    "observed_at_utc": "2026-11-10T21:49:33Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 45763.4,
-    "operations": 1027134,
-    "exact_check_samples": 1024,
+    "elapsed_seconds": 45883.5,
+    "operations": 1029704,
+    "exact_check_samples": 1026,
     "completed_hourly_bursts": 12,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -126,15 +126,15 @@
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
     "observed_operations_per_second_elapsed": 22.466,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2147Z.json",
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2149Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.17655632716049383,
+    "coverage_duration_fraction": 0.17701967592592593,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "db182d6383425d6bdd1d5095ed33ba7f69e4b54282820723d064042acce8025b",
+    "latest_checkpoint_sha256": "afb5f88a0606b783f3a3d381ee626ac47f37b49a816fae2b4703845117eac028",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -1111,12 +1111,16 @@
     "full_python_suite_rerun_after_change": false
   },
   "vps2_disk_latest": {
-    "observed_at_utc": "2026-11-10T21:43:33Z",
-    "root_filesystem_use_percent": 90,
-    "root_available_gib": 9.3,
-    "var_tmp_gib": 4.2,
+    "observed_at_utc": "2026-11-10T21:50:07Z",
+    "root_filesystem_use_percent": 89,
+    "root_available_gib": 11.0,
+    "var_tmp_gib": 2.4,
     "var_log_journal_gib": 4.1,
-    "cleanup_performed": false,
-    "note": "Active build/test workloads present; preserve qualification artifacts and avoid cleanup while jobs are running."
+    "cleanup_performed": true,
+    "note": "Removed inactive reproducible build caches after confirming no process references. Preserved repositories, reports, qualification evidence, journal, and active soak data.",
+    "removed_caches": [
+      "/var/tmp/dux-cargo (1005 MiB)",
+      "/var/tmp/dux-rustup (842 MiB)"
+    ]
   }
 }
