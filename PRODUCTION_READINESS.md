@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 23:18 UTC**. VPS1 was rechecked at 23:18 UTC and remains on the old event-apply
+**2026-11-10 23:23 UTC**. VPS1 was rechecked at 23:23 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -16,10 +16,10 @@ machine-readable snapshot is
 
 | System | Latest verified state |
 |---|---|
-| **VPS1 production** | At 23:18 UTC the installed Dux remains 0.6.3 build `e0cc915f8f37`, running as root with four historical systemd restarts; dirty and not caught up, 887 lifetime overflows, 2,518,862 dropped updates, 29,172 pending updates, and no scan active. Dirty reason is `fanotify queue overflow`; last full scan is 5.44 days old and the reported behind time is 3.24 days. In a 30-second sample, pending updates fell by 6,045 while 132,067 more events were seen; the cumulative overflow and dropped-update counts did not change. Mean service CPU time was 23.32% of one core during that window. This is short-window backlog drainage, not proof of sustainable capacity or exactness. The latest 500-message journal sample contained 430 unresolved `ESTALE` failures, 304 with `FAN_ATTRIB`-only masks; this is not a complete event rate or proof of causality. See [23:18 status](docs/qualification/vps1-backlog-window-20261110T2318Z.json), [23:14 status](docs/qualification/vps1-live-status-20261110T2315Z.json), and [ESTALE sample](docs/qualification/vps1-estale-event-sample-20261110T2314Z.json). |
+| **VPS1 production** | At 23:23 UTC the installed Dux remains 0.6.3 build `e0cc915f8f37`, running as root with four historical systemd restarts; dirty and not caught up, 887 lifetime overflows, 2,518,862 dropped updates, 717 pending updates, and no scan active. Dirty reason is `fanotify queue overflow`; last full scan is 5.44 days old and the reported behind time is 3.24 days. Pending updates fluctuated sharply, including a rise above 52,000 followed by rapid declines and re-growth; temporary drainage is not accuracy recovery. In the last hour sample, the daemon emitted 1,991 unresolved-event warnings, 1,975 with `ESTALE`; candidate rate limiting projects to about 60/hour at the same event rate, but no production A/B measurement exists. See [23:23 VPS1 status](docs/qualification/vps1-live-status-20261110T2322Z.json), [warning-volume sample](docs/qualification/vps1-unresolved-log-volume-20261110T2321Z.json), and the [30-second backlog sample](docs/qualification/vps1-backlog-window-20261110T2318Z.json). |
 | **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode. The latest full observation completed at 21:36:57 over 1,786,223 files and 218,602 directories with 0 coverage issues; accounting passed at 21:38:09. At 21:38 the service had zero kernel overflows, dropped updates, and pending updates. It was dirty because filesystem changes await the next full observation; per-path freshness is not measured. |
 | **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 23:07, the soak had run 14h02m26s of a 72-hour target (19.50%), with 1,127,524 operations, 1,124 exactness samples, 14 mutation bursts, two held-reader/WAL-reclaim passes, and one controlled crash/restart recovery. Whole-run average is 22.307 ops/s; synchronous scan/accounting/oracle checks pause the pacer, so this does not demonstrate sustained 25/s capacity. Sampled convergence latency: mean 3.461s, median 2.842s, p95 7.942s, max 17.393s. The recovery killed candidate PID 1305044, restarted PID 3117886, and recovered 64 files created during downtime after exact-index and history checks passed. The outer systemd supervisor remains active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. See the [23:07 checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2307Z.json). |
-| **Disk and VM admission** | At 23:14 the qualification host root was 71% used with 52.8 GiB free and `/dev/shm` had 9.3 GiB free. The admission probe refused VM qualification at sample 1/3 because unrelated Go compiler, `go test`, and `go vet` processes were active. VPS2 has no `/dev/kvm` and remains the soak host, so it is not a safe substitute for the isolated matrix. No fault suite ran. See the [23:08 capacity sample](docs/qualification/host-capacity-20261110T2308Z.json) and [23:14 admission record](docs/qualification/vm-admission-20261110T2314Z.json). |
+| **Disk and VM admission** | At 23:22 the qualification host root was 71% used with 51.6 GiB free and `/dev/shm` had 9.3 GiB free. The admission probe refused VM qualification at sample 1/3 due to active Go compiler/tests and `node tsc`, load1 15.89, and I/O PSI some avg10 28.48%. VPS2 has no `/dev/kvm` and remains the soak host, so it is not a safe substitute for the isolated matrix. No fault suite ran. See the [23:22 admission record](docs/qualification/vm-admission-20261110T2322Z.json) and [23:08 capacity sample](docs/qualification/host-capacity-20261110T2308Z.json). |
 
 ### Recent live reliability and throughput evidence
 
@@ -42,6 +42,17 @@ remained dirty and not caught up; the full scan age continued increasing. This
 short interval does not establish a sustained service rate, and the counters
 have different meanings. The sample is preserved in
 [`vps1-backlog-window-20261110T2318Z.json`](docs/qualification/vps1-backlog-window-20261110T2318Z.json).
+
+The installed daemon also emits a warning for almost every unresolved event: in
+the latest hour sample there were 1,991 such warnings (1,975 `ESTALE`) and no
+rate-limit suppression fields. The candidate source has a global one-per-minute
+warning limiter with a suppressed-event count, and its focused unit test passed
+in the recorded Rust suite. At the observed rate this projects to roughly 97%
+fewer warning records, but it has not been measured after deployment. Journald
+uses 508.6 MiB overall; that total includes all units and cannot be attributed
+to Dux. See the [bounded warning-volume sample and projection
+limits](docs/qualification/vps1-unresolved-log-volume-20261110T2321Z.json) and
+[test log](docs/qualification/regression-20261110T1823Z/rust-tests.log).
 
 On the installed VPS2 service, one scan at 18:53 found a conflicting inode
 incarnation and was rejected with one coverage issue. The old index was retained.

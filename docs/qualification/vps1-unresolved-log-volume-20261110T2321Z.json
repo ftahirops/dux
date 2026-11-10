@@ -1,0 +1,92 @@
+{
+  "observed_at_utc": "2026-11-10T23:22:12+00:00",
+  "host": "VPS1 production host",
+  "installed_binary": "dux 0.6.3 (e0cc915f8f37), predates r132 candidate",
+  "query": "journalctl -u dux.service --since <window> --no-pager -o short-iso-precise",
+  "samples": [
+    {
+      "requested_window": "15 minutes ago",
+      "journal_lines": 497,
+      "unresolved_warning_lines": 462,
+      "estale_lines": 459,
+      "estale_mask_and_info_type_counts": {
+        "mask=0x4 info_type_mask=0x2": 388,
+        "mask=0x40000300 info_type_mask=0x6": 19,
+        "mask=0x40000200 info_type_mask=0x6": 7,
+        "mask=0x14a info_type_mask=0x6": 5,
+        "mask=0x200 info_type_mask=0x6": 5,
+        "mask=0x20a info_type_mask=0x6": 5,
+        "mask=0x40000100 info_type_mask=0x6": 3,
+        "mask=0x14e info_type_mask=0x6": 3,
+        "mask=0x48 info_type_mask=0x6": 6,
+        "mask=0x208 info_type_mask=0x6": 5,
+        "mask=0x308 info_type_mask=0x6": 1,
+        "mask=0x10a info_type_mask=0x6": 3,
+        "mask=0x30a info_type_mask=0x6": 3,
+        "mask=0xa info_type_mask=0x6": 5,
+        "mask=0x304 info_type_mask=0x6": 1
+      },
+      "warning_output_bytes": 189210,
+      "suppressed_events_fields": 0,
+      "first_warning": "2026-11-10T23:07:12.925224+00:00",
+      "last_warning": "2026-11-10T23:22:11.909295+00:00"
+    },
+    {
+      "requested_window": "1 hour ago",
+      "journal_lines": 2510,
+      "unresolved_warning_lines": 1991,
+      "estale_lines": 1975,
+      "estale_mask_and_info_type_counts": {
+        "mask=0x4 info_type_mask=0x2": 1445,
+        "mask=0x40000300 info_type_mask=0x6": 114,
+        "mask=0x10a info_type_mask=0x6": 20,
+        "mask=0x40000200 info_type_mask=0x6": 31,
+        "mask=0x20a info_type_mask=0x6": 79,
+        "mask=0xa info_type_mask=0x6": 36,
+        "mask=0x304 info_type_mask=0x6": 8,
+        "mask=0x208 info_type_mask=0x6": 23,
+        "mask=0x200 info_type_mask=0x6": 30,
+        "mask=0x308 info_type_mask=0x6": 9,
+        "mask=0x14a info_type_mask=0x6": 23,
+        "mask=0x48 info_type_mask=0x6": 46,
+        "mask=0x14e info_type_mask=0x6": 36,
+        "mask=0x8 info_type_mask=0x6": 12,
+        "mask=0x20c info_type_mask=0x6": 3,
+        "mask=0x30a info_type_mask=0x6": 20,
+        "mask=0x4a info_type_mask=0x6": 4,
+        "mask=0x280 info_type_mask=0x6": 1,
+        "mask=0x2c0 info_type_mask=0x6": 1,
+        "mask=0x108 info_type_mask=0x6": 4,
+        "mask=0x40000100 info_type_mask=0x6": 15,
+        "mask=0x204 info_type_mask=0x6": 1,
+        "mask=0x140 info_type_mask=0x6": 4,
+        "mask=0x80 info_type_mask=0x6": 1,
+        "mask=0x40000040 info_type_mask=0x6": 1,
+        "mask=0x4 info_type_mask=0x6": 1,
+        "mask=0x300 info_type_mask=0x6": 1,
+        "mask=0x20e info_type_mask=0x6": 4,
+        "mask=0x10e info_type_mask=0x6": 1,
+        "mask=0x40 info_type_mask=0x6": 1
+      },
+      "warning_output_bytes": 815893,
+      "suppressed_events_fields": 0,
+      "first_warning": "2026-11-10T22:22:15.302132+00:00",
+      "last_warning": "2026-11-10T23:22:11.909295+00:00"
+    }
+  ],
+  "journald_total_disk_usage": "508.6M (all system journals; not attributable to Dux alone)",
+  "candidate_behavior": "src/watch.rs rate-limits unresolved-event WARN diagnostics globally to one per 60 seconds and records suppressed_events on the emitted warning",
+  "candidate_test": "watch::tests::unresolved_event_diagnostics_are_rate_limited_with_suppressed_count; passed in docs/qualification/regression-20261110T1823Z/rust-tests.log",
+  "conditional_projection": {
+    "observed_unresolved_warnings_last_hour": 1991,
+    "candidate_max_warnings_per_hour_at_same_steady_state": 60,
+    "estimated_reduction_percent": 97.0,
+    "warning": "conditional log-rate projection only; not measured candidate-on-production behavior"
+  },
+  "interpretation": "The currently installed daemon emits high-volume unresolved-event warnings, predominantly ESTALE. This creates avoidable journald write and storage pressure. Candidate source already rate-limits diagnostics and has a passing unit test; this observation does not prove candidate production correctness or reduce its other reliability gates.",
+  "limitations": [
+    "Relative journal windows are bounded by available journal retention.",
+    "Journald total size includes every system unit and cannot be attributed to Dux from this query.",
+    "The candidate was not installed for an A/B production comparison."
+  ]
+}
