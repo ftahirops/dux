@@ -35,6 +35,19 @@ history, and SQLite integrity are therefore still pending. This is progress,
 not a soak pass. The captured progress JSON is
 [`soak-progress-20261110T1002Z.json`](soak-progress-20261110T1002Z.json).
 
+### Hourly burst checkpoint — 2026-11-10 10:05 UTC
+
+The first scheduled **500-file hourly burst** had completed. At 10:05 UTC,
+durable progress recorded `mutation_bursts: 1` after 3,601.6 seconds and 85,758
+total operations. The harness increments this counter before `daemon.exact`
+and `case.history`, then writes the durable progress checkpoint only after both
+assertions succeed. This therefore proves the first burst's exactness and
+history checks passed. The latest regular 1,000-operation sample was operation
+85,000: exact convergence **890 ms**, RSS **4,388 KiB**, 15 file descriptors,
+and a **4,301,312-byte WAL**. The six-hour held-reader and twelve-hour crash
+recovery remain pending. See
+[`soak-progress-20261110T1005Z.json`](soak-progress-20261110T1005Z.json).
+
 ## Workload and pass criteria
 
 - 25 filesystem mutations per second for 259,200 seconds.
