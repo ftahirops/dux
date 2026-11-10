@@ -1,0 +1,6 @@
+2026-11-10T19:45:22.121329Z INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+2026-11-10T19:50:44.414465Z INFO dux::watch: rescan complete: 1770640 files, 217236 dirs, 1987876 staged path instances (0 directory alias paths), visible 84340547584 bytes/1987876 entries, unique 84153237504 bytes/1984394 inodes, 78.37 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=0 revalidated_reuse_paths=2 unresolved_reuse_paths=0
+2026-11-10T19:52:24.854260Z INFO dux::watch: reconciliation accounting verification passed elapsed_ms=100407
+2026-11-10T20:00:22.122017Z INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+2026-11-10T20:06:50.163775Z INFO dux::watch: rescan complete: 1772716 files, 217565 dirs, 1990281 staged path instances (0 directory alias paths), visible 84316205056 bytes/1990281 entries, unique 84128894976 bytes/1986799 inodes, 78.35 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=60 revalidated_reuse_paths=2 unresolved_reuse_paths=0
+2026-11-10T20:09:00.469700Z INFO dux::watch: reconciliation accounting verification passed elapsed_ms=130285

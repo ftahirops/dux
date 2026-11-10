@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 20:08 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
+**2026-11-10 20:12 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -17,19 +17,21 @@ machine-readable snapshot is
 | System | Latest verified state |
 |---|---|
 | **VPS1 production** | At 20:08 UTC: Dux 0.6.3 build `e0cc915f`, running as root with four historical systemd restarts; dirty and not caught up, 785 lifetime overflows, 2,518,862 dropped updates, 166 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. Current dirty reason reports non-watched filesystem mounts changed; reconciling visible paths. No OOM events were recorded. See [latest VPS1 status](docs/qualification/vps1-live-status-20261110T2008Z.json). |
-| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 19:41:55 it was active with zero restarts; VPS2 host admission was rechecked at 19:50. The latest full scan/accounting evidence remains from 19:37–19:38. Its latest full observation completed at 19:37 with zero coverage issues; independent accounting passed in 66.0 seconds. The index was marked dirty because new hints arrived after the scan. Per-path freshness is not measured. |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 20:08 checkpoint is 11h03m19s into a 72-hour run (15.35%), with 900,404 operations, 897 exactness samples, 11 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 19:41:55 the installed service was active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. |
-| **VPS2 disk** | At 19:50, root was 91% used with 8.58 GB available. CPU PSI some avg10 was 20.58%, and ClickHouse used 90.8% CPU; the guarded fault VM was not started. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
+| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 20:12:32 it was active with zero restarts, overflows, drops, or pending updates. Two later full observations completed at 19:50 and 20:06 with zero coverage issues; independent accounting passed in 100.4 and 130.3 seconds. Starts were exactly 15 minutes apart. The latest scan-first status remains dirty because new hints arrived after the scan; last scan age was 343 seconds. Per-path freshness is not measured. |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 20:12 checkpoint is 11h08m19s into a 72-hour run (15.47%), with 906,776 operations, 903 exactness samples, 11 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 20:12:32 the installed service was active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. |
+| **VPS2 disk** | At 20:12, root was 91% used with 8.94 GB available. CPU PSI some avg10 was 14.43%, and ClickHouse used 91.1% CPU; the guarded fault VM was not started. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
 
 ### Recent live reliability and throughput evidence
 
 On the installed VPS2 service, one scan at 18:53 found a conflicting inode
 incarnation and was rejected with one coverage issue. The old index was retained.
 The bounded retry completed at 19:09 with zero coverage issues; accounting
-passed at 19:10. The next scheduled scan completed at 19:21 with zero coverage
-issues and accounting passed at 19:22. These results show recovery in this
-observed interval; they do not prove convergence under every sustained-churn
-condition.
+passed at 19:10. Later full observations completed at 19:50 and 20:06 with zero
+coverage issues. Their starts were exactly 15 minutes apart; traversal took
+322.3 and 388.0 seconds, followed by independent accounting checks of 100.4 and
+130.3 seconds. These results demonstrate scheduled recovery in this interval,
+not convergence under every sustained-churn condition or a per-path freshness
+SLO.
 
 A separate 10m45s watcher-log window recorded 65 samples: median 28,298
 fanotify events/s (range 10,437–35,493), maximum queue depth 1,296 bytes, and
@@ -38,11 +40,11 @@ VPS2 service, not a controlled capacity test for r132. Dux reported zero event
 resolution in this window, as expected in scan-first mode. The scan-first
 `behind_seconds` field is marked inapplicable; it is not a freshness measure.
 
-Evidence: [latest scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1938Z.log), [latest VPS2 status](docs/qualification/vps2-live-status-20261110T1938Z.json), [scan retry and recovery](docs/qualification/vps2-reconciliation-retry-20261110T1911Z.log),
+Evidence: [latest scheduled scans](docs/qualification/vps2-reconciliation-cycle-20261110T2006Z.log), [latest VPS2 status](docs/qualification/vps2-live-status-20261110T2012Z.json), [scan retry and recovery](docs/qualification/vps2-reconciliation-retry-20261110T1911Z.log),
 [next scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log),
 [throughput profile](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json),
 [latest VPS2 status](docs/qualification/vps2-live-status-20261110T1926Z.json),
-[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2008Z.json).
+[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2012Z.json).
 
 ## Tests, coverage, and open release gates
 
