@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T22:15:00Z",
+  "snapshot_at_utc": "2026-11-10T22:18:04Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -55,30 +55,33 @@
     "var_lib_dux_bytes": 3799470080
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T22:08:31Z",
-    "load_average_1m": 1.69,
-    "cpu_psi_some_avg10_percent": 1.59,
+    "observed_at_utc": "2026-11-10T22:18:04Z",
+    "load_average_1m": 10.04,
+    "cpu_psi_some_avg10_percent": 28.57,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "2 active Go test processes",
-      "I/O PSI some exceeds 10%"
+      "active host build/test/install/analysis workloads",
+      "load1 exceeds 10"
     ],
-    "active_host_workload_count": 2,
+    "active_host_workload_count": 7,
     "active_host_workload_types": [
-      "Go test binary",
-      "go test"
+      "Go compiler",
+      "Go vet worker",
+      "go test",
+      "go vet",
+      "shell test script"
     ],
-    "evidence": "docs/qualification/vm-admission-20261110T2208Z.json",
+    "evidence": "docs/qualification/vm-admission-20261110T2218Z.json",
     "ubuntu_guest_started": true,
     "ubuntu_guest_state": "started 17:04:20, pressure guard stopped 17:04:29; ephemeral overlay cleaned; guest state missing",
     "cpu_psi_full_avg10_percent": 0.0,
     "active_host_workloads": true,
     "vm_started": false,
     "fault_matrix_started": false,
-    "io_psi_some_avg10_percent": 11.43,
+    "io_psi_some_avg10_percent": 1.15,
     "memory_psi_some_avg10_percent": 0.0
   },
   "rust_tests": {
@@ -109,12 +112,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T22:11:41Z",
+    "observed_at_utc": "2026-11-10T22:18:04Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 47211.0,
-    "operations": 1057380,
-    "exact_check_samples": 1054,
+    "elapsed_seconds": 47574.4,
+    "operations": 1065000,
+    "exact_check_samples": 1062,
     "completed_hourly_bursts": 13,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -123,16 +126,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.397,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2211Z.json",
+    "observed_operations_per_second_elapsed": 22.386,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2218Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.1821412037037037,
+    "coverage_duration_fraction": 0.1835432098765432,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "ece62858aefa886b3d24848a4d90c38bebcb69195aaa08d7eda985e404afa4ab",
+    "latest_checkpoint_sha256": "9e093e79b4d0b1f4e3470feb0b791b05319378a13583c5e102f6015dbc81b701",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -175,7 +178,7 @@
     "next_controlled_crash_due_utc": "2026-11-11T09:04:50Z",
     "controlled_crash_recovery_scenarios_planned": 5,
     "controlled_crash_recovery_scenarios_remaining": 4,
-    "observed_rate_observed_at_utc": "2026-11-10T22:11:41Z",
+    "observed_rate_observed_at_utc": "2026-11-10T22:18:04Z",
     "observed_rate_semantics": "Whole-wallclock average includes pauses for synchronous full scan/accounting/oracle checks every 1000 mutations; pacer rebases rather than catching up. Does not establish sustained 25/s capacity.",
     "sustained_25_per_second_capacity_qualified": false,
     "exact_convergence_profile_at_2026_11_10T2211Z": {
