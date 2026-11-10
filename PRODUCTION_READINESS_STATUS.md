@@ -84,6 +84,12 @@ to 244, while the on-disk index remained 3.44 GB. Root disk was 68% used with
 without completing a scan; it does not measure r132 behavior. See
 [`the 10:55 VPS1 snapshot`](docs/qualification/live-vps1-readiness-20261110T1055Z.json).
 
+At 10:58:27 UTC the daemon remained live, dirty, and not caught up; its last
+full scan was still November 5 12:49:22 UTC, with 313 pending updates and no
+scan in progress. The root filesystem remained 68% used with 58 GiB available.
+The read-only snapshot also records the active unrelated Go test workload and
+host pressure at that sample: [`the 10:58 VPS1 snapshot`](docs/qualification/live-vps1-readiness-20261110T1058Z.json).
+
 ### VPS1 follow-up — 2026-11-10 10:21 UTC
 
 The service remains active on r66, dirty and not caught up. The last full scan
@@ -187,6 +193,10 @@ final checks were still pending. On VPS1, unrelated Go tests were active and
 I/O PSI reached 11.56% some / 10.69% full, above the VM admission gate, so no
 new Rocky attempt was made. The host still had 58 GiB free. See the
 [`10:57 admission sample`](docs/qualification/live-vps1-admission-20261110T1057Z.json).
+
+At 10:57:55 UTC, the VPS2 worker was still active with zero restarts, 6,785.3
+seconds elapsed, 160,303 operations, and 160 exact-check samples. The held
+reader, controlled recovery, and terminal checks had not yet run.
 
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
