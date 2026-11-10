@@ -237,3 +237,29 @@ reclaim scenarios, and one controlled crash recovery. Whole-run rate is
 checkpoints and terminal exactness/history/SQLite assertions remain pending.
 Evidence: [`soak-progress-20261110T2307Z.json`](soak-progress-20261110T2307Z.json),
 SHA-256 `2e4548a958ab4a57cffce480f11d9cdc8dd2db4718ebf81ecc0fd000cfc80998`.
+
+
+### Live checkpoint — 2026-11-10 23:40 UTC
+
+The exact-hash r132 candidate remains active on VPS2 with zero supervisor
+restarts. At 23:39:22 UTC, the durable progress report showed **52,471.7
+seconds** elapsed (14h34m32s; **20.24%**), **1,168,716 operations**, and
+**1,165 exactness samples**. Fourteen mutation bursts, two held-reader/WAL
+reclaim passes, and one controlled crash/recovery are recorded. Sampled exact
+convergence is **3.520 s mean, 2.943 s median, 8.105 s p95, and 17.393 s
+maximum**. The elapsed average is **22.274 operations/s**, below the requested
+25/s because synchronous exactness/accounting checks pause the producer; this
+is not a sustained producer-capacity result. Final exactness/history and SQLite
+integrity are still pending, and four scheduled crash checkpoints remain.
+
+The persistent soak directory is 6.4 MiB and the tmpfs workspace 706 MiB; the
+worker is not the main root-disk consumer. VPS2 root is **89% used with 10.1
+GiB free**, `/dev/shm` has **2.0 GiB free**, `/var/log/journal` is 4.1 GiB,
+and `/var/tmp` totals 2.4 GiB. The soak unit wrote no journal output since the
+21:50 audit, so the 4.0 GiB system journal cannot be attributed to this run.
+VPS2 has no `/dev/kvm`; no additional VM suites were started.
+
+The remote progress file (176,691 bytes) had SHA-256
+`0917eb7e7e1320e2e7cd9b37d96ad9b88ee5f6521b6570151d6bcddb808fd46f` at the
+checkpoint. The machine-readable summary is
+[`soak-progress-20261110T2340Z.json`](soak-progress-20261110T2340Z.json).

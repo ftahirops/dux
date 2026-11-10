@@ -1,0 +1,34 @@
+{
+  "observed_at_utc": "2026-11-10T23:43:48Z",
+  "host": "VPS1 production host",
+  "binary": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+  "unit_properties": {
+    "ActiveState": "active",
+    "NRestarts": "4"
+  },
+  "status": {
+    "behind_seconds": 281564.837,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "events_dropped": 2518862,
+    "events_resolved": 161740875,
+    "events_seen": 277195430,
+    "index_bytes": 124761382912,
+    "index_bytes_on_disk": 3719430144,
+    "index_nodes": 1316519,
+    "kernel_overflow_notifications": 887,
+    "last_event_commit_timestamp_seconds": 1794354216,
+    "last_scan_age_seconds": 471254,
+    "last_scan_timestamp_seconds": 1793882962,
+    "pending_updates": 3,
+    "paused": false,
+    "pause_reason": null,
+    "scan_in_progress": false,
+    "updates_committed": 45196835,
+    "wal_bytes": 134217728
+  },
+  "root_filesystem_df_B1": "198092431360 127856345088 61404737536 68%",
+  "evidence": "read-only /usr/bin/dux status --json, systemctl show, df -B1 /"
+}
