@@ -5767,3 +5767,36 @@ controlled crashes. It has completed **14.30%** of 72 hours;
 terminal exactness/history/SQLite checks remain pending. Raw checkpoint:
 [`soak-progress-20261110T1922Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1922Z.json)
 (SHA-256 `5ecb0e6c138103ac1f7f8db106ab0dc40ccb9677c133e0ed14169fa276254992`).
+
+
+## VPS2 fanotify throughput and resource sample — 2026-11-10 19:26 UTC
+
+A 10m45s window of live scan-first watcher metrics on the installed VPS2
+service contained **65 samples** (19:14:39–19:25:24 UTC). It recorded
+**10,437–35,493 events/s** (median **28,298**), maximum kernel queue depth
+**1,296 bytes** (p95 **790 bytes**), and zero queue-pressure episodes. The
+pressure-sleep counter increased **226,915 ms** over the window. Event
+resolution remained 0/s, as expected in scan-first mode. This is observed
+production-host throughput under its current workload, not a controlled
+capacity limit or the separate r132 soak result. Raw samples:
+[`fanotify-pressure.log`](docs/qualification/vps2-event-throughput-20261110T1925Z/fanotify-pressure.log)
+(SHA-256 `358b92b5d936b0efdaa11b6046c3f755ce51686ad14e9ecedd4f18f1c2a0143a`); derived profile:
+[`profile.json`](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json)
+(SHA-256 `5b3120a48f71a0eaea7e13eed519922c03764bad17589a38ef8888e31f2f5596`).
+
+At **19:26:51**, Dux was active with zero restarts, overflow notifications,
+pending updates, or reported drops. The index was dirty because new hints await
+the next full observation; last scan age was **343 seconds**. Root storage was
+90% used with **9,960,583,168 bytes** available. Cgroup memory peak was
+**2,148,720,640 bytes**, slightly above `MemoryHigh=2 GiB` and below
+`MemoryMax=4 GiB`; OOM counters were zero. The cumulative memory-high counter
+was 1,948 and is not attributed to this sample window. Machine status:
+[`vps2-live-status-20261110T1926Z.json`](docs/qualification/vps2-live-status-20261110T1926Z.json).
+
+The separate r132 soak checkpoint at **19:26:51** records **37,305.2 seconds**
+(10h21m45s), **847,120 operations**, **844 exactness samples**, 10 mutation
+bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes.
+That is **14.39%** of the 72-hour target. Terminal
+exactness/history/SQLite checks remain pending. Checkpoint:
+[`soak-progress-20261110T1926Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1926Z.json)
+(SHA-256 `6c474e5464d9c4f6d3fb2e12b44cdf10df3a3e73d38c04427bf81ad00fd00969`).

@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:22:58Z",
+  "snapshot_at_utc": "2026-11-10T19:26:51Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -100,12 +100,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:22:58Z",
+    "observed_at_utc": "2026-11-10T19:26:51Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 37065.2,
-    "operations": 841780,
-    "exact_check_samples": 838,
+    "elapsed_seconds": 37305.2,
+    "operations": 847120,
+    "exact_check_samples": 844,
     "completed_hourly_bursts": 10,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -114,16 +114,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.71079071474051,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1922Z.json",
+    "observed_operations_per_second_elapsed": 22.70782625478486,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1926Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.14299845679012343,
+    "coverage_duration_fraction": 0.14392438271604938,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "5ecb0e6c138103ac1f7f8db106ab0dc40ccb9677c133e0ed14169fa276254992",
+    "latest_checkpoint_sha256": "6c474e5464d9c4f6d3fb2e12b44cdf10df3a3e73d38c04427bf81ad00fd00969",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -145,8 +145,8 @@
       "startup",
       "wal"
     ],
-    "latest_live_status_query_at_utc": "2026-11-10T19:22:34Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T19:22:58Z",
+    "latest_live_status_query_at_utc": "2026-11-10T19:26:51Z",
+    "latest_full_checkpoint_at_utc": "2026-11-10T19:26:51Z",
     "max_exact_convergence_ms_observed": 14012
   },
   "package_lifecycle": {
@@ -553,7 +553,7 @@
   },
   "latest_vps2_live_observation": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:22:34Z",
+    "observed_at_utc": "2026-11-10T19:26:51Z",
     "service_active": true,
     "systemd_active_state": "active",
     "service_restarts": 0,
@@ -563,14 +563,15 @@
     "dirty": true,
     "dirty_reason": "filesystem changes await the next full observation",
     "caught_up": false,
+    "behind_seconds_applicable": false,
     "last_scan_timestamp_utc": "2026-11-10T19:21:08Z",
-    "last_scan_age_seconds": 86,
+    "last_scan_age_seconds": 343,
     "scan_in_progress": false,
     "pending_updates": 0,
     "kernel_overflow_notifications": 0,
     "events_dropped": 0,
     "userspace_updates_dropped": 0,
-    "events_seen": 1434182141,
+    "events_seen": 1441173707,
     "index_nodes": 1977359,
     "index_bytes": 83721383936,
     "index_bytes_on_disk": 842403840,
@@ -578,12 +579,60 @@
     "failed_reconciliation_attempts": null,
     "automatic_reconciliation_paused": false,
     "write_error": null,
-    "last_scan_coverage_issues": 0,
-    "last_scan_vanished_reuse_paths": 36,
-    "last_scan_revalidated_reuse_paths": 0,
-    "last_scan_unresolved_reuse_paths": 0,
-    "last_scan_accounting_verification": "passed",
-    "last_scan_accounting_verification_elapsed_ms": 59876,
-    "note": "New filesystem hints arrived after the successful observation; dirty status awaits the next full observation. Path-level freshness is not exposed."
+    "root_disk_size_bytes": 99012476928,
+    "root_disk_used_bytes": 84472143872,
+    "root_disk_available_bytes": 9960583168,
+    "root_disk_use_percent": 90,
+    "service_memory_current_bytes": 531214336,
+    "service_memory_peak_bytes": 2148720640,
+    "service_memory_high_bytes": 2147483648,
+    "service_memory_max_bytes": 4294967296,
+    "service_memory_events_high_total": 1948,
+    "service_memory_oom_events": 0
+  },
+  "latest_vps2_event_throughput_profile": {
+    "observed_at_utc": "2026-11-10T19:25:30Z",
+    "source": "VPS2 live dux journald fanotify pressure metrics",
+    "window_start_utc": "2026-11-10T19:14:39.954560Z",
+    "window_end_utc": "2026-11-10T19:25:24.780093Z",
+    "sample_count": 65,
+    "events_seen_per_sec": {
+      "min": 10437.055299404403,
+      "median": 28297.598869502643,
+      "max": 35493.33896661597
+    },
+    "queue_bytes": {
+      "max": 1296.0,
+      "p95": 789.6
+    },
+    "queue_pressure_episodes": {
+      "start": 0.0,
+      "end": 0.0,
+      "delta": 0.0
+    },
+    "queue_pressure_total_ms_delta": 0.0,
+    "throttle_sleep_total_ms_delta": 226915.0,
+    "events_resolved_per_sec_max": 0.0,
+    "evidence_log": "docs/qualification/vps2-event-throughput-20261110T1925Z/fanotify-pressure.log",
+    "evidence_log_sha256": "358b92b5d936b0efdaa11b6046c3f755ce51686ad14e9ecedd4f18f1c2a0143a",
+    "cross_check_at_utc": "2026-11-10T19:26:09Z",
+    "service_active": true,
+    "service_restarts": 0,
+    "kernel_overflow_notifications": 0,
+    "events_dropped": 0,
+    "userspace_updates_dropped": 0,
+    "pending_updates": 0,
+    "scan_first": true,
+    "last_scan_age_seconds": 301,
+    "index_dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "memory_current_bytes": 531812352,
+    "memory_peak_bytes": 2148720640,
+    "memory_high_bytes": 2147483648,
+    "memory_max_bytes": 4294967296,
+    "memory_events_high_total": 1948,
+    "memory_events_oom": 0,
+    "root_disk_use_percent": 90,
+    "root_disk_available_bytes": 9958559744
   }
 }

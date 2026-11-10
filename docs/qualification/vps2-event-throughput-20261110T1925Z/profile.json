@@ -1,0 +1,45 @@
+{
+  "observed_at_utc": "2026-11-10T19:25:30Z",
+  "source": "VPS2 live dux journald fanotify pressure metrics",
+  "window_start_utc": "2026-11-10T19:14:39.954560Z",
+  "window_end_utc": "2026-11-10T19:25:24.780093Z",
+  "sample_count": 65,
+  "events_seen_per_sec": {
+    "min": 10437.055299404403,
+    "median": 28297.598869502643,
+    "max": 35493.33896661597
+  },
+  "queue_bytes": {
+    "max": 1296.0,
+    "p95": 789.6
+  },
+  "queue_pressure_episodes": {
+    "start": 0.0,
+    "end": 0.0,
+    "delta": 0.0
+  },
+  "queue_pressure_total_ms_delta": 0.0,
+  "throttle_sleep_total_ms_delta": 226915.0,
+  "events_resolved_per_sec_max": 0.0,
+  "evidence_log": "docs/qualification/vps2-event-throughput-20261110T1925Z/fanotify-pressure.log",
+  "evidence_log_sha256": "358b92b5d936b0efdaa11b6046c3f755ce51686ad14e9ecedd4f18f1c2a0143a",
+  "cross_check_at_utc": "2026-11-10T19:26:09Z",
+  "service_active": true,
+  "service_restarts": 0,
+  "kernel_overflow_notifications": 0,
+  "events_dropped": 0,
+  "userspace_updates_dropped": 0,
+  "pending_updates": 0,
+  "scan_first": true,
+  "last_scan_age_seconds": 301,
+  "index_dirty": true,
+  "dirty_reason": "filesystem changes await the next full observation",
+  "memory_current_bytes": 531812352,
+  "memory_peak_bytes": 2148720640,
+  "memory_high_bytes": 2147483648,
+  "memory_max_bytes": 4294967296,
+  "memory_events_high_total": 1948,
+  "memory_events_oom": 0,
+  "root_disk_use_percent": 90,
+  "root_disk_available_bytes": 9958559744
+}
