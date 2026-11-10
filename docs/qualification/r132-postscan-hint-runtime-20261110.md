@@ -68,12 +68,16 @@ removed by the harness. Machine-readable evidence is in
 coverage output is in
 [`llvm-cov-summary.json`](r132-postscan-hint-runtime-20261110/llvm-cov-summary.json).
 
-Three earlier harness attempts are also retained beside the passing report.
-They did not establish a production defect: initial placement of the test
-database on the observed image created unrelated hint noise, and the first
-fault setup did not ensure the queued event was consumed before the tiny
-accounting check. The final test isolates the database and adds a
-fault-injection-only delay. No delay is present in the production binary.
+Four exploratory runtime attempts preceded the pass. The first two did not
+converge with the test database on the observed ext4 image; moving the
+database to tmpfs removed that noise. The next two timed out before the
+asserted dirty-reason transition. Reviewing the scan-first path showed that its
+counter-only reader did not call the pending-check invalidation helper. The
+fourth attempt's intermediate report was overwritten by the final run; the
+other three reports are preserved in this evidence directory. The final test
+isolates the database and adds a fault-injection-only delay so the queued event
+is processed before the accounting result. No delay is present in the
+production binary.
 
 ## Limits and remaining gates
 
