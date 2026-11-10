@@ -1,8 +1,8 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 19:43 UTC**. VPS1 was last verified running the old event-apply
-daemon at 17:06 UTC and has not been rechecked since. The r132 candidate remains
+**2026-11-10 19:45 UTC**. VPS1 was rechecked at 19:44 UTC and remains on the old event-apply
+daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
 gates.
@@ -16,7 +16,7 @@ machine-readable snapshot is
 
 | System | Latest verified state |
 |---|---|
-| **VPS1 production** | Last detailed observation at 17:06 UTC: Dux 0.6.3 build `e0cc915f`, running as root, dirty after fanotify overflow, 775 lifetime overflows, 2,518,862 dropped updates, 30,500 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. No newer VPS1 observation is recorded here. |
+| **VPS1 production** | At 19:44 UTC: Dux 0.6.3 build `e0cc915f`, running as root with four historical systemd restarts; dirty and not caught up, 785 lifetime overflows, 2,518,862 dropped updates, 1,376 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. Current dirty reason reports non-watched filesystem mounts changed; reconciling visible paths. No OOM events were recorded. See [VPS1 status](docs/qualification/vps1-live-status-20261110T1944Z.json). |
 | **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 19:41:55 it was active with zero restarts. The latest full scan/accounting evidence remains from 19:37–19:38. Its latest full observation completed at 19:37 with zero coverage issues; independent accounting passed in 66.0 seconds. The index was marked dirty because new hints arrived after the scan. Per-path freshness is not measured. |
 | **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 19:42 checkpoint is 10h36m48s into a 72-hour run (14.76%), with 866,389 operations, 863 exactness samples, 10 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 19:41:55 the installed service was active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. |
 | **VPS2 disk** | At 19:41:55, root was 90% used with 9.68 GB available. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |

@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:43:00Z",
+  "snapshot_at_utc": "2026-11-10T19:45:00Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,33 +7,34 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T17:06:51Z",
+    "observed_at_utc": "2026-11-10T19:44:05Z",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
     "index_dirty": true,
     "caught_up": false,
-    "kernel_overflows": 775,
+    "kernel_overflows": 785,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 257759.609,
+    "behind_seconds": 267193.593,
     "service_user": "root",
-    "index_nodes": 1334760,
-    "index_bytes_on_disk": 3543773184,
+    "index_nodes": 1324453,
+    "index_bytes_on_disk": 3618058240,
     "wal_bytes": 134217728,
-    "pending_updates": 30500,
-    "dirty_reason": "fanotify queue overflow",
+    "pending_updates": 1376,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 447449,
+    "last_scan_age_seconds": 456883,
     "dirty_since_timestamp_seconds": 1794324009,
     "service_substate": "running",
-    "events_seen": 238532605,
-    "events_resolved": 138245519,
-    "updates_committed": 39353804,
+    "events_seen": 249553952,
+    "events_resolved": 145077840,
+    "updates_committed": 41566322,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
-    "index_bytes": 131912884224
+    "index_bytes": 125383118848,
+    "evidence": "docs/qualification/vps1-live-status-20261110T1944Z.json"
   },
   "disk": {
     "observed_at_utc": "2026-11-10T17:06:51Z",
@@ -518,12 +519,12 @@
     "completion_gap_semantics": "Completion-to-completion durations include scan duration variation and are not scheduler start intervals or per-path freshness SLO measurements; latest two starts were 15m apart."
   },
   "disk_at_snapshot": {
-    "observed_at_utc": "2026-11-10T18:08:35Z",
+    "observed_at_utc": "2026-11-10T19:44:05Z",
     "root_size_gib_approx": 184.5,
-    "used_gib_approx": 123.6,
-    "available_gib_approx": 52.6,
-    "percent_used": 71,
-    "evidence": "df -B1 on vps1"
+    "used_gib_approx": 119.6,
+    "available_gib_approx": 56.6,
+    "percent_used": 68,
+    "evidence": "df -B1 / on vps1"
   },
   "vps2_disk_inventory": {
     "observed_at_utc": "2026-11-10T19:41:55Z",
