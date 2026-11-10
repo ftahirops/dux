@@ -1,0 +1,8 @@
+Captured UTC: 2026-11-10T00:54:02.373395+00:00
+Command: cargo audit --no-fetch
+Exit status: 0
+RustSec advisory database: d9cb059f3217db87aeccd190b81eaffe8cc29cb9
+2026-11-09T17:13:08+01:00
+
+      Loaded 1430 security advisories (from /root/.cargo/advisory-db)
+    Scanning Cargo.lock for vulnerabilities (229 crate dependencies)

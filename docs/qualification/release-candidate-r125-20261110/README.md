@@ -33,7 +33,11 @@ dependencies, using the RustSec database snapshot with 1,430 advisories, last
 updated 2026-11-09T17:13:08+01:00. The embedded binary audit found auditable
 dependency metadata for 202 dependencies. This is dependency evidence bounded
 by that advisory snapshot; it is not an application-code security proof and
-does not replace a fresh advisory database scan.
+does not replace a fresh advisory database scan. A new `cargo audit --no-fetch`
+run at 2026-11-10 00:54 UTC also exited 0 with no findings; the attempted
+database refresh left the local advisory database at the same commit and
+timestamp. The exact output and database revision are in
+[`cargo-audit-refresh-20261110.log`](cargo-audit-refresh-20261110.log).
 
 ## Lifecycle and rollout gates
 
