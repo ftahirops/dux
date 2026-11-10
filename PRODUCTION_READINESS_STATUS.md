@@ -4786,3 +4786,29 @@ runtime was cleaned. This is a safely aborted boot, not a package test failure
 or a lifecycle pass. The runtime guard prevented the guest from competing with
 new host tests after startup; retry after host work subsides, using enough
 bounded CPU quota for cloud-init to complete.
+
+## Third consecutive scan-first observation — 2026-11-10 14:31 UTC
+
+A third periodic full-root observation completed at **14:30:09 UTC**. It
+reported 1,713,291 files, 210,335 directories, 1,923,626 staged path instances,
+83,517,370,368 unique bytes (77.78 GiB), zero coverage issues, 36 vanished
+inode-reuse paths, zero revalidated paths, and zero unresolved paths. The
+accounting verification passed at 14:31:24 in 75,351 ms. At 14:31:42 status
+showed 93-second scan age, no active scan, zero pending updates, no overflow or
+drops, and dirty state waiting for the next full observation.
+
+The completion intervals from the three observed scans were 13m48s and
+14m51s. The latter meets the initial 15-minute target by only nine seconds;
+therefore this is not robust margin and the next cycles may miss the target if
+scan time or verification slows. Three intervals are useful live evidence, not
+endurance qualification. All three returned zero coverage issues, and their
+accounting verification passed. The third scan's snapshot is captured in the
+journal and status output; the second and third completion records are retained
+in the append-only log.
+
+At 14:31:50 the soak remained active with zero restarts, 19,587.2 seconds
+elapsed, 454,606 operations, 452 samples, five mutation bursts, no held-reader
+or controlled-crash phases, and terminal exactness/history/SQLite checks
+pending. Snapshot
+[`soak-progress-20261110T1431Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1431Z.json)
+SHA-256: `aea5f8a4f979401e4fc84ea1d00366a7439418db9291ff36bbf5f616cb9c5727`.
