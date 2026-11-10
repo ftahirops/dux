@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 23:15 UTC**. VPS1 was rechecked at 23:14 UTC and remains on the old event-apply
+**2026-11-10 23:18 UTC**. VPS1 was rechecked at 23:18 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -16,7 +16,7 @@ machine-readable snapshot is
 
 | System | Latest verified state |
 |---|---|
-| **VPS1 production** | At 23:14 UTC the installed Dux remains 0.6.3 build `e0cc915f8f37`, running as root with four historical systemd restarts; dirty and not caught up, 887 lifetime overflows, 2,518,862 dropped updates, 58 pending updates, and no scan active. Dirty reason is `fanotify queue overflow`; last scan is 5.43 days old and index reports 3.24 days behind. Since the 23:08 snapshot, pending updates fell by 708 while the daemon committed another 46,746 updates; no new overflow or drop was reported. This is event backlog drainage, not exactness recovery. In the latest 500 journal messages, 430 contained unresolved `ESTALE` handle-open failures; 304 were `FAN_ATTRIB`-only, while the rest had other masks outside the candidate's narrow stale-target filter. This is a journal sample, not a complete event rate or proof of causality. See [23:14 VPS1 status](docs/qualification/vps1-live-status-20261110T2315Z.json), [ESTALE sample](docs/qualification/vps1-estale-event-sample-20261110T2314Z.json), and the [23:08 status analysis](PRODUCTION_READINESS_STATUS.md#vps1-production-status-recheck--2026-11-10-2308-utc). |
+| **VPS1 production** | At 23:18 UTC the installed Dux remains 0.6.3 build `e0cc915f8f37`, running as root with four historical systemd restarts; dirty and not caught up, 887 lifetime overflows, 2,518,862 dropped updates, 29,172 pending updates, and no scan active. Dirty reason is `fanotify queue overflow`; last full scan is 5.44 days old and the reported behind time is 3.24 days. In a 30-second sample, pending updates fell by 6,045 while 132,067 more events were seen; the cumulative overflow and dropped-update counts did not change. Mean service CPU time was 23.32% of one core during that window. This is short-window backlog drainage, not proof of sustainable capacity or exactness. The latest 500-message journal sample contained 430 unresolved `ESTALE` failures, 304 with `FAN_ATTRIB`-only masks; this is not a complete event rate or proof of causality. See [23:18 status](docs/qualification/vps1-backlog-window-20261110T2318Z.json), [23:14 status](docs/qualification/vps1-live-status-20261110T2315Z.json), and [ESTALE sample](docs/qualification/vps1-estale-event-sample-20261110T2314Z.json). |
 | **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode. The latest full observation completed at 21:36:57 over 1,786,223 files and 218,602 directories with 0 coverage issues; accounting passed at 21:38:09. At 21:38 the service had zero kernel overflows, dropped updates, and pending updates. It was dirty because filesystem changes await the next full observation; per-path freshness is not measured. |
 | **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 23:07, the soak had run 14h02m26s of a 72-hour target (19.50%), with 1,127,524 operations, 1,124 exactness samples, 14 mutation bursts, two held-reader/WAL-reclaim passes, and one controlled crash/restart recovery. Whole-run average is 22.307 ops/s; synchronous scan/accounting/oracle checks pause the pacer, so this does not demonstrate sustained 25/s capacity. Sampled convergence latency: mean 3.461s, median 2.842s, p95 7.942s, max 17.393s. The recovery killed candidate PID 1305044, restarted PID 3117886, and recovered 64 files created during downtime after exact-index and history checks passed. The outer systemd supervisor remains active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. See the [23:07 checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2307Z.json). |
 | **Disk and VM admission** | At 23:14 the qualification host root was 71% used with 52.8 GiB free and `/dev/shm` had 9.3 GiB free. The admission probe refused VM qualification at sample 1/3 because unrelated Go compiler, `go test`, and `go vet` processes were active. VPS2 has no `/dev/kvm` and remains the soak host, so it is not a safe substitute for the isolated matrix. No fault suite ran. See the [23:08 capacity sample](docs/qualification/host-capacity-20261110T2308Z.json) and [23:14 admission record](docs/qualification/vm-admission-20261110T2314Z.json). |
@@ -34,6 +34,14 @@ that every observed `FAN_ATTRIB` event is harmless, that the candidate would
 fix the live index, or that these events caused the historical overflows. The
 installed production binary predates the candidate, and a live candidate
 comparison has not been run. See the [sample and limitations](docs/qualification/vps1-estale-event-sample-20261110T2314Z.json).
+
+A separate 30-second status sample at 23:17:47–23:18:17 showed 132,067 new
+events seen, 75,130 resolved, 12,544 updates committed, and a net decrease of
+6,045 pending updates. The queue drained in this interval while the index
+remained dirty and not caught up; the full scan age continued increasing. This
+short interval does not establish a sustained service rate, and the counters
+have different meanings. The sample is preserved in
+[`vps1-backlog-window-20261110T2318Z.json`](docs/qualification/vps1-backlog-window-20261110T2318Z.json).
 
 On the installed VPS2 service, one scan at 18:53 found a conflicting inode
 incarnation and was rejected with one coverage issue. The old index was retained.

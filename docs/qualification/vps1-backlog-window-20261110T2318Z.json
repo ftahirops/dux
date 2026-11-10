@@ -1,0 +1,82 @@
+{
+  "observed_at_utc": "2026-11-10T23:18:17Z",
+  "host": "VPS1 production daemon",
+  "method": "four read-only /usr/bin/dux status --json samples 10 seconds apart, paired with systemctl show CPUUsageNSec and MemoryCurrent",
+  "sample_interval_seconds": 30,
+  "samples": [
+    {
+      "t": "2026-11-10T23:17:47Z",
+      "seen": 276254659,
+      "resolved": 161154214,
+      "committed": 44903256,
+      "pending": 35217,
+      "overflows": 887,
+      "drops": 2518862,
+      "behind_s": 280015.933,
+      "scan_age_s": 469705,
+      "cpu_ns": 29695269330000,
+      "memory_bytes": 1148420096
+    },
+    {
+      "t": "2026-11-10T23:17:57Z",
+      "seen": 276334827,
+      "resolved": 161206743,
+      "committed": 44906712,
+      "pending": 32197,
+      "overflows": 887,
+      "drops": 2518862,
+      "behind_s": 280025.859,
+      "scan_age_s": 469715,
+      "cpu_ns": 29697717508000,
+      "memory_bytes": 1149435904
+    },
+    {
+      "t": "2026-11-10T23:18:07Z",
+      "seen": 276381272,
+      "resolved": 161227752,
+      "committed": 44911704,
+      "pending": 32275,
+      "overflows": 887,
+      "drops": 2518862,
+      "behind_s": 280035.934,
+      "scan_age_s": 469725,
+      "cpu_ns": 29699850127000,
+      "memory_bytes": 1148518400
+    },
+    {
+      "t": "2026-11-10T23:18:17Z",
+      "seen": 276386726,
+      "resolved": 161229344,
+      "committed": 44915800,
+      "pending": 29172,
+      "overflows": 887,
+      "drops": 2518862,
+      "behind_s": 280045.922,
+      "scan_age_s": 469735,
+      "cpu_ns": 29702264488000,
+      "memory_bytes": 1148780544
+    }
+  ],
+  "counter_delta_first_to_last": {
+    "events_seen": 132067,
+    "events_resolved": 75130,
+    "updates_committed": 12544,
+    "pending_updates": -6045,
+    "kernel_overflows": 0,
+    "dropped_updates": 0,
+    "behind_seconds": 29.989,
+    "last_scan_age_seconds": 30,
+    "service_cpu_time_seconds": 6.995,
+    "mean_one_core_cpu_percent": 23.32,
+    "memory_bytes_first_to_last": [
+      1148420096,
+      1148780544
+    ]
+  },
+  "interpretation": "During this 30-second interval, pending updates decreased by 6,045 while new events continued to arrive; no additional kernel overflow or dropped-update count appeared. This indicates short-window backlog drainage during this sample only. The index remained dirty and not caught up, and last full scan age increased by 30 seconds. A short sample does not establish sustainable capacity or accuracy.",
+  "limitations": [
+    "Counters are cumulative daemon counters; event resolution and updates committed are different measures and should not be treated as interchangeable throughput.",
+    "The backlog was highly variable immediately before this interval, including a sample of 52,591 pending updates; do not generalize this 30-second decline.",
+    "No independent path-level oracle was run."
+  ]
+}
