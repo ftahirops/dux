@@ -72,7 +72,11 @@ was stopped cleanly. No package was installed on a production host. The
 complete report is
 [`deb-lifecycle-passed-report.json`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-passed-report.json); the interrupted attempt and guard evidence is in
 [`the DEB lifecycle attempt`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/deb-lifecycle-attempt.json).
-RPM lifecycle on Rocky remains unqualified. The build manifest, checksums and audit reports are in
+RPM lifecycle on Rocky remains unqualified; its official image and signed
+checksum are verified, but VM admission is still refusing startup during
+unrelated Go test/build pressure. See the
+[Rocky RPM qualification prerequisite](docs/qualification/r132-rocky-rpm-prereq-20261110.md).
+The build manifest, checksums and audit reports are in
 [`the r132 package evidence`](docs/qualification/r132-postscan-hint-runtime-20261110/r132-release/).
 Package artifact and Ubuntu DEB lifecycle gates pass; production readiness
 remains open.
