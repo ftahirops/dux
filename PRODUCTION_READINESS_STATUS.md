@@ -10,6 +10,22 @@ zero warnings**. The RustSec database snapshot had 1,430 advisories at commit
 application security certification; its scope and raw result are in the
 [audit record](docs/qualification/cargo-audit-20261110T1007Z/README.md).
 
+## VPS1 live production check — 2026-11-10 10:09 UTC
+
+The installed production binary is still Dux **0.6.3 / r66** (SHA-256
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`). The
+service is active with four historical restarts and about 1.19 GiB current
+memory use. Its index remains **dirty and not caught up** from fanotify queue
+overflow: 742 cumulative overflow notifications and 2,518,862 dropped updates.
+The last full scan was **2026-11-05 12:49:22 UTC** (about 4d21h before this
+sample); reported behind time was about 2d16h. In the last five minutes there
+were 187 stale-handle resolution warnings and four slow-flush warnings, with
+no new queue-overflow log messages. The root filesystem was 73% used with
+48.6 GiB available, so disk capacity is not the active cause. This is a fresh
+read-only observation; it does not show r132 behavior or recovery. Full status,
+unit, binary, disk, and recent-warning counts are in the
+[10:09 VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T1010Z.json).
+
 ## Exact r132 72-hour soak — running since 2026-11-10 09:04:48 UTC
 
 A dedicated soak is running on the authorized VPS2 using the exact r132 static

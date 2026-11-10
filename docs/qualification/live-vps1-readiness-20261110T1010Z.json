@@ -1,0 +1,63 @@
+{
+  "captured_at_utc": "2026-11-10T10:09:41.862990+00:00",
+  "host": "vps1",
+  "service": {
+    "MainPID": "1073891",
+    "NRestarts": "4",
+    "ExecMainStatus": "0",
+    "MemoryCurrent": "1190494208",
+    "MemoryPeak": "1430843392",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "status": {
+    "behind_seconds": 232730.247,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since_timestamp_seconds": 1794299269,
+    "events_dropped": 2518862,
+    "events_resolved": 128606623,
+    "events_seen": 222318319,
+    "index_bytes": 134389690368,
+    "index_bytes_on_disk": 3431161856,
+    "index_nodes": 1331592,
+    "kernel_overflow_notifications": 742,
+    "last_event_commit_timestamp_seconds": 1794305381,
+    "last_scan_age_seconds": 422419,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 12,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794072651,
+    "updates_committed": 36096283,
+    "userspace_updates_dropped": 2518862,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794305381,
+    "write_error": null
+  },
+  "root_filesystem": {
+    "size_bytes": 198092431360,
+    "used_bytes": 137093582848,
+    "available_bytes": 52167499776,
+    "used_percent": "73%"
+  },
+  "recent_log_counts_last_5m": {
+    "stale_handle_resolution_warnings": 187,
+    "slow_flush_warnings": 4,
+    "fanotify_overflow_messages": 0
+  },
+  "installed_binary": {
+    "path": "/usr/bin/dux",
+    "version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+    "sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060"
+  }
+}
