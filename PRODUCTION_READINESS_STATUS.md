@@ -1,18 +1,18 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 02:53 UTC
+## Latest verified checkpoint — 2026-11-10 03:44 UTC
 
 ### Release decision
 
 **Not production-ready; do not claim release qualification.** Release candidate
-r126 has a passing full Rust test/coverage run and verified packages, but has
-not been installed on either host. The guarded Debian lifecycle runner has not
-launched its disposable VM because recurring unrelated Go compiler/test jobs
-keep resetting host admission. The required fresh 24-hour candidate canary
-remains open. The privileged success-path and missing-`CAP_DAC_READ_SEARCH`
-event-resolution smokes passed on VPS2; missing-`CAP_SYS_ADMIN` startup failed
-closed on VPS1. These targeted checks do not replace broader churn/inode-race,
-package lifecycle, or sustained-canary qualification.
+r126 has a passing full Rust test/coverage run, verified packages, and has now
+passed the Debian r121-to-r126 upgrade/rollback/re-upgrade/remove/purge/clean-
+install lifecycle on the marked VPS2 KVM qualification VM. It remains
+uninstalled on production VPS1. The required fresh 24-hour candidate canary,
+independent filesystem path comparison, and sustained high-churn qualification
+remain open. Privileged fanotify success and capability-negative smokes passed
+on the tested Linux 6.8 kernel; these targeted checks do not qualify all
+capability, filesystem, kernel, or race behavior.
 
 ### Production VPS1 — current installed service
 
@@ -164,6 +164,30 @@ local process check. The disposable guest has not launched. r126 remains
 uninstalled; the production decision and open gates above are unchanged.
 
 **Updated:** 2026-11-10 02:53 UTC
+
+### r126 package lifecycle and VPS2 restoration — 2026-11-10 03:44 UTC
+
+The Debian package lifecycle harness completed **passed** on the marked KVM
+qualification VM VPS2 (Ubuntu 24.04, Linux 6.8.0-147-generic) in 1,732.768
+seconds. All five stages passed: r121 baseline, upgrade to r126 with disabled
+service-state preservation and rollback backup, rollback to r121 and index
+restore, re-upgrade/remove/purge, and clean r126 install. The clean-install
+scan staged 1,848,188 path instances (1,652,162 files, 196,026 directories),
+reported zero coverage issues, revalidated four inode-reuse paths, and passed
+accounting verification. Details and raw artifacts are in
+[`r126 Debian lifecycle on VPS2`](docs/qualification/package-lifecycle-r126-vps2-20261110/README.md).
+
+The VM was restored to r121 after the destructive package test. Its follow-up
+observation completed with 1,654,904 files, 196,340 directories, zero coverage
+issues, and passing accounting verification in 85.222 seconds. Final check:
+r121 active and enabled, zero restarts, drops, or overflows. During both the
+r126 clean install and r121 restore, SQLite WAL crossed its 256 MiB guard
+(sampled peaks 713 MB and 270 MB respectively) and later returned to 128 MiB;
+neither run reported dropped events or a write error. The r126 lifecycle
+harness passed despite this guard activation, so WAL behavior under sustained
+churn remains a reliability/freshness gate rather than a release pass.
+
+**Updated:** 2026-11-10 03:44 UTC
 
 ---
 
