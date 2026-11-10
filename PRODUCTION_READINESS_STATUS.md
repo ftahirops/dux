@@ -5735,3 +5735,35 @@ controlled crashes. That is **14.04%** of the required 72 hours;
 terminal exactness/history/SQLite checks remain pending. Checkpoint:
 [`soak-progress-20261110T1910Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1910Z.json)
 (SHA-256 `9d87c8b081117a0953e0f64fd15c66ca1f7f1958882dd32b7ef0ca0176163834`).
+
+
+## VPS2 post-recovery scheduled observation — 2026-11-10 19:22 UTC
+
+The next scheduled full observation started at **19:15:22** and completed at
+**19:21:08** in about **5m46s**. It again passed with **zero coverage issues**:
+**1,764,257 files**, **216,584 directories**, **1,980,841 staged path
+instances**; 36 paths that vanished during inode reuse were pruned, with no
+revalidated or unresolved paths. Independent accounting passed at **19:22:08**
+in **59,876 ms**.
+
+At **19:22:34**, the service was active with zero restarts, kernel overflow
+notifications, pending updates, or reported drops. The index held **1,977,359
+nodes** and **83,721,383,936 bytes**. It was marked dirty because more hints
+arrived after observation; path-level freshness remains unmeasured. The VPS2
+root filesystem was 90% used with **10,017,976,320 bytes** available at
+19:22:58. Raw log: [`vps2-reconciliation-cycle-20261110T1922Z.log`](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log)
+(SHA-256 `ef6ecf10df11dd7dd1c0cc9786d9117be38f3bbd39a9ab719b90c0f057329e54`). Status: [`vps2-live-status-20261110T1922Z.json`](docs/qualification/vps2-live-status-20261110T1922Z.json).
+
+Together with the prior retry, the initial inode-incarnation conflict did not
+recur on the next scheduled scan: one rejected scan was followed by two
+coverage-clean scans and two successful accounting checks. This is positive
+recovery evidence, but not proof of convergence under sustained arbitrary
+churn or a path-level freshness guarantee.
+
+The r132 soak remains separate and active. Its 19:22:58 checkpoint records
+**37,065.2 seconds** (10h17m45s), **841,780 operations**, **838 exactness
+samples**, 10 mutation bursts, one held-reader/WAL-reclaim scenario, and zero
+controlled crashes. It has completed **14.30%** of 72 hours;
+terminal exactness/history/SQLite checks remain pending. Raw checkpoint:
+[`soak-progress-20261110T1922Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1922Z.json)
+(SHA-256 `5ecb0e6c138103ac1f7f8db106ab0dc40ccb9677c133e0ed14169fa276254992`).

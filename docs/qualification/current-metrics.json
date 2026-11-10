@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:11:07Z",
+  "snapshot_at_utc": "2026-11-10T19:22:58Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -100,12 +100,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:10:18Z",
+    "observed_at_utc": "2026-11-10T19:22:58Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 36402.0,
-    "operations": 827000,
-    "exact_check_samples": 824,
+    "elapsed_seconds": 37065.2,
+    "operations": 841780,
+    "exact_check_samples": 838,
     "completed_hourly_bursts": 10,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -114,16 +114,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.718531948794023,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1910Z.json",
+    "observed_operations_per_second_elapsed": 22.71079071474051,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1922Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.14043981481481482,
+    "coverage_duration_fraction": 0.14299845679012343,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "9d87c8b081117a0953e0f64fd15c66ca1f7f1958882dd32b7ef0ca0176163834",
+    "latest_checkpoint_sha256": "5ecb0e6c138103ac1f7f8db106ab0dc40ccb9677c133e0ed14169fa276254992",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -145,8 +145,8 @@
       "startup",
       "wal"
     ],
-    "latest_live_status_query_at_utc": "2026-11-10T19:11:07Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T19:10:18Z",
+    "latest_live_status_query_at_utc": "2026-11-10T19:22:34Z",
+    "latest_full_checkpoint_at_utc": "2026-11-10T19:22:58Z",
     "max_exact_convergence_ms_observed": 14012
   },
   "package_lifecycle": {
@@ -553,7 +553,7 @@
   },
   "latest_vps2_live_observation": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:11:07Z",
+    "observed_at_utc": "2026-11-10T19:22:34Z",
     "service_active": true,
     "systemd_active_state": "active",
     "service_restarts": 0,
@@ -563,27 +563,27 @@
     "dirty": true,
     "dirty_reason": "filesystem changes await the next full observation",
     "caught_up": false,
-    "last_scan_timestamp_utc": "2026-11-10T19:09:08Z",
-    "last_scan_age_seconds": 119,
+    "last_scan_timestamp_utc": "2026-11-10T19:21:08Z",
+    "last_scan_age_seconds": 86,
     "scan_in_progress": false,
     "pending_updates": 0,
     "kernel_overflow_notifications": 0,
     "events_dropped": 0,
     "userspace_updates_dropped": 0,
-    "events_seen": 1416091135,
-    "index_nodes": 1975625,
-    "index_bytes": 83778015232,
-    "index_bytes_on_disk": 840282112,
+    "events_seen": 1434182141,
+    "index_nodes": 1977359,
+    "index_bytes": 83721383936,
+    "index_bytes_on_disk": 842403840,
     "wal_bytes": 60110832,
     "failed_reconciliation_attempts": null,
     "automatic_reconciliation_paused": false,
     "write_error": null,
     "last_scan_coverage_issues": 0,
-    "last_scan_vanished_reuse_paths": 120,
-    "last_scan_revalidated_reuse_paths": 2,
+    "last_scan_vanished_reuse_paths": 36,
+    "last_scan_revalidated_reuse_paths": 0,
     "last_scan_unresolved_reuse_paths": 0,
     "last_scan_accounting_verification": "passed",
-    "last_scan_accounting_verification_elapsed_ms": 75082,
-    "note": "Fresh fanotify hints arrived during the completed scan; dirty status is expected until the next observation. The global behind_seconds field is not a per-path freshness measure."
+    "last_scan_accounting_verification_elapsed_ms": 59876,
+    "note": "New filesystem hints arrived after the successful observation; dirty status awaits the next full observation. Path-level freshness is not exposed."
   }
 }
