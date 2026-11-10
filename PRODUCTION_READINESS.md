@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 20:46 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
+**2026-11-10 21:06 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -18,8 +18,8 @@ machine-readable snapshot is
 |---|---|
 | **VPS1 production** | At 20:08 UTC: Dux 0.6.3 build `e0cc915f`, running as root with four historical systemd restarts; dirty and not caught up, 785 lifetime overflows, 2,518,862 dropped updates, 166 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. Current dirty reason reports non-watched filesystem mounts changed; reconciling visible paths. No OOM events were recorded. See [latest VPS1 status](docs/qualification/vps1-live-status-20261110T2008Z.json). |
 | **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode. At 20:46 it had zero restarts, overflows, drops, and pending updates. A periodic full observation was in progress; last completed scan age was 592 seconds. Dirty status was expected during the observation. Per-path freshness is not measured. |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. The 20:46 checkpoint is 11h41m23s into a 72-hour run (16.24%), with 949,120 operations, 946 exactness samples, 11 mutation bursts, one held-reader/WAL-reclaim pass, and zero controlled crashes. Each exactness sample requests full scan-first reconciliation, so this is repeated reconciliation-under-churn on a small fixture, not passive event-only or production-scale soak evidence. Twelve-hour crash recovery and terminal exactness, history, and SQLite checks remain pending. |
-| **VPS2 disk** | At 20:46 root was 90% used with about 9.6 GiB available; `/var/tmp` measured 4.2 GiB after old release and build caches were removed. CPU PSI some avg10 was 44.99% and I/O PSI some 4.92%, so no additional fault VM was started. ClickHouse and its data volume remain active; do not prune Docker images, journals, or application volumes without retention approval. |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. The 21:05 checkpoint is 12h00m24s into a 72-hour run (16.68%), with 973,838 operations, 970 exactness samples, 11 mutation bursts, and one held-reader/WAL-reclaim pass. The first controlled crash/restart scenario passed: candidate PID 1305044 was killed, PID 3117886 restarted, and 64 files created during downtime were recovered. The harness records the scenario only after exact-index and history checks pass. The outer systemd supervisor remains active with zero restarts. Four more scheduled crash/recovery points and terminal exactness, history, and SQLite checks remain pending. Each exactness sample requests full scan-first reconciliation, so this is repeated reconciliation-under-churn on a small fixture, not passive event-only or production-scale soak evidence. The remaining crash-recovery checkpoints and terminal exactness, history, and SQLite checks remain pending. |
+| **VPS2 disk** | At 20:55 root was 90% used with 10.27 GB (about 9.57 GiB) available; `/var/tmp` measured 4.18 GiB. The Dux database and WAL together were about 0.85 GiB. Journald occupied 4.00 GiB and Docker reported 18.13 GB of images, with 7.07 GB reclaimable; those images were left untouched. The guarded VM admission check remained blocked by active Go compiler/test workloads and load1 10.97, so no VM was started. See the [20:55 disk follow-up](docs/qualification/vps2-disk-audit-20261110.md#follow-up-2026-11-10-2055-utc) and [host admission sample](docs/qualification/vm-admission-20261110T2056Z.json). |
 
 ### Recent live reliability and throughput evidence
 
@@ -44,7 +44,7 @@ Evidence: [latest scheduled scans](docs/qualification/vps2-reconciliation-cycle-
 [next scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log),
 [throughput profile](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json),
 [latest VPS2 status](docs/qualification/vps2-live-status-20261110T1926Z.json),
-[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2046Z.json).
+[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2105Z.json).
 
 ## Tests, coverage, and open release gates
 
@@ -55,7 +55,7 @@ Evidence: [latest scheduled scans](docs/qualification/vps2-reconciliation-cycle-
 | Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
 | Dependency audit | 229 locked dependencies; zero advisories and warnings. Local RustSec database head matched upstream at the 18:55 check. | This is dependency hygiene, not a full application security review. |
 | Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
-| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. The 20:40 read-only VPS1 admission sample was blocked: load1 41.34, CPU PSI some avg10 86.34%, and 23 active Go compiler/test processes. No VM was attempted. VPS2 remains under a separate soak and has 91% disk use. See [latest VPS1 admission sample](docs/qualification/vm-admission-20261110T2040Z.json). |
+| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix remains unrun; the r132 soak has passed its first of five scheduled controlled crash-recovery checkpoints. The 20:56 admission sample was blocked: load1 10.97, CPU PSI some avg10 14.59%, and active Go compiler/test processes. No VM was started. VPS2 remains under a separate soak and its root filesystem measured 90% used. See [latest admission sample](docs/qualification/vm-admission-20261110T2056Z.json). |
 | Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
 | Systemd sandbox event visibility | Exact r132 binary in a separate mount namespace with package-equivalent capabilities, syscall filters, `ProtectKernelTunables`, and `ProtectControlGroups` indexed host-namespace create, rename, and delete events on ext4; create appeared in 187 ms, with zero test-group overflows or drops. Production service counters did not change during the test. | Actual package-created UID, install/upgrade/rollback lifecycle, other filesystems/kernels, and long-duration packaged service remain open. See [namespace event result](docs/qualification/systemd-hardening-20261110/cross-namespace-event-test-20261110T2004Z.json). |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |

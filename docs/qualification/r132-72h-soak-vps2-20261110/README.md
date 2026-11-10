@@ -128,3 +128,20 @@ controlled crashes. The scheduled crash-recovery phase begins at 12 hours and
 remains pending, as do final exactness, history, and SQLite integrity checks.
 The measured average operation rate is about 22.6/s against the requested 25/s.
 See [`soak-progress-20261110T2022Z.json`](soak-progress-20261110T2022Z.json).
+
+
+## 12-hour controlled restart checkpoint — 2026-11-10 21:05 UTC
+
+The live r132 candidate was stopped and relaunched by the soak harness after
+12 hours. The checkpoint records candidate PID `1305044`, replacement PID
+`3117886`, and 64 files written while the daemon was down. The harness sequence
+performs a full exactness check against the pre-crash generation and checks
+history continuity before it appends the crash record, so the recorded entry
+means both assertions returned successfully. The outer systemd soak unit stayed
+active with zero supervisor restarts.
+
+At this checkpoint the run had 43,224 seconds elapsed, 973,838 mutations, and
+970 exactness samples. This is one successful controlled restart on the small
+ext4 fixture; four more scheduled 12-hour checkpoints and the final exactness,
+history, and SQLite integrity gates remain pending. Evidence:
+[`soak-progress-20261110T2105Z.json`](soak-progress-20261110T2105Z.json).

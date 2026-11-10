@@ -138,3 +138,31 @@ and `incremental` caches from `/var/tmp/dux-production-build-0b81fa8/release`
 binary, source/reports, Cargo/Rust toolchains, and failure evidence were kept.
 `/var/tmp` fell from 4.7 to 4.2 GiB; root measured 90% used with about 9.6 GiB
 available. CPU PSI some avg10 was 44.99%, so no new test VM was started.
+
+## Follow-up — 2026-11-10 20:55 UTC
+
+A read-only SSH check over port 22 measured root at 90% used, with
+10,273,873,920 bytes available (about 9.57 GiB). The point-in-time allocation
+was:
+
+| Path or resource | Measured size | Assessment |
+|---|---:|---|
+| `/var/lib/dux` | 909,860,864 bytes | Database 849,592,320 bytes, WAL 60,110,832 bytes, SHM 131,072 bytes; not the source of multi-GiB growth |
+| `/var/log` | 4,789,362,688 bytes | Journald is 4,295,532,544 bytes (4.00 GiB); retain until journal policy/retention is checked |
+| `/var/tmp` | 4,487,704,576 bytes (4.18 GiB) | Includes toolchains, Cargo cache, qualification artifacts, and preserved failure evidence |
+| Docker images | 18.13 GB reported | 7.074 GB reported reclaimable; no prune performed because image ownership/rollback use is not established |
+| Docker volumes | 17.85 GB reported | 9 active; preserve application data |
+| Docker containers | 2.145 GB reported | 20 active; preserve |
+
+The Dux database and WAL were checked while the r132 soak was active; the soak
+fixture is on `/dev/shm`. The disk view does not explain the earlier short-term
+change in `df` by itself, but at this sample the Dux database was under 1 GiB.
+The largest named `/var/tmp` item was the Rust toolchain (about 0.82 GiB),
+followed by Cargo cache (about 0.98 GiB). The 617 MiB
+`dux-readiness-release116` tree contains a preserved qualification failure
+workspace with a 2 GiB logical, approximately 578 MiB allocated ext4 image.
+It is evidence for a failed run and was retained.
+
+No data was deleted in this follow-up. Journals, Docker images/volumes, Rust and
+Cargo caches, and qualification failure artifacts have different retention or
+rebuild costs; use their owners' retention policy before pruning.
