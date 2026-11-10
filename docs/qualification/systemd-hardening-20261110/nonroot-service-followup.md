@@ -82,8 +82,10 @@ The captured checkpoint is [`soak-progress-20261110T1200Z.json`](../r132-72h-soa
 A later bounded runtime probe started the exact candidate as UID `dux` on a
 512 MiB ext4 loop filesystem, verified all five process capability masks,
 observed a fanotify event, rescanned, found the created file, and passed
-SQLite `quick_check`. See the separate [runtime qualification record](../nonroot-runtime-r132-vps2-20261110/README.md)
-for its exact scope and cleanup evidence.
+SQLite `quick_check`. A separate probe read a mode-000 ext4 file through the
+kernel handle API as UID `dux`. See the [runtime qualification record](../nonroot-runtime-r132-vps2-20261110/README.md)
+for scope and cleanup evidence; Dux's internal handle decoder/replay remains
+unqualified.
 
 ## Remaining qualification
 
@@ -91,9 +93,9 @@ for its exact scope and cleanup evidence.
    and verify their checksums and scriptlet content.
 2. On disposable Ubuntu and Rocky guests, test clean install, upgrade from the
    old root-owned state, inactive-service preservation, rollback, and removal.
-3. Extend runtime checks to direct handle reads, DB/WAL permissions, a
-   production-sized tree, and concurrent churn; the small ext4 probe is not a
-   substitute for these cases.
+3. Exercise Dux's internal handle-event decoder/replay, DB/WAL permissions, a
+   production-sized tree, and concurrent churn; the kernel handle API probe
+   does not cover those paths.
 4. Qualify the full packaged systemd sandbox and assess residual
    `CAP_SYS_ADMIN` exposure after install and upgrade.
 5. Complete the existing 72-hour soak and production-scale qualification

@@ -6,7 +6,7 @@ correctness and package checks, but the long soak, Rocky RPM lifecycle,
 publisher authentication, production-scale qualification, and canary gates are
 not complete.
 
-Status snapshot: **2026-11-10 12:26 UTC**. Machine-readable values and evidence
+Status snapshot: **2026-11-10 12:43 UTC**. Machine-readable values and evidence
 timestamps are in [`current-metrics.json`](docs/qualification/current-metrics.json).
 The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTION_READINESS_STATUS.md).
 
@@ -15,9 +15,9 @@ The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTIO
 | Item | Current evidence |
 |---|---|
 | Candidate | r132, source `f02ba7a`; binary SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76` |
-| VPS1 production | r66, active as root with 4 historical restarts; at 12:01 UTC it was dirty and about 66.5 hours behind, with 752 overflows and 2,518,862 dropped updates; last full scan Nov 5 12:49 UTC |
-| Disk | At 12:01 UTC: `/` 185 GiB total, 60 GiB free; `target/readiness` 1.4 GiB. Disk is not the current blocker. |
-| Current root host admission | At 12:23 UTC: load1 7.17; an active host shell test script blocks VM admission. No Rocky guest was started. |
+| VPS1 production | r66, active as root with 4 historical restarts; at 12:42 UTC it was dirty and about 67.2 hours behind, with 766 overflows and 2,518,862 dropped updates; last full scan Nov 5 12:49 UTC |
+| Disk | At 12:42 UTC: `/` 185 GiB total, 58 GiB free; workspace is 4.1 GiB (`target` 3.6 GiB; `target/readiness` 1.4 GiB). Disk is not the current blocker. |
+| Current root host admission | At 12:41 UTC: load1 14.46 with Go compiler/tests active. The Rocky guest had started earlier but the pressure guard stopped it during boot; do not retry until admission clears. |
 
 ## Qualification gates
 
@@ -27,8 +27,8 @@ The detailed, append-only record is [`PRODUCTION_READINESS_STATUS.md`](PRODUCTIO
 | Python qualification harnesses | 377 passed, 0 failed, 1 skipped across 25 modules | Includes the 75-case package lifecycle/security suite. Standard-library statement coverage is 53% for the package lifecycle harness; this is not daemon coverage, and branch coverage is unavailable. One signing integration case is skipped without its dedicated RPM fixture. |
 | Instrumented coverage | 72.61% lines, 71.44% regions, 76.19% functions; branch counters unavailable | Critical untested paths and filesystem/platform coverage remain. |
 | r132 churn | 100k-file ext4 run passed 20k mutations, exact comparisons and SQLite integrity | Not a 1.9M-node production-scale benchmark; convergence ranged 92–323 seconds. |
-| 72-hour soak | Running on VPS2, zero restarts at 12:25 UTC; 12,012.5 seconds, 280,007 operations, 279 periodic samples, 3 bursts | Held-reader, crash/recovery, terminal exactness/history/integrity are pending. This run uses an older pacing harness. |
-| Non-root service hardening | Exact r132 binary passed a bounded `User=dux` ext4 runtime probe; all capability masks matched, fanotify observed a new file, rescan accounting and SQLite checks passed; 377 Python tests and temporary DEB/RPM builds pass | Temporary packages are unsigned and not release outputs. Package install/upgrade/rollback, direct handle resolution, full packaged sandbox, production-scale and multi-day behavior remain unqualified. See [runtime evidence](docs/qualification/nonroot-runtime-r132-vps2-20261110/README.md). |
+| 72-hour soak | Running on VPS2, zero restarts at 12:43 UTC; 13,092.9 seconds, 304,581 operations, 303 periodic samples, 3 bursts | Held-reader, crash/recovery, terminal exactness/history/integrity are pending. This run uses an older pacing harness. |
+| Non-root service hardening | Exact r132 binary passed a bounded `User=dux` ext4 runtime probe; all capability masks matched, fanotify observed a new file, rescan/accounting and SQLite checks passed. A mode-000 file was read through `open_by_handle_at` as UID `dux` (direct kernel API probe). | Temporary packages are unsigned and not release outputs. Package install/upgrade/rollback, Dux's integrated handle decoder/replay, full packaged sandbox, production-scale and multi-day behavior remain unqualified. See [runtime evidence](docs/qualification/nonroot-runtime-r132-vps2-20261110/README.md). |
 | Ubuntu DEB lifecycle | Passed for r132 | Does not qualify RPM behavior or production rollout. |
 | Rocky RPM lifecycle | Not qualified; a disposable-key RPM signature was verified in Rocky | Full install/upgrade/rollback did not start; retry only after guarded host admission. |
 | Release authenticity | Open | Root GPG keyring is empty and `DUX_RELEASE_SIGNING_KEY` is unset. Release owner must provide trusted fingerprint/key; no publisher key has been used. |

@@ -4350,3 +4350,36 @@ waiting for the next scan; `caught_up=false` and `behind_seconds` 13,472.1s is
 not a scan-first freshness measure. Root disk remains 93% used with 7.23 GB
 available. The local `b07fc63` fix has not been installed on VPS2. Raw record:
 `docs/qualification/scan-first-timestamp-fix-r121-20261109/vps2-runtime-20261109T1743Z.json`.
+
+## Refreshed production and qualification checkpoint — 2026-11-10 12:42 UTC
+
+Read-only live status on VPS1 still shows the installed r66 daemon active as
+root, but dirty and not caught up. It is about 67.2 hours behind, reports 766
+kernel queue overflows and 2,518,862 dropped updates, and its last full scan
+was Nov 5 12:49 UTC. The root filesystem is 68% used with 58 GiB available;
+`/home/dux` is 4.1 GiB, including 3.6 GiB under `target` and 1.4 GiB under
+`target/readiness`. Disk pressure is not the current blocker.
+
+The exact-r132 VPS2 soak remains active, not passed: 13,032.9 seconds elapsed,
+303,255 operations, 303 periodic exact-check samples, three mutation bursts,
+zero observed restarts, and no held-reader or controlled-crash scenarios yet.
+Final exactness, history, and SQLite integrity checks remain pending. Its
+measured average operation rate so far is about 23.27/s against the requested
+25/s; the run uses the pre-pacing-fix harness.
+
+The Rocky qualification guest was stopped by the host pressure guard during
+boot. At 12:41 UTC VPS1 had load1 14.46 and active Go compiler/test processes;
+no RPM lifecycle assertions ran. The guard remains in force. These are
+qualification-environment scheduling conditions, not a Dux test result.
+
+The bounded non-root runtime evidence has been extended with a direct C probe:
+as UID `dux` with the expected capability masks, `name_to_handle_at`,
+`open_by_handle_at`, and a read of a mode-000 ext4 file passed. This validates
+the kernel API permission path only; Dux's own event-handle decoding/replay,
+packaged unit, package lifecycle, and production-scale behavior remain open.
+
+The next VPS2 soak checkpoint was copied at 12:43:16 UTC to
+[`soak-progress-20261110T1241Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1241Z.json).
+It records 13,092.9 seconds, 304,581 operations, 303 periodic samples, three
+mutation bursts, and zero controlled crashes or held-reader scenarios. The
+checkpoint remains `running`; terminal assertions are still pending.

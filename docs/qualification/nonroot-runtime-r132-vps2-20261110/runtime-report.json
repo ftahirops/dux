@@ -50,16 +50,50 @@
     "loop_mount_removed": true,
     "loop_device_detached": true,
     "existing_dux_service_restarts": 0,
-    "soak_service_restarts": 0
+    "soak_service_restarts": 0,
+    "direct_handle_probe_temporary_user_removed": true,
+    "direct_handle_probe_dux_group_restored": "dux:x:115:",
+    "direct_handle_probe_existing_service_restarts": 0,
+    "direct_handle_probe_soak_restarts": 0
   },
   "scope_limits": [
     "No DEB/RPM install, upgrade, rollback, or removal was run",
-    "No direct open_by_handle_at test under UID dux was run",
+    "Dux internal event-handle decoding and replay are not qualified; direct kernel handle API was exercised separately",
     "Small fixture only; not production-scale or multi-day qualification",
-    "Transient unit reproduced identity/capabilities, not the full packaged systemd sandbox"
+    "Transient units reproduced identity/capabilities, not the full packaged systemd sandbox"
   ],
   "evidence": {
     "unit_journal": "unit-journal.log",
-    "cleanup_state": "cleanup-state.txt"
+    "cleanup_state": "cleanup-state.txt",
+    "handle_probe_source": "open-by-handle-probe.c",
+    "handle_probe_result": "open-by-handle-result.txt",
+    "handle_unit_journal": "handle-unit-journal.log",
+    "handle_cleanup_state": "handle-cleanup-state.txt"
+  },
+  "direct_handle_probe": {
+    "result": "passed",
+    "observed_at_utc": "2026-11-10T12:32:05Z",
+    "unit": "dux-handle-uid-1794313924.service",
+    "uid": 996,
+    "gid": 115,
+    "capability_masks": {
+      "CapEff": "0x200004",
+      "CapPrm": "0x200004",
+      "CapBnd": "0x200004",
+      "CapInh": "0x200004",
+      "CapAmb": "0x200004"
+    },
+    "filesystem": "VPS2 ext4 root filesystem",
+    "protected_directory_and_file_mode": "000",
+    "calls": [
+      "name_to_handle_at",
+      "open_by_handle_at",
+      "read"
+    ],
+    "handle_type": 1,
+    "handle_bytes": 8,
+    "read_payload": "handle-capability-probe",
+    "helper_sha256": "fe5a8c3de827c08aa7a6ba647a107d6edb0bc7543239468c01af1d27baf77aa3",
+    "dux_internal_handle_decoder_qualified": false
   }
 }

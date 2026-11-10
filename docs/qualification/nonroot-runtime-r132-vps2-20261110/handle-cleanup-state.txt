@@ -1,0 +1,13 @@
+dux-group: dux:x:115:
+
+temporary-user: absent
+
+production-service: NRestarts=0
+ActiveState=active
+
+soak-service: NRestarts=0
+ActiveState=active
+
+probe: removed
+
+loop-devices: absent
