@@ -4872,3 +4872,42 @@ The local host admission check at 15:10:49 remained blocked: load1 16.34,
 CPU PSI some 58.08%, multiple Go compiler workers, Go vet, Go build/test, and a
 shell test. The Ubuntu guest remains inactive after the 14:23 runtime-guard
 stop; no package installation, upgrade, or rollback command has run.
+
+## Scan-first freshness and resource-cost checkpoint — 2026-11-10 15:34 UTC
+
+A seventh scan-first observation completed at **15:32:18 UTC**. It covered
+1,723,345 files, 211,633 directories, 1,934,978 staged path instances, and
+83,985,891,328 unique bytes (78.22 GiB), with zero coverage issues, 48 vanished
+inode-reuse paths, zero revalidated paths, and zero unresolved paths.
+Accounting verification passed at 15:33:38 in 79,462 ms. At 15:34:52 the
+observation was 154 seconds old, no scan was active, the service was dirty
+awaiting the next observation, pending updates were zero, and there were still
+zero fanotify overflow notifications or dropped updates.
+
+Seven completion times have produced six gaps: **13m48s, 14m51s, 15m39s,
+14m47s, 17m00s, 14m43s**. Four met the 15-minute target and two missed (by
+39 seconds and 2 minutes). This is direct evidence that fixed 15-minute scan
+start cadence does not reliably meet a 15-minute observation-age target when
+scan duration varies. The service continued recovering correctly with zero
+coverage errors and no overflow, but freshness is not qualified.
+
+A counter window around the seventh scan (15:24:59–15:32:35, including about
+10 seconds before scan start and 17 seconds after completion) measured roughly
+422 seconds of Dux cgroup CPU, 2.77 GiB read, and 2.69 GiB written. The scan
+itself took 7m09s. This approaches one CPU core for the scan window and shows
+that reducing the interval may raise meaningful recurring CPU and I/O cost;
+profile/optimize before increasing scan frequency. These counters are one
+sample, not a per-scan distribution.
+
+The older VPS1 event-apply daemon was rechecked at 15:34:44: dirty reason
+`fanotify queue overflow`, 774 cumulative kernel overflows, 2,518,862 dropped
+updates, 50,618 pending updates, 70.1 hours behind, and last full scan 5.11 days
+old. The root filesystem had 57 GiB available; disk remains below capacity.
+
+The r132 soak remained running at 15:34:52 with 23,372.4 seconds elapsed,
+539,934 operations, 537 samples, six mutation bursts, one successful 300-second
+held-reader/WAL-reclaim phase, zero controlled crashes, and zero worker
+restarts. Terminal exactness/history/SQLite checks are still pending. Latest
+checkpoint:
+[`soak-progress-20261110T1533Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1533Z.json)
+(SHA-256 `8ba61095f175124256e3176b2d3318da7d131c2450461cf1c52ee0bd857a4068`).
