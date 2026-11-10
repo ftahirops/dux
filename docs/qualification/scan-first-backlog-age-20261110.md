@@ -28,6 +28,12 @@ continuous mutation. The raw journal excerpt is in
 [`scan-first-backlog-age-20261110-vps2-journal.txt`](scan-first-backlog-age-20261110-vps2-journal.txt);
 two raw status captures are in
 [`release-candidate-r125-20261110`](release-candidate-r125-20261110/README.md).
+At 01:25 UTC, another read-only snapshot showed r121 still active with zero
+restarts, overflows, or dropped updates; the last observation was 255 seconds
+old and the dirty reason still said the next observation was pending. Its raw
+`behind_seconds` counter showed 11.4 hours and `throttled_since` remained set,
+but both are inapplicable event-mode values in scan-first. The captured record
+is [`scan-first-backlog-age-20261110-vps2-status-0125Z.json`](scan-first-backlog-age-20261110-vps2-status-0125Z.json).
 
 ## Code correction
 
