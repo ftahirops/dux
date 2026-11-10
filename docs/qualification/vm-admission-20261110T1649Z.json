@@ -1,0 +1,36 @@
+{
+  "observed_at_utc": "2026-11-10T16:50:48Z",
+  "host": "vps1",
+  "attempted_action": "guarded disposable Ubuntu 24.04 r136 package lifecycle VM start",
+  "attempt_result": "refused at admission sample 3 of 3; no guest created; no package command ran",
+  "refusal": "active host Go compiler, Go vet workers, go test and go vet appeared during admission samples",
+  "guest_state": "missing",
+  "pressure_at_followup": {
+    "load1": 7.75,
+    "cpu": {
+      "some": 3.01,
+      "full": 0.0
+    },
+    "io": {
+      "some": 2.07,
+      "full": 2.06
+    },
+    "memory": {
+      "some": 0.0,
+      "full": 0.0
+    },
+    "active_host_workloads": [
+      "Go compiler pid=2778268",
+      "Go test binary pid=2778225",
+      "go test pid=2778031",
+      "go test pid=2778059"
+    ],
+    "telemetry_errors": []
+  },
+  "followup_blockers": [
+    "active host build/test/install/analysis workload: Go compiler pid=2778268",
+    "active host build/test/install/analysis workload: Go test binary pid=2778225",
+    "active host build/test/install/analysis workload: go test pid=2778031",
+    "active host build/test/install/analysis workload: go test pid=2778059"
+  ]
+}

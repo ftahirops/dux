@@ -5227,3 +5227,24 @@ one passed held-reader/WAL-reclaim phase, and zero worker restarts or controlled
 crashes. Final exactness/history/SQLite checks remain pending. Checkpoint:
 [`soak-progress-20261110T1646Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1646Z.json)
 (SHA-256 `926d500acadfb2b3b5225da28924154458407af490f89971ac42b084ede59c9a`).
+
+
+## Package VM admission blocked on third sample — 2026-11-10 16:50 UTC
+
+A guarded attempt to start the disposable Ubuntu 24.04 r136 lifecycle guest
+was refused at **admission sample 3/3**. A quiet first sample did not persist:
+Go compiler, Go vet, and Go test processes became active during the 30-second
+admission window. The controller created no guest; its status is `missing`, and
+no package scripts ran. At 16:50:48, follow-up pressure telemetry showed four
+Go workloads, load1 7.75, CPU PSI some 3.01%, IO PSI some 2.07%, and no CPU or
+memory full pressure. Evidence:
+[`vm-admission-20261110T1649Z.json`](docs/qualification/vm-admission-20261110T1649Z.json).
+
+At 16:49:37 VPS2 remained active with zero restarts, pending updates, kernel
+overflows, and dropped updates; the last verified observation was 319 seconds
+old and the index was waiting for the next scheduled full observation. The
+r132 soak was still running at that query: 27,830 seconds (7h43m50s), 637,139
+operations, 634 exactness samples, seven mutation bursts, one passed
+held-reader/WAL-reclaim phase, zero restarts, and zero controlled crashes.
+Terminal exactness/history/SQLite checks remain pending. The most recent full
+soak checkpoint is at 16:46 UTC; the 16:49 values are from a live status query.
