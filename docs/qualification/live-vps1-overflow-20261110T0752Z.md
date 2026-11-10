@@ -49,3 +49,15 @@ soak. The installed daemon's multi-day stale state remains a release blocker.
 Raw machine-readable counters, service properties, host pressure, disk
 accounting, and a five-minute log summary are in
 [`live-vps1-overflow-20261110T0752Z.json`](live-vps1-overflow-20261110T0752Z.json).
+
+## 30-second follow-up — 2026-11-10 07:58:28–07:58:58 UTC
+
+During a separate active Go test/build workload, status counters advanced by
+9,006 events seen, 6,237 resolved, and 2,518 committed updates. No additional
+drops or overflow notifications were recorded in that particular 30-second
+window. The cumulative overflow counter had risen from 721 at 07:52:43 to 731
+at 07:58:28, while the cumulative dropped-update count remained 2,518,862. The
+daemon remained dirty with the same overflow reason and the last scan remained
+the 2026-11-05 observation. A clean 30-second interval does not erase the
+existing loss or establish sustained reliability. Raw before/after status is
+in [`live-vps1-overflow-window-20261110T075858Z.json`](live-vps1-overflow-window-20261110T075858Z.json).

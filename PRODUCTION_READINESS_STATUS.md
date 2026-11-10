@@ -19,6 +19,14 @@ production-scale throughput, sustained churn, or a long canary/soak. Full
 counters and caveats are in the
 [VPS1 production snapshot](docs/qualification/live-vps1-overflow-20261110T0752Z.md).
 
+A 30-second read-only follow-up at 07:58:28–07:58:58 during host Go test/build
+churn saw 9,006 events, 6,237 resolved, and 2,518 committed updates; it added
+no drops or overflows during that short interval. The cumulative overflow
+counter rose from 721 to 731 between the 07:52 and 07:58 samples, while dropped
+updates remained at 2,518,862. Dux remained dirty and its last full scan was
+still November 5. This short interval is not a reliability pass. See the
+[30-second counter comparison](docs/qualification/live-vps1-overflow-window-20261110T075858Z.json).
+
 ## r132 exact-source package and DEB lifecycle qualification — 2026-11-10 07:44 UTC
 
 The exact current source at commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`
