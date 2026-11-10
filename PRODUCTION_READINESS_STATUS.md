@@ -242,6 +242,17 @@ burst was complete; held-reader, controlled-recovery, and final checks were
 pending. No Rocky VM was attempted during the active host race tests and load1
 14.35 sample.
 
+At 11:12:01 UTC, the r132 soak remained active with zero restarts and reached
+7,630.7 seconds, 180,305 operations, 179 exact-check samples, and **two
+completed hourly bursts**. The held-reader, controlled-recovery, and final
+checks remain pending.
+
+At 11:12:55 UTC, VPS1's r66 daemon was still dirty and not caught up, with its
+last full scan 426,213 seconds old and 3 pending updates. The cumulative drop
+and overflow counts remained 2,518,862 and 742. Root disk use had fallen to
+66%, with 62 GiB free; disk capacity is not blocking recovery. See
+[`the 11:12 VPS1 snapshot`](docs/qualification/live-vps1-readiness-20261110T1112Z.json).
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM
