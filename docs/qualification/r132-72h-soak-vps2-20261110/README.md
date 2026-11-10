@@ -176,3 +176,16 @@ and max **17.393 s**. Sampled candidate RSS peaked at **6,568 KiB** and WAL at
 pending. This is continued progress, not a passed soak. Snapshot:
 [`soak-progress-20261110T2238Z.json`](soak-progress-20261110T2238Z.json),
 SHA-256 `22d006fae545c22abcec1d4a92acc167a210813a2a8b6cd41873a4662332f36c`.
+
+### Live checkpoint — 2026-11-10 22:44 UTC
+
+The 22:44 VPS2 read-only query found the worker active with zero service
+restarts. The report records **49,207.9 seconds** (13h40m08s; **18.99%**),
+**1,098,981 mutations**, **1,095 exactness samples**, 13 bursts, two
+held-reader/WAL-reclaim scenarios, and one controlled crash/recovery. The
+whole-run average is **22.333 mutations/s**. Sampled exact convergence latency
+is **3.409 s mean, 2.783 s median, 7.839 s p95, and 17.393 s maximum**.
+Terminal exactness, history, and SQLite integrity remain pending. This is a
+running checkpoint, not a passed soak. Evidence:
+[`soak-progress-20261110T2244Z.json`](soak-progress-20261110T2244Z.json),
+SHA-256 `6654a73a881f5a121a74deeb3d3bbfb6792063c21e94ca479b56bf9308c535aa`.
