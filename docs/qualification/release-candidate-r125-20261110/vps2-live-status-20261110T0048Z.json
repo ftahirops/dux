@@ -1,6 +1,10 @@
 {
   "binary_version": "dux 0.6.3 (8b02799b4132) [production]",
   "captured_at_utc": "2026-11-10T00:48:24.463821+00:00",
+  "derived_semantics": {
+    "behind_seconds_applicable": false,
+    "reason": "scan_first=true; source contract excludes event-apply backlog age as a freshness measure in this mode"
+  },
   "dux_status": {
     "automatic_reconciliation_paused": false,
     "behind_seconds": 38932.977,
@@ -44,7 +48,7 @@
     "write_error": null
   },
   "host": "192.168.5.106",
-  "interpretation": "Read-only live snapshot. Service is running with zero restarts, zero kernel overflows, and zero dropped/resolved event updates. This is scan-first mode; events_resolved=0 is expected for hint-only events. A full observation just completed but accounting verification is pending; index remains dirty and not caught up.",
+  "interpretation": "Read-only live snapshot. Service is running with zero restarts, zero kernel overflows, and zero dropped event updates. This is scan-first mode; events_resolved=0 is expected for hint-only events. The full observation was 59 seconds old, while accounting verification was pending. The raw status reported behind_seconds around 10.8 hours, but this metric is not applicable in scan-first mode and must not be read as observation age or index lag.",
   "unit": {
     "ActiveState": "active",
     "MainPID": "2561224",

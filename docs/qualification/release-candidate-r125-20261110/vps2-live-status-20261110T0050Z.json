@@ -1,6 +1,10 @@
 {
   "binary_version": "dux 0.6.3 (8b02799b4132) [production]",
   "captured_at_utc": "2026-11-10T00:50:30.905191+00:00",
+  "derived_semantics": {
+    "behind_seconds_applicable": false,
+    "reason": "scan_first=true; source contract excludes event-apply backlog age as a freshness measure in this mode"
+  },
   "dux_status": {
     "automatic_reconciliation_paused": false,
     "behind_seconds": 39061.284,
@@ -44,7 +48,7 @@
     "write_error": null
   },
   "host": "192.168.5.106",
-  "interpretation": "Read-only follow-up. The previous observation completed and dirty_reason advanced from accounting verification pending to filesystem changes await the next full observation. Service remains active with zero restarts, kernel overflows, or dropped updates; index is still dirty/not caught up and reports about 10.8 hours lag. In scan-first mode events_resolved=0 is expected for fanotify hints.",
+  "interpretation": "Read-only follow-up. The prior observation completed and dirty_reason advanced from accounting verification pending to filesystem changes await the next full observation. Service remains active with zero restarts, kernel overflows, or dropped updates. In scan-first mode events_resolved=0 is expected for fanotify hints and behind_seconds is inapplicable; the last full observation was 85 seconds old at capture. Index is marked dirty while waiting for the next full observation; this does not quantify the age of every indexed path.",
   "unit": {
     "ActiveState": "active",
     "MainPID": "2561224",

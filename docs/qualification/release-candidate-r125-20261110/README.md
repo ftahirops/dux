@@ -50,17 +50,19 @@ A fresh read-only VPS2 snapshot is retained in
 [`vps2-live-status-20261110T0048Z.json`](vps2-live-status-20261110T0048Z.json).
 At capture the r121 daemon was active with PID 2561224 and zero restarts. It
 had completed a full observation 59 seconds earlier, but accounting
-verification was still pending; the index remained dirty and not caught up,
-with reported lag of about 10.8 hours. The same sample showed zero kernel
-overflows and dropped events. Since VPS2 is in scan-first mode, `events_resolved`
-being zero is expected: fanotify records are hints, and full observations
-reconcile the index. This brief live snapshot is not a new canary pass.
-At 00:50 UTC a second read-only sample showed the observation had advanced
-past accounting verification to `filesystem changes await the next full
-observation`; the daemon remained active with zero restarts, overflows, and
-dropped events. The index still reported about 10.8 hours since its last
-fully-caught-up state, so this is evidence of scan completion, not proof the
-lag has recovered. See
+verification was still pending; its dirty reason reported that state. The same
+sample showed zero kernel overflows and dropped events. Since VPS2 is in
+scan-first mode, `events_resolved=0` is expected: fanotify records are hints,
+and full observations reconcile the index. The legacy r121 status output lacks
+the newer `behind_seconds_applicable` field; its `behind_seconds` value of
+about 10.8 hours is **not** a valid scan-first freshness measurement. The
+current source marks it inapplicable when `scan_first` is true. At 00:50 UTC,
+a second read-only sample showed the dirty reason had advanced to `filesystem
+changes await the next full observation`; the daemon remained active with zero
+restarts, overflows, and dropped events, and the most recent observation was
+85 seconds old. That is evidence a full observation completed, not proof the
+index is instantaneously consistent during ongoing filesystem changes. These
+brief snapshots are not a new canary pass. See
 [`vps2-live-status-20261110T0050Z.json`](vps2-live-status-20261110T0050Z.json).
 
 The new `src/watch.rs` changes in this revision are test-only. The bounded
