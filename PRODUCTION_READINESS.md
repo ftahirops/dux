@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 19:31 UTC**. VPS1 was last verified running the old event-apply
+**2026-11-10 19:43 UTC**. VPS1 was last verified running the old event-apply
 daemon at 17:06 UTC and has not been rechecked since. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -17,9 +17,9 @@ machine-readable snapshot is
 | System | Latest verified state |
 |---|---|
 | **VPS1 production** | Last detailed observation at 17:06 UTC: Dux 0.6.3 build `e0cc915f`, running as root, dirty after fanotify overflow, 775 lifetime overflows, 2,518,862 dropped updates, 30,500 pending updates, and last full scan on 2026-11-05. This is not the r132 candidate. No newer VPS1 observation is recorded here. |
-| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 19:26 it was active with zero restarts, overflows, pending updates, or reported drops. Its latest full observation completed at 19:21 with zero coverage issues; independent accounting passed in 59.9 seconds. The index was marked dirty because new hints arrived after the scan. Per-path freshness is not measured. |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 19:26 checkpoint is 10h21m45s into a 72-hour run (14.39%), with 847,120 operations, 844 exactness samples, 10 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. Terminal exactness, history, and SQLite checks are pending. |
-| **VPS2 disk** | At 19:26, root was 90% used with 9.96 GB available. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
+| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode; binary SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`. At 19:41:55 it was active with zero restarts. The latest full scan/accounting evidence remains from 19:37–19:38. Its latest full observation completed at 19:37 with zero coverage issues; independent accounting passed in 66.0 seconds. The index was marked dirty because new hints arrived after the scan. Per-path freshness is not measured. |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, running in an isolated worker on VPS2. It is separate from the installed VPS2 daemon. The 19:42 checkpoint is 10h36m48s into a 72-hour run (14.76%), with 866,389 operations, 863 exactness samples, 10 mutation bursts, one held-reader/WAL-reclaim scenario, and zero controlled crashes. At 19:41:55 the installed service was active with zero restarts. Terminal exactness, history, and SQLite checks remain pending. |
+| **VPS2 disk** | At 19:41:55, root was 90% used with 9.68 GB available. Detailed directory attribution is older (18:06); no cleanup is recorded. Do not start nested KVM or a large package build on VPS2. |
 
 ### Recent live reliability and throughput evidence
 
@@ -38,11 +38,11 @@ VPS2 service, not a controlled capacity test for r132. Dux reported zero event
 resolution in this window, as expected in scan-first mode. The scan-first
 `behind_seconds` field is marked inapplicable; it is not a freshness measure.
 
-Evidence: [scan retry and recovery](docs/qualification/vps2-reconciliation-retry-20261110T1911Z.log),
+Evidence: [latest scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1938Z.log), [latest VPS2 status](docs/qualification/vps2-live-status-20261110T1938Z.json), [scan retry and recovery](docs/qualification/vps2-reconciliation-retry-20261110T1911Z.log),
 [next scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log),
 [throughput profile](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json),
 [latest VPS2 status](docs/qualification/vps2-live-status-20261110T1926Z.json),
-[r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1926Z.json).
+[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1942Z.json).
 
 ## Tests, coverage, and open release gates
 
@@ -53,7 +53,7 @@ Evidence: [scan retry and recovery](docs/qualification/vps2-reconciliation-retry
 | Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
 | Dependency audit | 229 locked dependencies; zero advisories and warnings. Local RustSec database head matched upstream at the 18:55 check. | This is dependency hygiene, not a full application security review. |
 | Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
-| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:31 unrelated Go compile/test and migration workloads were active; load1 was 18.46 and CPU PSI some avg10 was 44.72%. No VM was started. See [host admission sample](docs/qualification/host-admission-20261110T1931Z.json). |
+| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:39 an unrelated Go test was still active, despite CPU PSI some avg10 easing to 1.23%. No VM was started. See [latest host sample](docs/qualification/current-metrics.json) and [earlier high-pressure sample](docs/qualification/host-admission-20261110T1931Z.json). |
 | Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |
 

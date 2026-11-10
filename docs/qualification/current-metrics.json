@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T19:31:11Z",
+  "snapshot_at_utc": "2026-11-10T19:43:00Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -100,12 +100,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:26:51Z",
-    "state": "active/running",
+    "observed_at_utc": "2026-11-10T19:42:00Z",
+    "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 37305.2,
-    "operations": 847120,
-    "exact_check_samples": 844,
+    "elapsed_seconds": 38208.1,
+    "operations": 866389,
+    "exact_check_samples": 863,
     "completed_hourly_bursts": 10,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -114,16 +114,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.70782625478486,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1926Z.json",
+    "observed_operations_per_second_elapsed": 22.676,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1942Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.14392438271604938,
+    "coverage_duration_fraction": 0.14740779320987654,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "6c474e5464d9c4f6d3fb2e12b44cdf10df3a3e73d38c04427bf81ad00fd00969",
+    "latest_checkpoint_sha256": "30709e3d7e55f133d7064d292c584bc8193a03b30ec2954de2da12af1a44f259",
     "controlled_crashes_completed": 0,
     "harness_suites_run": [
       "soak"
@@ -145,8 +145,8 @@
       "startup",
       "wal"
     ],
-    "latest_live_status_query_at_utc": "2026-11-10T19:26:51Z",
-    "latest_full_checkpoint_at_utc": "2026-11-10T19:26:51Z",
+    "latest_live_status_query_at_utc": "2026-11-10T19:38:49Z",
+    "latest_full_checkpoint_at_utc": "2026-11-10T19:42:00Z",
     "max_exact_convergence_ms_observed": 14012
   },
   "package_lifecycle": {
@@ -526,16 +526,16 @@
     "evidence": "df -B1 on vps1"
   },
   "vps2_disk_inventory": {
-    "observed_at_utc": "2026-11-10T18:35:53Z",
+    "observed_at_utc": "2026-11-10T19:41:55Z",
     "root_total_bytes": 99012476928,
-    "root_used_bytes": 84281683968,
-    "root_available_bytes": 10151043072,
+    "root_used_bytes": 84750471168,
+    "root_available_bytes": 9682255872,
     "root_use_percent": 90,
     "var_tmp_gib_approx": 5.3,
     "var_log_gib_approx": 4.5,
     "systemd_journal_gib_approx": 4.0,
     "kvm_available": false,
-    "evidence": "df -B1 on VPS2 at 18:35:53 UTC; latest detailed attribution remains 18:06 UTC"
+    "evidence": "df -B1 / on VPS2 at 19:41:55 UTC; latest detailed directory attribution remains 18:06 UTC"
   },
   "unmerged_candidate_worktree": {
     "base_commit": "52542d9639a5da52e3703f521e4aff67e2d5e8a3",
@@ -553,7 +553,7 @@
   },
   "latest_vps2_live_observation": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T19:26:51Z",
+    "observed_at_utc": "2026-11-10T19:38:49Z",
     "service_active": true,
     "systemd_active_state": "active",
     "service_restarts": 0,
@@ -564,31 +564,38 @@
     "dirty_reason": "filesystem changes await the next full observation",
     "caught_up": false,
     "behind_seconds_applicable": false,
-    "last_scan_timestamp_utc": "2026-11-10T19:21:08Z",
-    "last_scan_age_seconds": 343,
+    "last_scan_timestamp_utc": "2026-11-10T19:37:32Z",
+    "last_scan_age_seconds": 77,
     "scan_in_progress": false,
     "pending_updates": 0,
     "kernel_overflow_notifications": 0,
     "events_dropped": 0,
     "userspace_updates_dropped": 0,
-    "events_seen": 1441173707,
-    "index_nodes": 1977359,
-    "index_bytes": 83721383936,
-    "index_bytes_on_disk": 842403840,
+    "events_seen": 1459149802,
+    "index_nodes": 1981125,
+    "index_bytes": 83872292864,
+    "index_bytes_on_disk": 843448320,
     "wal_bytes": 60110832,
     "failed_reconciliation_attempts": null,
     "automatic_reconciliation_paused": false,
     "write_error": null,
+    "last_scan_coverage_issues": 0,
+    "last_scan_vanished_reuse_paths": 48,
+    "last_scan_revalidated_reuse_paths": 0,
+    "last_scan_unresolved_reuse_paths": 0,
+    "last_scan_accounting_verification": "passed",
+    "last_scan_accounting_verification_elapsed_ms": 65984,
     "root_disk_size_bytes": 99012476928,
-    "root_disk_used_bytes": 84472143872,
-    "root_disk_available_bytes": 9960583168,
+    "root_disk_used_bytes": 84565647360,
+    "root_disk_available_bytes": 9867079680,
     "root_disk_use_percent": 90,
-    "service_memory_current_bytes": 531214336,
+    "service_memory_current_bytes": 584417280,
     "service_memory_peak_bytes": 2148720640,
     "service_memory_high_bytes": 2147483648,
     "service_memory_max_bytes": 4294967296,
-    "service_memory_events_high_total": 1948,
-    "service_memory_oom_events": 0
+    "service_memory_events_high_total": 3188,
+    "service_memory_oom_events": 0,
+    "latest_live_status_query_at_utc": "2026-11-10T19:41:55Z"
   },
   "latest_vps2_event_throughput_profile": {
     "observed_at_utc": "2026-11-10T19:25:30Z",
@@ -636,29 +643,19 @@
     "root_disk_available_bytes": 9958559744
   },
   "latest_qualification_host_sample": {
-    "observed_at_utc": "2026-11-10T19:31:11Z",
-    "load_average_1m": 18.46,
-    "cpu_psi_some_avg10_percent": 44.72,
-    "cpu_psi_some_avg60_percent": 33.57,
-    "cpu_psi_some_avg300_percent": 17.4,
+    "observed_at_utc": "2026-11-10T19:39:09Z",
+    "load_average_1m": 3.16,
+    "cpu_psi_some_avg10_percent": 1.23,
+    "cpu_psi_some_avg60_percent": 5.47,
+    "cpu_psi_some_avg300_percent": 17.74,
     "cpu_psi_full_avg10_percent": 0.0,
-    "active_unrelated_workloads": [
-      {
-        "type": "Go compiler",
-        "worktree": "/home/xtop/engine"
-      },
-      {
-        "type": "go test",
-        "scope": "/home/xtop/engine and /home/xtop/engine/replay"
-      },
-      {
-        "type": "go run",
-        "scope": "/home/xtop/cmd/migrate"
-      }
-    ],
+    "active_unrelated_workload": {
+      "type": "go test",
+      "scope": "/home/xgenstack.com/backend/internal/router and /home/xgenstack.com/backend/internal/handler"
+    },
     "qualification_vm_started": false,
     "fault_matrix_started": false,
-    "decision": "do not start guarded qualification VM while shared host has active unrelated build/test workloads and severe CPU pressure",
+    "decision": "do not start guarded qualification VM while unrelated Go test workload remains active",
     "evidence": "docs/qualification/host-admission-20261110T1931Z.json"
   }
 }
