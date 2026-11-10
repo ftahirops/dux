@@ -1,5 +1,25 @@
 # Production readiness status
 
+## r132 working-tree runtime follow-up — 2026-11-10 06:26 UTC
+
+Built production and fault-injection release binaries from `fad49686709d`; both
+reported the same source SHA-256. The isolated VPS2 `retry` suite passed in
+62.1s: persisted failure/cooldown survived restart, event ingestion continued,
+automatic retry succeeded, and the final fixture index matched exactly. It ran
+in a private mount namespace on a disposable ext4 loop fixture; the installed
+r121 service/database were untouched, and the fixture was cleaned up. The
+installed service had zero restarts, with its own scheduled scan active at the
+post-test sample.
+
+This runtime suite covers bounded retry behavior, not the new post-observation
+hint race itself. That guard currently has a focused unit test only; a
+deterministic runtime race test is still needed. The current worktree has 341
+passing Rust tests, 2 ignored, 72.64% line coverage, 71.49% region coverage,
+and 76.26% function coverage. Branch counters are unavailable. Binary hashes,
+test evidence, and unqualified gates are documented in [the r132 runtime
+qualification](docs/qualification/r132-retry-runtime-20261110.md). No package
+has been released or installed; production readiness remains open.
+
 ## VPS2 live reconciliation follow-up — 2026-11-10 06:14 UTC
 
 The installed r121 service's bounded retry completed at 05:58:50 after about
