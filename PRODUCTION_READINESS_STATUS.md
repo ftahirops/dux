@@ -1,5 +1,24 @@
 # Production readiness status
 
+## Live VPS1 overflow evidence — 2026-11-10 07:52 UTC
+
+Read-only production sampling found the installed package is still **r66**
+(`dux 0.6.3-66`, revision `e0cc915f8f37`), not the r132 candidate. The service
+was active with historical `NRestarts=4`, but its index status was dirty from
+fanotify overflow: **721 overflow notifications**, **2,518,862 dropped
+updates**, last full scan **4d19h** earlier, and `caught_up=false`. In the
+preceding five minutes journald recorded 109 stale-handle warnings and 29 slow
+flush-phase warnings. Host load was elevated with unrelated Go builds/tests
+running; root still had about 57 GiB free, so disk exhaustion did not explain
+the stale index. The 126.4 GB `index_bytes` value is the logical sum of indexed
+file sizes, not SQLite disk usage; the DB was 3.38 GB and WAL 128 MiB.
+
+This confirms a current production blocker but does not qualify the r132
+candidate. r132 has passed focused runtime and Ubuntu DEB lifecycle checks, not
+production-scale throughput, sustained churn, or a long canary/soak. Full
+counters and caveats are in the
+[VPS1 production snapshot](docs/qualification/live-vps1-overflow-20261110T0752Z.md).
+
 ## r132 exact-source package and DEB lifecycle qualification — 2026-11-10 07:44 UTC
 
 The exact current source at commit `f02ba7ad235ea841a99de27b69fcd402e3c3927c`
