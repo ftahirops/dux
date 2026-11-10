@@ -15,9 +15,11 @@ and diff checks passed. LLVM coverage is **72.61% lines, 71.44% regions, and
 76.19% functions**; branch counters are unavailable. On VPS2, the focused
 runtime race suite passed in 5.235s on a disposable 768 MiB ext4 image. It
 proved dirty-state retention, later exact indexing of the new file, and final
-integrity. The installed r121 service stayed active with zero restarts. The
-candidate was not installed or packaged. Details, hashes, and machine-readable
-evidence are in [the race qualification](docs/qualification/r132-postscan-hint-runtime-20261110.md).
+integrity. The current-source ignored ext4 stale-parent integration also
+passed **1/1** on VPS2 in a private mount namespace. The installed r121 service
+stayed active with zero restarts. The candidate was not installed or packaged.
+Details, hashes, and machine-readable evidence are in
+[the race qualification](docs/qualification/r132-postscan-hint-runtime-20261110.md).
 
 This closes the specific post-observation accounting race gate. It does not
 close the 72-hour soak, 24-hour canary, package/rollback, privilege review,

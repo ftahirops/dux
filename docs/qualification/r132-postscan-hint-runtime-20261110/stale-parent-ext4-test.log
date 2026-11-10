@@ -1,0 +1,15 @@
+VPS2: 192.168.5.106
+Kernel: 6.8.0-147-generic
+Test binary SHA-256: 57626519f2c042ca6a35de504b8f48c2a54c1025b9ef18076a12bf5239c908ff
+Isolation: transient systemd unit, PrivateMounts=yes, CPUQuota=25%, MemoryMax=4096M
+Fixture: 128 MiB ext4 loop image backed by /dev/shm; TMPDIR set to the mounted ext4
+
+running 1 test
+test watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 342 filtered out; finished in 0.46s
+
+Finished with result: success
+Service runtime: 650ms
+CPU time consumed: 164ms
+Memory peak: 432.0K

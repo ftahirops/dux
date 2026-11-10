@@ -79,6 +79,19 @@ isolates the database and adds a fault-injection-only delay so the queued event
 is processed before the accounting result. No delay is present in the
 production binary.
 
+## Current-source ext4 handle integration
+
+The current all-features Rust test binary also passed the ignored ext4
+stale-parent integration on VPS2:
+`watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs`.
+It ran in a separate transient unit with a private mount namespace, 25% CPU
+quota, 4 GiB memory ceiling, and a 128 MiB ext4 loop image on tmpfs. Result:
+**1 passed, 0 failed** in 0.46s. Test binary SHA-256:
+`57626519f2c042ca6a35de504b8f48c2a54c1025b9ef18076a12bf5239c908ff`.
+VPS2 remained active with zero service restarts; the unit removed the loop mount
+and fixture. Raw output and setup are in
+[`stale-parent-ext4-test.log`](r132-postscan-hint-runtime-20261110/stale-parent-ext4-test.log).
+
 ## Limits and remaining gates
 
 This is one deterministic race regression on ext4 and one kernel. It is not a
