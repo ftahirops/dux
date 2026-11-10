@@ -41,8 +41,10 @@ remain visible.
 
 This corrects misleading diagnostics; it does not change event capture,
 observation cadence, or index consistency. The r125 package was built before
-this fix. A new release candidate must include it before package lifecycle or
-canary qualification.
+this fix. Release 126 was subsequently built from commit
+`2a884a8ed6d5a63a5019322241de418354f560dc` and includes it; its guarded package
+lifecycle and canary gates remain open. See
+[`release-candidate-r126-20261110`](release-candidate-r126-20261110/README.md).
 
 ## Tests and coverage
 
@@ -66,11 +68,10 @@ as a profile of this exact source revision; branch coverage remains unreported.
 
 ## Remaining release gates
 
-- Build and audit a release from the commit containing this fix.
 - Complete the guarded install/upgrade/rollback test on the disposable Ubuntu
   guest, then compare index paths and accounting with an independent walk.
 - Run a fresh uninterrupted 24-hour canary on the candidate. The previous r121
-  canary remains failed, and the r125 lifecycle runner has not yet started a VM
+  canary remains failed, and the r126 lifecycle runner has not yet started a VM
   because the host admission guard continues to detect Go/Vitest jobs and
   pressure.
 - Complete privileged fanotify success-path and capability-negative tests;
