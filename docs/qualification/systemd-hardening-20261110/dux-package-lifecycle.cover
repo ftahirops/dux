@@ -1,0 +1,920 @@
+       #!/usr/bin/env python3
+    1: """Exercise upgrade, rollback, removal, purge and clean install in a disposable VM."""
+    1: import argparse
+    1: import grp
+    1: import hashlib
+    1: import json
+    1: import os
+    1: import platform
+    1: import pwd
+    1: import shlex
+    1: import shutil
+    1: import sqlite3
+    1: import stat
+    1: import subprocess
+    1: import sys
+    1: import tempfile
+    1: import time
+    1: from pathlib import Path
+       
+    1: if not __debug__:
+           raise RuntimeError(
+               "package lifecycle qualification requires assertions enabled; do not use python -O"
+           )
+       
+    1: SANDBOX_MARKER = Path("/etc/dux-qualification-sandbox")
+    1: HASH_CHUNK_BYTES = 1024 * 1024
+       
+       
+    1: def _sha256_file(path):
+           """Hash arbitrarily large qualification artifacts with bounded memory."""
+    7:     digest = hashlib.sha256()
+   14:     with Path(path).open("rb") as stream:
+   28:         for chunk in iter(lambda: stream.read(HASH_CHUNK_BYTES), b""):
+    7:             digest.update(chunk)
+    7:     return digest.hexdigest()
+       
+       
+    1: def command(*args, check=True):
+>>>>>>     return subprocess.run([str(arg) for arg in args], check=check,
+>>>>>>                           capture_output=True, text=True)
+       
+       
+    1: def emit_progress(event, stream=None):
+           """Write one machine-readable lifecycle checkpoint and flush it now.
+       
+           A host can tee SSH stdout to durable evidence while the guest report is
+           still being built. This preserves the last completed or active stage if a
+           disposable guest is stopped before its final report can be fetched.
+           """
+    1:     stream = sys.stdout if stream is None else stream
+    2:     print("DUX_PACKAGE_LIFECYCLE " + json.dumps(event, sort_keys=True),
+    1:           file=stream, flush=True)
+       
+       
+    1: def stage_complete_progress_event(step, report_status):
+           """Carry completed evidence in the host-streamed checkpoint.
+       
+           Qualification guests may be stopped before their private overlay can be
+           fetched. A stage name alone is not enough to preserve what the lifecycle
+           actually verified, so include the exact report step in the durable stream.
+           """
+    2:     return {"event": "stage_complete", "stage": step["name"],
+    1:             "status": report_status, "step": step}
+       
+       
+    1: def lifecycle_outcome_progress_event(report):
+           """Make the streamed terminal event a self-contained final report."""
+    2:     status = report["status"]
+    2:     if status not in {"passed", "failed"}:
+    1:         raise ValueError(f"lifecycle outcome is not terminal: {status!r}")
+    1:     return {"event": f"lifecycle_{status}", "report": report}
+       
+       
+    1: def _exec_start_has_option(exec_start, option):
+           """Match a real ExecStart argv option, not an option-name substring."""
+   10:     _, separator, arguments = exec_start.partition("argv[]=")
+   10:     if not separator:
+>>>>>>         return False
+           # `systemctl show` appends metadata after the argv list. Parse only the
+           # command vector and use shell-style quoting to keep each argument intact.
+   10:     arguments = arguments.split(" ; ignore_errors=", 1)[0]
+   10:     try:
+   10:         argv = shlex.split(arguments)
+>>>>>>     except ValueError:
+>>>>>>         return False
+   53:     return any(argument == option or argument.startswith(f"{option}=") for argument in argv)
+       
+       
+    1: def systemd_syscall_filter_group_members(groups):
+           """Resolve systemd syscall groups so effective expanded filters are verifiable."""
+   17:     result = command("systemd-analyze", "syscall-filter", *sorted(groups), check=False)
+   17:     assert result.returncode == 0, {
+>>>>>>         "property": "systemd syscall-filter group expansion",
+>>>>>>         "groups": sorted(groups), "returncode": result.returncode,
+>>>>>>         "stderr": result.stderr,
+           }
+   51:     members = {group: set() for group in groups}
+   17:     active_group = None
+  663:     for line in result.stdout.splitlines():
+  646:         value = line.strip()
+  646:         if value.startswith("@"):
+   34:             active_group = value.split()[0]
+  612:         elif active_group in members and value and not value.startswith("#"):
+  561:             members[active_group].add(value.split()[0])
+   17:     assert all(members.values()), {
+>>>>>>         "property": "systemd syscall-filter group expansion",
+>>>>>>         "expected_groups": sorted(groups), "observed": result.stdout,
+           }
+   17:     return members
+       
+       
+    1: def require_disposable_qualification_vm():
+           """Refuse package removal/purge unless the VM controller provisioned this guest."""
+>>>>>>     assert os.geteuid() == 0, "package lifecycle qualification requires root inside its disposable VM"
+>>>>>>     virtualization = command("systemd-detect-virt", "--vm", check=False)
+>>>>>>     assert virtualization.returncode == 0 and virtualization.stdout.strip() in {"kvm", "qemu"}, {
+>>>>>>         "reason": "package lifecycle is allowed only inside a KVM/QEMU qualification guest",
+>>>>>>         "systemd_detect_virt": virtualization.stdout.strip(),
+           }
+>>>>>>     try:
+>>>>>>         marker = SANDBOX_MARKER.lstat()
+>>>>>>     except FileNotFoundError as error:
+>>>>>>         raise AssertionError(
+>>>>>>             "qualification VM marker is absent; create this guest with dux-qualification-vm.py"
+>>>>>>         ) from error
+>>>>>>     assert stat.S_ISREG(marker.st_mode), marker
+>>>>>>     assert marker.st_uid == 0 and stat.S_IMODE(marker.st_mode) == 0o400, marker
+>>>>>>     assert SANDBOX_MARKER.read_text().strip() == "dux-qualification-sandbox-v1", (
+>>>>>>         "qualification VM marker is missing or invalid"
+           )
+>>>>>>     return {"virtualization": virtualization.stdout.strip(),
+>>>>>>             "marker": str(SANDBOX_MARKER), "marker_mode": oct(stat.S_IMODE(marker.st_mode))}
+       
+       
+    1: def installed_version(kind):
+>>>>>>     if kind == "deb":
+>>>>>>         result = command("dpkg-query", "-W", "-f=${db:Status-Status}\\t${Version}", "dux", check=False)
+>>>>>>         if result.returncode != 0:
+>>>>>>             return None
+>>>>>>         status, separator, version = result.stdout.strip().partition("\t")
+>>>>>>         return version if separator and status == "installed" else None
+>>>>>>     args = ("rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", "dux")
+>>>>>>     result = command(*args, check=False)
+>>>>>>     return result.stdout.strip() if result.returncode == 0 else None
+       
+       
+    1: def service_state():
+>>>>>>     enabled = command("systemctl", "is-enabled", "dux.service", check=False).stdout.strip()
+>>>>>>     active = command("systemctl", "is-active", "dux.service", check=False).stdout.strip()
+>>>>>>     tunnel_enabled = command("systemctl", "is-enabled", "dux-tunnel.service", check=False).stdout.strip()
+>>>>>>     tunnel_active = command("systemctl", "is-active", "dux-tunnel.service", check=False).stdout.strip()
+>>>>>>     return {"enabled": enabled, "active": active,
+>>>>>>             "tunnel_enabled": tunnel_enabled, "tunnel_active": tunnel_active}
+       
+       
+    1: def assert_service_security_policy(proc_root=Path("/proc")):
+           """Check the effective installed unit configuration, not only its source file."""
+   25:     properties = (
+               "User", "Group", "AmbientCapabilities", "CapabilityBoundingSet",
+               "SecureBits",
+               "NoNewPrivileges", "UMask", "StateDirectory", "StateDirectoryMode",
+               "MemoryHigh", "MemoryMax", "CPUQuotaPerSecUSec", "OOMScoreAdjust",
+               "IOAccounting", "IOReadBytes", "IOWriteBytes", "LimitCORE", "ProtectKernelModules",
+               "SystemCallFilter", "RestrictAddressFamilies", "ExecStart", "MainPID",
+           )
+  125:     output = command(
+   25:         "systemctl", "show", "dux.service",
+ 1700:         *(argument for name in properties for argument in ("-p", name)),
+   25:         "--no-pager",
+   25:     ).stdout
+  600:     observed = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+  425:     expected = {
+   25:         "User": "dux",
+   25:         "Group": "dux",
+   25:         "AmbientCapabilities": {"cap_dac_read_search", "cap_sys_admin"},
+   25:         "CapabilityBoundingSet": {"cap_dac_read_search", "cap_sys_admin"},
+   25:         "SecureBits": "3",
+   25:         "NoNewPrivileges": "yes",
+   25:         "UMask": "0027",
+   25:         "StateDirectory": "dux",
+   25:         "StateDirectoryMode": "0750",
+   25:         "MemoryHigh": str(2 * 1024**3),
+   25:         "MemoryMax": str(4 * 1024**3),
+   25:         "CPUQuotaPerSecUSec": "1s",
+   25:         "IOAccounting": "yes",
+   25:         "OOMScoreAdjust": "0",
+   25:         "LimitCORE": "0",
+   25:         "ProtectKernelModules": "no",
+           }
+  366:     for name, wanted in expected.items():
+  348:         value = observed.get(name)
+  348:         if name in {"AmbientCapabilities", "CapabilityBoundingSet"}:
+   47:             value = set(value.split()) if value is not None else None
+  348:         assert value == wanted, {"property": name, "expected": wanted, "observed": value}
+   18:     syscall_filter = observed.get("SystemCallFilter", "").split()
+   19:     assert syscall_filter and syscall_filter[0].startswith("~"), {
+    1:         "property": "SystemCallFilter", "expected": "a deny list for kernel module syscalls",
+    1:         "observed": observed.get("SystemCallFilter"),
+           }
+   17:     denied_syscalls = {syscall_filter[0][1:], *syscall_filter[1:]}
+   17:     required_denials = {
+               "init_module", "finit_module", "delete_module",
+               "mount", "umount", "umount2", "pivot_root", "chroot",
+               "swapon", "swapoff", "reboot", "kexec_load", "kexec_file_load",
+               "ioperm", "iopl", "pciconfig_iobase", "pciconfig_read", "pciconfig_write",
+               "lookup_dcookie", "perf_event_open", "pidfd_getfd", "ptrace",
+               "modify_ldt", "vm86", "vm86old", "bpf",
+           }
+   17:     group_members = systemd_syscall_filter_group_members({"@clock", "@obsolete"})
+   51:     missing_group_members = {
+   34:         group: sorted(members - denied_syscalls)
+   51:         for group, members in group_members.items()
+   34:         if group not in denied_syscalls and not members <= denied_syscalls
+           }
+   23:     assert required_denials <= denied_syscalls and not missing_group_members, {
+    6:         "property": "SystemCallFilter",
+    6:         "required_denials": sorted(required_denials),
+    6:         "missing_group_denials": missing_group_members,
+    6:         "observed": observed.get("SystemCallFilter"),
+           }
+   11:     address_families = set(observed.get("RestrictAddressFamilies", "").split())
+   11:     permitted_families = {"AF_UNIX", "AF_INET", "AF_INET6"}
+   12:     assert "AF_UNIX" in address_families and address_families <= permitted_families, {
+    1:         "property": "RestrictAddressFamilies",
+    1:         "expected": "AF_UNIX and optional IP families",
+    1:         "observed": observed.get("RestrictAddressFamilies"),
+           }
+   10:     alert_exec = _exec_start_has_option(observed.get("ExecStart", ""), "--alert-exec")
+   10:     if not alert_exec:
+   11:         assert address_families == {"AF_UNIX"}, {
+    3:             "property": "RestrictAddressFamilies",
+    3:             "expected": "AF_UNIX when the daemon has no alert hook",
+    3:             "observed": observed.get("RestrictAddressFamilies"),
+               }
+    7:     try:
+    7:         main_pid = int(observed["MainPID"])
+>>>>>>     except (KeyError, ValueError) as error:
+>>>>>>         raise AssertionError({"property": "MainPID", "observed": observed.get("MainPID")}) from error
+    7:     assert main_pid > 0, {"property": "MainPID", "observed": main_pid}
+    7:     process_score_path = Path(proc_root) / str(main_pid) / "oom_score_adj"
+    7:     process_score = process_score_path.read_text().strip()
+    8:     assert process_score == "0", {
+    1:         "property": "process oom_score_adj", "expected": "0",
+    1:         "observed": process_score, "path": str(process_score_path),
+           }
+    6:     observed["ProcessOOMScoreAdjust"] = process_score
+   60:     process_status = dict(
+   42:         line.split(":", 1)
+   48:         for line in (Path(proc_root) / str(main_pid) / "status").read_text().splitlines()
+   42:         if ":" in line
+           )
+    6:     service_uid = pwd.getpwnam("dux").pw_uid
+   30:     process_uids = [int(value) for value in process_status["Uid"].split()]
+    6:     assert len(process_uids) == 4 and set(process_uids) == {service_uid}, {
+>>>>>>         "property": "process Uid", "expected": [service_uid] * 4, "observed": process_uids,
+           }
+    6:     service_gid = grp.getgrnam("dux").gr_gid
+   30:     process_gids = [int(value) for value in process_status["Gid"].split()]
+    6:     assert len(process_gids) == 4 and set(process_gids) == {service_gid}, {
+>>>>>>         "property": "process Gid", "expected": [service_gid] * 4, "observed": process_gids,
+           }
+    6:     observed["ProcessUID"] = service_uid
+    6:     observed["ProcessGID"] = service_gid
+    6:     required_caps = (1 << 2) | (1 << 21)  # CAP_DAC_READ_SEARCH | CAP_SYS_ADMIN
+   36:     process_caps = {
+   30:         name: int(process_status[name].split()[0], 16)
+   36:         for name in ("CapEff", "CapPrm", "CapBnd", "CapInh", "CapAmb")
+           }
+   37:     assert all(value == required_caps for value in process_caps.values()), {
+    2:         "property": "process capabilities", "expected_mask": hex(required_caps),
+   12:         "observed_masks": {name: hex(value) for name, value in process_caps.items()},
+           }
+   24:     observed["ProcessCapabilities"] = {
+   24:         name: hex(value) for name, value in process_caps.items()
+           }
+    4:     return observed
+       
+       
+    1: def assert_service_path_visible(path, main_pid, proc_root=Path("/proc")):
+           """Ensure service mount names the same inode as the host-visible path."""
+    2:     path = Path(path)
+    2:     service_path = Path(proc_root) / str(main_pid) / "root" / path.relative_to("/")
+    2:     host_stat = path.stat()
+    2:     service_stat = service_path.stat()
+    2:     host_id = (host_stat.st_dev, host_stat.st_ino)
+    2:     service_id = (service_stat.st_dev, service_stat.st_ino)
+    3:     assert service_id == host_id, {
+    1:         "path": str(path), "host_identity": host_id,
+    1:         "service_identity": service_id, "service_path": str(service_path),
+           }
+    1:     return {"path": str(path), "device": host_id[0], "inode": host_id[1]}
+       
+       
+    1: def assert_index_access_policy(directory=Path("/var/lib/dux"), expected_uid=None, group_name="dux"):
+           """Enforce the dedicated-user:dux permissions on the filename index."""
+    4:     directory = Path(directory)
+    4:     expected_uid = pwd.getpwnam("dux").pw_uid if expected_uid is None else expected_uid
+    4:     expected_owner = pwd.getpwuid(expected_uid).pw_name
+    4:     directory_stat = directory.lstat()
+    4:     expected_gid = grp.getgrnam(group_name).gr_gid
+    4:     assert stat.S_ISDIR(directory_stat.st_mode), directory_stat
+    4:     assert (directory_stat.st_uid, directory_stat.st_gid) == (expected_uid, expected_gid), directory_stat
+    4:     assert stat.S_IMODE(directory_stat.st_mode) == 0o750, oct(stat.S_IMODE(directory_stat.st_mode))
+       
+    3:     database = directory / "dux.db"
+    3:     database_stat = database.lstat()
+    3:     assert stat.S_ISREG(database_stat.st_mode), database_stat
+    2:     checked = {}
+    3:     for path, info in [(database, database_stat)]:
+    2:         assert (info.st_uid, info.st_gid) == (expected_uid, expected_gid), (str(path), info)
+    2:         assert stat.S_IMODE(info.st_mode) == 0o640, (str(path), oct(stat.S_IMODE(info.st_mode)))
+    1:         checked[path.name] = oct(stat.S_IMODE(info.st_mode))
+    4:     for suffix in ("-wal", "-shm", "-journal"):
+    3:         path = Path(f"{database}{suffix}")
+    3:         try:
+    3:             info = path.lstat()
+>>>>>>         except FileNotFoundError:
+>>>>>>             continue
+    3:         assert stat.S_ISREG(info.st_mode), (str(path), info)
+    3:         assert (info.st_uid, info.st_gid) == (expected_uid, expected_gid), (str(path), info)
+    3:         assert stat.S_IMODE(info.st_mode) == 0o640, (str(path), oct(stat.S_IMODE(info.st_mode)))
+    3:         checked[path.name] = oct(stat.S_IMODE(info.st_mode))
+    2:     return {"directory_owner": expected_owner, "directory_group": group_name,
+    1:             "directory_mode": oct(stat.S_IMODE(directory_stat.st_mode)),
+    1:             "index_file_owner": expected_owner, "index_file_group": group_name,
+    1:             "index_files": checked}
+       
+       
+       # A status read every two seconds avoids turning qualification polling into a
+       # source of database load. Match the service's 3600-second startup allowance:
+       # production-sized root scans can exceed five minutes on an idle-I/O, low-share
+       # qualification guest. A timeout must still bound nonconverging runs.
+    1: DAEMON_READINESS_POLL_SECONDS = 2.0
+    1: LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS = 3600
+       
+       
+    1: def wait_service_active(timeout, stage):
+>>>>>>     deadline = time.monotonic() + timeout
+>>>>>>     while True:
+>>>>>>         state = service_state()
+>>>>>>         if state["active"] == "active":
+>>>>>>             return state
+>>>>>>         if state["active"] == "failed":
+>>>>>>             journal = command("journalctl", "-u", "dux.service", "--no-pager", "-n", "30", check=False)
+>>>>>>             raise AssertionError({"stage": stage, "service": state,
+>>>>>>                                   "journal": journal.stdout, "journal_error": journal.stderr})
+>>>>>>         if time.monotonic() >= deadline:
+>>>>>>             raise AssertionError({"stage": stage, "service_start_timeout": state,
+>>>>>>                                   "timeout_seconds": timeout})
+>>>>>>         time.sleep(DAEMON_READINESS_POLL_SECONDS)
+       
+       
+    1: def wait_daemon_caught_up(timeout, stage):
+           """Require a clean, complete first reconciliation, not just Type=notify active."""
+    4:     deadline = time.monotonic() + timeout
+    4:     last_status = None
+    5:     while True:
+    5:         result = command("/usr/bin/dux", "status", "--json", check=False)
+    5:         try:
+    5:             last_status = json.loads(result.stdout)
+>>>>>>         except (json.JSONDecodeError, TypeError):
+>>>>>>             last_status = {
+>>>>>>                 "status_command_returncode": result.returncode,
+>>>>>>                 "status_stdout": result.stdout[-4000:],
+>>>>>>                 "status_stderr": result.stderr[-4000:],
+                   }
+    5:         if (result.returncode == 0 and isinstance(last_status, dict)
+    5:                 and last_status.get("daemon_live") is True
+    5:                 and last_status.get("watch_status_available") is True
+    5:                 and last_status.get("dirty") is False
+    1:                 and last_status.get("paused") is False
+    1:                 and last_status.get("scan_in_progress") is False
+    1:                 and last_status.get("caught_up") is True):
+    1:             return last_status
+    4:         reason = (last_status.get("dirty_reason") or "") if isinstance(last_status, dict) else ""
+    4:         if "automatic retries paused" in reason.lower():
+    1:             journal = command("journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False)
+    2:             raise AssertionError({"stage": stage, "automatic_reconciliation_paused": last_status,
+    1:                                   "timeout_seconds": timeout,
+    1:                                   "journal": journal.stdout, "journal_error": journal.stderr})
+    3:         if time.monotonic() >= deadline:
+    2:             journal = command("journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False)
+    4:             raise AssertionError({"stage": stage, "daemon_not_caught_up": last_status,
+    2:                                   "timeout_seconds": timeout,
+    2:                                   "journal": journal.stdout, "journal_error": journal.stderr})
+    1:         time.sleep(DAEMON_READINESS_POLL_SECONDS)
+       
+       
+    1: def wait_initial_scan_complete(
+    1:     timeout, stage, not_before_timestamp, require_accounting=False,
+       ):
+           """Wait for a post-start scan; optionally require successful accounting.
+       
+           Package transition tests need a stable, readable pre-upgrade index; requiring
+           a legacy binary to represent mount aliases it cannot model prevents testing
+           the candidate at all. For a clean candidate install, the caller requires
+           accounting to have completed. Only a clean status or the normal
+           post-accounting hint-dirty state is acceptable; pending, incomplete, and
+           accounting-failure states do not qualify.
+           """
+    4:     deadline = time.monotonic() + timeout
+    4:     last_status = None
+    9:     while True:
+    9:         result = command("/usr/bin/dux", "status", "--json", check=False)
+    9:         try:
+    9:             last_status = json.loads(result.stdout)
+>>>>>>         except (json.JSONDecodeError, TypeError):
+>>>>>>             last_status = {
+>>>>>>                 "status_command_returncode": result.returncode,
+>>>>>>                 "status_stdout": result.stdout[-4000:],
+>>>>>>                 "status_stderr": result.stderr[-4000:],
+                   }
+    9:         if isinstance(last_status, dict):
+    9:             reason = last_status.get("dirty_reason")
+    9:             if (last_status.get("automatic_reconciliation_paused") is True
+    9:                     or (isinstance(reason, str) and "paused after" in reason.lower())):
+>>>>>>                 journal = command(
+>>>>>>                     "journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False
+                       )
+>>>>>>                 raise AssertionError({
+>>>>>>                     "stage": stage, "baseline_reconciliation_paused": last_status,
+>>>>>>                     "journal": journal.stdout, "journal_error": journal.stderr,
+                       })
+    9:             scan_completed = (
+   44:                 result.returncode == 0
+    9:                 and last_status.get("daemon_live") is True
+    9:                 and last_status.get("watch_status_available") is True
+    9:                 and last_status.get("scan_in_progress") is False
+    8:                 and isinstance(last_status.get("last_scan_timestamp_seconds"), int)
+    8:                 and last_status["last_scan_timestamp_seconds"] > not_before_timestamp
+                   )
+    9:             accounting_complete = (
+    9:                 not require_accounting
+                       or (
+    5:                     "dirty_reason" in last_status
+    5:                     and reason in {
+                               None,
+                               "filesystem changes await the next full observation",
+                           }
+                       )
+                   )
+    9:             if scan_completed and accounting_complete:
+    4:                 return last_status
+    5:         if time.monotonic() >= deadline:
+>>>>>>             journal = command("journalctl", "-u", "dux.service", "--no-pager", "-n", "50", check=False)
+>>>>>>             raise AssertionError({
+>>>>>>                 "stage": stage, "initial_scan_not_completed": last_status,
+>>>>>>                 "timeout_seconds": timeout,
+>>>>>>                 "journal": journal.stdout, "journal_error": journal.stderr,
+                   })
+    5:         time.sleep(DAEMON_READINESS_POLL_SECONDS)
+       
+       
+    1: def structured_failure_evidence(error):
+           """Preserve assertion diagnostics as JSON data as well as a readable error."""
+    2:     if isinstance(error, AssertionError) and error.args and isinstance(error.args[0], dict):
+    1:         return error.args[0]
+    1:     return None
+       
+       
+    1: def install(kind, package, downgrade=False):
+>>>>>>     if kind == "rpm":
+>>>>>>         args = ["rpm", "-Uvh", "--replacepkgs"]
+>>>>>>         if downgrade:
+>>>>>>             args.append("--oldpackage")
+>>>>>>         args.append(package)
+           else:
+>>>>>>         args = ["dpkg", "-i", package]
+>>>>>>     return command(*args)
+       
+       
+    1: def package_payload_hash(kind, package, payload_path):
+           """Hash a named payload file without installing or executing the package."""
+    4:     payload_path = Path(payload_path)
+    4:     relative = payload_path.as_posix().lstrip("/")
+    8:     with tempfile.TemporaryDirectory(prefix="dux-package-payload-") as directory:
+    4:         if kind == "deb":
+    2:             command("dpkg-deb", "-x", package, directory)
+               else:
+    4:             archive = subprocess.run(
+    2:                 ["rpm2cpio", str(package)], check=True, capture_output=True
+                   )
+    4:             subprocess.run(
+    2:                 ["cpio", "-id", "--quiet", f"./{relative}"],
+    2:                 cwd=directory, input=archive.stdout, check=True, capture_output=True,
+                   )
+    4:         payload = Path(directory) / relative
+    4:         return _sha256_file(payload)
+       
+       
+    1: def package_binary_hash(kind, package):
+           """Hash the packaged daemon payload without installing or executing it."""
+    2:     return package_payload_hash(kind, package, "/usr/bin/dux")
+       
+       
+    1: def package_backup_helper_hash(kind, package):
+           """Hash the installed rollback helper from the package payload."""
+    2:     return package_payload_hash(kind, package, "/usr/lib/dux/dux-backup-index.py")
+       
+       
+    1: def installed_backup_helper_hash(path=Path("/usr/lib/dux/dux-backup-index.py")):
+>>>>>>     return _sha256_file(path)
+       
+       
+    1: def rollback_backup_path_for_report(report_path):
+           """Keep each lifecycle attempt's rollback snapshot isolated from prior runs."""
+    7:     report_path = Path(report_path)
+    7:     return report_path.with_name(f"{report_path.stem}-rollback.sqlite")
+       
+       
+    1: def assert_private_directory(directory, stage):
+           """Require a real, writable, owner-only directory for sensitive lifecycle evidence."""
+    9:     directory = Path(directory)
+    9:     try:
+    9:         metadata = directory.lstat()
+>>>>>>     except OSError as error:
+>>>>>>         raise AssertionError({"stage": stage, "path": str(directory), "error": str(error)}) from error
+    9:     evidence = {
+    9:         "stage": stage,
+    9:         "path": str(directory),
+    9:         "uid": metadata.st_uid,
+    9:         "mode": oct(stat.S_IMODE(metadata.st_mode)),
+           }
+    9:     assert stat.S_ISDIR(metadata.st_mode), {**evidence, "expected": "real directory"}
+    8:     assert metadata.st_uid == os.geteuid(), evidence
+    8:     assert stat.S_IMODE(metadata.st_mode) & 0o077 == 0, evidence
+    8:     assert stat.S_IMODE(metadata.st_mode) & stat.S_IWUSR, {
+    2:         **evidence, "expected": "owner-writable directory",
+           }
+    5:     assert os.access(directory, os.W_OK), {**evidence, "expected": "writable directory"}
+    5:     return evidence
+       
+       
+    1: def validate_report_destination(report_path):
+           """Fail before package changes if report or rollback output is unsafe or reused."""
+    8:     report_path = Path(report_path)
+    8:     assert_private_directory(report_path.parent, "report_directory_security")
+   10:     for path, stage in (
+    4:         (report_path, "report_destination_collision"),
+    4:         (report_path.with_suffix(report_path.suffix + ".tmp"), "report_temporary_collision"),
+    4:         (rollback_backup_path_for_report(report_path), "rollback_backup_collision"),
+           ):
+    9:         if path.exists() or path.is_symlink():
+    3:             raise FileExistsError({"stage": stage, "path": str(path)})
+    1:     return report_path
+       
+       
+    1: def create_rollback_index_backup(database, backup):
+           """Use SQLite's online backup API to preserve a schema-matched rollback index."""
+    1:     database, backup = Path(database), Path(backup)
+    1:     if not database.is_file():
+>>>>>>         return None
+    1:     if backup.exists():
+>>>>>>         raise FileExistsError(f"refusing to replace an existing rollback backup: {backup}")
+    1:     assert_private_directory(backup.parent, "rollback_backup_directory_security")
+    1:     metadata = database.stat()
+    1:     source = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    1:     destination = sqlite3.connect(backup)
+    1:     try:
+    1:         source.backup(destination)
+    1:         result = destination.execute("PRAGMA quick_check").fetchone()[0]
+    1:         assert result == "ok", {"stage": "rollback_backup_quick_check", "result": result}
+           finally:
+    1:         destination.close()
+    1:         source.close()
+    1:     os.chown(backup, metadata.st_uid, metadata.st_gid)
+    1:     os.chmod(backup, stat.S_IMODE(metadata.st_mode))
+    2:     return {"path": str(backup), "sha256": _sha256_file(backup),
+    1:             "mode": oct(stat.S_IMODE(backup.stat().st_mode)), "quick_check": "ok"}
+       
+       
+    1: def restore_rollback_index_backup(database, backup):
+           """Restore a verified snapshot and discard stale SQLite sidecars."""
+    1:     database, backup = Path(database), Path(backup)
+    1:     source = sqlite3.connect(f"file:{backup}?mode=ro", uri=True)
+    1:     try:
+    1:         result = source.execute("PRAGMA quick_check").fetchone()[0]
+    1:         assert result == "ok", {"stage": "rollback_restore_quick_check", "result": result}
+           finally:
+    1:         source.close()
+    1:     metadata = database.stat() if database.exists() else backup.stat()
+    2:     temporary_fd, temporary_name = tempfile.mkstemp(
+    1:         prefix=f".{database.name}.rollback-restore.", dir=database.parent
+           )
+    1:     os.close(temporary_fd)
+    1:     temporary = Path(temporary_name)
+    1:     try:
+    1:         source = sqlite3.connect(f"file:{backup}?mode=ro", uri=True)
+    1:         try:
+    1:             destination = sqlite3.connect(temporary)
+    1:             try:
+    1:                 source.backup(destination)
+    1:                 destination.execute("PRAGMA journal_mode=DELETE")
+    1:                 result = destination.execute("PRAGMA quick_check").fetchone()[0]
+    1:                 assert result == "ok", {"stage": "rollback_restore_copy_quick_check", "result": result}
+                   finally:
+    1:                 destination.close()
+               finally:
+    1:             source.close()
+    1:         os.chown(temporary, metadata.st_uid, metadata.st_gid)
+    1:         os.chmod(temporary, stat.S_IMODE(metadata.st_mode))
+    4:         for suffix in ("-wal", "-shm", "-journal"):
+    3:             sidecar = Path(f"{database}{suffix}")
+    3:             if sidecar.exists() or sidecar.is_symlink():
+    3:                 sidecar.unlink()
+    1:         os.replace(temporary, database)
+           finally:
+    5:         for suffix in ("", "-wal", "-shm", "-journal"):
+    4:             path = Path(f"{temporary}{suffix}")
+    4:             try:
+    4:                 path.unlink()
+    4:             except FileNotFoundError:
+    4:                 pass
+    2:     return {"sha256": _sha256_file(database),
+    1:             "mode": oct(stat.S_IMODE(database.stat().st_mode)), "quick_check": "ok"}
+       
+       
+    1: def baseline_install_needed(installed_version, expected_version, installed_binary_hash,
+                                   expected_binary_hash):
+           """Require the baseline package payload to match, not just its version.
+       
+           Disposable guest overlays can survive between qualification runs. A package
+           version alone is not an identity: locally rebuilt or previously qualified
+           artifacts may share the same version string while containing different code.
+           """
+    6:     return (installed_version != expected_version
+    2:             or installed_binary_hash != expected_binary_hash)
+       
+       
+    1: def main():
+    1:     parser = argparse.ArgumentParser(description=__doc__)
+    1:     parser.add_argument("kind", choices=("rpm", "deb"))
+    1:     parser.add_argument("old_package")
+    1:     parser.add_argument("new_package")
+    1:     parser.add_argument("--report", required=True)
+    2:     parser.add_argument("--progress", action="store_true",
+    1:                         help="flush machine-readable phase checkpoints to stdout")
+    1:     args = parser.parse_args()
+    1:     report_path = validate_report_destination(args.report)
+>>>>>>     sandbox = require_disposable_qualification_vm()
+>>>>>>     old_package, new_package = Path(args.old_package), Path(args.new_package)
+>>>>>>     report = {
+>>>>>>         "status": "running", "kind": args.kind,
+>>>>>>         "platform": platform.platform(), "kernel": platform.release(),
+>>>>>>         "started_at_epoch": time.time(), "steps": [],
+>>>>>>         "sandbox": sandbox,
+>>>>>>         "old_package_sha256": _sha256_file(old_package),
+>>>>>>         "new_package_sha256": _sha256_file(new_package),
+           }
+       
+>>>>>>     def record(name, evidence):
+>>>>>>         report["steps"].append({"name": name, "evidence": evidence})
+>>>>>>         report_path.parent.mkdir(parents=True, exist_ok=True)
+>>>>>>         temporary = report_path.with_suffix(report_path.suffix + ".tmp")
+>>>>>>         temporary.write_text(json.dumps(report, indent=2) + "\n")
+>>>>>>         temporary.replace(report_path)
+>>>>>>         if args.progress:
+>>>>>>             emit_progress(stage_complete_progress_event(
+>>>>>>                 report["steps"][-1], report["status"]))
+       
+>>>>>>     def progress(stage, **details):
+>>>>>>         if args.progress:
+>>>>>>             emit_progress({"event": "stage_started", "stage": stage, **details})
+       
+>>>>>>     try:
+>>>>>>         progress("legacy_baseline_preparation")
+>>>>>>         initial = installed_version(args.kind)
+>>>>>>         old_version = installed_version_from_package(args.kind, old_package)
+>>>>>>         old_payload_hash = package_binary_hash(args.kind, old_package)
+>>>>>>         old_binary = Path("/usr/bin/dux")
+>>>>>>         initial_binary_hash = (
+>>>>>>             _sha256_file(old_binary)
+>>>>>>             if old_binary.is_file() else None
+               )
+>>>>>>         baseline_reinstall = baseline_install_needed(
+>>>>>>             initial, old_version, initial_binary_hash, old_payload_hash
+               )
+>>>>>>         baseline_scan_started_at = int(time.time())
+>>>>>>         progress("legacy_baseline_runtime", expected_version=old_version,
+>>>>>>                  package_reinstall_required=baseline_reinstall)
+>>>>>>         if baseline_reinstall:
+>>>>>>             install(args.kind, old_package,
+>>>>>>                     downgrade=initial is not None and initial != old_version)
+>>>>>>         old_probe = command(str(old_binary), "--version", check=False)
+>>>>>>         assert old_probe.returncode == 0, {
+>>>>>>             "stage": "legacy_baseline", "returncode": old_probe.returncode,
+>>>>>>             "stdout": old_probe.stdout, "stderr": old_probe.stderr,
+               }
+>>>>>>         assert _sha256_file(old_binary) == old_payload_hash
+>>>>>>         service_after_baseline_install = service_state()
+>>>>>>         if service_after_baseline_install["active"] == "failed":
+>>>>>>             command("systemctl", "reset-failed", "dux.service", check=False)
+>>>>>>         command("systemctl", "start", "--no-block", "dux.service", check=False)
+>>>>>>         legacy_running = wait_service_active(
+>>>>>>             LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "legacy_baseline_runtime"
+               )
+>>>>>>         legacy_baseline = wait_initial_scan_complete(
+>>>>>>             LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS,
+>>>>>>             "legacy_baseline_initial_scan",
+>>>>>>             baseline_scan_started_at,
+               )
+               # Keep optional/missing tunnel units from making systemctl reject the
+               # whole multi-unit request before it disables the main service.
+>>>>>>         for unit in ("dux.service", "dux-tunnel.service"):
+>>>>>>             command("systemctl", "stop", unit, check=False)
+>>>>>>             command("systemctl", "disable", unit, check=False)
+>>>>>>         record("legacy_baseline", {"initial_version": initial,
+>>>>>>                                     "staged_version": installed_version(args.kind),
+>>>>>>                                     "initial_binary_sha256": initial_binary_hash,
+>>>>>>                                     "baseline_package_reinstalled": baseline_reinstall,
+>>>>>>                                     "binary_sha256": _sha256_file(Path("/usr/bin/dux")),
+>>>>>>                                     "package_payload_binary_sha256": old_payload_hash,
+>>>>>>                                     "service_after_install": service_after_baseline_install,
+>>>>>>                                     "service_runtime_verified": legacy_running,
+>>>>>>                                     "daemon_caught_up": legacy_baseline.get("caught_up") is True,
+>>>>>>                                     "daemon_status": legacy_baseline,
+>>>>>>                                     "service": service_state()})
+       
+>>>>>>         rollback_backup = create_rollback_index_backup(
+>>>>>>             "/var/lib/dux/dux.db",
+>>>>>>             rollback_backup_path_for_report(report_path),
+               )
+>>>>>>         progress("upgrade", target_version=installed_version_from_package(args.kind, new_package))
+>>>>>>         install(args.kind, new_package)
+>>>>>>         upgraded = installed_version(args.kind)
+>>>>>>         assert upgraded and upgraded != installed_version_from_package(args.kind, old_package), upgraded
+>>>>>>         new_payload_hash = package_binary_hash(args.kind, new_package)
+>>>>>>         new_backup_helper_hash = package_backup_helper_hash(args.kind, new_package)
+>>>>>>         assert _sha256_file(Path("/usr/bin/dux")) == new_payload_hash
+>>>>>>         assert installed_backup_helper_hash() == new_backup_helper_hash, {
+>>>>>>             "stage": "upgrade_backup_helper_payload",
+>>>>>>             "installed_sha256": installed_backup_helper_hash(),
+>>>>>>             "package_sha256": new_backup_helper_hash,
+               }
+>>>>>>         assert command("systemctl", "is-enabled", "dux.service", check=False).stdout.strip() == "disabled", service_state()
+>>>>>>         assert command("systemctl", "is-active", "dux.service", check=False).stdout.strip() != "active", service_state()
+>>>>>>         assert command("systemctl", "is-enabled", "dux-tunnel.service", check=False).stdout.strip() in {"disabled", "not-found"}, service_state()
+>>>>>>         assert command("systemctl", "is-active", "dux-tunnel.service", check=False).stdout.strip() != "active", service_state()
+>>>>>>         command("rpm", "-V", "dux") if args.kind == "rpm" else None
+>>>>>>         record("upgrade_preserves_disabled_services", {"version": upgraded,
+>>>>>>                                                         "binary_sha256": _sha256_file(Path("/usr/bin/dux")),
+>>>>>>                                                         "package_payload_binary_sha256": new_payload_hash,
+>>>>>>                                                         "backup_helper_sha256": new_backup_helper_hash,
+>>>>>>                                                         "rollback_index_backup": rollback_backup,
+>>>>>>                                                         "service": service_state()})
+       
+>>>>>>         progress("rollback", target_version=old_version)
+>>>>>>         install(args.kind, old_package, downgrade=True)
+>>>>>>         rolled_back = installed_version(args.kind)
+>>>>>>         assert rolled_back == installed_version_from_package(args.kind, old_package), rolled_back
+>>>>>>         rollback_service_after_install = service_state()
+>>>>>>         rollback_binary = Path("/usr/bin/dux")
+>>>>>>         rollback_probe = command(str(rollback_binary), "--version", check=False)
+>>>>>>         assert rollback_probe.returncode == 0, {
+>>>>>>             "stage": "rollback", "returncode": rollback_probe.returncode,
+>>>>>>             "stdout": rollback_probe.stdout, "stderr": rollback_probe.stderr,
+               }
+>>>>>>         assert _sha256_file(rollback_binary) == old_payload_hash
+>>>>>>         rollback_restore = None
+>>>>>>         if rollback_backup:
+                   # Rollback follows the documented procedure: restore a verified
+                   # pre-upgrade SQLite snapshot before starting the older executable.
+>>>>>>             command("systemctl", "stop", "dux.service", check=False)
+>>>>>>             assert service_state()["active"] in {"inactive", "failed"}, service_state()
+>>>>>>             rollback_restore = restore_rollback_index_backup(
+>>>>>>                 "/var/lib/dux/dux.db", rollback_backup["path"]
+                   )
+>>>>>>         if rollback_service_after_install["active"] == "failed":
+>>>>>>             command("systemctl", "reset-failed", "dux.service", check=False)
+>>>>>>         command("systemctl", "start", "--no-block", "dux.service", check=False)
+>>>>>>         legacy_rollback_service = wait_service_active(
+>>>>>>             LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "rollback_runtime"
+               )
+>>>>>>         record("rollback", {"version": rolled_back,
+>>>>>>                              "binary_sha256": _sha256_file(rollback_binary),
+>>>>>>                              "package_payload_binary_sha256": old_payload_hash,
+>>>>>>                              "index_restore": rollback_restore,
+>>>>>>                              "service_after_install": rollback_service_after_install,
+>>>>>>                              "service_runtime_verified": legacy_rollback_service,
+>>>>>>                              "legacy_package_service_behavior": legacy_rollback_service})
+               # Legacy releases may enable/start the service from their install
+               # scriptlet during downgrade. Normalize that test-only state before
+               # checking that the new package preserves an operator's disabled choice.
+>>>>>>         for unit in ("dux.service", "dux-tunnel.service"):
+>>>>>>             command("systemctl", "stop", unit, check=False)
+>>>>>>             command("systemctl", "disable", unit, check=False)
+       
+>>>>>>         progress("re_upgrade", target_version=upgraded)
+>>>>>>         install(args.kind, new_package)
+>>>>>>         assert installed_version(args.kind) == upgraded
+>>>>>>         assert _sha256_file(Path("/usr/bin/dux")) == new_payload_hash
+>>>>>>         assert installed_backup_helper_hash() == new_backup_helper_hash
+>>>>>>         assert command("systemctl", "is-enabled", "dux.service", check=False).stdout.strip() == "disabled", service_state()
+>>>>>>         assert command("systemctl", "is-active", "dux.service", check=False).stdout.strip() != "active", service_state()
+>>>>>>         record("re_upgrade", {"version": installed_version(args.kind),
+>>>>>>                                "binary_sha256": new_payload_hash,
+>>>>>>                                "package_payload_binary_sha256": new_payload_hash,
+>>>>>>                                "backup_helper_sha256": new_backup_helper_hash,
+>>>>>>                                "service": service_state()})
+       
+>>>>>>         if args.kind == "rpm":
+>>>>>>             progress("remove_and_purge", package_manager="rpm")
+>>>>>>             command("rpm", "-e", "dux")
+               else:
+>>>>>>             progress("remove_and_purge", package_manager="deb")
+>>>>>>             command("dpkg", "-r", "dux")
+>>>>>>         assert installed_version(args.kind) is None
+>>>>>>         assert not Path("/usr/bin/dux").exists()
+>>>>>>         state_retained = Path("/var/lib/dux").exists()
+>>>>>>         if args.kind == "deb":
+>>>>>>             assert state_retained, "remove must retain the index until purge"
+>>>>>>             command("dpkg", "-P", "dux")
+>>>>>>             assert not Path("/var/lib/dux").exists(), "purge must remove package state"
+>>>>>>         state_reset_for_clean_install = not Path("/var/lib/dux").exists()
+>>>>>>         if args.kind == "rpm" and not state_reset_for_clean_install:
+                   # RPM erase intentionally preserves application state. This is a
+                   # disposable, controller-marked guest, so remove only this package's
+                   # retained state to make the following install genuinely clean.
+>>>>>>             shutil.rmtree("/var/lib/dux")
+>>>>>>             state_reset_for_clean_install = not Path("/var/lib/dux").exists()
+>>>>>>         assert state_reset_for_clean_install, "clean-install phase requires an empty package state directory"
+>>>>>>         record("remove_and_purge", {"package_removed": True,
+>>>>>>                                      "state_retained_after_remove": state_retained,
+>>>>>>                                      "purge_supported": args.kind == "deb",
+>>>>>>                                      "state_removed_after_purge": not Path("/var/lib/dux").exists() if args.kind == "deb" else None,
+>>>>>>                                      "state_reset_for_clean_install": state_reset_for_clean_install,
+>>>>>>                                      "service": service_state()})
+       
+               # Old packages can leave an optional tunnel key behind. A clean install
+               # test starts from clean state so it verifies the current package does
+               # not create remote-access identities by default.
+>>>>>>         shutil.rmtree("/etc/dux", ignore_errors=True)
+>>>>>>         progress("clean_install", target_version=upgraded)
+>>>>>>         clean_scan_started_at = int(time.time())
+>>>>>>         install(args.kind, new_package)
+>>>>>>         clean_version = installed_version(args.kind)
+>>>>>>         assert clean_version == upgraded, clean_version
+               # Type=notify stays in systemd's "reloading" state while dux builds the
+               # initial index. Wait for that real readiness transition instead of
+               # treating the first scan as a package startup failure.
+>>>>>>         clean_service = wait_service_active(
+>>>>>>             LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS, "clean_install_runtime"
+               )
+               # In scan-first mode caught_up intentionally remains false: fanotify
+               # events are hints and the index is a last-observed snapshot. Package
+               # readiness therefore requires a completed post-install observation;
+               # record dirty/caught_up separately instead of waiting for an
+               # impossible real-time exactness state.
+>>>>>>         clean_daemon = wait_initial_scan_complete(
+>>>>>>             LEGACY_BASELINE_SCAN_TIMEOUT_SECONDS,
+>>>>>>             "clean_install_reconciliation",
+>>>>>>             clean_scan_started_at,
+>>>>>>             require_accounting=True,
+               )
+>>>>>>         assert clean_service["enabled"] == "enabled" and clean_service["active"] == "active", clean_service
+>>>>>>         assert clean_service["tunnel_enabled"] in {"disabled", "not-found"}, clean_service
+>>>>>>         assert clean_service["tunnel_active"] != "active", clean_service
+>>>>>>         assert not Path("/etc/dux/ed25519").exists(), "clean install unexpectedly created a tunnel identity"
+>>>>>>         unit_security = assert_service_security_policy()
+>>>>>>         module_path = Path("/usr/lib/modules")
+>>>>>>         if module_path.is_dir():
+>>>>>>             unit_security["module_tree_visible"] = assert_service_path_visible(
+>>>>>>                 module_path, unit_security["MainPID"]
+                   )
+>>>>>>         index_access = assert_index_access_policy()
+>>>>>>         binary_hash = _sha256_file(Path("/usr/bin/dux"))
+>>>>>>         clean_backup_helper_hash = installed_backup_helper_hash()
+>>>>>>         assert binary_hash == new_payload_hash, {
+>>>>>>             "stage": "clean_install", "installed_binary_sha256": binary_hash,
+>>>>>>             "package_payload_sha256": new_payload_hash,
+               }
+>>>>>>         assert clean_backup_helper_hash == new_backup_helper_hash, {
+>>>>>>             "stage": "clean_install_backup_helper",
+>>>>>>             "installed_sha256": clean_backup_helper_hash,
+>>>>>>             "package_sha256": new_backup_helper_hash,
+               }
+>>>>>>         assert command("/usr/bin/dux", "--version").returncode == 0
+>>>>>>         if args.kind == "rpm":
+>>>>>>             command("rpm", "-V", "dux")
+>>>>>>         record("clean_install", {"version": clean_version, "binary_sha256": binary_hash,
+>>>>>>                                  "package_payload_binary_sha256": new_payload_hash,
+>>>>>>                                  "backup_helper_sha256": clean_backup_helper_hash,
+>>>>>>                                  "service": clean_service,
+>>>>>>                                  "daemon_observation": clean_daemon,
+>>>>>>                                  "daemon_caught_up": clean_daemon.get("caught_up") is True,
+>>>>>>                                  "service_security_policy": unit_security,
+>>>>>>                                  "index_access_policy": index_access,
+>>>>>>                                  "tunnel_identity_created": Path("/etc/dux/ed25519").exists()})
+       
+>>>>>>         command("systemctl", "stop", "dux.service", check=False)
+>>>>>>         command("systemctl", "disable", "dux.service", check=False)
+>>>>>>         report["status"] = "passed"
+>>>>>>     except Exception as error:
+>>>>>>         report["status"] = "failed"
+>>>>>>         report["error"] = repr(error)
+>>>>>>         evidence = structured_failure_evidence(error)
+>>>>>>         if evidence is not None:
+>>>>>>             report["failure_evidence"] = evidence
+>>>>>>         report["installed_version_at_failure"] = installed_version(args.kind)
+>>>>>>         report["service_at_failure"] = service_state()
+>>>>>>         raise
+           finally:
+>>>>>>         report["elapsed_seconds"] = round(time.time() - report["started_at_epoch"], 3)
+>>>>>>         report_path.parent.mkdir(parents=True, exist_ok=True)
+>>>>>>         report_path.write_text(json.dumps(report, indent=2) + "\n")
+>>>>>>         if args.progress and report["status"] == "failed":
+>>>>>>             emit_progress(lifecycle_outcome_progress_event(report))
+>>>>>>     if args.progress:
+>>>>>>         emit_progress(lifecycle_outcome_progress_event(report))
+>>>>>>     print(json.dumps(report, indent=2))
+       
+       
+    1: def installed_version_from_package(kind, package):
+>>>>>>     if kind == "rpm":
+>>>>>>         return command("rpm", "-qp", "--qf", "%{VERSION}-%{RELEASE}", package).stdout.strip()
+>>>>>>     return command("dpkg-deb", "-f", package, "Version").stdout.strip()
+       
+       
+    1: if __name__ == "__main__":
+>>>>>>     main()

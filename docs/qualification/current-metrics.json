@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T12:02:00Z",
+  "snapshot_at_utc": "2026-11-10T12:05:00Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -115,7 +115,9 @@
     "full_python_suite_passed": 377,
     "full_python_suite_skipped": 1,
     "temporary_rpm_build": "passed; unsigned; not release artifact",
-    "temporary_deb_staging_build": "passed; unsigned; source metadata version 0.6.3-12"
+    "temporary_deb_staging_build": "passed; unsigned; source metadata version 0.6.3-12",
+    "source_statement_coverage_percent": 53,
+    "source_coverage_statements": 691
   },
   "python_tests": {
     "modules": 25,
@@ -123,5 +125,17 @@
     "failed": 0,
     "skipped": 1,
     "observed_at_utc": "2026-11-10T11:56:23Z"
+  },
+  "python_trace_coverage": {
+    "tool": "Python standard-library trace",
+    "source": "scripts/dux-package-lifecycle.py",
+    "source_statements": 691,
+    "source_statement_coverage_percent": 53,
+    "test_module": "scripts/test_dux_package_lifecycle.py",
+    "test_module_statements": 887,
+    "test_module_statement_coverage_percent": 99,
+    "branch_coverage": "not measured",
+    "daemon_code_covered": false,
+    "evidence": "docs/qualification/systemd-hardening-20261110/dux-package-lifecycle.cover"
   }
 }

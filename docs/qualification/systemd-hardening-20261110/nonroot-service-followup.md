@@ -1,7 +1,8 @@
 # Non-root service packaging follow-up
 
-Observed: 2026-11-10 11:54 UTC. This records source changes and read-only
-runtime observations. The packaging change has not been built into a release,
+Source/artifact verification: 2026-11-10 12:04 UTC. Live state was refreshed
+through 12:01 UTC. This records source changes and read-only runtime
+observations. The packaging change has not been built into a release,
 installed, or qualified on Debian or Rocky; it does not change the deployed
 service.
 
@@ -30,6 +31,10 @@ the dedicated UID remain unproven.
 - Full Python discovery: **377 passed, 0 failed, 1 skipped** across 25 modules.
   The focused lifecycle suite is included in this total and independently
   passed **75 tests**.
+- Standard-library `trace` run of the focused lifecycle suite: **53% statement
+  coverage** for `dux-package-lifecycle.py` (691 statements) and **99%** for
+  its test module (887 statements). Branch coverage is not measured. The
+  annotated source report is [`dux-package-lifecycle.cover`](dux-package-lifecycle.cover).
 - `PYTHONPATH=scripts python3 -B -m unittest -q test_dux_package_lifecycle`:
   **75 passed, 0 failed** after the RPM ordering and inheritable-capability
   regressions were added.
@@ -55,23 +60,24 @@ new UID.
 
 ### VPS1 production
 
-At 11:54 UTC, `/usr/bin/dux status --json` reported the active installed
-service dirty and behind by **238,999 seconds** (about 66.4 hours), with
+At 12:01 UTC, `/usr/bin/dux status --json` reported the active installed
+service dirty and behind by **239,417 seconds** (about 66.5 hours), with
 **752 kernel overflows** and **2,518,862 dropped updates**. Its last full scan
 was 2026-11-05; the service still runs as root (`User=` unset) with
 `CAP_DAC_READ_SEARCH` and `CAP_SYS_ADMIN`. The current source change is not
-deployed there. Root filesystem had 56 GiB available.
+deployed there. Root filesystem had 60 GiB available.
 
 ### VPS2 soak
 
-At 11:53 UTC, transient unit `dux-readiness-1304925.service` was active with
+At 12:00 UTC, transient unit `dux-readiness-1304925.service` was active with
 zero restarts. The exact r132 binary SHA-256 remained
 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`. The
-progress file recorded 10,091.7 seconds elapsed, 236,237 mutations, 235
+progress file recorded 10,511.9 seconds elapsed, 245,857 mutations, 244
 periodic samples, and two completed mutation bursts. No held-reader or
 controlled-crash scenario had run; terminal exactness/history/integrity were
-pending. The most recent exact convergence sample was 7,718 ms. The run still
+pending. The most recent exact convergence sample was 1,470 ms. The run still
 uses the older copied pacing harness and remains an active soak, not a pass.
+The captured checkpoint is [`soak-progress-20261110T1200Z.json`](../r132-72h-soak-vps2-20261110/soak-progress-20261110T1200Z.json).
 
 ## Remaining qualification
 
