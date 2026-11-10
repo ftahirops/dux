@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 02:26 UTC
+## Latest verified checkpoint — 2026-11-10 02:34 UTC
 
 ### Release decision
 
@@ -121,7 +121,15 @@ dropped, or overflow events. The installed r121 service remained active with
 zero restarts and no write error. Test report and captured output are in the
 same follow-up folder.
 
-**Updated:** 2026-11-10 02:26 UTC
+At 02:34 UTC, `systemd-analyze security` on VPS2 scored the installed unit
+3.3 (“OK”); the installed unit hash exactly matches the r126 package unit and
+there are no drop-in overrides. The main remaining hardening question is
+whether the daemon can run as UID `dux` with the same two required capabilities;
+that change is not made or claimed without lifecycle and full-tree access
+tests. See
+[`systemd hardening review`](docs/qualification/systemd-hardening-20261110/README.md).
+
+**Updated:** 2026-11-10 02:34 UTC
 
 ---
 
