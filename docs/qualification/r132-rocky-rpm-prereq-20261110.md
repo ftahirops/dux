@@ -35,6 +35,11 @@ active Go test workloads and I/O PSI `some avg10=16.84%`, above its
 10% startup limit. No VM was launched. Retry only after both the workload and
 I/O pressure clear through the normal three-sample admission procedure.
 
+At 10:45 UTC, a new guarded ephemeral start was attempted after load and I/O
+pressure had fallen. Admission refused on sample 1/3 because five host Go
+compiler/test processes were active. No VM was started and no package phase
+ran. The guard was not bypassed.
+
 ## Static package authenticity inspection — 2026-11-10 10:13 UTC
 
 The exact r132 artifact

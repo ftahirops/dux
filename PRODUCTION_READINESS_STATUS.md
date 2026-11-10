@@ -64,6 +64,17 @@ read-only observation; it does not show r132 behavior or recovery. Full status,
 unit, binary, disk, and recent-warning counts are in the
 [10:09 VPS1 snapshot](docs/qualification/live-vps1-readiness-20261110T1010Z.json).
 
+### VPS1 follow-up — 2026-11-10 10:46 UTC
+
+The production service is still active on the same r66 binary, with four
+historical restarts. A fresh `dux status --json` reports dirty/not caught up,
+742 cumulative overflow notifications, 2,518,862 dropped updates, and only 9
+pending updates; no scan is currently running. The last full scan remains
+2026-11-05 12:49:22 UTC, now 4d21h56m old, and the reported behind time is
+234,919 seconds. The host root filesystem is 67% used with 59 GiB available,
+so disk capacity is not the cause. The complete read-only snapshot is
+[`the 10:46 VPS1 record`](docs/qualification/live-vps1-readiness-20261110T1046Z.json).
+
 ### VPS1 follow-up — 2026-11-10 10:21 UTC
 
 The service remains active on r66, dirty and not caught up. The last full scan
@@ -143,6 +154,12 @@ and twelve-hour controlled recovery have not run yet; final exactness, history,
 and SQLite integrity results are still pending. This is continued progress,
 not a soak pass. VPS2 was queried read-only over SSH; the full live evidence
 remains at `/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json`.
+
+At 10:45:55 UTC, a fresh read-only check showed the r132 worker still active
+with zero restarts, 6,065 seconds elapsed, 143,276 operations, 143 exact
+samples, and one completed hourly burst. The held-reader and controlled
+recovery phases have not started; final exactness/history/integrity assertions
+remain pending.
 
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
