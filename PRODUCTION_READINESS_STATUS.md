@@ -180,6 +180,14 @@ restarts, with 6,605.2 seconds elapsed, 156,056 operations, and 156 exact
 samples. The hourly burst count remained one; held-reader, controlled recovery,
 and final exactness/history/SQLite checks were pending.
 
+At 10:56:55 UTC, the r132 soak remained active with zero restarts and had
+reached 6,725.2 seconds elapsed, 158,897 operations, and 158 exact samples.
+The hourly burst count remained one; the held-reader, controlled-recovery, and
+final checks were still pending. On VPS1, unrelated Go tests were active and
+I/O PSI reached 11.56% some / 10.69% full, above the VM admission gate, so no
+new Rocky attempt was made. The host still had 58 GiB free. See the
+[`10:57 admission sample`](docs/qualification/live-vps1-admission-20261110T1057Z.json).
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM

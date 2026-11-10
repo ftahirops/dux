@@ -1,0 +1,21 @@
+{
+  "captured_at_utc": "2026-11-10T10:57:17Z",
+  "load_average": [6.08, 7.39, 9.42],
+  "pressure_psi_avg10_percent": {
+    "cpu_some": 9.81,
+    "cpu_full": 0.0,
+    "io_some": 11.56,
+    "io_full": 10.69,
+    "memory_some": 0.0,
+    "memory_full": 0.0
+  },
+  "active_host_test_process": "go test ./agent/wordpress -count=1",
+  "root_disk": {
+    "size": "185G",
+    "used": "119G",
+    "available": "58G",
+    "use_percent": 68
+  },
+  "rocky_vm_active": false,
+  "admission_conclusion": "do not start qualification VM: active host test and I/O PSI exceeds the 10 percent gate"
+}
