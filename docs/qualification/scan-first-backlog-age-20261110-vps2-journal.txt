@@ -1,0 +1,11 @@
+Command: journalctl -u dux.service --since "2026-11-10 00:30:00 UTC" --until "2026-11-10 00:55:00 UTC" --no-pager -o short-iso | grep -E "starting background reconciliation|rescan complete|accounting verification|filesystem or fanotify hints changed|index backlog persists"
+
+2026-11-10T00:35:22+00:00 vps2 dux[2561224]: 2026-11-10T00:35:22.700898Z  INFO dux::watch: filesystem or fanotify hints changed during scan-first observation; next full observation is scheduled
+2026-11-10T00:35:22+00:00 vps2 dux[2561224]: 2026-11-10T00:35:22.701179Z  INFO dux::watch: rescan complete: 1636462 files, 194734 dirs, 1831196 staged path instances (0 directory alias paths), visible 87291506688 bytes/1831196 entries, unique 87104196608 bytes/1827714 inodes, 81.12 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=0 revalidated_reuse_paths=3 unresolved_reuse_paths=0
+2026-11-10T00:35:22+00:00 vps2 dux[2561224]: 2026-11-10T00:35:22.701569Z  INFO dux::watch: index backlog persists — 38157s since last caught up
+2026-11-10T00:36:25+00:00 vps2 dux[2561224]: 2026-11-10T00:36:25.412580Z  INFO dux::watch: reconciliation accounting verification passed elapsed_ms=62689
+2026-11-10T00:41:55+00:00 vps2 dux[2561224]: 2026-11-10T00:41:55.887402Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+2026-11-10T00:47:22+00:00 vps2 dux[2561224]: 2026-11-10T00:47:22.199028Z  INFO dux::watch: filesystem or fanotify hints changed during scan-first observation; next full observation is scheduled
+2026-11-10T00:47:22+00:00 vps2 dux[2561224]: 2026-11-10T00:47:22.199075Z  INFO dux::watch: rescan complete: 1639365 files, 195088 dirs, 1834453 staged path instances (0 directory alias paths), visible 87516606464 bytes/1834453 entries, unique 87329296384 bytes/1830971 inodes, 81.33 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=0 revalidated_reuse_paths=2 unresolved_reuse_paths=0
+2026-11-10T00:47:22+00:00 vps2 dux[2561224]: 2026-11-10T00:47:22.271635Z  INFO dux::watch: index backlog persists — 38876s since last caught up
+2026-11-10T00:49:13+00:00 vps2 dux[2561224]: 2026-11-10T00:49:13.660338Z  INFO dux::watch: reconciliation accounting verification passed elapsed_ms=111369

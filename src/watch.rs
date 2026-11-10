@@ -855,6 +855,10 @@ impl IndexedParentPathCache {
 /// load) — surface a "throttled, data is stale" state to status/TUI.
 const STALE_BEHIND_SECS: i64 = 15;
 
+fn event_apply_backlog_is_stale(scan_first: bool, scan_active: bool, behind_secs: i64) -> bool {
+    !scan_first && !scan_active && behind_secs >= STALE_BEHIND_SECS
+}
+
 /// Max `pending` entries indexed in one flush. Bounds the per-flush CPU burst so
 /// the governor can hold a low `--max-cpu` target under a create storm (a giant
 /// single flush would be a multi-second spike it can't offset). The remainder
@@ -4117,14 +4121,15 @@ pub fn run_daemon(
             // it the moment we catch up. Writes only on a transition, so this adds
             // no steady-state I/O.
             let behind = last_caught_up.elapsed().as_secs() as i64;
-            if scan_job.is_none() && behind >= STALE_BEHIND_SECS {
+            if event_apply_backlog_is_stale(reconcile_first, scan_job.is_some(), behind) {
                 if throttled_since.is_none() {
                     let since = now_secs() - behind;
                     store.set_meta("throttled_since", &since.to_string()).ok();
                     throttled_since = Some(since);
                     tracing::info!("index backlog persists — {behind}s since last caught up");
                 }
-            } else if scan_job.is_none()
+            } else if !reconcile_first
+                && scan_job.is_none()
                 && behind < STALE_BEHIND_SECS
                 && throttled_since.take().is_some()
             {
@@ -10098,6 +10103,23 @@ mod tests {
         ));
         assert!(pipeline_is_caught_up(
             false, true, true, true, true, false, false,
+        ));
+    }
+
+    #[test]
+    fn scan_first_never_classifies_event_apply_age_as_throttled_backlog() {
+        assert!(!event_apply_backlog_is_stale(true, false, 38_000));
+        assert!(!event_apply_backlog_is_stale(true, true, 38_000));
+        assert!(!event_apply_backlog_is_stale(false, true, 38_000));
+        assert!(!event_apply_backlog_is_stale(
+            false,
+            false,
+            STALE_BEHIND_SECS - 1
+        ));
+        assert!(event_apply_backlog_is_stale(
+            false,
+            false,
+            STALE_BEHIND_SECS
         ));
     }
 

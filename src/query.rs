@@ -985,16 +985,19 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
     } else {
         out.push_str("daemon:     not running — index is a static snapshot (run `dux daemon /`)");
     }
-    // Throttled/behind: the CPU/IO governor is deliberately holding the daemon back
-    // under sustained event load so it never disturbs the host. The index is LIVE
-    // but intentionally stale — explain why, and how stale, so the numbers aren't
-    // mistaken for real-time. Self-clears when the daemon catches up.
-    if let Some(since) = throttled_since(store)? {
-        out.push_str(&format!(
-            "\nstate:      BEHIND — {} since the pipeline was last caught up. Check the pause reason, \
-             pending updates, and flush errors below; this is not the age of every indexed file.",
-            crate::util::ago(since)
-        ));
+    // This event-apply backlog clock does not measure freshness in scan-first
+    // mode. Do not surface a persisted value there as though it were the age
+    // of the last full filesystem observation.
+    let scan_first_live = crate::util::daemon_live_for(db)
+        && crate::util::read_watch_status(db).is_some_and(|watch| watch.scan_first);
+    if !scan_first_live {
+        if let Some(since) = throttled_since(store)? {
+            out.push_str(&format!(
+                "\nstate:      BEHIND — {} since the pipeline was last caught up. Check the pause reason, \
+                 pending updates, and flush errors below; this is not the age of every indexed file.",
+                crate::util::ago(since)
+            ));
+        }
     }
     if let Some(error) = store.get_meta("flush_error")? {
         out.push_str(&format!(
@@ -1074,13 +1077,17 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
     let last_scan_at = optional_timestamp(store, "last_scan_ts")?.unwrap_or(0);
     let dirty_since = dirty_since(store)?;
     let paused_since = paused_since(store)?;
-    let throttled_since = throttled_since(store)?;
     let write_error = store.get_meta("flush_error")?;
     let pause_reason = store.get_meta("pause_reason")?;
     let dirty_reason = store.get_meta("dirty_reason")?;
     let daemon_live = crate::util::daemon_live_for(db);
     let watch = crate::util::read_watch_status(db);
     let scan_first_live = daemon_live && watch.as_ref().is_some_and(|status| status.scan_first);
+    let throttled_since = if scan_first_live {
+        None
+    } else {
+        throttled_since(store)?
+    };
     let retry_state = store.get_meta("failed_reconciliation_attempts")?;
     let retry_deadline = store.get_meta("reconciliation_retry_after_unix")?;
     let (failed_reconciliation_attempts, retry_circuit_open) =
@@ -1590,13 +1597,28 @@ mod tests {
             false,
             true,
         );
+        store
+            .set_meta(
+                "throttled_since",
+                &(crate::util::now_secs() - 38_000).to_string(),
+            )
+            .unwrap();
         let scan_first_json = status_json(&store, &db).unwrap();
         assert_eq!(scan_first_json["scan_first"], true);
         assert_eq!(scan_first_json["caught_up"], false);
         assert_eq!(scan_first_json["behind_seconds_applicable"], false);
+        assert_eq!(
+            scan_first_json["throttled_since_timestamp_seconds"],
+            serde_json::Value::Null,
+            "event-apply throttling age is not scan-first freshness"
+        );
         let scan_first_status = status(&store, &db).unwrap();
         assert!(scan_first_status.contains("fanotify hints"));
         assert!(scan_first_status.contains("latest view is not real-time"));
+        assert!(
+            !scan_first_status.contains("state:      BEHIND"),
+            "scan-first status must not report event-apply backlog as stale age"
+        );
 
         store
             .set_meta("failed_reconciliation_attempts", "1")
