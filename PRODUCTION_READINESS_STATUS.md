@@ -27,6 +27,12 @@ The release-authenticity gate remains open until the release owner supplies a
 trusted primary-key fingerprint and the actual signed package verifies in the
 Rocky lifecycle guest.
 
+At 2026-11-10 11:20 UTC, a read-only check of the current root GPG keyring
+found **zero public keys and zero secret keys**; `DUX_RELEASE_SIGNING_KEY` is
+unset. No candidate or publisher key was selected or used. Local signing
+cannot establish publisher authenticity until the release owner supplies the
+trusted fingerprint and key through the approved release process.
+
 ## Strict dependency audit — 2026-11-10 10:07 UTC
 
 Fresh `cargo audit` and stricter `cargo audit -D warnings` runs both exited 0
