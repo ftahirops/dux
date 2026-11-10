@@ -1,0 +1,1 @@
+{"action":"refused_before_vm_start","blockers":["active host build/test/install/analysis workload: Go test binary pid=1139293","active host build/test/install/analysis workload: go test pid=1139157"],"time":"2026-11-10T09:31:18Z","vm_unit":"dux-qualification-vm-rocky9-lifecycle-ephemeral"}

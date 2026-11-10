@@ -76,6 +76,11 @@ No package install or upgrade ran. The exact record is in
 At approximately 09:29:29 UTC, another 75%-quota start was refused on admission
 sample 1/3 after seven Go compiler/test processes appeared. No VM was created.
 
+At 09:31:18 UTC, another start was refused on admission sample 1/3 after a Go
+test binary and `go test` process appeared. No VM was created. The admission
+decision is saved in
+[`the 09:31 refusal record`](r132-rocky-rpm-admission-refusal-20261110T093118Z.jsonl).
+
 ### Admission window closed during sampling — 2026-11-10 09:23 UTC
 
 At 09:23 UTC, a fresh host sample showed no build/test workloads, load1 3.72,

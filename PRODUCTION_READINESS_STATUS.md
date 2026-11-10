@@ -56,6 +56,9 @@ tests appeared during the three-sample admission window. See the
 At 09:27 UTC a later guest booted and its RPM hashes verified, but the guard
 stopped it at 09:28:20 UTC before package lifecycle began. Another start was
 refused at admission at about 09:29:29 UTC.
+The 09:31:18 UTC start was also refused before VM creation when a Go test
+binary started; the decision is preserved in
+[`the 09:31 refusal record`](docs/qualification/r132-rocky-rpm-admission-refusal-20261110T093118Z.jsonl).
 
 ## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
 
