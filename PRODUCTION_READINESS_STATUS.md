@@ -1,18 +1,20 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 03:54 UTC
+## Latest verified checkpoint — 2026-11-10 04:24 UTC
 
 ### Release decision
 
-**Not production-ready; do not claim release qualification.** Release candidate
-r126 has a passing full Rust test/coverage run, verified packages, and has now
-passed the Debian r121-to-r126 upgrade/rollback/re-upgrade/remove/purge/clean-
-install lifecycle on the marked VPS2 KVM qualification VM. It remains
-uninstalled on production VPS1. The required fresh 24-hour candidate canary,
-independent filesystem path comparison, and sustained high-churn qualification
-remain open. Privileged fanotify success and capability-negative smokes passed
-on the tested Linux 6.8 kernel; these targeted checks do not qualify all
-capability, filesystem, kernel, or race behavior.
+**Not production-ready; do not claim release qualification.** Candidate r127
+(source commit `f0673f5`) passed all 339 inclusive Rust tests, the static
+package pipeline, and the Debian r121-to-r127 upgrade/rollback/re-upgrade/
+remove/purge/clean-install lifecycle on the marked VPS2 KVM qualification VM.
+However, its WAL guard still activated at 717,609,272 bytes during clean-install
+publication because SQLite could not checkpoint while the publication writer
+was active. The guard recovered after the scan; no drops, overflows, or write
+error were reported. r127 is not installed on production VPS1; VPS2 has been
+restored to r121. The required fresh 24-hour candidate canary, independent
+filesystem path comparison, and sustained high-churn qualification remain
+open. The WAL publication burst is an unresolved reliability/freshness issue.
 
 ### Production VPS1 — current installed service
 
@@ -219,6 +221,38 @@ change. Production remains unqualified; the WAL guard behavior remains an
 open runtime gate.
 
 **Updated:** 2026-11-10 03:54 UTC
+
+### r127 lifecycle, WAL finding, and VPS2 restoration — 2026-11-10 04:24 UTC
+
+Candidate r127 was built from clean commit `f0673f5` as an auditable static
+musl binary; DEB/RPM packaging, dependency audits, payload/revision/source
+checks, and artifact checksums passed. Its Debian lifecycle on VPS2 passed all
+five stages in 1,332.532 seconds. The clean-install observation scanned
+1,664,114 files / 197,276 directories, reported zero coverage issues, and
+revalidated four inode-reuse paths; accounting verification passed. Full
+machine-readable evidence is in
+[`r127 package lifecycle on VPS2`](docs/qualification/r127-package-lifecycle-vps2-20261110/README.md).
+
+The checkpoint-during-scan source change did not prevent the original WAL
+burst. At 04:20:31 UTC, a PASSIVE checkpoint during clean-install publication
+returned `busy=1`, `log_frames=-1`, and `checkpointed_frames=-1` while the WAL
+was 717,609,272 bytes. Dux paused event writes under its 256 MiB guard; the
+scan finished three seconds later with zero coverage issues, and the WAL
+returned to 128 MiB. The service reported zero drops, kernel overflows,
+restarts, and write errors. This identifies the large publication transaction
+as the next design target; the guard still creates a temporary disk and
+freshness risk, so it remains an open gate.
+
+VPS2 was restored to the exact pre-test r121 package binary and database. The
+saved DB hash matched byte-for-byte and `PRAGMA quick_check` returned `ok`. Its
+post-restore scan completed with 1,665,459 files / 197,491 directories, zero
+coverage issues, and passing accounting verification in 76.8 seconds; 130
+vanished paths were discarded and two inode-reuse paths were revalidated. r121
+remains active+enabled with zero restarts, drops, or overflows. Test-only
+backups were removed after verification; free space recovered from 2.9 to 4.8
+GiB.
+
+**Updated:** 2026-11-10 04:24 UTC
 
 ---
 
