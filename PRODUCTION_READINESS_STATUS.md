@@ -5689,3 +5689,49 @@ Live daemon evidence: [`vps2-live-status-20261110T1852Z.json`](docs/qualificatio
 The complete 15-suite fault matrix is still not started. Concurrent unrelated Go
 tests remain active on VPS1 at this observation, so no guarded VM attempt was
 made.
+
+
+## VPS2 scan-first churn failure and bounded recovery — 2026-11-10 19:11 UTC
+
+Live journald evidence captured a complete failure-and-retry cycle on the
+installed VPS2 scan-first service (`dux 0.6.3`, build `8b02799b4132`; binary
+SHA-256 `b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70`).
+This is not the r132 binary used by the separate 72-hour soak.
+
+The observation starting at **18:53:55** finished at **18:59:21** but was
+correctly rejected as incomplete: the walk logged one conflicting inode
+birth-time incarnation after pruning **72** vanished reuse paths and refreshing
+**2** paths. It reported one coverage issue and one scan error; the prior indexed
+graph was retained. Kernel overflow notifications and event-drop counters
+remained zero. The retry was initially deferred under elevated CPU pressure
+(load1 5.99 on 6 CPUs; CPU PSI some avg10 18.42%).
+The reconciliation warning also logged `lost_events=true`, while the health
+snapshot showed zero kernel overflow notifications and zero reported drops; the
+log did not identify the source of that boolean, so it should not be read as
+proof of a kernel queue overflow.
+
+The retry started at **19:00:21** and completed at **19:09:09** in about **8m48s**.
+It observed **1,762,787 files**, **216,320 directories**, and **1,979,107 staged
+path instances**, with **zero coverage issues**. It pruned **120** vanished reuse
+paths, refreshed **2**, and had **zero unresolved reuse paths**. The independent
+accounting verification passed at **19:10:24** in **75,082 ms**. At **19:11:07**,
+the daemon was active with zero restarts, overflows, pending updates, or reported
+drops. It was marked dirty only because new hints arrived during/after the walk;
+the latest scan was 119 seconds old. Its published index held **1,975,625 nodes**
+and **83,778,015,232 bytes**. The `caught_up=false` and `behind_seconds` status
+fields do not report per-path age; path-level freshness remains unmeasured.
+
+This observation demonstrates both behaviors under real churn: fail-closed
+retention on a conflicting scan, followed by successful bounded recovery. It
+does not establish that every retry will converge under persistent load. Raw
+filtered journald evidence is [`vps2-reconciliation-retry-20261110T1911Z.log`](docs/qualification/vps2-reconciliation-retry-20261110T1911Z.log)
+(SHA-256 `5d6ddbcd68cb28e878d4a7e47916625f709698bcb8b6341077c8ccf89625b0a8`). Live status is
+[`vps2-live-status-20261110T1911Z.json`](docs/qualification/vps2-live-status-20261110T1911Z.json).
+
+The separate r132 soak remains active. Its **19:10 UTC** checkpoint records
+**36,402 seconds** (10h06m42s), **827,000 operations**, **824 exactness samples**,
+**10 mutation bursts**, one successful held-reader/WAL-reclaim case, and no
+controlled crashes. That is **14.04%** of the required 72 hours;
+terminal exactness/history/SQLite checks remain pending. Checkpoint:
+[`soak-progress-20261110T1910Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1910Z.json)
+(SHA-256 `9d87c8b081117a0953e0f64fd15c66ca1f7f1958882dd32b7ef0ca0176163834`).
