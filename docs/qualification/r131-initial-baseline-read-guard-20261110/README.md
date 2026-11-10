@@ -35,8 +35,15 @@ SQLite connection has closed.
   `watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs`
   integration test was run separately as root on VPS2's ext4 root filesystem
   and passed (**1 passed, 0 failed**). The installed service remained active
-  with zero restarts before and after. The manual production-shaped scale
-  test remains unrun.
+  with zero restarts before and after.
+- The ignored scale test was run separately on VPS2 using a 3 GiB `/dev/shm`
+  tmpfs fixture with 100,000 file entries. Atomic baseline took **12.698 s**;
+  unchanged in-place reconciliation took **13.931 s**; both produced the
+  expected row count and a 30,076,928-byte database. This verifies the
+  correctness path at 100k entries, but does not demonstrate a speedup or
+  measure disk writes. It is below the approximately 1.37M-node production
+  tree. The installed service stayed active with zero restarts, drops, or
+  overflow notices; tmpfs returned to its prior usage afterward.
 
 ## Release package
 
@@ -98,5 +105,8 @@ qualification, independent path equality, and a 24-hour canary remain open.
 - `target/readiness/production-r131-20261110/ext4-stale-parent-test.log`
 - `target/readiness/production-r131-20261110/ext4-service-before.txt`
 - `target/readiness/production-r131-20261110/ext4-service-after.txt`
+- `target/readiness/production-r131-20261110/scale-test.log`
+- `target/readiness/production-r131-20261110/scale-service-before.txt`
+- `target/readiness/production-r131-20261110/scale-service-after.txt`
 - `target/readiness/production-r131-20261110/llvm-cov-summary.json`
 - `target/readiness/production-r131-20261110/build-manifest.json`

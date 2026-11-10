@@ -19,7 +19,12 @@ passed, and the audited lockfile has zero known vulnerabilities.
 The suite's ignored ext4 stale-parent integration case was also run separately
 as root on VPS2's ext4 root filesystem and passed. VPS2's installed service
 remained active with zero restarts before and after. Only the manual
-production-shaped scale test remains ignored among those two suite exclusions.
+production-shaped scale test was run separately on tmpfs with 100,000 file
+entries: atomic baseline took 12.698s, unchanged in-place reconciliation
+13.931s, with the expected rows and a 30,076,928-byte database. This verifies
+correctness at 100k but does not show a speedup or measure disk writes; it is
+below the ~1.37M-node production tree. The installed service remained active
+with zero restarts, drops, and overflow notices during both targeted runs.
 
 The exact r131 binary passed isolated event-apply and scan-first fanotify
 smokes on VPS2. Accounting verification passed with zero coverage issues,
