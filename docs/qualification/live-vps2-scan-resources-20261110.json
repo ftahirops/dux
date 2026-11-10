@@ -339,6 +339,86 @@
         "write_error": null
       },
       "observed_at_utc": "2026-11-10T16:46:24Z"
+    },
+    {
+      "cpu": {
+        "usage_usec": 26633937445,
+        "user_usec": 11781560922,
+        "system_usec": 14852376523,
+        "core_sched.force_idle_usec": 0,
+        "nr_periods": 435525,
+        "nr_throttled": 164473,
+        "throttled_usec": 17031609926,
+        "nr_bursts": 0,
+        "burst_usec": 0
+      },
+      "memory_bytes": {
+        "current": 577785856,
+        "peak": 2071248896
+      },
+      "io_by_device": [
+        {
+          "device": "8:0",
+          "rbytes": 157889474560,
+          "wbytes": 101577691136,
+          "rios": 25463715,
+          "wios": 2216649,
+          "dbytes": 0,
+          "dios": 0
+        },
+        {
+          "device": "252:0",
+          "rbytes": 157886652416,
+          "wbytes": 101577691136,
+          "rios": 25463194,
+          "wios": 2166568,
+          "dbytes": 0,
+          "dios": 0
+        }
+      ],
+      "dux": {
+        "automatic_reconciliation_paused": false,
+        "behind_seconds": 902.596,
+        "caught_up": false,
+        "daemon_live": true,
+        "dirty": true,
+        "dirty_reason": "reconciliation accounting verification pending",
+        "dirty_since_timestamp_seconds": 1794329977,
+        "events_dropped": 0,
+        "events_resolved": 0,
+        "events_seen": 1213358532,
+        "failed_reconciliation_attempts": null,
+        "index_bytes": 82718134272,
+        "index_bytes_on_disk": 828604416,
+        "index_nodes": 1951531,
+        "kernel_overflow_notifications": 0,
+        "last_event_commit_timestamp_seconds": 0,
+        "last_scan_age_seconds": 69,
+        "last_scan_timestamp_seconds": 1794329977,
+        "max_automatic_reconciliation_retries": 1,
+        "max_pending_updates": 500000,
+        "pause_reason": null,
+        "paused": false,
+        "paused_since_timestamp_seconds": null,
+        "pending_updates": 0,
+        "reconciliation_retry_backoff_seconds": null,
+        "reconciliation_retry_due": false,
+        "reconciliation_retry_remaining_seconds": null,
+        "reconciliation_retry_state_corrupt": false,
+        "root": "/",
+        "scan_first": true,
+        "scan_in_progress": false,
+        "scan_progress": null,
+        "status_version": 1,
+        "throttled_since_timestamp_seconds": 1794329143,
+        "updates_committed": 0,
+        "userspace_updates_dropped": 0,
+        "wal_bytes": 60110832,
+        "watch_status_available": true,
+        "watch_status_updated_at_seconds": 1794330045,
+        "write_error": null
+      },
+      "observed_at_utc": "2026-11-10T17:00:46Z"
     }
   ]
 }

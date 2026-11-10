@@ -5248,3 +5248,49 @@ operations, 634 exactness samples, seven mutation bursts, one passed
 held-reader/WAL-reclaim phase, zero restarts, and zero controlled crashes.
 Terminal exactness/history/SQLite checks remain pending. The most recent full
 soak checkpoint is at 16:46 UTC; the 16:49 values are from a live status query.
+
+
+## Twelfth verified observation and guarded package-VM stop — 2026-11-10 17:06 UTC
+
+VPS2's scheduled observation started at **16:53:54** and finished traversal at
+**16:59:37** (5m43s). It covered 1,741,455 files and 213,558 directories, with
+1,955,013 staged path instances and 77.04 GiB unique allocation. It reported
+zero coverage issues, discarded 1,578 vanished reuse paths, revalidated two,
+and had zero unresolved paths. Independent accounting verification passed at
+**17:00:49** in 71,904 ms. The completion gap from the preceding successful
+observation was **15m19s**, 19 seconds over the target. This is the twelfth
+successful observation and eleventh completion interval; five intervals now
+exceed 15 minutes. At 17:06:31 the service was active with zero restarts,
+pending updates, kernel overflows, or drops. The last observation was 414
+seconds old; the index was dirty because it waits for the next full observation.
+The service has not met a sustained freshness SLO, and per-path age remains
+unmeasured.
+
+A guarded Ubuntu 24.04 lifecycle VM passed host admission and started at
+**17:04:20**, but the watchdog stopped it at **17:04:29** after Go compiler and
+test processes appeared. The first SSH probe was reset during startup; the guest
+was gone before it could become reachable. No package commands ran. The
+controller reports no guest, its QEMU unit is inactive, and the ephemeral
+runtime was cleaned. The VM used a verified Ubuntu image, 10% CPU quota, 2-GiB
+RAM profile, and tmpfs overlay; storage admission passed with 1 GiB reserved.
+Guard evidence:
+[`vm-admission-20261110T1704Z.json`](docs/qualification/vm-admission-20261110T1704Z.json)
+(SHA-256 `905a7b2b17a14596c6677d9e104f86a2d6dc1cabb1231d0f5ac4cac13cb64596`).
+
+During the minute around VM startup, the old VPS1 daemon logged 26 stale-file-
+handle warnings. This overlaps volatile filesystem activity; attribution to the
+guest alone is not established. Its lifetime overflow counter remained 775 and
+its lifetime dropped-update counter remained 2,518,862; there were no overflow
+log warnings in the sampled minute. At 17:06:51 VPS1 remained active with four
+historical restarts, dirty from fanotify overflow, 71.6 hours behind, and
+30,500 pending updates. Root disk was 72% used with 50.6 GiB available. The
+read-only snapshot is
+[`vps1-live-status-20261110T1706Z.json`](docs/qualification/vps1-live-status-20261110T1706Z.json)
+(SHA-256 `c1b9f69719d898f432143032c858806181e7f2de9ddaa507e111d73fbdaa9c62`).
+
+The r132 soak remained active at **17:06:31** with 28,850.5 seconds (8h00m50s),
+660,577 operations, 657 exactness samples, eight mutation bursts, one passed
+held-reader/WAL-reclaim phase, zero worker restarts, and zero controlled crashes.
+Final exactness/history/SQLite checks remain pending; this is 11.1% of the
+72-hour duration. The latest full raw checkpoint is still the 17:00 UTC file;
+the 17:06 values above are from a direct live status query.

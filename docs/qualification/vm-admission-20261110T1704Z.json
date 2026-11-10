@@ -1,0 +1,134 @@
+{
+  "observed_at_utc": "2026-11-10T17:06:04Z",
+  "host": "vps1",
+  "guest": "ubuntu24-lifecycle-current",
+  "profile": {
+    "os": "Ubuntu 24.04",
+    "ram_mib": 2048,
+    "cpu_quota_percent": 10,
+    "cgroup_memory_mib": 2560,
+    "ephemeral_tmpfs_overlay": true
+  },
+  "admission": "passed three samples and started at 2026-11-10T17:04:20Z",
+  "ssh_probe": "connection reset before cloud-init/SSH became ready",
+  "guard_outcome": {
+    "action": "stopped_disposable_vm",
+    "guest": "ubuntu24-lifecycle-current",
+    "pressure": {
+      "active_host_workloads": [
+        "Go compiler pid=2811563",
+        "go test pid=2811274"
+      ],
+      "cpu": {
+        "full": 0.0,
+        "some": 23.62
+      },
+      "io": {
+        "full": 5.83,
+        "some": 5.89
+      },
+      "load1": 2.56,
+      "memory": {
+        "full": 0.0,
+        "some": 0.0
+      },
+      "telemetry_errors": []
+    },
+    "reason": [
+      "active host build/test/install/analysis workload: Go compiler pid=2811563",
+      "active host build/test/install/analysis workload: go test pid=2811274"
+    ],
+    "time": "2026-11-10T17:04:29Z",
+    "vm_unit": "dux-qualification-vm-ubuntu24-lifecycle-current"
+  },
+  "guest_state_after_guard": "missing; QEMU unit inactive; ephemeral runtime cleaned",
+  "package_commands_run": false,
+  "pressure_guard_evidence": {
+    "unit": "dux-qualification-vm-ubuntu24-lifecycle-current",
+    "guest": "ubuntu24-lifecycle-current",
+    "port": 37845,
+    "identity": "/dev/shm/dux-qualification-vm/ubuntu24-lifecycle-current/1794330256411998363/identity",
+    "known_hosts": "/dev/shm/dux-qualification-vm/ubuntu24-lifecycle-current/1794330256411998363/known_hosts",
+    "image": {
+      "architecture": "amd64",
+      "checksum_manifest_file": "ubuntu-SHA256SUMS",
+      "checksum_manifest_url": "https://cloud-images.ubuntu.com/releases/noble/release/SHA256SUMS",
+      "digest": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+      "digest_algorithm": "sha256",
+      "distribution": "Ubuntu",
+      "file": "ubuntu-24.04-server-cloudimg-amd64.img",
+      "release": "24.04",
+      "source_url": "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img",
+      "stored_image_path": "/dev/shm/dux-qualification-images/ubuntu-24.04-server-cloudimg-amd64.img",
+      "verified_at_utc": "2026-11-09T19:11:35Z"
+    },
+    "profile": "standard",
+    "guest_ram_mib": 2048,
+    "vcpus": 2,
+    "cpu_quota_percent": 10,
+    "cgroup_memory_mib": 2560,
+    "minimum_host_free_mib": 6144,
+    "read_only_share": null,
+    "read_only_disk": null,
+    "ephemeral_runtime": true,
+    "overlay_isolated_tmpfs": true,
+    "runtime_directory": "/dev/shm/dux-qualification-vm/ubuntu24-lifecycle-current/1794330256411998363",
+    "host_mem_available_mib_at_start": 21400,
+    "storage_admission": {
+      "path": "/dev/shm/dux-qualification-vm/ubuntu24-lifecycle-current/1794330256411998363",
+      "available_bytes": 10252005376,
+      "available_inodes": 3344102,
+      "required_bytes": 268435456,
+      "reserve_bytes": 1073741824,
+      "minimum_free_inodes": 4096,
+      "passed": true,
+      "reasons": []
+    },
+    "started_at": "2026-11-10T17:04:20Z",
+    "ephemeral_runtime_cleaned": true
+  },
+  "production_dux_status_after_stop": {
+    "behind_seconds": 257712.595,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since_timestamp_seconds": 1794325596,
+    "events_dropped": 2518862,
+    "events_resolved": 138239293,
+    "events_seen": 238522741,
+    "index_bytes": 131721043968,
+    "index_bytes_on_disk": 3543547904,
+    "index_nodes": 1334668,
+    "kernel_overflow_notifications": 775,
+    "last_event_commit_timestamp_seconds": 1794330364,
+    "last_scan_age_seconds": 447402,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 67881,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794072651,
+    "updates_committed": 39312844,
+    "userspace_updates_dropped": 2518862,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794330364,
+    "write_error": null
+  },
+  "production_dux_log_observation": {
+    "window_utc": [
+      "2026-11-10T17:04:10Z",
+      "2026-11-10T17:05:10Z"
+    ],
+    "stale_file_handle_warnings": 26,
+    "overflow_warnings": 0,
+    "kernel_overflow_counter": 775,
+    "dropped_event_counter": 2518862
+  }
+}
