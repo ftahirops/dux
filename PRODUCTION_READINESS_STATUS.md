@@ -309,6 +309,16 @@ harness (41). These test the qualification tooling, not the Dux Rust binary or
 the actual Rocky RPM lifecycle. Details are in the
 [harness retest report](docs/qualification/r132-harness-retest-20261110T0950Z.md).
 
+## Workspace disk inventory — 2026-11-10 11:30 UTC
+
+The root filesystem is 185 GiB total, 121 GiB used, and 56 GiB available
+(69% used). `target/readiness` occupies 1.4 GiB. Its `vms` directory contains
+only small image/checksum metadata; no VM image or QEMU process was present in
+this workspace at the check. The readiness artifacts are retained because
+they contain the current r131/r132 package candidates and qualification
+evidence; available disk is not blocking the pending lifecycle. Full sampled
+inventory: [workspace disk record](docs/qualification/workspace-disk-20261110T1130Z.json).
+
 ## Current production and disk snapshot — 2026-11-10 09:58 UTC
 
 The installed VPS1 production daemon remains **r66** (`0.6.3`, revision

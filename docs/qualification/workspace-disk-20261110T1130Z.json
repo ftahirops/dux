@@ -1,0 +1,24 @@
+{
+  "sampled_at_utc": "2026-11-10T11:30:37Z",
+  "workspace": "/home/dux",
+  "filesystem": {
+    "mount": "/",
+    "size_gib": 185,
+    "used_gib": 121,
+    "available_gib": 56,
+    "use_percent": 69
+  },
+  "qualification_artifacts": {
+    "path": "/home/dux/target/readiness",
+    "size_gib": 1.4,
+    "vm_metadata_directory": "/home/dux/target/readiness/vms",
+    "vm_image_files_found_at_directory_root": 0,
+    "active_qemu_or_virt_install_processes": 0,
+    "current_candidate_directories_preserved": [
+      "production-r131-20261110",
+      "r132-release-20261110",
+      "r132-postscan-hint-20261110"
+    ]
+  },
+  "assessment": "Disk capacity is not the current Rocky lifecycle blocker; qualification packages and evidence were preserved."
+}
