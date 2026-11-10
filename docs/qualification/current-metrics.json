@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T21:38:29Z",
+  "snapshot_at_utc": "2026-11-10T21:45:02Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -55,26 +55,33 @@
     "var_lib_dux_bytes": 3799470080
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T17:04:29Z",
-    "load_average_1m": 7.75,
-    "cpu_psi_some_avg10_percent": 3.01,
+    "observed_at_utc": "2026-11-10T21:45:02Z",
+    "load_average_1m": 20.96,
+    "cpu_psi_some_avg10_percent": 63.92,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false,
     "rocky_guest_state": "inactive; latest start refused at controller admission sample 2/3",
     "active_host_build_or_test_workloads": true,
     "admission_blockers": [
-      "VM stopped by pressure guard 9 seconds after start when Go compiler/test appeared; SSH reset; no package commands ran"
+      "active host build/test/analysis workloads",
+      "load1 exceeds 10",
+      "CPU PSI some exceeds 55%"
     ],
-    "active_host_workload_count": 2,
+    "active_host_workload_count": 18,
     "active_host_workload_types": [
       "Go compiler",
-      "go test"
+      "Go vet worker",
+      "go test",
+      "go vet",
+      "shell test script"
     ],
-    "evidence": "PRODUCTION_READINESS_STATUS.md (14:23 UTC VM runtime-guard entry)",
+    "evidence": "docs/qualification/vm-admission-wrapper-detection-20261110.md (21:45 UTC recheck)",
     "ubuntu_guest_started": true,
     "ubuntu_guest_state": "started 17:04:20, pressure guard stopped 17:04:29; ephemeral overlay cleaned; guest state missing",
     "cpu_psi_full_avg10_percent": 0.0,
-    "active_host_workloads": true
+    "active_host_workloads": true,
+    "vm_started": false,
+    "fault_matrix_started": false
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
@@ -104,14 +111,14 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T21:38:11Z",
+    "observed_at_utc": "2026-11-10T21:43:33Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 45215.5,
-    "operations": 1015829,
-    "exact_check_samples": 1012,
+    "elapsed_seconds": 45523.2,
+    "operations": 1022121,
+    "exact_check_samples": 1019,
     "completed_hourly_bursts": 12,
-    "held_reader_scenarios": 1,
+    "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
     "terminal_exact_history_integrity": "pending",
     "requested_operations_per_second": 25,
@@ -119,15 +126,15 @@
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
     "observed_operations_per_second_elapsed": 22.466,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2138Z.json",
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2143Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.17444251543209877,
+    "coverage_duration_fraction": 0.1756296296296296,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "e40fbecceb0c514f30ee01eb139f328a262eaf8c31fdc7ed590c90ce3f70ed27",
+    "latest_checkpoint_sha256": "e502446a79bd4494a3e2989dcd481d889130fb385d8a25985e8410702af97fc2",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -1094,5 +1101,22 @@
     "dux_wal_bytes": 60110832,
     "scan_stage_present_after_2137_cycle": false,
     "evidence": "docs/qualification/vps2-reconciliation-cycle-20261110T2137Z.json"
+  },
+  "python_qualification_targeted_recheck": {
+    "observed_at_utc": "2026-11-10T21:43:00Z",
+    "command": "PYTHONPATH=scripts python3 -m unittest test_dux_qualification_vm",
+    "passed": 41,
+    "failed": 0,
+    "status": "passed",
+    "full_python_suite_rerun_after_change": false
+  },
+  "vps2_disk_latest": {
+    "observed_at_utc": "2026-11-10T21:43:33Z",
+    "root_filesystem_use_percent": 90,
+    "root_available_gib": 9.3,
+    "var_tmp_gib": 4.2,
+    "var_log_journal_gib": 4.1,
+    "cleanup_performed": false,
+    "note": "Active build/test workloads present; preserve qualification artifacts and avoid cleanup while jobs are running."
   }
 }

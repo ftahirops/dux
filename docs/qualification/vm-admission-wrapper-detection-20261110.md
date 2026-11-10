@@ -32,3 +32,17 @@ completed.
 At 21:36 UTC, host admission was blocked by active Go compilation/test work:
 load1 17.73 and CPU PSI some avg10 33.45%. No VM was started. Evidence:
 [`vm-admission-20261110T2136Z.json`](vm-admission-20261110T2136Z.json).
+
+## Recheck — 2026-11-10 21:43–21:45 UTC
+
+The targeted admission module was rerun at 21:43 UTC after the wrapper
+classification change: **41 passed, 0 failed**. The full Python suite has not
+been rerun since the added regression test, so the prior aggregate of 380
+passed and 1 skipped is unchanged as the last full-suite result. Exact output:
+[`targeted test log`](vm-admission-wrapper-regression-20261110T2146Z.log).
+
+At 21:45 UTC, the admission probe found 18 active build/test/analysis
+processes, load1 20.96, and CPU PSI some avg10 63.92% (CPU PSI full 0%). The
+probe correctly blocks a VM run for both active workloads and pressure. No VM
+was started and no fault-matrix suite ran. This preserves the test isolation
+gate rather than treating a high-pressure run as useful qualification.

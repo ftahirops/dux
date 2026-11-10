@@ -1,0 +1,6 @@
+$ PYTHONPATH=scripts python3 -m unittest test_dux_qualification_vm
+.........................................
+----------------------------------------------------------------------
+Ran 41 tests in 0.194s
+
+OK
