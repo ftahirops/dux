@@ -81,6 +81,11 @@ test binary and `go test` process appeared. No VM was created. The admission
 decision is saved in
 [`the 09:31 refusal record`](r132-rocky-rpm-admission-refusal-20261110T093118Z.jsonl).
 
+At 09:35:06 UTC, a further start was refused on sample 3/3 after three Go
+compiler processes and one Go test process appeared. No VM was created. The
+decision is preserved in
+[`the 09:35 refusal record`](r132-rocky-rpm-admission-refusal-20261110T093506Z.jsonl).
+
 ### Admission window closed during sampling — 2026-11-10 09:23 UTC
 
 At 09:23 UTC, a fresh host sample showed no build/test workloads, load1 3.72,

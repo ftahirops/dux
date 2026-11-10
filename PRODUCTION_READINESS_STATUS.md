@@ -27,16 +27,17 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
-### Live checkpoint — 2026-11-10 09:30 UTC
+### Live checkpoint — 2026-11-10 09:34 UTC
 
 The unit remains `active/running`, with **zero restarts**. At elapsed 600.2s,
 the earlier checkpoint was 13,994 mutations; at the latest progress sample,
 elapsed time was 1,500.6s and the worker had completed **35,777 mutations**.
-The 35,000-op exact checkpoint passed in 724ms; no controlled crash,
-held-reader phase, or hourly burst had occurred yet. Final exactness, history,
-and SQLite integrity are still pending. These are early progress measurements,
-not a soak pass. VPS2 had 4.4 GiB free on `/`; the disposable fixture uses
-`/dev/shm`, with 2.8 GiB free.
+At the latest progress sample, elapsed time was 1,740.6s and the worker had
+completed **41,552 mutations**. The 41,000-op exact checkpoint passed in
+466ms; no controlled crash, held-reader phase, or hourly burst had occurred
+yet. Final exactness, history, and SQLite integrity are still pending. These
+are progress measurements, not a soak pass. VPS2 had 4.3 GiB free on `/`; the
+disposable fixture uses `/dev/shm`, with 2.8 GiB free.
 
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
@@ -59,6 +60,9 @@ refused at admission at about 09:29:29 UTC.
 The 09:31:18 UTC start was also refused before VM creation when a Go test
 binary started; the decision is preserved in
 [`the 09:31 refusal record`](docs/qualification/r132-rocky-rpm-admission-refusal-20261110T093118Z.jsonl).
+At 09:35:06 UTC a further start was refused on sample 3/3 after three Go
+compiler processes and a Go test process appeared; no VM was created. See
+[`the 09:35 refusal record`](docs/qualification/r132-rocky-rpm-admission-refusal-20261110T093506Z.jsonl).
 
 ## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
 
