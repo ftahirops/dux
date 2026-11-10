@@ -561,6 +561,31 @@ class ReadinessHarnessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("retry suite requires --fault-binary", result.stderr)
 
+    def test_postscan_hint_suite_requires_fault_binary_before_starting_worker(self):
+        result = subprocess.run(
+            [sys.executable, str(HARNESS), "--suites", "postscan-hint"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("postscan-hint suite requires --fault-binary", result.stderr)
+
+    def test_postscan_hint_runtime_gate_pauses_after_accounting_check_starts(self):
+        source = HARNESS.read_text()
+        tree = ast.parse(source)
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "post_observation_hint_test"
+        )
+        function_source = ast.unparse(function)
+        self.assertIn('watch.reconciliation_check_started', function_source)
+        self.assertIn('filesystem changes await the next full observation', function_source)
+        self.assertIn('DUX_TEST_ACCOUNTING_CHECK_DELAY_MS', function_source)
+        self.assertIn('os.stat(case.db).st_dev != os.stat(case.tree).st_dev', function_source)
+        self.assertIn('check_index(case.db, case.tree)', function_source)
+        self.assertIn('integrity(case.db)', function_source)
+        watcher = (ROOT / "src" / "watch.rs").read_text()
+        self.assertIn('checkpoint("watch.reconciliation_check_started")', watcher)
+
     def test_report_checkpoints_are_atomically_published_as_valid_json(self):
         with tempfile.TemporaryDirectory() as directory:
             report_path = Path(directory) / "report.json"

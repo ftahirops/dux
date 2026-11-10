@@ -1092,6 +1092,7 @@ fn start_accounting_check(
                     false
                 }),
             )?;
+            crate::fault::delay_accounting_check();
             let result = store.totals_consistent();
             if worker_cancel.load(Ordering::Relaxed) {
                 Ok(None)
@@ -2625,8 +2626,9 @@ pub fn run_daemon(
         }
         if let Some(reader) = hint_reader.as_ref() {
             let observed = reader.observed_events.load(Ordering::Relaxed);
+            let observed_delta = observed.saturating_sub(sampled_hint_events);
             if observed > sampled_hint_events {
-                ev_seen = ev_seen.saturating_add(observed - sampled_hint_events);
+                ev_seen = ev_seen.saturating_add(observed_delta);
                 sampled_hint_events = observed;
                 if !index_uncertain {
                     persist_dirty_marker_best_effort(
@@ -2640,9 +2642,10 @@ pub fn run_daemon(
                 }
             }
             let overflows = reader.kernel_overflows.load(Ordering::Relaxed);
+            let overflow_delta = overflows.saturating_sub(sampled_hint_overflows);
             if overflows > sampled_hint_overflows {
-                kernel_overflow_notifications = kernel_overflow_notifications
-                    .saturating_add(overflows - sampled_hint_overflows);
+                kernel_overflow_notifications =
+                    kernel_overflow_notifications.saturating_add(overflow_delta);
                 sampled_hint_overflows = overflows;
                 if !index_uncertain {
                     persist_dirty_marker_best_effort(
@@ -2653,6 +2656,29 @@ pub fn run_daemon(
                 index_uncertain = true;
                 if scan_job.is_some() {
                     lost_events = true;
+                }
+            }
+            if (observed_delta > 0 || overflow_delta > 0)
+                && invalidate_scan_first_pending_reconciliation_check(
+                    reconcile_first,
+                    scan_job.is_some(),
+                    true,
+                    &mut pending_reconciliation_check,
+                )
+            {
+                // Scan-first drains and counts hints without resolving paths.
+                // A hint counted after the walk therefore invalidates its
+                // pending accounting result just like a resolved in-scope hint.
+                if let Some(check) = &accounting_check {
+                    check.cancel.store(true, Ordering::Relaxed);
+                }
+                if store.get_meta("dirty_reason")?.as_deref()
+                    == Some(RECONCILIATION_ACCOUNTING_PENDING)
+                {
+                    store.set_meta(
+                        "dirty_reason",
+                        "filesystem changes await the next full observation",
+                    )?;
                 }
             }
         }
@@ -4365,6 +4391,7 @@ pub fn run_daemon(
                         Ok(check) => {
                             tracing::debug!("starting post-reconciliation accounting verification");
                             accounting_check = Some(check);
+                            crate::fault::checkpoint("watch.reconciliation_check_started");
                         }
                         Err(e) => {
                             index_uncertain = true;

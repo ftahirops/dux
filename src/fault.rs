@@ -50,6 +50,9 @@ pub fn force_high_load_elevated_pressure() -> bool {
 pub fn checkpoint(_stage: &str) {}
 
 #[cfg(not(feature = "fault-injection"))]
+pub fn delay_accounting_check() {}
+
+#[cfg(not(feature = "fault-injection"))]
 pub fn fail_scan(_stage: &str) -> anyhow::Result<()> {
     Ok(())
 }
@@ -74,6 +77,18 @@ pub fn checkpoint(stage: &str) {
             libc::raise(libc::SIGSTOP);
         }
     }
+}
+
+#[cfg(feature = "fault-injection")]
+pub fn delay_accounting_check() {
+    let Some(milliseconds) = std::env::var("DUX_TEST_ACCOUNTING_CHECK_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| (1..=10_000).contains(value))
+    else {
+        return;
+    };
+    std::thread::sleep(std::time::Duration::from_millis(milliseconds));
 }
 
 #[cfg(feature = "fault-injection")]

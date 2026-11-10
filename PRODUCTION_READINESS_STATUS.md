@@ -1,5 +1,29 @@
 # Production readiness status
 
+## r132 post-observation accounting race fix — 2026-11-10 06:54 UTC
+
+The deterministic VPS2 regression test exposed that scan-first mode's dedicated
+reader counted post-walk hints but did not invalidate the pending accounting
+check. The coordinator could therefore clear dirty state using a verification
+for an older observation. The scan-first counter path now invalidates that
+pending clear for either new events or kernel overflows, cancels the worker
+when possible, and retains the reason that a fresh observation is required.
+
+Verification passed: **341 Rust tests passed, 0 failed, 2 ignored**; **61
+readiness harness tests passed**; strict Clippy, formatting, byte compilation,
+and diff checks passed. LLVM coverage is **72.61% lines, 71.44% regions, and
+76.19% functions**; branch counters are unavailable. On VPS2, the focused
+runtime race suite passed in 5.235s on a disposable 768 MiB ext4 image. It
+proved dirty-state retention, later exact indexing of the new file, and final
+integrity. The installed r121 service stayed active with zero restarts. The
+candidate was not installed or packaged. Details, hashes, and machine-readable
+evidence are in [the race qualification](docs/qualification/r132-postscan-hint-runtime-20261110.md).
+
+This closes the specific post-observation accounting race gate. It does not
+close the 72-hour soak, 24-hour canary, package/rollback, privilege review,
+large-scale performance, or cross-filesystem/kernel qualification gates.
+Production readiness remains open.
+
 ## r132 working-tree runtime follow-up — 2026-11-10 06:26 UTC
 
 Built production and fault-injection release binaries from `fad49686709d`; both

@@ -357,11 +357,14 @@ def request_scan_first_observation(
 
 
 class Daemon:
-    def __init__(self, case, binary=None, pause=None, prefix=None, max_cpu_percent=50):
+    def __init__(self, case, binary=None, pause=None, prefix=None, max_cpu_percent=50,
+                 extra_env=None):
         self.case, self.binary = case, binary or case.binary
         self.marker = case.base / "crash.marker"
         self.marker.unlink(missing_ok=True)
         env = dict(case.env)
+        if extra_env:
+            env.update(extra_env)
         if pause:
             env.update(DUX_TEST_PAUSE_AT=pause, DUX_TEST_MARKER=str(self.marker))
         self.log = (case.base / "daemon.log").open("a")
@@ -2666,6 +2669,114 @@ def root_scan_test(case, _args, evidence):
     print(f'{outcome} scan root /: {counts[0]} files, {counts[1]} dirs, {entries} entries', flush=True)
 
 
+def post_observation_hint_test(case, _args, evidence):
+    """Ensure a post-walk hint cannot be cleared by the older snapshot's check."""
+    assert case.fault_binary, "post-observation hint test requires the fault binary"
+    # Keep the index and watcher runtime off the observed ext4 image. The
+    # filesystem-wide fanotify mark also sees database/WAL writes on that
+    # filesystem; this race test should exercise only the deliberate tree
+    # mutation and not its own qualification database traffic.
+    case.db = case.base / "post-observation-hint.db"
+    case.scan()
+    assert os.stat(case.db).st_dev != os.stat(case.tree).st_dev, \
+        "race test database must be outside the observed filesystem"
+    stage = "watch.reconciliation_check_started"
+
+    def metadata():
+        with contextlib.closing(snapshot(case.db)) as connection:
+            return dict(connection.execute("SELECT key,value FROM meta"))
+
+    daemon = Daemon(
+        case,
+        case.fault_binary,
+        stage,
+        extra_env={"DUX_TEST_ACCOUNTING_CHECK_DELAY_MS": "2000"},
+    )
+    try:
+        daemon.paused_at(stage)
+        pending = metadata()
+        assert pending.get("dirty_reason") == "reconciliation accounting verification pending", pending
+        assert "dirty_since" in pending, pending
+        previous_seen = daemon.record()["seen"]
+
+        late_path = case.tree / "created-after-observation"
+        late_path.write_bytes(b"must remain dirty until the next full observation")
+        with late_path.open("rb") as source:
+            os.fsync(source.fileno())
+        # SIGSTOP pauses every daemon thread, including the fanotify reader.
+        # The fault-only accounting delay below gives that reader time to drain
+        # the queued create/write/close burst after SIGCONT and before the old
+        # snapshot's accounting result can be consumed.
+        daemon.process.send_signal(signal.SIGCONT)
+
+        def hint_invalidated_pending_check():
+            current = metadata()
+            record = daemon.record()
+            if (record["seen"] > previous_seen
+                    and current.get("dirty_reason") == "filesystem changes await the next full observation"):
+                return current
+            return False
+
+        invalidated = daemon.wait(
+            hint_invalidated_pending_check,
+            "post-observation hint to invalidate pending accounting verification",
+            timeout=30,
+        )
+        assert "dirty_since" in invalidated, invalidated
+        assert invalidated.get("last_reconcile_attempt_result") == "complete", invalidated
+        generation_before_recovery = invalidated.get("scan_generation")
+
+        quiet_since = time.monotonic()
+        quiet_seen = daemon.record()["seen"]
+
+        def hint_stream_quiet():
+            nonlocal quiet_since, quiet_seen
+            current_seen = daemon.record()["seen"]
+            if current_seen != quiet_seen:
+                quiet_seen = current_seen
+                quiet_since = time.monotonic()
+            return time.monotonic() - quiet_since >= 1.5
+
+        daemon.wait(hint_stream_quiet, "post-write fanotify hint burst to drain", timeout=15)
+
+        daemon.process.send_signal(signal.SIGHUP)
+
+        def exact_recovery():
+            status_result = command(
+                case.binary, "--db", case.db, "status", "--json", env=case.env,
+            )
+            status = json.loads(status_result.stdout)
+            if status.get("scan_in_progress") or status.get("dirty"):
+                return False
+            current = metadata()
+            if current.get("scan_generation") == generation_before_recovery:
+                return False
+            try:
+                check_index(case.db, case.tree)
+            except (AssertionError, sqlite3.Error):
+                return False
+            return current
+
+        recovered = daemon.wait(
+            exact_recovery,
+            "fresh observation to index the post-walk file and clear dirty status",
+            timeout=180,
+        )
+        assert "dirty_since" not in recovered, recovered
+        integrity(case.db)
+    finally:
+        daemon.stop()
+
+    evidence.update(
+        paused_during_accounting_check=True,
+        post_observation_event_preserved_dirty_status=True,
+        stale_accounting_check_did_not_clear_dirty=True,
+        next_full_observation_indexed_new_path=True,
+        final_exact_index=True,
+    )
+    print("PASS post-observation hint invalidates stale accounting clear; next scan restores exactness", flush=True)
+
+
 def validate_workspace_parent(path, image_mib):
     """Require excluded tmpfs with room for the disposable image and index."""
     path = Path(path).resolve()
@@ -2746,6 +2857,7 @@ SUITES = {"crash": crash_tests, "overflow": overflow_test, "cpu": cpu_event_burs
           "capability": capability_test, "oom": oom_test, "pressure": pressure_reconciliation_test,
           "mount": mount_test, "wal": wal_test, "startup": startup_test,
           "retry": reconciliation_retry_test,
+          "postscan-hint": post_observation_hint_test,
           # A read-only root scan can raise host I/O PSI. Run it after the
           # isolated crash/pressure suites so that it cannot cause those tests
           # to exercise their intentional pressure deferral path accidentally.
@@ -3020,6 +3132,8 @@ def main():
         if "pressure" in args.suites and not args.fault_binary else None
     parser.error("the retry suite requires --fault-binary built from the same candidate source") \
         if "retry" in args.suites and not args.fault_binary else None
+    parser.error("the postscan-hint suite requires --fault-binary built from the same candidate source") \
+        if "postscan-hint" in args.suites and not args.fault_binary else None
     parser.error("crash rounds must be 1..1000") if not 1 <= args.crash_rounds <= 1000 else None
     parser.error("duration must be 1..259200 seconds") if not 1 <= args.duration_seconds <= 259200 else None
     parser.error("operation rate must be 1..1000") if not 1 <= args.operations_per_second <= 1000 else None
