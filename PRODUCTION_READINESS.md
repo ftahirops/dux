@@ -1,7 +1,7 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-10 20:19 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
+**2026-11-10 20:40 UTC**. VPS1 was rechecked at 20:08 UTC and remains on the old event-apply
 daemon. The r132 candidate remains
 in a separate soak, and release, scale, fault-matrix, and canary gates remain
 open. A green unit suite or a successful VPS2 observation does not close those
@@ -55,7 +55,7 @@ Evidence: [latest scheduled scans](docs/qualification/vps2-reconciliation-cycle-
 | Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
 | Dependency audit | 229 locked dependencies; zero advisories and warnings. Local RustSec database head matched upstream at the 18:55 check. | This is dependency hygiene, not a full application security review. |
 | Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
-| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. At 19:50 VPS2 admission showed CPU PSI some avg10 20.58%, load1 7.21, root disk 91% used, and ClickHouse at 90.8% CPU. No VM was started. See [latest VPS2 admission sample](docs/qualification/vm-admission-20261110T1950Z.json). |
+| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. | The complete 15-suite guarded matrix and controlled soak crash scenarios have not run. The 20:40 read-only VPS1 admission sample was blocked: load1 41.34, CPU PSI some avg10 86.34%, and 23 active Go compiler/test processes. No VM was attempted. VPS2 remains under a separate soak and has 91% disk use. See [latest VPS1 admission sample](docs/qualification/vm-admission-20261110T2040Z.json). |
 | Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
 | Systemd sandbox event visibility | Exact r132 binary in a separate mount namespace with package-equivalent capabilities, syscall filters, `ProtectKernelTunables`, and `ProtectControlGroups` indexed host-namespace create, rename, and delete events on ext4; create appeared in 187 ms, with zero test-group overflows or drops. Production service counters did not change during the test. | Actual package-created UID, install/upgrade/rollback lifecycle, other filesystems/kernels, and long-duration packaged service remain open. See [namespace event result](docs/qualification/systemd-hardening-20261110/cross-namespace-event-test-20261110T2004Z.json). |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |

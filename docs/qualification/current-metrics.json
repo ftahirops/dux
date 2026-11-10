@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T20:23:01Z",
+  "snapshot_at_utc": "2026-11-10T20:40:26Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -231,7 +231,8 @@
     "latest_soak_checkpoint_1836z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1836Z.json",
     "latest_vps2_status_1836z": "docs/qualification/vps2-live-status-20261110T1836Z.json",
     "latest_soak_checkpoint_2018z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2018Z.json",
-    "latest_soak_checkpoint_2022z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2022Z.json"
+    "latest_soak_checkpoint_2022z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2022Z.json",
+    "latest_vm_admission_2040z": "docs/qualification/vm-admission-20261110T2040Z.json"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -887,5 +888,20 @@
     "root_available_bytes": 9427034112,
     "cpu_psi_some_avg10_percent": 11.33,
     "evidence": "read-only VPS2 status and host admission sample via SSH"
+  },
+  "vps1_vm_admission_latest": {
+    "observed_at_utc": "2026-11-10T20:40:26Z",
+    "admission": "blocked on read-only single-sample check; no VM attempted",
+    "load_average_1m": 41.34,
+    "cpu_psi_some_avg10_percent": 86.34,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 1.16,
+    "memory_psi_some_avg10_percent": 0.06,
+    "active_host_workload_count": 23,
+    "active_host_workload_types": {
+      "Go compiler": 20,
+      "go test": 3
+    },
+    "evidence": "docs/qualification/vm-admission-20261110T2040Z.json"
   }
 }

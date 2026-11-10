@@ -1,0 +1,53 @@
+{
+  "observed_at_utc": "2026-11-10T20:40:26Z",
+  "host": "vps1",
+  "guest": "none",
+  "admission": "blocked on read-only single-sample check; no VM was attempted",
+  "sample": {
+    "load1": 41.34,
+    "cpu": {
+      "some": 86.34,
+      "full": 0.0
+    },
+    "io": {
+      "some": 0.92,
+      "full": 0.0
+    },
+    "memory": {
+      "some": 0.0,
+      "full": 0.0
+    },
+    "active_host_workloads_count": 23,
+    "active_host_workload_types": {
+      "Go compiler": 18,
+      "go test": 2
+    }
+  },
+  "blockers": [
+    "active host build/test/install/analysis workload: Go compiler pid=3671796",
+    "active host build/test/install/analysis workload: Go compiler pid=3671974",
+    "active host build/test/install/analysis workload: Go compiler pid=3672476",
+    "active host build/test/install/analysis workload: Go compiler pid=3672632",
+    "active host build/test/install/analysis workload: Go compiler pid=3675963",
+    "active host build/test/install/analysis workload: Go compiler pid=3676109",
+    "active host build/test/install/analysis workload: Go compiler pid=3676123",
+    "active host build/test/install/analysis workload: Go compiler pid=3676186",
+    "active host build/test/install/analysis workload: Go compiler pid=3676521",
+    "active host build/test/install/analysis workload: Go compiler pid=3676538",
+    "active host build/test/install/analysis workload: Go compiler pid=3677076",
+    "active host build/test/install/analysis workload: Go compiler pid=3677120",
+    "active host build/test/install/analysis workload: Go compiler pid=3677141",
+    "active host build/test/install/analysis workload: Go compiler pid=3677176",
+    "active host build/test/install/analysis workload: Go compiler pid=3677215",
+    "active host build/test/install/analysis workload: Go compiler pid=3677393",
+    "active host build/test/install/analysis workload: Go compiler pid=3677559",
+    "active host build/test/install/analysis workload: Go compiler pid=3677654",
+    "active host build/test/install/analysis workload: Go vet worker pid=3677581",
+    "active host build/test/install/analysis workload: Go vet worker pid=3677743",
+    "active host build/test/install/analysis workload: Go vet worker pid=3677777",
+    "active host build/test/install/analysis workload: go test pid=3663609",
+    "active host build/test/install/analysis workload: go test pid=3666205",
+    "host load1=41.34 exceeds 10",
+    "cpu PSI some avg10=86.34% exceeds hard admission limit 55%"
+  ]
+}
