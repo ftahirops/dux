@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T22:44:43Z",
+  "snapshot_at_utc": "2026-11-10T22:48Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -1134,12 +1134,14 @@
     "evidence": "docs/qualification/vps2-reconciliation-cycle-20261110T2137Z.json"
   },
   "python_qualification_targeted_recheck": {
-    "observed_at_utc": "2026-11-10T21:43:00Z",
+    "observed_at_utc": "2026-11-10T22:48Z",
     "command": "PYTHONPATH=scripts python3 -m unittest test_dux_qualification_vm",
     "passed": 41,
     "failed": 0,
     "status": "passed",
-    "full_python_suite_rerun_after_change": false
+    "full_python_suite_rerun_after_change": false,
+    "note": "Focused regression recheck; no code changes in this turn. No VM was started.",
+    "evidence": "docs/qualification/guard-recheck-20261110T2248Z.log"
   },
   "vps2_disk_latest": {
     "observed_at_utc": "2026-11-10T22:44Z",
