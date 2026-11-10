@@ -59,6 +59,30 @@ assertions remain pending. This is a 100k-operation soak milestone, not a
 72-hour pass. The full snapshot is
 [`soak-progress-20261110T1016Z.json`](soak-progress-20261110T1016Z.json).
 
+### Early latency and resource profile — 2026-11-10 10:19 UTC
+
+At elapsed **4,442.5 seconds**, the worker had completed **105,689 mutations**
+and **105 exact-check samples**; the unit remained active with zero restarts.
+Across those checks, end-to-end exact convergence was **229 ms minimum, 796 ms
+median, 1,148 ms mean, 2,634 ms p95, and 9,028 ms maximum**. These timings
+include requesting a full scan-first observation, waiting for accounting
+verification, and the harness's independent tree/index comparison; they are
+not scanner-only benchmarks. Sampled daemon RSS ranged from **4,244 to 6,568
+KiB**; the largest observed WAL was **4,412,552 bytes**. Systemd's whole-unit
+peak was about **68 MiB**, with about **150 CPU-seconds** accumulated under its
+25% CPU quota.
+
+The host-pressure sample at 10:19:54 had six logical CPUs, load averages
+4.01/4.17/4.24, CPU PSI `some` 5.58% over 10 seconds and 8.55% over five
+minutes. The existing VPS2 Dux process and ClickHouse were also active. This
+confirms the test ran on a shared, contended host; the co-occurring load cannot
+be assigned as the cause of earlier latency outliers because per-check host
+pressure was not recorded. The run uses only a small seeded fixture, so these
+measurements do not establish production-scale scan latency or overhead.
+
+Evidence: [progress samples](soak-progress-20261110T1019Z.json) and
+[host-pressure sample](host-pressure-20261110T1019Z.json).
+
 ## Workload and pass criteria
 
 - 25 filesystem mutations per second for 259,200 seconds.

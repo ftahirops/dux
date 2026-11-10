@@ -83,6 +83,17 @@ six-hour reader, twelve-hour controlled recovery, and final assertions are
 still pending. See the
 [10:16 progress snapshot](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1016Z.json).
 
+At 10:19 UTC, progress reached 105,689 mutations and 105 exact checkpoints.
+Their end-to-end convergence time was 229ms minimum, 796ms median, 1,148ms
+mean, 2,634ms p95, and 9,028ms maximum; the metric includes full scan-first
+observation, accounting verification, and independent comparison. Sampled
+daemon RSS peaked at 6,568 KiB and WAL at 4.41 MB. The host was shared and
+contended (six CPUs, load 4.01/4.17/4.24, CPU PSI some 5.58% over 10 seconds);
+ClickHouse and the installed VPS2 Dux were active. This cannot be treated as an
+isolated performance benchmark, and the 9-second outlier cannot be attributed
+to host pressure from the available samples. See the
+[10:19 progress and pressure evidence](docs/qualification/r132-72h-soak-vps2-20261110/).
+
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
 release builder CLI (13), debug-artifact verifier (1), and qualification VM
