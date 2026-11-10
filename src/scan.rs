@@ -4815,6 +4815,17 @@ mod tests {
                     .conn
                     .close()
                     .expect("fresh database connection closes before rename");
+                let reader_error = match Store::open_ro(&db) {
+                    Ok(_) => panic!("reader must not open the empty target during publication"),
+                    Err(error) => error.to_string(),
+                };
+                assert!(reader_error.contains("initial scan in progress"));
+                for suffix in ["-wal", "-shm", "-journal"] {
+                    assert!(
+                        !PathBuf::from(format!("{}{suffix}", db.display())).exists(),
+                        "read during rename handoff created SQLite sidecar {suffix}"
+                    );
+                }
                 true
             },
             || installed.set(true),
