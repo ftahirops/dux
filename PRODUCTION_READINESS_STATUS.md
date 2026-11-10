@@ -75,6 +75,15 @@ pending updates; no scan is currently running. The last full scan remains
 so disk capacity is not the cause. The complete read-only snapshot is
 [`the 10:46 VPS1 record`](docs/qualification/live-vps1-readiness-20261110T1046Z.json).
 
+At 10:55:58 UTC the installed r66 daemon was still live, dirty, and not caught
+up, with no scan in progress. The last full scan was still November 5
+12:49:22 UTC (age 425,196 seconds); reported behind time was 235,507 seconds.
+Overflow/drop counters remained 742 and 2,518,862. Pending updates had grown
+to 244, while the on-disk index remained 3.44 GB. Root disk was 68% used with
+58 GiB free. This confirms the installed service continues ingesting events
+without completing a scan; it does not measure r132 behavior. See
+[`the 10:55 VPS1 snapshot`](docs/qualification/live-vps1-readiness-20261110T1055Z.json).
+
 ### VPS1 follow-up — 2026-11-10 10:21 UTC
 
 The service remains active on r66, dirty and not caught up. The last full scan
@@ -165,6 +174,11 @@ At 10:52:55 UTC, the worker remained active with zero restarts and had reached
 6,485.1 seconds elapsed, 153,305 operations, and 153 exact-check samples. One
 hourly burst was complete; held-reader, controlled recovery, and final checks
 were still pending. This remains a running soak, not a pass.
+
+At 10:54:55 UTC, a fresh VPS2 check reported the same active unit and zero
+restarts, with 6,605.2 seconds elapsed, 156,056 operations, and 156 exact
+samples. The hourly burst count remained one; held-reader, controlled recovery,
+and final exactness/history/SQLite checks were pending.
 
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
