@@ -5800,3 +5800,26 @@ That is **14.39%** of the 72-hour target. Terminal
 exactness/history/SQLite checks remain pending. Checkpoint:
 [`soak-progress-20261110T1926Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1926Z.json)
 (SHA-256 `6c474e5464d9c4f6d3fb2e12b44cdf10df3a3e73d38c04427bf81ad00fd00969`).
+
+## VPS1 production status recheck — 2026-11-10 23:05 UTC
+
+A read-only status query at 23:05:29 confirms the installed service is still
+Dux **0.6.3 build `e0cc915f8f37`**, running as root with four historical
+systemd restarts. The installed executable SHA-256 is
+`e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060`; its
+embedded source digest is
+`b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882`.
+
+The index remains dirty and not caught up, with no scan running. Dux reports
+reason `fanotify queue overflow`, **887 lifetime overflow notifications**,
+**2,518,862 dropped updates**, and **22,819 pending updates**. It reports
+about **279,278 seconds (3.23 days) behind**; the last full scan is about
+**468,967 seconds (5.43 days) old**. Since the 21:30 sample, overflows rose
+by 54, pending updates by 21,862, events seen by 12,249,055, and events
+resolved by 7,209,184; the dropped-update counter did not change. No recovery
+scan was active during this observation. This confirms that the installed
+production daemon remains on the old build and continues to fall further
+behind; the isolated r132 soak does not change that live service state.
+
+Raw machine-readable status, systemd state, version, and binary hash:
+[`vps1-live-status-20261110T2305Z.json`](docs/qualification/vps1-live-status-20261110T2305Z.json).
