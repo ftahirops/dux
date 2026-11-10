@@ -4911,3 +4911,54 @@ restarts. Terminal exactness/history/SQLite checks are still pending. Latest
 checkpoint:
 [`soak-progress-20261110T1533Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1533Z.json)
 (SHA-256 `8ba61095f175124256e3176b2d3318da7d131c2450461cf1c52ee0bd857a4068`).
+
+
+## Scan-first cadence and per-path freshness measurement — 2026-11-10 15:43 UTC
+
+The VPS2 scan-first service started its eighth scheduled observation at
+**15:40:09 UTC**, exactly 15 minutes after the previous start. At 15:43:12 it
+was still traversing: 1,220,673 files and 173,617 directories seen, with zero
+pending updates, kernel overflows, or dropped updates. The prior seven scan
+starts were at 13:55:09, 14:10:09, 14:25:09, 14:40:09, 14:55:09, 15:10:09, and
+15:25:09 UTC. The scheduler is maintaining its configured start cadence.
+
+The six completion-to-completion gaps still include two intervals over 15
+minutes (15m39s and 17m). However, the code records `last_scan_ts` at traversal
+completion and does not store a last-observed timestamp per path. Because each
+walk takes several minutes and writes changed rows in place, completion age and
+completion gaps cannot prove the maximum age of every indexed path. The
+completion cadence has two misses; the per-path freshness SLO is not directly
+measured and remains unqualified. Do not treat the current status timestamp as
+a point-in-time or per-file freshness guarantee.
+
+The r132 soak worker remained active with zero restarts at 15:43:12. It had run
+23,852.7 seconds (6h37m33s), completed 550,274 operations and 548 exactness
+samples, and recorded six mutation bursts. One 300-second held-reader phase
+passed with WAL reclaim. Controlled crashes and terminal exactness, history,
+and SQLite checks remain pending. Progress is recorded in
+[`soak-progress-20261110T1539Z.json`](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1539Z.json)
+(SHA-256 `aba31cdc18e55dcbba9741561dc825acad98b7f80440ffb54372da45fa612e67`).
+
+The local VM admission remains blocked by unrelated host load (load average
+117.20; CPU PSI some avg10 86.96% at 15:43:15). No guest was started.
+
+
+## Live scan-first inode-reuse failure and retry — 2026-11-10 15:49 UTC
+
+The eighth scheduled VPS2 observation began at **15:40:09 UTC**, on the expected
+15-minute start cadence, but did not complete cleanly. After a 7m58s walk, at
+15:48:07 Dux reported **three conflicting inode incarnations** during concurrent
+filesystem churn (with 108 vanished paths discarded, 3 file identities
+revalidated, and zero unresolved reuse paths). The scan reported three
+coverage issues and was marked incomplete. The previously published index
+remained in place (1,931,496 nodes and 83,985,891,328 unique bytes); Dux did not
+replace it with the unverified scan.
+
+The daemon scheduled its bounded automatic retry for 60 seconds later; the
+retry began at **15:49:07 UTC**. At 15:49:23 it was still scanning. The daemon
+remained active with zero restarts, zero kernel overflow notifications, zero
+dropped updates, zero pending updates, and no paused retry circuit. Recovery is
+not yet proven; the next observation result must be checked before counting this
+cycle as recovered. The earlier seven complete scans remain valid evidence, but
+this live failure shows scan-first reconciliation can encounter incomplete
+coverage under concurrent inode reuse and depends on the retry path.

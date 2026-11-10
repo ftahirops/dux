@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T15:34:52Z",
+  "snapshot_at_utc": "2026-11-10T15:49:23Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -91,12 +91,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T15:34:52Z",
+    "observed_at_utc": "2026-11-10T15:43:12Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 23372.4,
-    "operations": 539934,
-    "exact_check_samples": 537,
+    "elapsed_seconds": 23852.7,
+    "operations": 550274,
+    "exact_check_samples": 548,
     "completed_hourly_bursts": 6,
     "held_reader_scenarios": 1,
     "controlled_crash_recovery_scenarios": 0,
@@ -105,15 +105,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 23.101350310622784,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1533Z.json",
+    "observed_operations_per_second_elapsed": 23.069673454158227,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1539Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.0901712962962963,
+    "coverage_duration_fraction": 0.09202430555555556,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
-    }
+    },
+    "latest_checkpoint_sha256": "aba31cdc18e55dcbba9741561dc825acad98b7f80440ffb54372da45fa612e67"
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -160,7 +161,9 @@
     "latest_soak_checkpoint_1431z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1431Z.json",
     "latest_soak_checkpoint_1447z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1447Z.json",
     "latest_soak_checkpoint_1510z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1510Z.json",
-    "latest_soak_checkpoint_1533z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1533Z.json"
+    "latest_soak_checkpoint_1533z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1533Z.json",
+    "latest_soak_checkpoint_1539z": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T1539Z.json",
+    "vps2_latest_observation_failure": "PRODUCTION_READINESS_STATUS.md (15:49 UTC live scan-first inode-reuse failure and retry)"
   },
   "nonroot_service_hardening": {
     "status": "source implemented; bounded exact-r132 non-root runtime probe passed; package lifecycle qualification pending",
@@ -244,13 +247,13 @@
     "dux_internal_handle_decoder": "not qualified"
   },
   "vps2_scan_first_runtime": {
-    "observed_at_utc": "2026-11-10T15:34:52Z",
+    "observed_at_utc": "2026-11-10T15:49:23Z",
     "installed_build": "0.6.3 (8b02799b)",
     "mode": "scan_first",
     "service_active": true,
     "service_restarts": 0,
     "last_full_observation_utc": "2026-11-10T15:32:18Z",
-    "last_observation_age_seconds": 154,
+    "last_observation_age_seconds": 1025,
     "last_observation_coverage_issues": 0,
     "accounting_verification": "passed",
     "accounting_verification_elapsed_ms": 79462,
@@ -270,7 +273,7 @@
     "behind_seconds_semantics": "not applicable in scan-first mode; use last_scan_age_seconds for observation freshness",
     "completed_observations_since_checkpoint": 7,
     "latest_observation_utc": "2026-11-10T15:32:18Z",
-    "latest_observation_age_seconds": 154,
+    "latest_observation_age_seconds": 1025,
     "latest_observation_files": 1723345,
     "latest_observation_directories": 211633,
     "latest_observation_staged_path_instances": 1934978,
@@ -303,7 +306,7 @@
     ],
     "state_at_1447": "dirty; changes await next full observation; no scan active",
     "state_at_1510": "sixth observation in progress; zero pending updates/overflow/drops",
-    "in_progress_observation_started_at_utc": "2026-11-10T15:10:09Z",
+    "in_progress_observation_started_at_utc": "2026-11-10T15:49:07Z",
     "in_progress_scan_age_seconds_at_observation": 584,
     "state_at_1534": "dirty; changes await next full observation; no scan active; zero pending/overflow/drops",
     "recent_scan_resource_sample": {
@@ -314,6 +317,41 @@
       "measurement_window_seconds": 456,
       "notes": "cgroup/proc counter delta window included about 10s before scan start and 17s after scan completion"
     },
-    "state": "dirty; changes await next full observation; no scan active; zero pending/overflow/drops"
+    "state": "dirty; changes await next full observation; no scan active; zero pending/overflow/drops",
+    "state_at_1543": "dirty; periodic full observation in progress; zero pending updates, kernel overflows, or dropped updates",
+    "in_progress_scan_files_seen": 1220673,
+    "in_progress_scan_directories_seen": 173617,
+    "in_progress_scan_allocated_bytes_seen": 63704932352,
+    "per_path_last_observed_timestamp_available": false,
+    "last_scan_timestamp_semantics": "successful traversal completion time; not a per-path observation timestamp",
+    "observation_start_times_utc": [
+      "2026-11-10T13:55:09Z",
+      "2026-11-10T14:10:09Z",
+      "2026-11-10T14:25:09Z",
+      "2026-11-10T14:40:09Z",
+      "2026-11-10T14:55:09Z",
+      "2026-11-10T15:10:09Z",
+      "2026-11-10T15:25:09Z"
+    ],
+    "freshness_slo_assessment": "per-path maximum age is not directly measured; completion-to-completion gaps miss 15 minutes twice in six intervals",
+    "scan_in_progress_at_1543": true,
+    "scan_progress_files_seen": 73123,
+    "scan_progress_directories_seen": 15047,
+    "scan_progress_allocated_bytes_seen": 63704932352,
+    "state_at_1549": "dirty; bounded retry observation in progress after previous scan failed with 3 inode-incarnation conflicts",
+    "scan_in_progress_at_1549": true,
+    "scan_failed_attempt": {
+      "started_at_utc": "2026-11-10T15:40:09Z",
+      "ended_at_utc": "2026-11-10T15:48:07Z",
+      "duration_seconds": 478,
+      "coverage_issues": 3,
+      "conflicting_inode_incarnations": 3,
+      "vanished_reuse_paths": 108,
+      "revalidated_reuse_paths": 3,
+      "unresolved_reuse_paths": 0,
+      "previous_index_retained": true,
+      "automatic_retry_delay_seconds": 60,
+      "retry_started_at_utc": "2026-11-10T15:49:07Z"
+    }
   }
 }
