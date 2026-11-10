@@ -64,6 +64,17 @@ host verification, but no VM started and no package was copied. The
 throwaway key/workspace was removed. See
 [`the 11:01 admission refusal`](r132-rocky-admission-refusal-20261110T1101Z.json).
 
+At 11:09:42 UTC, a guarded Rocky 9.8 guest started and completed cloud-init.
+After importing a disposable test key, Rocky's RPM verifier accepted the
+signed r132 copy and reported the header signature, header digests, and payload
+digest all `OK`; package queries returned baseline `0.6.3-131` and candidate
+`0.6.3-132`. At 11:11:22 UTC the independent guard stopped the VM when a Go
+test started, before the lifecycle harness or any RPM install began. This
+qualifies cross-platform RPM signature mechanics with a test key, not the
+release owner's publisher identity or the install/upgrade/rollback lifecycle.
+The temporary key and workspace were removed. Evidence:
+[`the Rocky signature check`](r132-rocky-rpm-signature-test-20261110T1111Z.json).
+
 ## Static package authenticity inspection — 2026-11-10 10:13 UTC
 
 The exact r132 artifact

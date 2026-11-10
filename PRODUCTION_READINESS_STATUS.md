@@ -73,6 +73,12 @@ records limits and hashes.
 The focused lifecycle policy regression rejecting a missing BPF denial passed
 **1/1**; it does not execute the syscall in production.
 
+Rocky 9.8 also accepted the RPM signature and all package digests on a
+disposable-key-signed r132 copy. The guest was stopped by the host pressure
+guard before package installation, so this does not close Rocky lifecycle or
+publisher-identity qualification. See the
+[Rocky signature evidence](docs/qualification/r132-rocky-rpm-signature-test-20261110T1111Z.json).
+
 ## VPS1 live production check — 2026-11-10 10:09 UTC
 
 The installed production binary is still Dux **0.6.3 / r66** (SHA-256

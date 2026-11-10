@@ -1,0 +1,41 @@
+{
+  "guest": "rocky9-lifecycle-ephemeral",
+  "distribution": "Rocky Linux 9.8 (Blue Onyx)",
+  "guest_start_utc": "2026-11-10T11:09:42Z",
+  "cloud_init_completed_utc": "2026-11-10T11:10:24Z",
+  "rpm_signing_key": {
+    "type": "disposable qualification-only key",
+    "primary_fingerprint": "48EBF1D8C53517CA9EDA2DC9F245695F9011265A",
+    "removed_after_test": true
+  },
+  "signed_candidate_copy": {
+    "package_version": "0.6.3-132",
+    "sha256": "fd83f932a16199019a9c83a0ce4810097184a4727362aa9f38a6dc0f3d0ae605",
+    "rpm_signature": "Header V4 RSA/SHA512 Signature, key ID 9011265a: OK",
+    "header_sha256_digest": "OK",
+    "header_sha1_digest": "OK",
+    "payload_sha256_digest": "OK",
+    "md5_digest": "OK"
+  },
+  "baseline_package_version": "0.6.3-131",
+  "candidate_signature_check": "passed in Rocky RPM database after importing the public key",
+  "lifecycle_harness_started": false,
+  "package_install_started": false,
+  "guard_stopped_guest_at_utc": "2026-11-10T11:11:22Z",
+  "stop_reason": [
+    "active Go test binary pid=1383153",
+    "active go test pid=1383042"
+  ],
+  "pressure_at_stop": {
+    "load1": 3.07,
+    "cpu_psi_some_avg10_percent": 10.28,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 4.35,
+    "io_psi_full_avg10_percent": 3.98,
+    "memory_psi_some_avg10_percent": 0.04,
+    "memory_psi_full_avg10_percent": 0.04
+  },
+  "production_service_modified": false,
+  "original_r132_rpm_modified": false,
+  "test_key_and_workspace_removed": true
+}
