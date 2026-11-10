@@ -1,6 +1,6 @@
 # Production readiness status
 
-## Latest verified checkpoint — 2026-11-10 01:42 UTC
+## Latest verified checkpoint — 2026-11-10 01:45 UTC
 
 ### Release decision
 
@@ -67,7 +67,7 @@ recorded advisory snapshot. Privileged fanotify success paths and actual
 event-handle resolution remain untested. Full details and artifacts:
 [`r126 qualification`](docs/qualification/release-candidate-r126-20261110/README.md).
 
-**Updated:** 2026-11-10 01:42 UTC
+**Updated:** 2026-11-10 01:45 UTC
 
 ---
 
