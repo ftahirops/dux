@@ -1,0 +1,17 @@
+{
+  "observed_at_utc": "2026-11-10T23:32:39Z",
+  "qualification_host": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 125754486784,
+    "root_available_bytes": 63506595840,
+    "root_use_percent": 67,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3752701952,
+    "dev_shm_available_bytes": 9976512512,
+    "dev_shm_use_percent": 28
+  },
+  "load_average_1m": 22.18,
+  "cpu_psi_some_avg10_percent": 17.48,
+  "io_psi_some_avg10_percent": 3.32,
+  "method": "read-only df -B1, /proc/loadavg, /proc/pressure"
+}
