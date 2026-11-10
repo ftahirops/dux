@@ -27,11 +27,24 @@ and progress file are on VPS2 at the path above; a final copy and qualification
 decision will be added here after the worker reaches a terminal result. See
 the [soak configuration and gates](docs/qualification/r132-72h-soak-vps2-20261110/README.md).
 
+### Live checkpoint — 2026-11-10 09:15 UTC
+
+The unit remains `active/running`, with **zero restarts**. At elapsed 600.2s,
+the worker had completed **13,994 mutations**. The latest recorded 1,000-op
+exact checkpoint (13,000 operations) passed in 1.856s; no controlled crash,
+held-reader phase, or hourly burst had occurred yet. Final exactness, history,
+and SQLite integrity are still pending. These are early progress measurements,
+not a soak pass. VPS2 had 4.5 GiB free on `/`; the disposable fixture uses
+`/dev/shm`, with 2.8 GiB free there.
+
 The Rocky RPM lifecycle is still pending. A guarded VM start at 09:08 UTC was
 stopped by its independent host-pressure monitor 11 seconds later when five Go
 compiler processes and one Go race-test process appeared. SSH was not ready and
 no RPM package operation ran. The recorded interruption is in the
 [Rocky prerequisite report](docs/qualification/r132-rocky-rpm-prereq-20261110.md).
+At 09:15 UTC another guarded startup attempt was refused before launch because
+host load1 was 11.73 against the limit of 10; the guest and package state remain
+untouched.
 
 ## Exact r132 100k-file churn qualification — 2026-11-10 08:19–08:57 UTC
 

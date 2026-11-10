@@ -36,3 +36,13 @@ file-copy attempts were refused, and no RPM lifecycle phase ran or package was
 changed. The stopped event and pressure sample are preserved in
 [`the captured guard event`](r132-rocky-rpm-guarded-start-20261110T090848Z.jsonl).
 Retry after the new host workloads finish and admission remains clear.
+
+### Admission retry refused — 2026-11-10 09:15 UTC
+
+At 09:15 UTC, the ephemeral Rocky guest start was retried with the standard
+profile and a 25% CPU quota. The admission guard refused before starting a VM:
+sample 1/3 reported host load1 **11.73**, above the configured limit of **10**.
+The host still had a Go test process consuming substantial CPU. No guest was
+started, no package lifecycle phase ran, and no package or service was changed.
+This is another admission refusal, not a failed RPM lifecycle test. Retry only
+after the guard's three stable samples pass.
