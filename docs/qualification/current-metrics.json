@@ -204,12 +204,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T23:50:40Z",
+    "observed_at_utc": "2026-11-10T23:56:45Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 53199.0,
-    "operations": 1184363,
-    "exact_check_samples": 1181,
+    "elapsed_seconds": 53501.3,
+    "operations": 1190852,
+    "exact_check_samples": 1187,
     "completed_hourly_bursts": 14,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -218,16 +218,16 @@
     "observed_operations_per_second_last_measured": 23.562,
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
-    "observed_operations_per_second_elapsed": 22.263,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2350Z.json",
+    "observed_operations_per_second_elapsed": 22.258,
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2356Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
-    "coverage_duration_fraction": 0.20524305555555555,
+    "coverage_duration_fraction": 0.2064093364197531,
     "held_reader_result": {
       "held_seconds": 300,
       "snapshot_inodes": 2502,
       "wal_reclaimed": true
     },
-    "latest_checkpoint_sha256": "2c54b4e6ebdaf2187cde2c184348cdbf185a429488e1ed7427e0122ad93f49a6",
+    "latest_checkpoint_sha256": "513591ed840e6cba9dc7c44f1a5f6fbcde5f061bf5889e4d8a9c1dadc19accb2",
     "controlled_crashes_completed": 1,
     "harness_suites_run": [
       "soak"
@@ -252,7 +252,7 @@
     "latest_live_status_query_at_utc": "2026-11-10T23:47Z",
     "latest_full_checkpoint_at_utc": "2026-11-10T20:12:09Z",
     "max_exact_convergence_ms_observed": 17393,
-    "latest_checkpoint_at_utc": "2026-11-10T23:50Z",
+    "latest_checkpoint_at_utc": "2026-11-10T23:56Z",
     "controlled_crash_recovery_scheduled_at_elapsed_seconds": 43200,
     "exactness_protocol": "Each 1000-operation exactness sample requests a full scan-first observation via SIGHUP, waits for accounting verification, then compares fixture and index.",
     "latest_live_checkpoint_remote_path": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json",
@@ -282,7 +282,7 @@
       "max_ms": 17393,
       "elapsed_fraction_percent": 7.37
     },
-    "remaining_seconds": 206001.0,
+    "remaining_seconds": 205698.7,
     "exact_convergence_profile_at_2026_11_10T2238Z": {
       "sample_count": 1088,
       "mean_ms": 3384.563,
@@ -344,12 +344,14 @@
       "max_ms": 17393
     },
     "sampled_exact_convergence_ms": {
-      "count": 1181,
-      "mean": 3542.767,
-      "median": 2988,
-      "p95_nearest_rank": 8237,
+      "count": 1187,
+      "mean": 3552.153,
+      "median": 3002,
+      "p95_nearest_rank": 8252,
       "max": 17393
-    }
+    },
+    "latest_checkpoint_progress_file_mtime_utc": "2026-11-10T23:56:31.813Z",
+    "latest_checkpoint_progress_file_size_bytes": 179877
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -1289,15 +1291,15 @@
     "evidence": "docs/qualification/guard-recheck-20261110T2248Z.log"
   },
   "vps2_disk_latest": {
-    "observed_at_utc": "2026-11-10T23:50Z",
+    "observed_at_utc": "2026-11-10T23:56Z",
     "root_filesystem_use_percent": 89,
     "root_available_gib": 10.0,
     "dev_shm_available_gib": 2.1,
     "var_tmp_gib": 2.4,
     "var_log_journal_gib": 4.1,
     "cleanup_performed": true,
-    "note": "Direct df sample; /var/tmp and journal sizes are last measured at 21:50. VPS2 has no /dev/kvm and its dedicated soak remains active.",
-    "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2350Z.json"
+    "note": "Measured at 23:56 UTC. Totals do not identify ownership of all files. VPS2 has no /dev/kvm and the dedicated soak remains active.",
+    "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2356Z.json"
   },
   "python_qualification_latest": {
     "observed_at_utc": "2026-11-10T22:05:28Z",
