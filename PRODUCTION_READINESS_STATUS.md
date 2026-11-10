@@ -37,6 +37,16 @@ zero warnings**. The RustSec database snapshot had 1,430 advisories at commit
 application security certification; its scope and raw result are in the
 [audit record](docs/qualification/cargo-audit-20261110T1007Z/README.md).
 
+### Fresh recheck — 2026-11-10 11:04 UTC
+
+`cargo audit -D warnings` exited 0 after fetching the advisory database and
+updating the crates.io index. The lockfile still contains 229 crates and the
+audit reported no vulnerabilities or warnings. The fetched advisory database
+resolved to the same commit `d9cb059f3217db87aeccd190b81eaffe8cc29cb9`, dated
+2026-11-09T17:13:08+01:00; therefore this is a fresh scan against the latest
+database available to this host, not a newer advisory snapshot. Cargo Audit
+version was 0.22.2. No lockfile or worktree files changed.
+
 ## Release artifact authenticity — open gate
 
 Static inspection of the exact r132 RPM confirmed its payload hashes and
@@ -204,6 +214,12 @@ burst had completed; the held-reader, controlled-recovery, and final checks
 remained pending. A further Rocky VM attempt was refused at admission sample
 2/3 when unrelated Go build/test work appeared; details are in the
 [`11:01 refusal record`](docs/qualification/r132-rocky-admission-refusal-20261110T1101Z.json).
+
+At 11:03:00 UTC, the worker remained active with zero restarts, 7,090.4
+seconds elapsed, 167,198 operations, and 167 exact-check samples. One hourly
+burst was complete; held-reader, controlled-recovery, and final checks were
+pending. No Rocky VM was attempted during the active host race tests and load1
+14.35 sample.
 
 The Python readiness/release harnesses were rerun at low priority: **189 passed,
 0 failed** across readiness workflow (62), package lifecycle harness (72),
