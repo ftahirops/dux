@@ -17,13 +17,25 @@ Read-only capture at 01:40:51 UTC: `/usr/bin/dux` is package `0.6.3-66`, source
 commit `e0cc915f8f37`, not the current candidate. PID 1073891 is active with 4
 lifetime restarts and no reconciliation in progress. Status is dirty and not
 caught up, with reason `non-watched filesystem mounts changed; reconciling
-visible paths`, zero pending updates, and no write error. Its last full scan
-was 2026-11-05 12:49:22 UTC (about 4.5 days earlier); event backlog age was
-about 56 hours. Lifetime counters show **649 kernel overflows** and
-**2,518,862 reported dropped updates**. The journal at capture time continues
-to report `open_by_handle_at` `ESTALE` for transient paths. Root storage is
-70% used with 55 GiB free. Evidence: direct status, systemd/process output,
-and the live journal were checked; no service or database changes were made.
+visible paths`, and no write error. Its last full scan was 2026-11-05 12:49:22
+UTC (about 4.5 days earlier); event backlog age was about 56 hours. Lifetime
+counters show **649 kernel overflows** and **2,518,862 reported dropped
+updates**. The journal at capture time continues to report `open_by_handle_at`
+`ESTALE` for transient paths. Root storage is 70% used with 55 GiB free.
+
+At 01:45 UTC, the r126 binary's read-only `status --db` command successfully
+opened this same production database. It reported event-apply mode, 2 failed
+reconciliation attempts against a limit of 1, and
+`automatic_reconciliation_paused=true`; the daemon itself was not paused and
+had 31 pending updates in that sample. This identifies the legacy repair
+circuit as the immediate reason automatic recovery is no longer proceeding.
+The snapshot is
+[`production-r126-readonly-status-20261110T0145Z.json`](docs/qualification/production-r126-readonly-status-20261110T0145Z.json),
+SHA-256 `7932514a5276fbed865007c8aa85f89c0358bde0112220aee6629cf9aec5a12e`.
+The r126 default-mode regression test confirms the new daemon defaults to
+reconciliation-first; the installed package 66 remains event-apply. That is a
+candidate behavior change whose upgrade and live canary still need the open
+lifecycle gates. No service or database changes were made.
 
 ### VPS2 — scan-first runtime evidence and capacity
 
