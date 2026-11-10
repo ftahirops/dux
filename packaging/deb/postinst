@@ -1,19 +1,45 @@
 #!/bin/sh
 set -e
 
-# The `dux` group gates read access to the index. The index lists every filename
-# on /, so it is 0640 root:dux rather than world-readable; members of this group
-# (and root) can run `dux find` / `dux status` directly. Must exist BEFORE the
-# unit starts — systemd resolves Group= at activation.
+# The dedicated `dux` service account uses the two capabilities needed for
+# fanotify and path-handle reads without running with UID 0. The `dux` group
+# gates index queries. Both identities must exist before the unit starts.
 if ! getent group dux >/dev/null 2>&1; then
     addgroup --system dux >/dev/null
 fi
+if ! getent passwd dux >/dev/null 2>&1; then
+    adduser --system --ingroup dux --no-create-home --home /nonexistent \
+        --shell /usr/sbin/nologin dux >/dev/null
+else
+    account=$(getent passwd dux)
+    account_uid=$(printf '%s\n' "$account" | cut -d: -f3)
+    account_gid=$(printf '%s\n' "$account" | cut -d: -f4)
+    account_home=$(printf '%s\n' "$account" | cut -d: -f6)
+    account_shell=$(printf '%s\n' "$account" | cut -d: -f7)
+    dux_gid=$(getent group dux | cut -d: -f3)
+    case "${account_shell##*/}" in nologin|false) ;; *) account_uid=0 ;; esac
+    if [ "$account_uid" = 0 ] || [ "$account_gid" != "$dux_gid" ] \
+       || [ "$account_home" != /nonexistent ]; then
+        echo "dux: existing 'dux' account is not the expected locked service account" >&2
+        exit 1
+    fi
+fi
 
-# StateDirectory= enforces this on systemd starts too; this also covers the
-# non-systemd path. The helper rejects symlinked paths before chgrp/chmod so a
-# damaged state directory cannot redirect root's permission changes elsewhere.
+# On upgrade, stop the old daemon synchronously before transferring its open
+# database to the service UID. Preserve inactive state; only restart a daemon
+# that was active before this migration.
+was_active=no
+if [ -d /run/systemd/system ]; then
+    if systemctl is-active --quiet dux.service; then
+        was_active=yes
+    fi
+    systemctl stop dux.service
+fi
+
+# StateDirectory= enforces ownership on systemd starts too; this also covers
+# the non-systemd path. The helper rejects symlinks before changing permissions.
 mkdir -p /var/lib/dux
-/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux
+/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux dux
 
 case "$1" in
     configure)
@@ -32,14 +58,16 @@ case "$1" in
             if [ -z "${2:-}" ]; then
                 systemctl start --no-block dux.service
             else
-                systemctl try-restart --no-block dux.service
+                if [ "$was_active" = yes ]; then
+                    systemctl start --no-block dux.service
+                fi
                 systemctl try-restart --no-block dux-tunnel.service
             fi
             echo "dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)"
         else
             echo "dux: systemd not detected; run 'dux scan /' then 'dux daemon /' manually."
         fi
-        echo "dux: the index is readable by root and the 'dux' group (it lists every"
+        echo "dux: the index is readable by the 'dux' service account and group (it lists every"
         echo "dux: filename on /). Grant a user access with: usermod -aG dux <user>"
         ;;
 esac

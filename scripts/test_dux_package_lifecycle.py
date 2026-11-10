@@ -350,9 +350,33 @@ class SecureIndexPermissionsHelperTests(unittest.TestCase):
         deb = (root / "packaging/deb/postinst").read_text()
         spec = (root / "packaging/dux.spec").read_text()
         builder = (root / "scripts/build-release.sh").read_text()
-        self.assertIn("/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux", deb)
-        self.assertIn("/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux", spec)
-        self.assertIn("owner=${3:-root}", (root / "packaging/secure-index-permissions.sh").read_text())
+        self.assertIn("/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux dux", deb)
+        self.assertIn("/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux dux", spec)
+        self.assertIn("owner=${3:-dux}", (root / "packaging/secure-index-permissions.sh").read_text())
+        service = (root / "packaging/dux.service").read_text()
+        self.assertIn("User=dux", service)
+        self.assertIn("adduser --system --ingroup dux", deb)
+        self.assertIn("useradd --system --gid dux", spec)
+        self.assertIn("%dir %attr(0750,dux,dux) /var/lib/dux", spec)
+        deb_stop = deb.index("systemctl stop dux.service")
+        deb_migrate = deb.index("secure-index-permissions.sh /var/lib/dux dux dux")
+        deb_restart = deb.index('if [ "$was_active" = yes ]')
+        self.assertLess(deb_stop, deb_migrate)
+        self.assertLess(deb_migrate, deb_restart)
+        rpm_stop = spec.index("systemctl stop dux.service")
+        rpm_migrate = spec.index("secure-index-permissions.sh /var/lib/dux dux dux")
+        rpm_restart = spec.index('if [ "$was_active" = yes ]')
+        self.assertLess(rpm_stop, rpm_migrate)
+        self.assertLess(rpm_migrate, rpm_restart)
+        rpm_pre = spec.split("%pre\n", 1)[1].split("\n%post\n", 1)[0]
+        rpm_post = spec.split("%post\n", 1)[1].split("\n%posttrans\n", 1)[0]
+        rpm_posttrans = spec.split("%posttrans\n", 1)[1].split("\n%preun\n", 1)[0]
+        self.assertIn("/run/dux-rpm-upgrade-was-active", rpm_pre)
+        self.assertIn("systemctl stop dux.service", rpm_pre)
+        self.assertNotIn("systemctl stop dux.service", rpm_post)
+        self.assertIn("secure-index-permissions.sh /var/lib/dux dux dux", rpm_post)
+        self.assertIn("/run/dux-rpm-upgrade-was-active", rpm_posttrans)
+        self.assertIn('if [ "$was_active" = yes ]', rpm_posttrans)
         self.assertIn("packaging/secure-index-permissions.sh", builder)
         self.assertIn("Depends: adduser, python3", (root / "packaging/deb/control").read_text())
         self.assertIn("Requires:       python3", spec)
@@ -369,8 +393,13 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
         process_dir = Path(self.proc.name) / "4242"
         process_dir.mkdir()
         (process_dir / "oom_score_adj").write_text("0\n")
+        (process_dir / "status").write_text(
+            "Uid:\t1001\t1001\t1001\t1001\nGid:\t1002\t1002\t1002\t1002\n"
+            "CapEff:\t0000000000200004\nCapPrm:\t0000000000200004\n"
+            "CapBnd:\t0000000000200004\nCapAmb:\t0000000000200004\n"
+        )
         self.properties = {
-            "User": "",
+            "User": "dux",
             "Group": "dux",
             "AmbientCapabilities": "cap_dac_read_search cap_sys_admin",
             "CapabilityBoundingSet": "cap_dac_read_search cap_sys_admin",
@@ -451,7 +480,9 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
                 )
             return SimpleNamespace(returncode=0, stdout=output, stderr="")
 
-        with patch.object(LIFECYCLE, "command", side_effect=fake_command):
+        with patch.object(LIFECYCLE, "command", side_effect=fake_command), \
+             patch.object(LIFECYCLE.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=1001)), \
+             patch.object(LIFECYCLE.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=1002)):
             return LIFECYCLE.assert_service_security_policy(proc_root=self.proc.name)
 
     def use_expanded_syscall_filter(self):
@@ -468,7 +499,25 @@ class EffectiveUnitPolicyTests(unittest.TestCase):
         )
 
     def test_accepts_restricted_effective_service_unit(self):
-        self.assertEqual(self.check_properties()["Group"], "dux")
+        observed = self.check_properties()
+        self.assertEqual(observed["User"], "dux")
+        self.assertEqual(observed["Group"], "dux")
+        self.assertEqual(observed["ProcessUID"], 1001)
+        self.assertEqual(observed["ProcessGID"], 1002)
+        self.assertEqual(observed["ProcessCapabilities"]["CapEff"], "0x200004")
+
+    def test_rejects_root_service_identity(self):
+        self.properties["User"] = "root"
+        with self.assertRaises(AssertionError):
+            self.check_properties()
+
+    def test_rejects_unexpected_runtime_capabilities(self):
+        status_path = Path(self.proc.name) / "4242" / "status"
+        status_path.write_text(status_path.read_text().replace(
+            "CapEff:\t0000000000200004", "CapEff:\t000000000020000c"
+        ))
+        with self.assertRaises(AssertionError):
+            self.check_properties()
 
     def test_accepts_systemd_expanded_clock_and_obsolete_deny_groups(self):
         self.use_expanded_syscall_filter()

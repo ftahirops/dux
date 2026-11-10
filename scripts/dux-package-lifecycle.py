@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import pwd
 import shlex
 import shutil
 import sqlite3
@@ -169,6 +170,7 @@ def assert_service_security_policy(proc_root=Path("/proc")):
     ).stdout
     observed = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
     expected = {
+        "User": "dux",
         "Group": "dux",
         "AmbientCapabilities": {"cap_dac_read_search", "cap_sys_admin"},
         "CapabilityBoundingSet": {"cap_dac_read_search", "cap_sys_admin"},
@@ -185,7 +187,6 @@ def assert_service_security_policy(proc_root=Path("/proc")):
         "LimitCORE": "0",
         "ProtectKernelModules": "no",
     }
-    assert observed.get("User", "") in {"", "root"}, observed
     for name, wanted in expected.items():
         value = observed.get(name)
         if name in {"AmbientCapabilities", "CapabilityBoundingSet"}:
@@ -243,6 +244,35 @@ def assert_service_security_policy(proc_root=Path("/proc")):
         "observed": process_score, "path": str(process_score_path),
     }
     observed["ProcessOOMScoreAdjust"] = process_score
+    process_status = dict(
+        line.split(":", 1)
+        for line in (Path(proc_root) / str(main_pid) / "status").read_text().splitlines()
+        if ":" in line
+    )
+    service_uid = pwd.getpwnam("dux").pw_uid
+    process_uids = [int(value) for value in process_status["Uid"].split()]
+    assert len(process_uids) == 4 and set(process_uids) == {service_uid}, {
+        "property": "process Uid", "expected": [service_uid] * 4, "observed": process_uids,
+    }
+    service_gid = grp.getgrnam("dux").gr_gid
+    process_gids = [int(value) for value in process_status["Gid"].split()]
+    assert len(process_gids) == 4 and set(process_gids) == {service_gid}, {
+        "property": "process Gid", "expected": [service_gid] * 4, "observed": process_gids,
+    }
+    observed["ProcessUID"] = service_uid
+    observed["ProcessGID"] = service_gid
+    required_caps = (1 << 2) | (1 << 21)  # CAP_DAC_READ_SEARCH | CAP_SYS_ADMIN
+    process_caps = {
+        name: int(process_status[name].split()[0], 16)
+        for name in ("CapEff", "CapPrm", "CapBnd", "CapAmb")
+    }
+    assert all(value == required_caps for value in process_caps.values()), {
+        "property": "process capabilities", "expected_mask": hex(required_caps),
+        "observed_masks": {name: hex(value) for name, value in process_caps.items()},
+    }
+    observed["ProcessCapabilities"] = {
+        name: hex(value) for name, value in process_caps.items()
+    }
     return observed
 
 
@@ -261,9 +291,11 @@ def assert_service_path_visible(path, main_pid, proc_root=Path("/proc")):
     return {"path": str(path), "device": host_id[0], "inode": host_id[1]}
 
 
-def assert_index_access_policy(directory=Path("/var/lib/dux"), expected_uid=0, group_name="dux"):
-    """Enforce the documented root:dux permissions on the filename index."""
+def assert_index_access_policy(directory=Path("/var/lib/dux"), expected_uid=None, group_name="dux"):
+    """Enforce the dedicated-user:dux permissions on the filename index."""
     directory = Path(directory)
+    expected_uid = pwd.getpwnam("dux").pw_uid if expected_uid is None else expected_uid
+    expected_owner = pwd.getpwuid(expected_uid).pw_name
     directory_stat = directory.lstat()
     expected_gid = grp.getgrnam(group_name).gr_gid
     assert stat.S_ISDIR(directory_stat.st_mode), directory_stat
@@ -288,9 +320,9 @@ def assert_index_access_policy(directory=Path("/var/lib/dux"), expected_uid=0, g
         assert (info.st_uid, info.st_gid) == (expected_uid, expected_gid), (str(path), info)
         assert stat.S_IMODE(info.st_mode) == 0o640, (str(path), oct(stat.S_IMODE(info.st_mode)))
         checked[path.name] = oct(stat.S_IMODE(info.st_mode))
-    return {"directory_owner": "root" if expected_uid == 0 else str(expected_uid), "directory_group": group_name,
+    return {"directory_owner": expected_owner, "directory_group": group_name,
             "directory_mode": oct(stat.S_IMODE(directory_stat.st_mode)),
-            "index_file_owner": "root" if expected_uid == 0 else str(expected_uid), "index_file_group": group_name,
+            "index_file_owner": expected_owner, "index_file_group": group_name,
             "index_files": checked}
 
 

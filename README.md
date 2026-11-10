@@ -562,7 +562,7 @@ but do not eliminate contention or guarantee freshness under sustained load.
 The index lists **every filename on `/`** — including names inside directories a
 user could not otherwise traverse. It exposes no file *contents*, but reading it
 does bypass directory permissions, so the packaged service keeps it at **`0640
-root:dux`**, not world-readable.
+dux:dux`**, not world-readable.
 
 ```bash
 sudo usermod -aG dux alice     # alice can now run `dux find` / `dux status`

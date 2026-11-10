@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-10T11:34:00Z",
+  "snapshot_at_utc": "2026-11-10T11:55:09Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,18 +7,20 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-10T11:12:55Z",
+    "observed_at_utc": "2026-11-10T11:54:00Z",
     "installed_release": "0.6.3-66",
     "service_active": true,
     "historical_restarts": 4,
     "index_dirty": true,
     "caught_up": false,
-    "kernel_overflows": 742,
+    "kernel_overflows": 752,
     "dropped_updates": 2518862,
-    "last_full_scan_utc": "2026-11-05T12:49:22Z"
+    "last_full_scan_utc": "2026-11-05T12:49:22Z",
+    "behind_seconds": 238998.746,
+    "service_user": "root"
   },
   "disk": {
-    "observed_at_utc": "2026-11-10T11:30:37Z",
+    "observed_at_utc": "2026-11-10T11:54:00Z",
     "root_size_gib": 185,
     "root_used_gib": 121,
     "root_available_gib": 56,
@@ -26,8 +28,8 @@
     "target_readiness_size_gib": 1.4
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-10T11:34:28Z",
-    "load_average_1m": 27.92,
+    "observed_at_utc": "2026-11-10T11:54:00Z",
+    "load_average_1m": 17.13,
     "cpu_psi_some_avg10_percent": 70.84,
     "active_go_build_or_test_workloads": true,
     "rocky_guest_started": false
@@ -50,16 +52,19 @@
     "result": "passed",
     "exact_comparisons": 10,
     "sqlite_integrity": "ok",
-    "limitations": ["not 1.9M-node production scale", "not multi-day endurance"]
+    "limitations": [
+      "not 1.9M-node production scale",
+      "not multi-day endurance"
+    ]
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-10T11:34:01Z",
+    "observed_at_utc": "2026-11-10T11:53:20Z",
     "state": "active/running",
     "restarts": 0,
-    "elapsed_seconds": 8951.3,
-    "operations": 210427,
-    "exact_check_samples": 209,
+    "elapsed_seconds": 10091.7,
+    "operations": 236237,
+    "exact_check_samples": 235,
     "completed_hourly_bursts": 2,
     "held_reader_scenarios": 0,
     "controlled_crash_recovery_scenarios": 0,
@@ -94,5 +99,27 @@
     "disk": "docs/qualification/workspace-disk-20261110T1130Z.json",
     "dependency_audit": "docs/qualification/cargo-audit-20261110T1133Z.json",
     "coverage_and_full_history": "PRODUCTION_READINESS_STATUS.md"
+  },
+  "nonroot_service_hardening": {
+    "status": "source implemented; runtime qualification pending",
+    "focused_tests_passed": 74,
+    "focused_tests_failed": 0,
+    "deb_rpm_script_syntax": "passed",
+    "systemd_unit_verification": "passed",
+    "rpm_install_upgrade_rollback": "not qualified",
+    "fanotify_handle_access_as_dux": "not qualified",
+    "production_deployed": false,
+    "evidence": "docs/qualification/systemd-hardening-20261110/nonroot-service-followup.md",
+    "full_python_suite_passed": 376,
+    "full_python_suite_skipped": 1,
+    "temporary_rpm_build": "passed; unsigned; not release artifact",
+    "temporary_deb_staging_build": "passed; unsigned; source metadata version 0.6.3-12"
+  },
+  "python_tests": {
+    "modules": 25,
+    "passed": 376,
+    "failed": 0,
+    "skipped": 1,
+    "observed_at_utc": "2026-11-10T11:56:23Z"
   }
 }

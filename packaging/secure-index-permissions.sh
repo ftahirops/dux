@@ -3,7 +3,7 @@ set -eu
 
 state_dir=${1:-/var/lib/dux}
 group=${2:-dux}
-owner=${3:-root}
+owner=${3:-dux}
 
 refuse() {
     printf 'dux: refusing unsafe index state path %s: %s\n' "$1" "$2" >&2

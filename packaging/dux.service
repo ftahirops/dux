@@ -28,9 +28,11 @@ RestartSec=30s
 RuntimeDirectory=dux
 RuntimeDirectoryMode=0755
 
-# Index ownership: runs as root (fanotify needs CAP_SYS_ADMIN) but with the `dux`
-# group, and a 0027 umask, so the index lands 0640 root:dux instead of 0644.
+# Run with a dedicated service UID; fanotify and handle reads use only the
+# explicitly granted ambient capabilities below. The `dux` group grants
+# controlled query access; 0027 makes the index 0640 dux:dux, not world-readable.
 # See "index exposure" at the bottom of this file.
+User=dux
 Group=dux
 UMask=0027
 StateDirectory=dux
@@ -68,9 +70,8 @@ OOMPolicy=stop
 OOMScoreAdjust=0
 
 # fanotify needs CAP_SYS_ADMIN; reading all files needs DAC override. Keep both
-# capabilities in the daemon's ambient set so the service retains them while
-# SecureBits=noroot prevents UID 0 from reacquiring them after exec. Alert hooks
-# clear ambient, effective, permitted, and inheritable capabilities by default.
+# capabilities in the daemon's ambient set for the non-root service UID. Alert
+# hooks clear ambient, effective, permitted, and inheritable capabilities.
 # NOTE: do NOT enable ProtectSystem/ProtectHome/PrivateTmp/PrivateMounts/
 # ReadOnlyPaths etc. — those put the service in a PRIVATE MOUNT NAMESPACE, and a
 # fanotify filesystem mark there would not see writes through the host's mounts.
@@ -120,12 +121,12 @@ RestrictAddressFamilies=AF_UNIX
 # not expose file CONTENTS, but it does expose the existence and names of every
 # path on the box.
 #
-# The index is therefore 0640 root:dux (see Group=/UMask=/StateDirectory* above),
-# NOT world-readable. Grant a trusted user direct query access with:
+# The index is therefore 0640 dux:dux (see User=/Group=/UMask=/StateDirectory*
+# above), NOT world-readable. Grant a trusted user direct query access with:
 #     usermod -aG dux alice     # alice can now run `dux find` / `dux status`
 # Everyone else is denied and must go through a privileged wrapper.
 #
-# To go further and make the index ROOT-ONLY, drop `Group=dux` and set:
+# To restrict queries to the service account and root, keep `User=dux` and set:
 #     StateDirectoryMode=0700
 #     UMask=0077
 # (the daemon then creates dux.db 0600.)

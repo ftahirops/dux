@@ -45,23 +45,63 @@ install -m0644 %{_sourcedir}/README.md  %{buildroot}%{_docdir}/dux/README.md
 /usr/lib/systemd/system/dux.service
 /usr/lib/systemd/system/dux-tunnel.service
 %doc %{_docdir}/dux/README.md
-# The index lists every filename on /, so the state dir is root:dux 0750, not 0755.
-%dir %attr(0750,root,dux) /var/lib/dux
+# The index lists every filename on /, so the state dir is dux:dux 0750, not 0755.
+%dir %attr(0750,dux,dux) /var/lib/dux
 
 %pre
-# The `dux` group gates read access to the index. Created in %pre so it exists
-# before %files ownership is applied and before the unit starts.
+set -e
+# The dedicated `dux` service account avoids UID 0; the group gates index
+# queries. Create both in %pre before %files ownership is applied.
 if ! getent group dux >/dev/null 2>&1; then
     groupadd -r dux >/dev/null
+fi
+if ! getent passwd dux >/dev/null 2>&1; then
+    useradd --system --gid dux --no-create-home --home-dir /nonexistent \
+        --shell /sbin/nologin dux
+else
+    account=$(getent passwd dux)
+    account_uid=$(printf '%s\n' "$account" | cut -d: -f3)
+    account_gid=$(printf '%s\n' "$account" | cut -d: -f4)
+    account_home=$(printf '%s\n' "$account" | cut -d: -f6)
+    account_shell=$(printf '%s\n' "$account" | cut -d: -f7)
+    dux_gid=$(getent group dux | cut -d: -f3)
+    case "${account_shell##*/}" in nologin|false) ;; *) account_uid=0 ;; esac
+    if [ "$account_uid" = 0 ] || [ "$account_gid" != "$dux_gid" ] \
+       || [ "$account_home" != /nonexistent ]; then
+        echo "dux: existing 'dux' account is not the expected locked service account" >&2
+        exit 1
+    fi
+fi
+# This scriptlet runs before RPM applies ownership from %files. Stop the old
+# daemon before the state directory can change from root:dux to dux:dux.
+dux_upgrade_marker=/run/dux-rpm-upgrade-was-active
+rm -f "$dux_upgrade_marker"
+if [ -d /run/systemd/system ] && systemctl is-active --quiet dux.service; then
+    umask 077
+    : > "$dux_upgrade_marker"
+    systemctl stop dux.service
 fi
 exit 0
 
 %post
+set -e
 mkdir -p /var/lib/dux
-/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux
+/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux dux
 # Optional dux-tunnel.service is never enabled or configured by installation.
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
+fi
+exit 0
+
+%posttrans
+set -e
+was_active=no
+dux_upgrade_marker=/run/dux-rpm-upgrade-was-active
+if [ -f "$dux_upgrade_marker" ]; then
+    was_active=yes
+    rm -f "$dux_upgrade_marker"
+fi
+if [ -d /run/systemd/system ]; then
     if [ "$1" = "1" ]; then
         systemctl enable dux.service
     fi
@@ -71,12 +111,14 @@ if [ -d /run/systemd/system ]; then
     if [ "$1" = "1" ]; then
         systemctl start --no-block dux.service
     else
-        systemctl try-restart --no-block dux.service
+        if [ "$was_active" = yes ]; then
+            systemctl start --no-block dux.service
+        fi
         systemctl try-restart --no-block dux-tunnel.service
     fi
     echo "dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)"
 fi
-echo "dux: the index is readable by root and the 'dux' group (it lists every"
+echo "dux: the index is readable by the 'dux' service account and group (it lists every"
 echo "dux: filename on /). Grant a user access with: usermod -aG dux <user>"
 exit 0
 
