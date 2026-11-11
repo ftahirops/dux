@@ -1,0 +1,19 @@
+{
+  "observed_at_utc": "2026-11-11T03:15:13Z",
+  "source_commit": "d3763f2d8900bf5dbb1298a7aba313870c6674f5",
+  "source_sha256_embedded": "d1f1cdd284f444b7efdfd10a9cc7bbc85e1dd70883174cacc5ada4db306ed131",
+  "build_command": "CARGO_BUILD_JOBS=1 cargo build --locked --release",
+  "build_result": "passed",
+  "binary": "target/release/dux",
+  "binary_version": "dux 0.6.3 (d3763f2d8900) [production]",
+  "binary_sha256": "e441adcb7e290b6dea5ff0bf4e35810b36acb8f4912f0c318ae0f7b07cbe3b5b",
+  "format": "ELF 64-bit x86-64 PIE, stripped, dynamically linked",
+  "hardening_headers": "GNU_RELRO present; GNU_STACK is non-executable",
+  "deployment": "Local build artifact only; it has not been installed on VPS1 or VPS2.",
+  "runtime_qualification": "The full guarded matrix did not run. An admitted guest stopped at 2026-11-11T03:12:26Z when the runtime guard detected unrelated Go compiler/test work on the host. The staged guest artifacts were r132 binaries; this new workspace build was not tested in the guest.",
+  "next": [
+    "Stage this production binary read-only with its matching fault-injection binary and source manifest.",
+    "Run the guarded fault matrix and test the actual systemd unit state through reconciliation.",
+    "Do not install or canary before the candidate passes the release gates."
+  ]
+}

@@ -2149,5 +2149,25 @@
     "combined_distinct_passed_cases": 724,
     "coverage_measured_for_this_change": false,
     "details": "docs/qualification/workspace-regression-20261111T0306Z.json"
+  },
+  "workspace_release_build_20261111T0315Z": {
+    "source_commit": "d3763f2d8900bf5dbb1298a7aba313870c6674f5",
+    "version": "dux 0.6.3 (d3763f2d8900) [production]",
+    "binary_sha256": "e441adcb7e290b6dea5ff0bf4e35810b36acb8f4912f0c318ae0f7b07cbe3b5b",
+    "build_passed": true,
+    "staged_for_vm": false,
+    "installed": false,
+    "runtime_qualified": false,
+    "details": "docs/qualification/workspace-release-build-20261111T0315Z.json"
+  },
+  "fault_matrix_attempt_20261111T0312Z": {
+    "guest": "ubuntu24",
+    "vm_admission_passed": true,
+    "vm_started_at_utc": "2026-11-11T03:10:39Z",
+    "vm_stopped_at_utc": "2026-11-11T03:12:26Z",
+    "matrix_suites_started": 0,
+    "result": "stopped_before_matrix_start",
+    "reason": "Runtime guard detected unrelated Go compiler and go test processes on the shared host.",
+    "guard_enforced": true
   }
 }

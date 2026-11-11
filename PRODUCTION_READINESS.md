@@ -139,11 +139,13 @@ smoke on `/dev/shm`) then passed when run explicitly. Strict Clippy and
 `cargo fmt --check` also pass. One initial 100k invocation on ext4 was refused
 by the fixture safety guard before creating data; the `/dev/shm` rerun passed.
 
-This correction is not yet included in the staged r132 binaries or installed
-on either VPS. Rebuild the candidate, test the notification with systemd,
-rerun the full suites, and verify the service reaches `active/running` during
-and after a long reconciliation before treating the finding as resolved in a
-release. The live host was not modified.
+This correction is not included in the staged r132 binaries or installed on
+either VPS. A fresh production-mode release binary has been built locally from
+the updated workspace, but it has not yet been staged with its matching fault
+binary or runtime-qualified. The guarded VM stopped before the fault matrix
+could start when unrelated Go tests returned on the host. Test the actual
+systemd unit state through a reconciliation and verify `active/running` before
+treating the finding as resolved in a release. The live host was not modified.
 
 This workspace regression run is separate from the r132 candidate evidence
 below. Its Rust instrumentation coverage was not measured. The existing 72.61%
@@ -152,6 +154,8 @@ presented as coverage of this fix. Detailed commands and outcomes are recorded
 in the [workspace regression evidence](docs/qualification/workspace-regression-20261111T0306Z.json).
 The 03:08 VPS2 service and index observation is in
 [`current-metrics.json`](docs/qualification/current-metrics.json).
+The locally built production artifact and its hash are recorded in the
+[workspace release build evidence](docs/qualification/workspace-release-build-20261111T0315Z.json).
 
 | Area | Latest evidence | Still open |
 |---|---|---|
