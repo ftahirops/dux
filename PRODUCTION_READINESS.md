@@ -236,6 +236,14 @@ a low-cost regression check while the guarded VM remains inadmissible; it does
 not replace or expand the full suite or runtime qualification. See the
 [focused rerun record](docs/qualification/exact-mismatch-followup-focused-rerun-20261111T0527Z.json).
 
+At 05:41 UTC, two focused Rust runs on the same source passed **10 distinct
+tests, 0 failed, 0 ignored**: the direct totals verifier test rejected three
+corruption shapes, and nine rollup tests covered drift detection, recovery,
+cross-directory mutation, overflow fallback, and nested artifact churn. This
+strengthens correctness evidence for the accounting invariant but does not
+measure the full production database's 85-second verification cost. See the
+[focused accounting test record](docs/qualification/accounting-integrity-rust-tests-20261111T0542Z.json).
+
 ### Accounting-query optimization experiment — 2026-11-11 05:39 UTC
 
 A low-priority, temporary 20k-file SQLite fixture compared the existing
