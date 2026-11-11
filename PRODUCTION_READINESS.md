@@ -230,6 +230,12 @@ The full Python suite was rerun after adding these cases and passed 384 tests
 focused Rust/Python runs this is **727 distinct passing cases, 0 failures,
 and 1 skipped**. See the [focused diagnostic regression evidence](docs/qualification/scan-first-behind-seconds-diagnostic-regression-20261111T0451Z.json).
 
+At 05:27 UTC, the same three focused diagnostic tests were rerun from workspace
+commit `7d92ce68`: **3 passed, 0 failed, 0 skipped** in 0.235 seconds. This is
+a low-cost regression check while the guarded VM remains inadmissible; it does
+not replace or expand the full suite or runtime qualification. See the
+[focused rerun record](docs/qualification/exact-mismatch-followup-focused-rerun-20261111T0527Z.json).
+
 ## Next gates
 
 1. Let the exact r132 soak reach 72 hours and require all terminal assertions to

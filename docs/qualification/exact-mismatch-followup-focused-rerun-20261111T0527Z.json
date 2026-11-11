@@ -1,0 +1,18 @@
+{
+  "observed_at_utc": "2026-11-11T05:27:00Z",
+  "workspace_commit": "7d92ce680971e80ada9ec70acefcba5fdd578319",
+  "command": "PYTHONPATH=scripts python3 -m unittest -v test_dux_exact_mismatch_followup",
+  "result": {
+    "discovered": 3,
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "elapsed_seconds": 0.235
+  },
+  "cases": [
+    "legacy event-apply sidecar preserves applicable behind_seconds",
+    "legacy scan-first sidecar marks event-drain age inapplicable and reports scan age",
+    "machine scan-first JSON suppresses misleading behind_seconds"
+  ],
+  "scope_limit": "Focused regression rerun only; not a full Python suite, coverage run, fault matrix, or production qualification."
+}
