@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-11T03:37Z",
+  "snapshot_at_utc": "2026-11-11T03:39Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -2266,5 +2266,18 @@
     "active_unrelated_build_test_work": true,
     "decision": "blocked_before_vm_start",
     "evidence": "docs/qualification/vm-admission-20261111T0334Z.json"
+  },
+  "r133_package_build_20261111T0338Z": {
+    "source_commit": "1641a15b9044676a4a9adb55302f1963d76b48f4",
+    "version": "0.6.3-22",
+    "target": "x86_64-unknown-linux-musl",
+    "build_passed": true,
+    "deb_sha256": "68d13de94191526ae6cd5d85dac165eaa944b54cd931710756bb96e049b81ae4",
+    "rpm_sha256": "194bee5fa70d87c8b28b1eddc408f8788fe25ec565d73ad1f23fe71b73834726",
+    "binary_sha256": "14a0717167c9f9ab25b0151c540f16410a4bc0f32878e6d1cf9309886d7dea9d",
+    "package_payload_hashes_match": true,
+    "package_install_upgrade_rollback_qualified": false,
+    "signed": false,
+    "evidence": "docs/qualification/r133-package-build-20261111T0338Z.json"
   }
 }
