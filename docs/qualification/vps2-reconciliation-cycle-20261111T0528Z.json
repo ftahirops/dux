@@ -1,0 +1,48 @@
+{
+  "host": "192.168.5.106",
+  "observation_completed_at_utc": "2026-11-11T05:28:00.579Z",
+  "accounting_verification_completed_at_utc": "2026-11-11T05:29:25.791Z",
+  "service_at_2026-11-11T05:30:29Z": {
+    "active_state": "active",
+    "sub_state": "running",
+    "historical_restarts": 0
+  },
+  "observation": {
+    "files": 1827604,
+    "directories": 220202,
+    "path_instances": 2047806,
+    "directory_alias_paths": 0,
+    "visible_bytes": 83232403456,
+    "unique_bytes": 83099693056,
+    "unique_inodes": 2044412,
+    "coverage_issues": 0,
+    "vanished_reuse_paths": 72,
+    "revalidated_reuse_paths": 2,
+    "unresolved_reuse_paths": 0
+  },
+  "accounting_verification": {
+    "result": "passed",
+    "elapsed_ms": 85180
+  },
+  "status_at_2026-11-11T05:30:29Z": {
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "scan_in_progress": false,
+    "last_scan_age_seconds": 149,
+    "events_dropped": 0,
+    "kernel_overflow_notifications": 0,
+    "pending_updates": 0
+  },
+  "systemd_during_same_observation": {
+    "observed_at_utc": "2026-11-11T05:25:02Z",
+    "active_state": "reloading",
+    "sub_state": "reload-notify"
+  },
+  "interpretation": [
+    "The full walk and independent accounting verification completed successfully over about 2.04M path instances.",
+    "The service remained dirty because filesystem changes raced the observation; this cycle does not prove an exact current view or path-level freshness SLO.",
+    "No event drops, kernel overflows, pending updates, or service restarts were reported in the post-cycle status.",
+    "Systemd's reload state recurred while the same observation was active, confirming the installed-build READY-notification issue remains; it returned to active/running after the scan.",
+    "Accounting verification took 85.180 seconds, a material recurring cost that needs performance measurement and optimization without weakening its integrity checks."
+  ]
+}
