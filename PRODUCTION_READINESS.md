@@ -124,13 +124,14 @@ Latest evidence: [02:49 reconciliation cycle](docs/qualification/vps2-reconcilia
 
 ### Newly found service-state defect (2026-11-11)
 
-VPS2 systemd reported `dux.service` as `reloading (reload-notify)` continuously
-for 22 hours, while the daemon remained alive and continued its reconciliation
-and event-ingestion work. The watcher source was sending `RELOADING=1` for
+At 03:01 UTC, VPS2 systemd reported `dux.service` as
+`reloading (reload-notify)` since 04:23 UTC the prior day, while the daemon was
+alive and reconciling. By 03:08 UTC it had returned to `active/running` after a
+completed observation. The watcher source was sending `RELOADING=1` for
 ordinary full observations and rebuilds. That notification means a service
-configuration reload to systemd, so it made normal indexing look like a
-service reload and left service managers/monitors with misleading lifecycle
-state. The workspace now sends `READY=1` with the same scan status instead;
+configuration reload to systemd, so normal indexing was reported as a service
+reload for the duration of the observation. The workspace now sends `READY=1`
+with the same scan status instead;
 the added regression test covers both observation modes. On this modified
 workspace, the complete Rust suite passed **342 tests, 0 failed, 2 ignored**;
 both ignored cases (ext4 stale-parent classification and the 100k-entry scale
@@ -149,6 +150,8 @@ below. Its Rust instrumentation coverage was not measured. The existing 72.61%
 line coverage is from the earlier r132 instrumented build and must not be
 presented as coverage of this fix. Detailed commands and outcomes are recorded
 in the [workspace regression evidence](docs/qualification/workspace-regression-20261111T0306Z.json).
+The 03:08 VPS2 service and index observation is in
+[`current-metrics.json`](docs/qualification/current-metrics.json).
 
 | Area | Latest evidence | Still open |
 |---|---|---|

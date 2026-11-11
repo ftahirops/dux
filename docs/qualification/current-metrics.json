@@ -2117,5 +2117,37 @@
     "root_available_bytes": 11343183872,
     "root_use_percent": 88,
     "evidence": "docs/qualification/vps2-reconciliation-cycle-20261111T0249Z.json"
+  },
+  "latest_vps2_live_observation_20261111T0308Z": {
+    "host": "192.168.5.106",
+    "observed_at_utc": "2026-11-11T03:08:40Z",
+    "installed_release": "dux 0.6.3 (8b02799b4132) [production]",
+    "systemd_active_state": "active",
+    "systemd_sub_state": "running",
+    "service_restarts": 0,
+    "daemon_live": true,
+    "scan_first": true,
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "scan_in_progress": false,
+    "last_scan_age_seconds": 471,
+    "pending_updates": 0,
+    "kernel_overflow_notifications": 0,
+    "events_dropped": 0,
+    "root_use_percent": 89,
+    "root_available_bytes": 11811160064,
+    "evidence": "remote systemctl show, dux status --json, and df -h captured at 2026-11-11T03:08:40Z"
+  },
+  "workspace_regression_20261111T0306Z": {
+    "source_commit": "8c6726a",
+    "rust_passed": 344,
+    "rust_failed": 0,
+    "rust_skipped_in_full_run": 2,
+    "python_passed_from_latest_suite": 380,
+    "python_skipped": 1,
+    "combined_distinct_passed_cases": 724,
+    "coverage_measured_for_this_change": false,
+    "details": "docs/qualification/workspace-regression-20261111T0306Z.json"
   }
 }
