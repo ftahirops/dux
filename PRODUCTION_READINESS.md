@@ -1,23 +1,22 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This report was refreshed at
-**2026-11-11 05:20 UTC**. VPS1 still runs the old event-apply 0.6.3 daemon and
-is 5.69 days past its last full scan, with accumulated fanotify overflows and
-dropped updates. VPS2's older root-owned 0.6.3 service completed another
-full observation and accounting verification, but is dirty again from ongoing
-filesystem changes. The r132 candidate is 20.26 hours into a 72-hour isolated
-soak; its terminal exactness, history, and SQLite checks are pending. The
-guarded 15-suite fault matrix has not started because unrelated Go workloads
-and I/O pressure continue to fail admission. Release, scale, package-lifecycle,
-and canary gates remain open. A green unit suite or one successful VPS2
-observation does not close them.
+**2026-11-11 05:49 UTC**. VPS1 still runs the old event-apply 0.6.3 daemon and
+is 5.71 days past its last full scan, with 979 lifetime fanotify overflows and
+2.52M dropped updates. Pending updates have fallen to 47, but the index remains
+dirty. VPS2's older 0.6.3 service remains dirty between scans; its latest
+observation and accounting verification passed, but did not establish a current
+exact view. The r132 candidate is 20.73 hours into a 72-hour isolated soak;
+final exactness, history, and SQLite checks remain pending. The guarded 15-suite
+fault matrix is still waiting on unrelated Go build/test workloads. Release,
+scale, package-lifecycle, and canary gates remain open.
 
 The detailed evidence trail is
 [`PRODUCTION_READINESS_STATUS.md`](PRODUCTION_READINESS_STATUS.md); the
 latest live host/service sample is
 [`live-reconciliation-followup-20261111T0423Z.json`](docs/qualification/live-reconciliation-followup-20261111T0423Z.json),
 and the latest consolidated live VPS1/VPS2/soak/admission snapshot is
-[`live-progress-20261111T0520Z.json`](docs/qualification/live-progress-20261111T0520Z.json).
+[`live-progress-20261111T0549Z.json`](docs/qualification/live-progress-20261111T0549Z.json).
 The broader aggregate snapshot in
 [`current-metrics.json`](docs/qualification/current-metrics.json) is from
 03:51 UTC and should be read with these newer samples.
@@ -26,10 +25,10 @@ The broader aggregate snapshot in
 
 | System | Latest verified state |
 |---|---|
-| **VPS1 production** | At 05:20 UTC the installed Dux remained active/running with four historical restarts. It is dirty/not caught up: 964 lifetime overflow notifications, 2,518,862 dropped updates, and 957 pending updates. Last full scan age was 5.69 days; event-mode behind time was 3.49 days. Dux reported 1,304,623 nodes and 123.95 GB indexed bytes; the index database occupied 3.90 GB. Root disk use was 68% (58G available). See the [05:20 consolidated snapshot](docs/qualification/live-progress-20261111T0520Z.json). |
-| **VPS2 installed service** | The 05:28 UTC observation covered 1,827,604 files, 220,202 directories, and 2,047,806 path instances with zero reported coverage issues. Accounting verification passed at 05:29:25 after 85.180s. At 05:30 the service was active/running with zero restarts, pending updates, event drops, and kernel overflows, but remained dirty because changes raced the observation. Systemd reported `reloading` during the same observation and returned to active/running afterward. A read-only query-plan inspection shows multiple full scans of `inodes` and `dirents` plus per-row primary-key joins; this confirms a performance target but is not an operator-level profile. See the [05:28 cycle record](docs/qualification/vps2-reconciliation-cycle-20261111T0528Z.json), [query-plan evidence](docs/qualification/accounting-query-plan-20261111T0532Z.json), and the [05:20 consolidated snapshot](docs/qualification/live-progress-20261111T0520Z.json). |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 05:20 it had run 20.26h of 72h (28.18%), with 1,593,189 operations and 1,588 exactness samples. Sampled convergence p95 is 10.047s and max 17.963s; maximum sampled RSS is 6.4 MiB and WAL 7.52 MB. It has completed 20 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Final exactness, history, and SQLite checks remain pending; four planned crash checkpoints remain. See the [05:20 consolidated snapshot](docs/qualification/live-progress-20261111T0520Z.json). |
-| **Disk and VM admission** | VPS2 root was 89% used with about 11G available at 05:00; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; Dux index totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. The guarded matrix runner remains alive but had started zero suites by 05:20; unrelated Go build/test/staticcheck jobs and I/O PSI above the admission threshold prevented entry. See the [05:20 consolidated snapshot](docs/qualification/live-progress-20261111T0520Z.json), [05:04 admission evidence](docs/qualification/vm-admission-20261111T0504Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). |
+| **VPS1 production** | At 05:48 UTC the installed Dux remained active/running with four historical restarts. It is dirty/not caught up: 979 lifetime overflow notifications, 2,518,862 dropped updates, and 47 pending updates. Last full scan age was 5.71 days; event-mode behind time was 3.51 days. Dux reported 1,268,287 nodes and 118.34 GB indexed bytes; the index database occupied 3.91 GB. Root disk use was 65% (63G available). Low pending work does not establish recovery or exactness. See the [05:49 consolidated snapshot](docs/qualification/live-progress-20261111T0549Z.json). |
+| **VPS2 installed service** | At 05:48 UTC the service was active/running with zero restarts, pending updates, event drops, and kernel overflows, but remained dirty between scans; last scan age was 416s. The 05:28 observation covered 1,827,604 files, 220,202 directories, and 2,047,806 path instances with zero reported coverage issues; accounting verification passed in 85.180s. The root filesystem was 89% used (9.9G available). In scan-first mode `behind_seconds` is inapplicable. See the [05:28 cycle record](docs/qualification/vps2-reconciliation-cycle-20261111T0528Z.json), [query-plan evidence](docs/qualification/accounting-query-plan-20261111T0532Z.json), and the [05:49 consolidated snapshot](docs/qualification/live-progress-20261111T0549Z.json). |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 05:49 it had run 20.73h of 72h (28.80%) with 1,627,575 operations. It has completed 20 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Final exactness, history, and SQLite checks remain pending; four planned crash checkpoints remain. See the [05:49 consolidated snapshot](docs/qualification/live-progress-20261111T0549Z.json). |
+| **Disk and VM admission** | VPS2 root was 89% used with 9.9G available at 05:48; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; indexed totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. The guarded matrix runner remains alive but has started zero suites; its 05:49 sample identified active Go build/test workloads and load1 11.20. See the [05:49 consolidated snapshot](docs/qualification/live-progress-20261111T0549Z.json), [VPS2 admission constraints](docs/qualification/vps2-test-admission-20261111T0525Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). |
 
 At 05:25 UTC, VPS2 was also ruled out as an alternate host for the additional
 fault matrix: it has no `/dev/kvm`, its root filesystem is 90% used with 9.6G
