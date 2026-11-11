@@ -31,6 +31,15 @@ The broader aggregate snapshot in
 | **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 05:20 it had run 20.26h of 72h (28.18%), with 1,593,189 operations and 1,588 exactness samples. Sampled convergence p95 is 10.047s and max 17.963s; maximum sampled RSS is 6.4 MiB and WAL 7.52 MB. It has completed 20 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Final exactness, history, and SQLite checks remain pending; four planned crash checkpoints remain. See the [05:20 consolidated snapshot](docs/qualification/live-progress-20261111T0520Z.json). |
 | **Disk and VM admission** | VPS2 root was 89% used with about 11G available at 05:00; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; Dux index totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. The guarded matrix runner remains alive but had started zero suites by 05:20; unrelated Go build/test/staticcheck jobs and I/O PSI above the admission threshold prevented entry. See the [05:20 consolidated snapshot](docs/qualification/live-progress-20261111T0520Z.json), [05:04 admission evidence](docs/qualification/vm-admission-20261111T0504Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). |
 
+At 05:25 UTC, VPS2 was also ruled out as an alternate host for the additional
+fault matrix: it has no `/dev/kvm`, its root filesystem is 90% used with 9.6G
+available, 2.5G of swap is occupied, I/O PSI full avg10 is 5.47%, and the
+installed Dux plus its hash-bound r132 soak are both active. Dux was in a
+periodic observation and systemd again showed `reloading`; the service had no
+new restarts, drops, or kernel overflows. Starting another runtime workload
+there would invalidate the soak's isolation and increase production-host
+pressure. Evidence: [VPS2 test admission snapshot](docs/qualification/vps2-test-admission-20261111T0525Z.json).
+
 ### Recent live reliability and throughput evidence
 
 At 04:03 and 04:09 UTC on VPS2, full scans each found one inode number

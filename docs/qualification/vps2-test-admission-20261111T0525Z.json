@@ -1,0 +1,50 @@
+{
+  "observed_at_utc": "2026-11-11T05:25:30Z",
+  "host": "192.168.5.106",
+  "qualification_admission": "do_not_start_additional_runtime_tests",
+  "host_capacity": {
+    "vcpus": 6,
+    "load_average_1m_5m_15m": [5.64, 5.19, 4.47],
+    "cpu_psi_some_avg10_percent": 17.26,
+    "cpu_psi_some_avg60_percent": 36.98,
+    "io_psi_some_avg10_percent": 6.31,
+    "io_psi_full_avg10_percent": 5.47,
+    "memory_total": "5.7 GiB",
+    "memory_available": "2.9 GiB",
+    "swap_used": "2.5 GiB",
+    "root_filesystem": {
+      "size": "93 GiB",
+      "used": "79 GiB",
+      "available": "9.6 GiB",
+      "used_percent": 90
+    },
+    "dev_shm": {
+      "size": "3.0 GiB",
+      "used": "989 MiB",
+      "available": "2.1 GiB"
+    },
+    "kvm_device_present": false
+  },
+  "live_workloads": {
+    "production_dux": {
+      "active_state": "reloading",
+      "sub_state": "reload-notify",
+      "historical_restarts": 0,
+      "scan_in_progress": true,
+      "last_scan_age_seconds": 790,
+      "dirty": true,
+      "dirty_reason": "periodic filesystem observation in progress",
+      "events_dropped": 0,
+      "kernel_overflow_notifications": 0
+    },
+    "r132_72h_soak": {
+      "active": true,
+      "elapsed_seconds_at_2026-11-11T05:24:50Z": 73129.8,
+      "controlled_crash_recoveries": 1,
+      "mutation_bursts": 20,
+      "terminal_exactness_history_and_integrity_pending": true
+    }
+  },
+  "decision": "No additional fault/scale workload started on VPS2. It lacks KVM, has elevated I/O pressure and constrained disk/swap headroom, and is running both the installed daemon and a hash-bound endurance soak. Concurrent qualification would compromise the soak and production observations.",
+  "scope": "Read-only admission observation; no service, test, disk, or database state was changed."
+}
