@@ -1,15 +1,15 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This report was refreshed at
-**2026-11-11 06:18 UTC**. VPS1 still runs the old event-apply 0.6.3 daemon and
-is 5.73 days past its last full scan, with 979 lifetime fanotify overflows and
-2.52M dropped updates. Its pending count is 1,117 while the index remains
+**2026-11-11 06:29 UTC**. VPS1 still runs the old event-apply 0.6.3 daemon and
+is 5.74 days past its last full scan, with 979 lifetime fanotify overflows and
+2.52M dropped updates. Its pending count is 70,201 while the index remains
 dirty. VPS2's older 0.6.3 service is active after a scan and is dirty while
-awaiting the next observation. The r132 candidate is 21.21 hours into a
+awaiting the next observation. The r132 candidate is 21.40 hours into a
 72-hour isolated soak; final exactness, history, and SQLite checks remain
-pending. A fail-closed hint-parser defect has a focused fix and regression
-tests, but the full Rust suite has not been rerun. The guarded 15-suite fault
-matrix is still waiting on unrelated Go build/test workloads. Release,
+pending. The current-source full Rust suite passed 343 tests, with two
+qualification tests ignored. The guarded 15-suite fault matrix is still
+waiting on unrelated Go build/test workloads. Release,
 scale, package-lifecycle, and canary gates remain open.
 
 The detailed evidence trail is
@@ -17,7 +17,7 @@ The detailed evidence trail is
 latest live host/service sample is
 [`live-reconciliation-followup-20261111T0423Z.json`](docs/qualification/live-reconciliation-followup-20261111T0423Z.json),
 and the latest consolidated live VPS1/VPS2/soak/admission snapshot is
-[`live-progress-20261111T0618Z.json`](docs/qualification/live-progress-20261111T0618Z.json).
+[`live-progress-20261111T0629Z.json`](docs/qualification/live-progress-20261111T0629Z.json).
 The broader aggregate snapshot in
 [`current-metrics.json`](docs/qualification/current-metrics.json) is from
 03:51 UTC and should be read with these newer samples.
@@ -26,10 +26,10 @@ The broader aggregate snapshot in
 
 | System | Latest verified state |
 |---|---|
-| **VPS1 production** | At 06:18 UTC the installed Dux remained active/running with four historical restarts. It is dirty/not caught up: 979 lifetime overflow notifications, 2,518,862 dropped updates, and 1,117 pending updates. Last full scan age was 5.73 days; event-mode behind time was 3.53 days. Dux reported 1,268,327 nodes; the index database occupied 3.93 GB. Root disk use was 65% (62G available); `/var/lib/dux` was 3.8 GiB. A lower pending count does not establish recovery or exactness after recorded drops. See the [06:18 live snapshot](docs/qualification/live-progress-20261111T0618Z.json). |
-| **VPS2 installed service** | At 06:18 UTC the service was active/running with zero historical restarts, pending updates, event drops, and kernel overflows. Its last scan was 332s old and complete; scan-first mode remained dirty while awaiting the next observation. Root was 89% used (9.8G available). See the [06:18 snapshot](docs/qualification/live-progress-20261111T0618Z.json) and the [05:28 completed cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0528Z.json). |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 06:17 it had run 21.21h of 72h (29.46%) with 1,662,000 operations. It has completed 21 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Final exactness, history, and SQLite checks remain pending; four planned crash checkpoints remain. The running soak still uses the copied pre-summary harness and does not include the latest hint-parser fix. See the [06:18 snapshot](docs/qualification/live-progress-20261111T0618Z.json). |
-| **Disk and VM admission** | At 06:18 VPS2 root was 89% used with 9.8G available; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; indexed totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. The guarded matrix runner remains alive but has started zero suites; host load1 was 11.71 with Go compile/test jobs. See the [06:18 snapshot](docs/qualification/live-progress-20261111T0618Z.json), [VPS2 admission constraints](docs/qualification/vps2-test-admission-20261111T0525Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). |
+| **VPS1 production** | At 06:29 UTC the installed Dux remained active/running with four historical restarts. It is dirty/not caught up: 979 lifetime overflow notifications, 2,518,862 dropped updates, and 70,201 pending updates. Last full scan age was 5.74 days; event-mode behind time was 3.54 days. Dux reported 1,268,743 nodes; the index database occupied 3.93 GB. Root disk use was 66% (61G available); `/var/lib/dux` was 3.8 GiB. The backlog is not evidence of recovery after recorded drops. See the [06:29 live snapshot](docs/qualification/live-progress-20261111T0629Z.json). |
+| **VPS2 installed service** | At 06:28 UTC the service was active/running with zero historical restarts, pending updates, event drops, and kernel overflows. Its last scan was 89s old and complete; scan-first mode remained dirty while awaiting the next observation. Root was 90% used (9.7G available). See the [06:29 snapshot](docs/qualification/live-progress-20261111T0629Z.json) and the [05:28 completed cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0528Z.json). |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 06:28 it had run 21.40h of 72h (29.72%) with 1,675,340 operations. It has completed 21 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Across 1,670 exact-convergence samples, p50 was 3.97s, p95 10.44s, and max 20.45s. Final exactness, history, and SQLite checks remain pending; four planned crash checkpoints remain. The running soak uses the copied pre-summary harness and does not include the latest hint-parser fix. See the [06:29 snapshot](docs/qualification/live-progress-20261111T0629Z.json). |
+| **Disk and VM admission** | At 06:29 VPS2 root was 90% used with 9.7G available; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; indexed totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. The guarded matrix runner remains alive but has started zero suites; Go test/compiler workloads are active. See the [06:29 snapshot](docs/qualification/live-progress-20261111T0629Z.json), [VPS2 admission constraints](docs/qualification/vps2-test-admission-20261111T0525Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). |
 
 At 05:25 UTC, VPS2 was also ruled out as an alternate host for the additional
 fault matrix: it has no `/dev/kvm`, its root filesystem is 90% used with 9.6G
@@ -208,7 +208,7 @@ The direct systemd A/B result is in the
 
 | Area | Latest evidence | Still open |
 |---|---|---|
-| Rust automated tests | Latest workspace full suite: 342 passed, 0 failed, 2 ignored; both ignored cases then passed explicitly (ext4 stale-parent and 100k-entry reconciliation). Strict Clippy and formatting passed. Earlier r132 evidence also passed the ext4 case under UID 65534 with planned service capability masks. | Coverage instrumentation was not rerun for the workspace fix; the 100k timing is debug-profile and is not a production-scale benchmark. The non-root test used UID 65534 because the `dux` account is not installed on this host. |
+| Rust automated tests | Current-source full suite at 06:26: **343 passed, 0 failed, 2 ignored** (345 tests listed), including the short-tail fanotify regression. The ignored ext4 stale-parent and 100k scale tests have earlier explicit pass records, but were not rerun in this full-suite run. Strict Clippy passed before this parser fix; formatting and the full Rust tests passed afterward. | Coverage instrumentation was not rerun for the parser fix; 100k timing is debug-profile and not production-scale. The prior non-root test used UID 65534 because the `dux` account is not installed on this host. See [current full-suite evidence](docs/qualification/rust-suite-20261111T0626Z.json). |
 | Python qualification harness | Latest full suite: 384 tests in 29.597s, 0 failures, 1 skipped (the RPM signing fixture); this includes the three new exact-mismatch status regressions and admission-wrapper tests. A preceding run under a 5% CPU cap had 11 subprocess-timeout errors; every case passed on the normal-priority rerun. | Python statement coverage is 53% for the package lifecycle script only and does not include the new diagnostic helper; branch coverage is unavailable. See [latest focused diagnostic evidence](docs/qualification/scan-first-behind-seconds-diagnostic-regression-20261111T0451Z.json) and [prior full-suite rerun record](docs/qualification/python-suite-rerun-20261110T2205Z.md). |
 | Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
 | Dependency audit | Refreshed `cargo audit -D warnings --json` at 03:37 fetched the advisory database and exited 0 for 229 locked dependencies; zero advisories or warnings. The database HEAD remained `28d73fc95e5972af3403225a217def57dcaba3c4`, last commit 2026-11-10 13:45 UTC. `Cargo.lock` SHA-256 is `fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3`. | Dependency hygiene only, not a source-code or runtime security review. See [03:37 audit evidence](docs/qualification/cargo-audit-20261111T0337Z.json). |
@@ -218,7 +218,7 @@ The direct systemd A/B result is in the
 | Systemd sandbox event visibility | Exact r132 binary in a separate mount namespace with package-equivalent capabilities, syscall filters, `ProtectKernelTunables`, and `ProtectControlGroups` indexed host-namespace create, rename, and delete events on ext4; create appeared in 187 ms, with zero test-group overflows or drops. r133 A/B notifications are verified, and its static production binary starts as `active/running` under systemd `Type=notify`. | Actual package-created UID, r133 package sandbox behavior, install/upgrade/rollback lifecycle, other filesystems/kernels, and long-duration packaged service remain open. See [namespace event result](docs/qualification/systemd-hardening-20261110/cross-namespace-event-test-20261110T2004Z.json), [notification A/B smoke](docs/qualification/systemd-reconciliation-state-smoke-20261111T0329Z.json), and [production-binary smoke](docs/qualification/r133-static-production-systemd-smoke-20261111T0351Z.json). |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |
 
-The latest full Rust and Python runs plus the two targeted Rust cases cover **727 distinct passing cases, 0 failures, and 1 skipped**: 342 Rust full-suite passes, two separately executed manual Rust cases, and 383 Python passes (384 discovered, one skipped). The ordinary Rust full-run output lists those two manual cases as ignored, so they are counted only once here. The 75 package lifecycle/security tests are included in the Python total. This is a test-case total across those recorded runs, not a statement of complete behavioral coverage. See the [focused qualification report](docs/qualification/r132-focused-qualification-20261110/README.md), the [current workspace regression record](docs/qualification/workspace-regression-20261111T0306Z.json), the [regression evidence](docs/qualification/regression-20261110T1823Z/README.md), and the [coverage gap review](docs/qualification/coverage-gaps-20261109.md).
+The latest full Rust and Python runs plus two separately executed Rust cases and two focused Python latency-summary tests cover **730 distinct passing cases, 0 failures, and 1 skipped**: 343 current-source Rust full-suite passes, two manually executed Rust cases (listed as ignored in that suite), 383 Python full-suite passes (384 discovered, one skipped), and two focused Python tests not included in that full run. The 75 package lifecycle/security tests are included in the Python full-suite total. This is a test-case total across recorded runs, not a statement of complete behavioral coverage. Rust and Python instrumentation percentages are partial and from scoped/older reports, not whole-project coverage. See the [focused qualification report](docs/qualification/r132-focused-qualification-20261110/README.md), the [current workspace regression record](docs/qualification/workspace-regression-20261111T0306Z.json), the [full Rust suite result](docs/qualification/rust-suite-20261111T0626Z.json), the [regression evidence](docs/qualification/regression-20261110T1823Z/README.md), and the [coverage gap review](docs/qualification/coverage-gaps-20261109.md).
 
 Since those full runs, a focused regression was added for the exact-mismatch
 diagnostic helper. Its three tests pass: two scan-first cases verify that the
@@ -227,7 +227,7 @@ scan freshness and native JSON retaining it; one event-apply case verifies
 that the numeric backlog age remains available.
 The full Python suite was rerun after adding these cases and passed 384 tests
 (383 passed, 1 skipped) in 29.597 seconds. Across the recorded full and
-focused Rust/Python runs this is **727 distinct passing cases, 0 failures,
+focused Rust/Python runs this is **730 distinct passing cases, 0 failures,
 and 1 skipped**. See the [focused diagnostic regression evidence](docs/qualification/scan-first-behind-seconds-diagnostic-regression-20261111T0451Z.json).
 
 At 05:27 UTC, the same three focused diagnostic tests were rerun from workspace
@@ -269,8 +269,14 @@ if a malformed/truncated chunk reaches this parser, the caller could treat the
 discarded suffix as fully accounted. The parser now marks that case lost so
 reconciliation widens safely. The regression iterates every short suffix size
 from 1 through 23 bytes; it and the three other parser tests passed (4 total),
-and `cargo fmt --check` passed. The full Rust suite has not been rerun for this
-fix. See the [focused regression evidence](docs/qualification/fanotify-short-tail-regression-20261111T0618Z.json).
+and `cargo fmt --check` passed. See the [focused regression evidence](docs/qualification/fanotify-short-tail-regression-20261111T0618Z.json).
+
+At 06:26 UTC, the current-source Rust suite was rerun serially at low CPU and
+I/O priority and passed **343 tests, 0 failures, 2 ignored** in 97.30 seconds.
+The new fanotify regression was included. The ignored ext4 stale-parent and
+100k scale cases were not rerun in this full-suite pass; their earlier explicit
+passes are recorded separately and predate this change. Coverage instrumentation
+and strict Clippy were not rerun for this update. See the [full-suite result](docs/qualification/rust-suite-20261111T0626Z.json).
 
 ### Accounting-query optimization experiment — 2026-11-11 05:39 UTC
 

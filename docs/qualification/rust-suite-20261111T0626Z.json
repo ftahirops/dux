@@ -1,0 +1,32 @@
+{
+  "observed_at_utc": "2026-11-11T06:26:37Z",
+  "source_commit": "3d29d23",
+  "command": "nice -n 19 ionice -c 3 env CARGO_BUILD_JOBS=1 cargo test --locked --offline --all-features -- --test-threads=1",
+  "profile": "single test thread; one Cargo build job; nice 19; idle I/O scheduling",
+  "result": {
+    "test_cases": 345,
+    "passed": 343,
+    "failed": 0,
+    "ignored": 2,
+    "measured": 0,
+    "filtered_out": 0,
+    "duration_seconds": 97.30,
+    "status": "passed"
+  },
+  "new_fanotify_short_tail_regression": "included and passed; iterates every 1-to-23-byte suffix length",
+  "ignored_tests": [
+    {
+      "name": "scan::tests::reconciliation_scale_smoke_reports_scan_cost",
+      "requirement": "explicit DUX_RECONCILE_SCALE_TMPDIR=/dev/shm fixture configuration"
+    },
+    {
+      "name": "watch::tests::stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs",
+      "requirement": "handle-capable ext4 qualification profile"
+    }
+  ],
+  "limits": [
+    "The two ignored tests were not rerun in this suite; earlier explicit pass records exist for the ext4 stale-parent case and 100k-entry smoke, but they predate this source commit.",
+    "Rust instrumentation coverage was not collected for this run.",
+    "The full guarded 15-suite runtime matrix, package lifecycle, and 72-hour candidate soak are separate gates."
+  ]
+}
