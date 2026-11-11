@@ -1,0 +1,40 @@
+{
+  "observed_at_utc": "2026-11-11T00:39:27Z",
+  "binary": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "service": {
+    "active_state": "active",
+    "main_pid": 1073891,
+    "historical_restarts": 4
+  },
+  "status": {
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+    "behind_seconds": 284915.477,
+    "kernel_overflow_notifications": 892,
+    "events_dropped": 2518862,
+    "pending_updates": 49,
+    "last_scan_age_seconds": 474605,
+    "scan_in_progress": false,
+    "index_nodes": 1268832,
+    "index_bytes_on_disk": 3738804224,
+    "index_bytes": 117552058368,
+    "wal_bytes": 134217728,
+    "write_error": null,
+    "events_seen": 282455904,
+    "events_resolved": 164154253,
+    "updates_committed": 46262741,
+    "last_event_commit_timestamp_seconds": 1794357565,
+    "watch_status_updated_at_seconds": 1794357567
+  },
+  "host_storage": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 120684216320,
+    "root_available_bytes": 68576866304,
+    "root_use_percent": 64,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3751559168,
+    "dev_shm_available_bytes": 9977655296
+  },
+  "interpretation": "The daemon is still dirty and not caught up. No additional overflow was observed since 00:35; pending work fluctuated from 12 to 49. Dirty reason remains the non-watched filesystem mount change."
+}

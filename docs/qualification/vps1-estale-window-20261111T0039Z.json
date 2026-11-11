@@ -1,0 +1,16 @@
+{
+  "observed_at_utc": "2026-11-11T00:39:20Z",
+  "host": "VPS1",
+  "source": "journalctl -u dux.service",
+  "window_start_utc": "2026-11-11T00:35:00Z",
+  "window_end_utc": "2026-11-11T00:39:20Z",
+  "matching_estale_warnings": 93,
+  "mask_info_type_counts": {
+    "mask_0x4_info_0x2_target_only_fid": 89,
+    "mask_0xa_info_0x6_compound": 1,
+    "mask_0x40000200_info_0x6_compound": 2,
+    "mask_0x14a_info_0x6_compound": 1
+  },
+  "distinct_fsids": 1,
+  "interpretation": "89/93 observed ESTALE warnings (95.7%) were FAN_ATTRIB target-only FID records; four were compound masks. Candidate suppression applies only to the narrow target-only case on a known handle-capable filesystem. This bounded journal count is not a complete event-rate measurement, a causal link to overflow, or proof the candidate fixes the live dirty state."
+}

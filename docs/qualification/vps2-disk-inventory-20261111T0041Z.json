@@ -1,0 +1,42 @@
+{
+  "observed_at_utc": "2026-11-11T00:41:06Z",
+  "host": "VPS2 qualification host",
+  "filesystem": {
+    "mount": "/",
+    "device": "/dev/mapper/ubuntu--vg-ubuntu--lv",
+    "total_bytes": 99012476928,
+    "used_bytes": 85230010368,
+    "available_bytes": 9202716672,
+    "use_percent": 91
+  },
+  "dev_shm": {
+    "total_bytes": 3221225472,
+    "used_bytes": 1035247616,
+    "available_bytes": 2185977856,
+    "use_percent": 33
+  },
+  "directory_usage_observed_at_utc": "2026-11-11T00:41:36Z",
+  "directory_usage_human": {
+    "/var/log": "4.6G",
+    "/var/log/journal": "4.0G",
+    "/var/tmp": "2.4G",
+    "/var/lib/dux": "874M",
+    "/var/cache": "39M",
+    "/home": "215M",
+    "/root": "8.0G",
+    "/tmp": "96M",
+    "/var/tmp/dux-r132-soak-20261110": "6.4M"
+  },
+  "largest_root_children_human": {
+    "/root/dux-canary-e96e708": "1.7G",
+    "/root/dux-canary-120": "1.4G",
+    "/root/.cargo": "1.1G",
+    "/root/dux-qualification-43a7769": "1.1G",
+    "/root/.rustup": "842M",
+    "/root/dux-canary-119": "646M",
+    "/root/dux-canary-409a2f4": "589M",
+    "/root/dux-rollback-d8ea72d": "565M"
+  },
+  "current_soak_storage": "The active harness workspace is on /dev/shm; its /var/tmp staging directory is 6.4M. The 2.4G /var/tmp total consists mainly of older candidate and qualification workspaces.",
+  "cleanup_decision": "No remote files were removed in this inventory. Large root entries include canary/rollback SQLite snapshots and Rust toolchain caches; these need ownership and retention review before deletion. Old /var/tmp candidates were not open in the observed Dux process list, but were retained as qualification provenance."
+}
