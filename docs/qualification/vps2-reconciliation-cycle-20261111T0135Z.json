@@ -1,0 +1,51 @@
+{
+  "host": "192.168.5.106",
+  "installed_release": "dux 0.6.3 (8b02799b4132) [production]",
+  "scan_first": true,
+  "observed_at_utc": "2026-11-11T01:35:03Z",
+  "scan_start_utc": "2026-11-11T01:25:20.940Z",
+  "scan_complete_utc": "2026-11-11T01:32:48.556Z",
+  "scan_duration_seconds": 447.616,
+  "files": 1783611,
+  "directories": 215232,
+  "path_instances": 1998843,
+  "visible_bytes": 85890727936,
+  "visible_entries": 1998843,
+  "unique_bytes": 85758017536,
+  "unique_inodes": 1995449,
+  "coverage_issues": 0,
+  "vanished_reuse_paths": 0,
+  "revalidated_reuse_paths": 0,
+  "unresolved_reuse_paths": 0,
+  "accounting_verification": "passed",
+  "accounting_elapsed_ms": 101795,
+  "accounting_completed_utc": "2026-11-11T01:34:30.379Z",
+  "post_observation_status": {
+    "dirty": true,
+    "caught_up": false,
+    "reason": "filesystem changes await the next full observation",
+    "last_scan_age_seconds": 135,
+    "kernel_overflows": 0,
+    "dropped_updates": 0,
+    "pending_updates": 0,
+    "events_seen": 1980694012,
+    "service_active_state": "active",
+    "service_restarts": 0
+  },
+  "storage": {
+    "root_total_bytes": 99012476928,
+    "root_used_bytes": 82469335040,
+    "root_available_bytes": 11963392000,
+    "root_use_percent": 88,
+    "var_lib_dux_bytes": 921241584,
+    "database_bytes": 860999680,
+    "wal_bytes": 60110832,
+    "dev_shm_available_bytes": 2185650176
+  },
+  "limitations": [
+    "Changes during observation kept the service dirty; another full observation is required to establish a quiet interval.",
+    "This successful scan and accounting check do not prove continuous exactness or per-path freshness.",
+    "The observation ran on installed Dux 0.6.3, not the r132 candidate."
+  ],
+  "evidence": "read-only VPS2 status, journal, systemd, and filesystem samples"
+}

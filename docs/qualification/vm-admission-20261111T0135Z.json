@@ -1,0 +1,27 @@
+{
+  "observed_at_utc": "2026-11-11T01:35:35Z",
+  "host": "vps1 qualification host",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "command": "python3 scripts/dux-qualification-vm.py --profile qualification4 --ephemeral-runtime --read-only-share /dev/shm/dux-r132-qualification-20261110 start ubuntu24",
+  "result": "refused_before_vm_start",
+  "admission_sample": "1/3",
+  "vm_started": false,
+  "fault_suites_started": false,
+  "blockers": [
+    "Go compiler processes",
+    "Go vet workers",
+    "go test",
+    "go vet",
+    "Node Vitest",
+    "shell test script"
+  ],
+  "host_snapshot": {
+    "load_average_1m": 10.68,
+    "cpu_psi_some_avg10_percent": 30.0,
+    "io_psi_some_avg10_percent": 1.11,
+    "available_memory_bytes": 20422451200,
+    "dev_shm_available_bytes": 9977798656
+  },
+  "interpretation": "The guarded launcher stopped before QEMU setup. No Dux fault test was run, and no admission guard was bypassed."
+}
