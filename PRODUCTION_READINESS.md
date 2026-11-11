@@ -141,10 +141,11 @@ by the fixture safety guard before creating data; the `/dev/shm` rerun passed.
 
 This correction is not included in the staged r132 binaries or installed on
 either VPS. A fresh production-mode release binary has been built locally from
-the updated workspace, but it has not yet been staged with its matching fault
-binary or runtime-qualified. The guarded VM stopped before the fault matrix
-could start when unrelated Go tests returned on the host. Test the actual
-systemd unit state through a reconciliation and verify `active/running` before
+the updated workspace, and a matching fault-injection binary now has the same
+embedded source digest. Both are staged read-only under `/dev/shm` but have not
+been runtime-qualified. The guarded VM stopped before the fault matrix could
+start when unrelated Go tests returned on the host. Test the actual systemd
+unit state through a reconciliation and verify `active/running` before
 treating the finding as resolved in a release. The live host was not modified.
 
 This workspace regression run is separate from the r132 candidate evidence
@@ -156,6 +157,8 @@ The 03:08 VPS2 service and index observation is in
 [`current-metrics.json`](docs/qualification/current-metrics.json).
 The locally built production artifact and its hash are recorded in the
 [workspace release build evidence](docs/qualification/workspace-release-build-20261111T0315Z.json).
+The matching current production/fault binary pair is recorded in the
+[r133 build-pair evidence](docs/qualification/r133-build-pair-20261111T0319Z.json).
 
 | Area | Latest evidence | Still open |
 |---|---|---|

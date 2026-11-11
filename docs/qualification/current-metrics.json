@@ -2169,5 +2169,15 @@
     "result": "stopped_before_matrix_start",
     "reason": "Runtime guard detected unrelated Go compiler and go test processes on the shared host.",
     "guard_enforced": true
+  },
+  "r133_build_pair_20261111T0319Z": {
+    "source_commit": "b0ed3078f2d8",
+    "embedded_source_sha256": "e755f897c6d79f027df83d30e8f8f50c492306923fa676526ec36d862b7df476",
+    "production_binary_sha256": "9c5e361408c364c6032be0c48f80b228eebb356b00b73535e8a097aa55917a03",
+    "fault_binary_sha256": "7bb5d2b0107a6b04901a45b0e2316d6fdf1e70bc103cf131599e420cfcd920b4",
+    "source_digests_match": true,
+    "staged_in_dev_shm": true,
+    "runtime_qualified": false,
+    "evidence": "docs/qualification/r133-build-pair-20261111T0319Z.json"
   }
 }
