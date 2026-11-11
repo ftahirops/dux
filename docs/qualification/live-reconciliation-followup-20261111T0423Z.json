@@ -26,8 +26,11 @@
     "service": {"active_state": "active", "sub_state": "running", "historical_restarts": 0},
     "dirty": true,
     "caught_up": false,
+    "scan_first": true,
     "dirty_reason": "filesystem changes await the next full observation",
     "behind_seconds": 23246.255,
+    "behind_seconds_applicable": false,
+    "behind_seconds_note": "The status command emits this historical field in scan-first mode, but the daemon's documented metrics say behind_seconds is inapplicable in scan-first mode; use last_scan_age_seconds for freshness.",
     "last_scan_age_seconds": 239,
     "failed_reconciliation_attempts": null,
     "kernel_overflow_notifications": 0,
@@ -78,7 +81,7 @@
   },
   "analysis": [
     "The two failed VPS2 attempts coincided with inode-number reuse during the walk and correctly failed closed; this is distinct from fanotify queue overflow.",
-    "The next scan completed without inode-incarnation conflicts, but event hints changed during the observation. At 04:24:49 the dirty reason had transitioned to awaiting the next full observation; this remains dirty and not caught up.",
+    "The next scan completed without inode-incarnation conflicts, but event hints changed during the observation. At 04:24:49 the dirty reason had transitioned to awaiting the next full observation. It remained dirty. Since scan_first is true, caught_up=false and the exposed behind_seconds value are not valid event-backlog measures; last_scan_age_seconds is the freshness field.",
     "The 7m42s duration was observed while the host was under CPU pressure; the sample does not isolate whether pressure caused the duration.",
     "These samples do not establish exact path-level correctness or prove that the accounting check will never complete."
   ],
