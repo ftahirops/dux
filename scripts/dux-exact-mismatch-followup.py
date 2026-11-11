@@ -97,6 +97,16 @@ def sample(source, db, root, binary):
             status = json.loads(status_run.stdout)
         except json.JSONDecodeError:
             pass
+    if isinstance(status, dict) and (
+            status.get('scan_first') is True
+            or status.get('behind_seconds_applicable') is False):
+        # Keep diagnostics from presenting the event-drain clock as scan-first
+        # freshness. The scan age is intentionally reported by the native
+        # status command, but this report only carries the event backlog field.
+        status = dict(status)
+        status['behind_seconds'] = None
+        status['behind_seconds_applicable'] = False
+        status['scan_first'] = True
     # Installed legacy builds may print the human status table and return 0
     # even with --json. Reconstruct the small status subset from the daemon's
     # versioned tmpfs heartbeat and the same read-only DB transaction instead
@@ -129,12 +139,19 @@ def sample(source, db, root, binary):
                 scanning = False
             if valid:
                 dirty, paused = 'dirty_since' in meta, 'paused_since' in meta
+                last_scan_ts = int(meta.get('last_scan_ts', '0'))
                 status = {
                     'caught_up': (pending == 0 and kernel_empty and behind_ms == 0
                                   and dropped == 0 and not uncertain and not dirty
                                   and not paused and not scanning and not scan_first),
                     'dirty': dirty, 'pending_updates': pending,
-                    'events_dropped': dropped, 'behind_seconds': behind_ms / 1000,
+                    'events_dropped': dropped,
+                    'behind_seconds': None if scan_first else behind_ms / 1000,
+                    'behind_seconds_applicable': not scan_first,
+                    'scan_first': scan_first,
+                    'last_scan_age_seconds': (
+                        max(0, int(time.time()) - last_scan_ts) if last_scan_ts > 0 else None
+                    ),
                     'updates_committed': updates_committed,
                     'status_source': f'legacy_watch_status_v{version}',
                 }
@@ -149,7 +166,8 @@ def sample(source, db, root, binary):
         'captured_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'status': {key: status.get(key) for key in
                    ('caught_up', 'dirty', 'pending_updates', 'events_dropped',
-                    'behind_seconds', 'updates_committed')},
+                    'behind_seconds', 'behind_seconds_applicable', 'scan_first',
+                    'last_scan_age_seconds', 'updates_committed')},
         'identity_mismatch': identity_rows,
         'allocation_mismatch': allocation_rows,
     }

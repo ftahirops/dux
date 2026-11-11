@@ -1,0 +1,37 @@
+{
+  "observed_at_utc": "2026-11-11T04:51:40Z",
+  "change": "The exact-mismatch follow-up report now suppresses behind_seconds in scan-first mode, includes scan_first plus behind_seconds_applicable, and provides last_scan_age_seconds as the relevant freshness measure.",
+  "files": [
+    "scripts/dux-exact-mismatch-followup.py",
+    "scripts/test_dux_exact_mismatch_followup.py"
+  ],
+  "tests": {
+    "command": "python3 -m unittest scripts.test_dux_exact_mismatch_followup -v",
+    "passed": 3,
+    "failed": 0,
+    "cases": [
+      "Legacy scan-first sidecar reports behind_seconds as null and inapplicable while including last_scan_age_seconds.",
+      "Native scan-first JSON with behind_seconds_applicable=false is normalized to null while retaining last_scan_age_seconds.",
+      "Legacy event-apply sidecar preserves numeric applicable behind_seconds."
+    ]
+  },
+  "other_checks": {
+    "python_compile": "passed for implementation and test module",
+    "git_diff_check": "passed"
+  },
+  "full_python_suite": {
+    "command": "PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'",
+    "observed_at_utc": "2026-11-11T04:54:42Z",
+    "discovered": 384,
+    "passed": 383,
+    "failed": 0,
+    "skipped": 1,
+    "elapsed_seconds": 29.597,
+    "result": "passed"
+  },
+  "coverage": "The full test suite was rerun, but coverage instrumentation was not. The earlier 53% package-lifecycle statement coverage does not include this helper; branch coverage remains unavailable.",
+  "why": "In scan-first mode the status daemon's behind_seconds measures event drain timing and is explicitly inapplicable. The diagnostic helper previously emitted this value without its applicability flag, which could be misread as index freshness or backlog.",
+  "limits": [
+    "This does not change daemon freshness semantics or repair an index that remains dirty while filesystem hints change during scans."
+  ]
+}
