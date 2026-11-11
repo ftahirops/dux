@@ -1,0 +1,74 @@
+{
+  "started_at_utc": "2026-11-11T01:05Z",
+  "host": "vps1 qualification host",
+  "guest": "disposable Ubuntu 24.04 KVM",
+  "guest_image_sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+  "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "fault_binary_sha256": "3b17b46c2f3c4baf18ed78bc3dc868e4ac92a9fb8ed4241141a12d659fee88b7",
+  "harness_sha256": "eadc239b6c2d3824f2dfa5c486b0444a9950822d164d335a001011a5cfd689c3",
+  "guest_profile": {
+    "ram_mib": 4096,
+    "vcpus": 2,
+    "qemu_cpu_quota_percent": 50,
+    "ephemeral_overlay": "tmpfs",
+    "host_share": "read-only virtio-9p"
+  },
+  "suites": [
+    "crash",
+    "overflow",
+    "cpu",
+    "churn",
+    "disk",
+    "coverage",
+    "capability",
+    "oom",
+    "pressure",
+    "mount",
+    "wal",
+    "startup",
+    "retry",
+    "postscan-hint",
+    "root"
+  ],
+  "parameters": {
+    "crash_rounds": 30,
+    "cpu_quota_percent": 25,
+    "seed": 20261022,
+    "seed_files": 256,
+    "filesystem_mib": 768,
+    "filesystem_type": "ext4",
+    "churn_operations": 20000,
+    "churn_batch_size": 2000,
+    "workspace_parent": "/dev/shm",
+    "keep_failed_workspace": true
+  },
+  "test_result": "not_started",
+  "test_started": false,
+  "vm_started_at_utc": "2026-11-11T01:02:11Z",
+  "vm_stopped_at_utc": "2026-11-11T01:04:36Z",
+  "vm_runtime_stop_evidence": "docs/qualification/vm-runtime-pressure-stop-20261111T0104Z.json",
+  "attempt_notes": [
+    "The guest booted and the read-only candidate share was verified.",
+    "First SSH test command used persistent-state lookup and did not find the ephemeral guest.",
+    "Second SSH attempt used ephemeral-state lookup after the runtime guard had stopped the guest.",
+    "No harness suite or fixture was started."
+  ],
+  "follow_up_attempts": [
+    {
+      "observed_at_utc": "2026-11-11T01:07Z",
+      "host": "vps1 qualification host",
+      "guest": "ubuntu24",
+      "profile": "qualification4",
+      "result": "refused_before_vm_start",
+      "admission_sample": "2/3",
+      "blockers": [
+        "Go compiler pid 547087",
+        "go test pid 546995"
+      ],
+      "vm_started": false,
+      "suites_started": false,
+      "interpretation": "The host admission guard refused while unrelated Go test work returned. No Dux fault suite ran."
+    }
+  ]
+}

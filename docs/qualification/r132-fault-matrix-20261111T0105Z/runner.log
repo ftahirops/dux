@@ -1,0 +1,13 @@
+Warning: Identity file /dev/shm/dux-qualification-vm/ubuntu24/1794358928628748788/identity not accessible: No such file or directory.
+ssh: connect to host 127.0.0.1 port 54307: Connection refused
+Traceback (most recent call last):
+  File "/home/dux/scripts/dux-qualification-vm.py", line 786, in <module>
+    main()
+  File "/home/dux/scripts/dux-qualification-vm.py", line 776, in main
+    run('ssh', *common, '-p', str(state['port']), 'root@127.0.0.1', *arguments)
+  File "/home/dux/scripts/dux-qualification-vm.py", line 522, in run
+    return subprocess.run([str(a) for a in args], check=True, text=True, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['ssh', '-i', '/dev/shm/dux-qualification-vm/ubuntu24/1794358928628748788/identity', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=/dev/shm/dux-qualification-vm/ubuntu24/1794358928628748788/known_hosts', '-p', '54307', 'root@127.0.0.1', 'sh', '-lc', 'mkdir -p /var/tmp/dux-r132-fault-matrix-20261111T0105Z && python3 /mnt/duxhost/dux-readiness.py --binary /mnt/duxhost/dux-r132 --fault-binary /mnt/duxhost/dux-r132-fault --suites crash overflow cpu churn disk coverage capability oom pressure mount wal startup retry postscan-hint root --crash-rounds 30 --seed 20261022 --cpu-quota-percent 25 --seed-files 256 --filesystem-mib 768 --filesystem-type ext4 --churn-operations 20000 --churn-batch-size 2000 --workspace-parent /dev/shm --keep-failed-workspace --report /var/tmp/dux-r132-fault-matrix-20261111T0105Z/report.json']' returned non-zero exit status 255.

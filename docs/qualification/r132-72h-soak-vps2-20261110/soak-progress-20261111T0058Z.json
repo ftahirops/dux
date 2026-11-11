@@ -1,0 +1,30 @@
+{
+  "observed_at_utc": "2026-11-11T00:58:04Z",
+  "progress_file_mtime_utc": "2026-11-11T00:58:04.181Z",
+  "status": "running",
+  "started_at_utc": "2026-11-10T09:04:50Z",
+  "elapsed_seconds": 57193.7,
+  "duration_target_seconds": 259200,
+  "completion_fraction": 0.22065470679012344,
+  "operations": 1268272,
+  "sample_count": 1265,
+  "candidate_binary_sha256": "998db222dcc0b86943b33c117f95e164b7940da03f0d76",
+  "controlled_crashes": 1,
+  "mutation_bursts": 15,
+  "held_reader_wal_reclaim_passes": 2,
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "systemd": {
+    "unit": "dux-readiness-1304925.service",
+    "active_state": "active",
+    "main_pid": 1304929,
+    "restarts": 0
+  },
+  "limitations": [
+    "The other 15 fault suites remain unrun.",
+    "One of five planned controlled crash/recovery checkpoints is complete.",
+    "Terminal exactness, history continuity, and SQLite integrity have not passed.",
+    "The soak is isolated from the installed Dux service; its results do not substitute for the live scan cycle."
+  ]
+}
