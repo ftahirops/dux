@@ -26,7 +26,7 @@ The broader aggregate snapshot in
 | System | Latest verified state |
 |---|---|
 | **VPS1 production** | At 04:23 UTC, the installed Dux remained 0.6.3 build `e0cc915f8f37`, active/running as root with four historical restarts. It is dirty/not caught up: 946 lifetime overflow notifications, 2,518,862 dropped updates, and 60,034 pending updates. Writes resumed after the earlier I/O-pressure pause but the event backlog grew again. Its last full scan was 5.65 days ago; event-mode behind time is 3.45 days. Dux reports 1,309,281 nodes and 127.80 GB indexed bytes; the index database occupies 3.86 GB. Root disk use is 70% (55G available, rounded). See the [04:23 follow-up evidence](docs/qualification/live-reconciliation-followup-20261111T0423Z.json) and earlier [04:06 snapshot](docs/qualification/live-host-check-20261111T0406Z.json). |
-| **VPS2 installed service** | At 04:43 UTC, Dux 0.6.3 build `8b02799b` completed its retry observation in 6m56: 1,819,084 files, 219,186 directories, and zero coverage issues. It pruned 72 vanished inode-reuse paths. Filesystem/fanotify hints changed during the scan, so the index remained dirty. Post-reconciliation accounting passed at 04:45:06 (116.819s); at 04:45:12 the daemon remained dirty awaiting another full observation. It was `active/running`, with zero restarts, pending updates, event drops, or kernel overflows. Earlier scans at 04:04 and 04:11 failed closed on one inode-incarnation conflict; 04:13 completed cleanly; 04:28 ended with one coverage issue. In scan-first mode `caught_up=false` and raw `behind_seconds` is inapplicable; use last-scan age. Root disk was 90% used (9.55 GB available) at 04:42. See the [04:44 VPS2 observation](docs/qualification/vps2-reconciliation-cycle-20261111T0444Z.json) and preceding reconciliation records. |
+| **VPS2 installed service** | Latest full observation completed at 04:58 UTC after 7m27: 1,821,622 files, 219,503 directories, and zero coverage issues. It pruned 72 vanished and revalidated 2 inode-reuse paths. Accounting verification passed at 04:59:48 (67.135s). The index remained dirty because filesystem/fanotify hints changed during the walk; at 05:00 it awaited another observation. The daemon was active/running with zero restarts, pending updates, event drops, or kernel overflows. Systemd still reported `reloading` during this scan on the installed older build. Root disk was 89% used (10G available, rounded) at 05:00. In scan-first mode `caught_up=false` and raw `behind_seconds` is inapplicable; use last-scan age. See the [05:00 VPS2 observation](docs/qualification/vps2-reconciliation-cycle-20261111T0500Z.json) and preceding reconciliation records. |
 | **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 04:55 it had run 19h50 of 72 hours (27.56%), with 1,562,000 operations and 1,558 exactness samples. Exact-convergence p95 is 10.001s, max 17.963s; latest RSS was 3.3 MiB and WAL 5.25 MiB. It has passed 19 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Whole-run average is 21.87 operations/s against the harness target of 25; exactness checks pause mutation pacing, so this does not prove sustained 25/s capacity. Final exactness, history, and SQLite checks remain pending, as do four planned crash checkpoints. See the [04:55 raw checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-live-checkpoint-20261111T0455Z.json). |
 | **Disk and VM admission** | At 04:24 VPS2 root was 89% used with 11G available; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; Dux index totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. See the [04:23 live follow-up](docs/qualification/live-reconciliation-followup-20261111T0423Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). The 04:02 guarded VM attempt was stopped after 30 seconds when Go compiler/build/test jobs appeared (load1 5.19, CPU PSI 33.45%); it started zero matrix suites. A fresh 04:27 admission attempt was refused before QEMU because unrelated Go test/build workloads were active and load1 was 19.48; again, zero suites started. See the [04:27 admission record](docs/qualification/vm-admission-20261111T0427Z.json) and prior [revision-67 admission evidence](docs/qualification/r133-package-revision-67-20261111T0405Z.json). |
 
@@ -37,19 +37,21 @@ associated with different birth-time incarnations. Both scans failed closed
 with one coverage issue and scheduled bounded retries; the status showed zero
 fanotify overflows and zero dropped events, so this is a distinct scan-time
 inode-reuse race. The third scan completed at 04:20 after 7m42 with 1,815,415
-files and zero coverage issues. The later retry also completed at 04:43 after
-6m56, with 1,819,084 files and zero coverage issues; it pruned 72 vanished
-inode-reuse paths. Fanotify hints changed during that scan, so the service
-kept the index dirty. Post-reconciliation accounting passed at 04:45:06,
-116.819s after scan completion. At 04:45:12 the index was still dirty awaiting
-another full observation, so a clean-index result is not claimed. The daemon
+files and zero coverage issues. The 04:43 scan completed in 6m56 and the
+04:51 scan in 7m27; both reported zero coverage issues. The latter saw
+1,821,622 files and pruned 72 vanished/revalidated 2 inode-reuse paths.
+Accounting passed at 04:59:48, 67.135s after that scan completed. Hints changed
+during both scans, so the service kept the index dirty. These cycles show that
+reconciliation and its independent accounting pass can complete under this
+observed churn, but they do not establish a clean current view while hints
+continue changing. The daemon
 is in scan-first mode: its `caught_up` flag is always false and its
 `behind_seconds` field is not applicable; use last-scan age to assess freshness.
-Systemd reported `reloading` during the scan
-on the installed build and returned to `active/running` afterward. The r133
+Systemd reported `reloading` during both scans on the installed build and
+returned to `active/running` afterward. The r133
 READY-notification change addresses that service-state reporting defect, but
 does not address the inode-reuse conflicts or the need for a fresh observation
-after concurrent changes. See the [04:23 live follow-up](docs/qualification/live-reconciliation-followup-20261111T0423Z.json).
+after concurrent changes. See the [04:44 observation](docs/qualification/vps2-reconciliation-cycle-20261111T0444Z.json), [05:00 observation](docs/qualification/vps2-reconciliation-cycle-20261111T0500Z.json), and [04:23 live follow-up](docs/qualification/live-reconciliation-followup-20261111T0423Z.json).
 
 At 23:14 UTC, a bounded inspection of the latest 500 VPS1 journal messages
 found 430 unresolved `open_by_handle_at` failures with `ESTALE`. Of those,
