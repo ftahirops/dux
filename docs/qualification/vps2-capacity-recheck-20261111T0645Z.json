@@ -1,0 +1,58 @@
+{
+  "observed_at_utc": "2026-11-11T06:45:30Z",
+  "host": "192.168.5.106",
+  "source_commit": "5e520c7",
+  "filesystem": {
+    "root_total": "93G",
+    "root_used": "79G",
+    "root_available": "9.6G",
+    "root_use_percent": 90,
+    "dev_shm_total": "3.0G",
+    "dev_shm_used": "990M",
+    "dev_shm_available": "2.1G"
+  },
+  "soak": {
+    "worker_pid": 1304925,
+    "daemon_pid": 3117886,
+    "state": "running",
+    "elapsed_at_064227_utc_seconds": 77813.1,
+    "operations_at_064227_utc": 1691445,
+    "controlled_crash_recoveries": 1,
+    "final_exact_passed": false,
+    "sqlite_integrity": null
+  },
+  "local_build_matrix_admission": {
+    "observed_at_utc": "2026-11-11T06:42:39Z",
+    "load1": 10.01,
+    "cpu_psi_some_avg10_percent": 30.6,
+    "io_psi_some_avg10_percent": 4.25,
+    "active_host_workloads": [
+      "Go compiler",
+      "Go test binary",
+      "Go vet",
+      "go test"
+    ],
+    "admitted": false
+  },
+  "disk_inventory": {
+    "operation": "ionice -c3 nice -n19 du -x -h -d1 /",
+    "started_pid": 365902,
+    "finished": false,
+    "stopped_by_operator": true,
+    "reason": "The read-only recursive walk was still active after about 73 seconds while I/O PSI was elevated. Avoid prolonging a broad disk walk during active host I/O.",
+    "no_disk_changes": true,
+    "root_usage_before_and_after": "90% used, approximately 9.6-9.7G available",
+    "io_psi_before_stop": {
+      "some_avg10_percent": 20.79,
+      "full_avg10_percent": 19.39
+    },
+    "io_psi_after_stop": {
+      "some_avg10_percent": 14.58,
+      "full_avg10_percent": 10.92
+    },
+    "causation_established": false
+  },
+  "disk_breakdown_source": "docs/qualification/vps2-disk-audit-20261111T0205Z.json",
+  "cleanup_performed": false,
+  "assessment": "The VM remains usable for the existing tmpfs-backed soak but has limited root-disk headroom. The earlier audit identifies large application data and active Docker logging; no safe cleanup target was established by this recheck."
+}

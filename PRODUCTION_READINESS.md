@@ -186,6 +186,18 @@ matrix attempt must rebuild both binaries from the current clean worktree,
 refresh the staged harness, verify digests, and then pass host admission. At
 06:40, Go test workloads were still active. See the [stale artifact audit](docs/qualification/stale-matrix-artifacts-20261111T0640Z.json).
 
+At 06:42–06:45, the VPS2 soak was still running (21h38m elapsed and 1,691,445
+operations at the sample); its final exactness and SQLite checks remain
+pending. Root storage was 90% used with about 9.6 GB free, while its tmpfs
+workspace had 2.1 GB free. A low-priority recursive `du` inventory was stopped
+after about 73 seconds when it remained active during elevated I/O pressure;
+the root usage was stable and no files were changed. This does not establish
+that the walk caused the pressure. The earlier targeted audit remains the
+available top-level size evidence. The local build/matrix admission was also
+closed by active Go compiler/test/vet workloads and load above its threshold.
+See the [06:45 capacity recheck](docs/qualification/vps2-capacity-recheck-20261111T0645Z.json)
+and [02:05 targeted disk audit](docs/qualification/vps2-disk-audit-20261111T0205Z.json).
+
 ### Newly found service-state defect (2026-11-11)
 
 At 03:01 UTC, VPS2 systemd reported `dux.service` as
