@@ -1,5 +1,6 @@
 {
   "observed_at_utc": "2026-11-11T06:18:31Z",
+  "verification_refreshed_at_utc": "2026-11-11T06:22:20Z",
   "issue": {
     "area": "scan-first fanotify hint parsing",
     "severity": "correctness / missed reconciliation signal",
@@ -10,7 +11,7 @@
   },
   "regression_test": {
     "name": "scan_first_hint_parser_marks_short_trailing_fragment_as_lost",
-    "fixture": "One valid synthetic parent-handle event followed by one invalid byte.",
+    "fixture": "One valid synthetic parent-handle event followed separately by each 1-to-23-byte invalid suffix length.",
     "assertions": [
       "valid preceding handle remains available",
       "all input bytes are accounted as consumed",
@@ -32,6 +33,7 @@
       "failed": 0,
       "ignored": 0,
       "filtered_out": 338,
+      "short_suffix_length_range_inclusive": [1, 23],
       "result": "passed"
     },
     "formatting": "cargo fmt --check passed",

@@ -8855,18 +8855,24 @@ mod tests {
 
     #[test]
     fn scan_first_hint_parser_marks_short_trailing_fragment_as_lost() {
-        let mut bytes = synthetic_hint_record(123, 42, b"entry");
-        bytes.push(0xaa);
+        for tail_len in 1..FAN_EVENT_METADATA_LEN {
+            let mut bytes = synthetic_hint_record(123, 42, b"entry");
+            bytes.resize(bytes.len() + tail_len, 0xaa);
 
-        let (overflows, consumed, lost, handles) = parse_fanotify_hints(&bytes, 8);
+            let (overflows, consumed, lost, handles) = parse_fanotify_hints(&bytes, 8);
 
-        assert_eq!(overflows, 0);
-        assert_eq!(consumed, bytes.len());
-        assert_eq!(handles.len(), 1, "valid preceding scope is retained");
-        assert!(
-            lost,
-            "discarding an unparseable suffix must widen to a full scan"
-        );
+            assert_eq!(overflows, 0, "tail length {tail_len}");
+            assert_eq!(consumed, bytes.len(), "tail length {tail_len}");
+            assert_eq!(
+                handles.len(),
+                1,
+                "valid preceding scope should survive tail length {tail_len}"
+            );
+            assert!(
+                lost,
+                "discarding a {tail_len}-byte suffix must widen to a full scan"
+            );
+        }
     }
 
     #[test]

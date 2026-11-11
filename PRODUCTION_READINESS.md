@@ -267,9 +267,10 @@ consumed a trailing fragment shorter than one event header without setting its
 lost-coverage flag. The fanotify reader normally returns complete records, but
 if a malformed/truncated chunk reaches this parser, the caller could treat the
 discarded suffix as fully accounted. The parser now marks that case lost so
-reconciliation widens safely. The new regression and all four related parser
-tests passed; `cargo fmt --check` passed. The full Rust suite has not been rerun
-for this fix. See the [focused regression evidence](docs/qualification/fanotify-short-tail-regression-20261111T0618Z.json).
+reconciliation widens safely. The regression iterates every short suffix size
+from 1 through 23 bytes; it and the three other parser tests passed (4 total),
+and `cargo fmt --check` passed. The full Rust suite has not been rerun for this
+fix. See the [focused regression evidence](docs/qualification/fanotify-short-tail-regression-20261111T0618Z.json).
 
 ### Accounting-query optimization experiment — 2026-11-11 05:39 UTC
 
