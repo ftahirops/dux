@@ -1,0 +1,33 @@
+{
+  "host": "192.168.5.106",
+  "observed_at_utc": "2026-11-11T03:24:44Z",
+  "installed_release": "dux 0.6.3 (8b02799b4132) [production]",
+  "systemd": {
+    "active_state": "active",
+    "sub_state": "running",
+    "restarts": 0
+  },
+  "index": {
+    "daemon_live": true,
+    "scan_first": true,
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "scan_in_progress": false,
+    "last_scan_utc": "2026-11-11T03:16:18Z",
+    "last_scan_age_seconds": 506,
+    "index_nodes": 2014970,
+    "pending_updates": 0,
+    "kernel_overflow_notifications": 0,
+    "events_dropped": 0,
+    "automatic_reconciliation_paused": false,
+    "behind_seconds": 19640.683
+  },
+  "root_disk": {
+    "total_bytes": 99012476928,
+    "used_bytes": 83355602944,
+    "available_bytes": 11077124096,
+    "use_percent": 89
+  },
+  "evidence": "Captured with systemctl show, dux status --json, and df -B1 from VPS2."
+}
