@@ -1,0 +1,34 @@
+{
+  "observed_at_utc": "2026-11-11T04:55:56Z",
+  "host": "192.168.5.106",
+  "status": "running",
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "elapsed_seconds": 71436.1,
+  "elapsed_hours": 19.8434,
+  "target_duration_hours": 72,
+  "completion_percent": 27.56,
+  "operations": 1562000,
+  "mean_operations_per_second_including_checks": 21.87,
+  "harness_target_operations_per_second": 25,
+  "exact_convergence_samples": 1558,
+  "exact_convergence_p95_ms": 10001,
+  "exact_convergence_max_ms": 17963,
+  "latest_rss_kib": 3352,
+  "latest_wal_bytes": 5508472,
+  "maximum_file_descriptors": 19,
+  "mutation_bursts": 19,
+  "controlled_crash_recoveries": 1,
+  "held_reader_checks": [
+    {"held_seconds": 300, "snapshot_inodes": 2502, "wal_reclaimed": true},
+    {"held_seconds": 300, "snapshot_inodes": 4308, "wal_reclaimed": true},
+    {"held_seconds": 300, "snapshot_inodes": 6230, "wal_reclaimed": true}
+  ],
+  "final_exactness": "pending",
+  "final_history_validation": "pending",
+  "sqlite_integrity": "pending",
+  "interpretation": [
+    "This is progress evidence from a live run, not its terminal pass/fail result.",
+    "The whole-run average is below the requested pacing target; exactness checks pause mutation pacing and the average does not isolate sustainable daemon throughput.",
+    "One controlled crash recovery and three held-reader/WAL reclamation checks have passed so far; final consistency checks and four additional planned crash checkpoints remain incomplete."
+  ]
+}
