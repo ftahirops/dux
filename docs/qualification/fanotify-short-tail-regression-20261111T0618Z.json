@@ -1,0 +1,45 @@
+{
+  "observed_at_utc": "2026-11-11T06:18:31Z",
+  "issue": {
+    "area": "scan-first fanotify hint parsing",
+    "severity": "correctness / missed reconciliation signal",
+    "description": "A trailing fragment shorter than FAN_EVENT_METADATA_LEN was marked consumed without setting lost=true. The caller therefore could not distinguish the discarded bytes from a completely parsed chunk and might not request reconciliation.",
+    "source": "src/watch.rs:1651",
+    "fix": "Mark coverage lost before consuming the short trailing suffix, so the caller widens recovery to a full observation.",
+    "assumption": "The kernel normally returns complete fanotify records; this is a fail-closed defense for malformed/truncated chunks."
+  },
+  "regression_test": {
+    "name": "scan_first_hint_parser_marks_short_trailing_fragment_as_lost",
+    "fixture": "One valid synthetic parent-handle event followed by one invalid byte.",
+    "assertions": [
+      "valid preceding handle remains available",
+      "all input bytes are accounted as consumed",
+      "the short suffix sets lost=true and requests widening to reconciliation"
+    ]
+  },
+  "verification": {
+    "focused_new_test": {
+      "command": "nice -n 19 ionice -c 3 env CARGO_BUILD_JOBS=1 cargo test --offline scan_first_hint_parser_marks_short_trailing_fragment_as_lost -- --nocapture",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 341,
+      "result": "passed"
+    },
+    "related_parser_tests": {
+      "command": "nice -n 19 ionice -c 3 env CARGO_BUILD_JOBS=1 cargo test --offline scan_first_hint_parser -- --nocapture",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 338,
+      "result": "passed"
+    },
+    "formatting": "cargo fmt --check passed",
+    "diff_check": "git diff --check passed",
+    "full_rust_suite": "not rerun for this fix"
+  },
+  "coverage_limits": [
+    "The regression test validates the parser's loss signal; it does not inject a truncated record from the kernel, which promises whole records from read().",
+    "The grouped parser test run contains the new regression and three related parser tests; it is not the full Rust suite or runtime fault matrix."
+  ]
+}

@@ -1649,6 +1649,10 @@ fn parse_fanotify_hints(
         buf = &buf[event_len..];
     }
     if consumed < input_len && buf.len() < FAN_EVENT_METADATA_LEN {
+        // The fanotify reader returns whole records. A short trailing fragment
+        // cannot be safely interpreted or silently discarded: the corresponding
+        // filesystem change may be absent from the hints, so force reconciliation.
+        lost = true;
         consumed = input_len;
     }
     (overflows, consumed, lost, handles.into_iter().collect())
@@ -8847,6 +8851,22 @@ mod tests {
         assert!(handles.is_empty());
         assert_eq!(consumed, bytes.len());
         assert!(lost);
+    }
+
+    #[test]
+    fn scan_first_hint_parser_marks_short_trailing_fragment_as_lost() {
+        let mut bytes = synthetic_hint_record(123, 42, b"entry");
+        bytes.push(0xaa);
+
+        let (overflows, consumed, lost, handles) = parse_fanotify_hints(&bytes, 8);
+
+        assert_eq!(overflows, 0);
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(handles.len(), 1, "valid preceding scope is retained");
+        assert!(
+            lost,
+            "discarding an unparseable suffix must widen to a full scan"
+        );
     }
 
     #[test]
