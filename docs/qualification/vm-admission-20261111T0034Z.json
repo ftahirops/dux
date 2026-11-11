@@ -1,0 +1,38 @@
+{
+  "observed_at_utc": "2026-11-11T00:34:26Z",
+  "host": "vps1 qualification host",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "attempts": [
+    {
+      "at_utc": "2026-11-11T00:33Z",
+      "result": "refused_before_vm_start",
+      "sample": "1/3",
+      "blockers": [
+        "Go test binary pid 418872",
+        "go test pid 418677",
+        "shell test script pid 418395"
+      ]
+    },
+    {
+      "at_utc": "2026-11-11T00:34Z",
+      "result": "refused_before_vm_start",
+      "sample": "2/3",
+      "blockers": [
+        "shell test script pid 419228"
+      ]
+    }
+  ],
+  "followup_observation": {
+    "at_utc": "2026-11-11T00:34:26Z",
+    "go_test_pid": 419769,
+    "command_scope": "Go race tests in repository ./internal/repository ./internal/service ./internal/handler",
+    "cpu_psi_some_avg10_percent": 0.08,
+    "io_psi_some_avg10_percent": 3.15,
+    "io_psi_full_avg10_percent": 3.06,
+    "vm_state": "inactive"
+  },
+  "suites_started": false,
+  "interpretation": "Admission guard refused to start the guest when unrelated Go build/test jobs appeared between samples. No Dux test ran; host pressure admission was preserved."
+}

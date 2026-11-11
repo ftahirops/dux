@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-11T00:29Z",
+  "snapshot_at_utc": "2026-11-11T00:36Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -7,34 +7,34 @@
     "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76"
   },
   "production_vps1": {
-    "observed_at_utc": "2026-11-11T00:27:40Z",
+    "observed_at_utc": "2026-11-11T00:35:32Z",
     "installed_release": "0.6.3 (build e0cc915f8f37)",
     "service_active": true,
     "historical_restarts": 4,
     "index_dirty": true,
     "caught_up": false,
-    "kernel_overflows": 891,
+    "kernel_overflows": 892,
     "dropped_updates": 2518862,
     "last_full_scan_utc": "2026-11-05T12:49:22Z",
-    "behind_seconds": 284208.701,
+    "behind_seconds": 284680.831,
     "service_user": "root",
-    "index_nodes": 1289626,
-    "index_bytes_on_disk": 3734249472,
+    "index_nodes": 1289538,
+    "index_bytes_on_disk": 3737456640,
     "wal_bytes": 134217728,
-    "pending_updates": 29,
-    "dirty_reason": "fanotify queue overflow",
+    "pending_updates": 12,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
     "scan_in_progress": false,
     "behind_seconds_applicable": true,
-    "last_scan_age_seconds": 473898,
+    "last_scan_age_seconds": 474370,
     "dirty_since_timestamp_seconds": 1794349023,
     "service_substate": "running",
-    "events_seen": 281153806,
-    "events_resolved": 163618539,
-    "updates_committed": 46011512,
+    "events_seen": 282350017,
+    "events_resolved": 164102158,
+    "updates_committed": 46242740,
     "systemd_start_utc": "2026-11-07T17:30:51Z",
     "binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
-    "index_bytes": 123001663488,
-    "evidence": "docs/qualification/vps1-live-status-20261111T0027Z.json",
+    "index_bytes": 123396354048,
+    "evidence": "docs/qualification/vps1-live-status-20261111T0035Z.json",
     "dirty": true,
     "paused": false,
     "installed_version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
@@ -50,8 +50,8 @@
       "events_resolved": 7209184,
       "dropped_updates": 0
     },
-    "last_event_commit_timestamp_seconds": 1794356859,
-    "watch_status_updated_at_seconds": 1794356860,
+    "last_event_commit_timestamp_seconds": 1794357331,
+    "watch_status_updated_at_seconds": 1794357332,
     "recent_estale_journal_sample": {
       "sample_file": "docs/qualification/vps1-estale-event-sample-20261110T2314Z.json",
       "matching_messages_in_latest_500": 430,
@@ -138,6 +138,15 @@
       "kernel_overflow_notifications": 0,
       "events_dropped": 0,
       "behind_seconds": 255
+    },
+    "latest_delta_since_2026_11_11T0027Z": {
+      "kernel_overflow_notifications": 1,
+      "events_dropped": 0,
+      "pending_updates": -17,
+      "events_seen": 1196211,
+      "events_resolved": 483619,
+      "updates_committed": 231228,
+      "behind_seconds": 472.13
     }
   },
   "disk": {
@@ -223,11 +232,11 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-11T00:28:09Z",
+    "observed_at_utc": "2026-11-11T00:35:27Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 55376.0,
-    "operations": 1230720,
+    "elapsed_seconds": 55796.2,
+    "operations": 1239687,
     "exact_check_samples": 1221,
     "completed_hourly_bursts": 15,
     "held_reader_scenarios": 2,
@@ -371,9 +380,9 @@
     },
     "latest_checkpoint_progress_file_mtime_utc": "2026-11-10T23:56:31.813Z",
     "latest_checkpoint_progress_file_size_bytes": 184891,
-    "completion_fraction": 0.21364197530864198,
-    "sample_count": 1227,
-    "operations_per_second_average": 22.22479052297024,
+    "completion_fraction": 0.21526311728395062,
+    "sample_count": 1236,
+    "operations_per_second_average": 22.21812596556755,
     "controlled_crashes": 1,
     "mutation_bursts": 15,
     "held_reader_wal_reclaim_passes": 2,
@@ -386,7 +395,7 @@
       "main_pid": 1304929,
       "restarts": 0
     },
-    "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0028Z.json"
+    "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0035Z.json"
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -1382,5 +1391,43 @@
     ],
     "fault_matrix_started": false,
     "evidence": "docs/qualification/vm-admission-20261110T2258Z.json"
+  },
+  "latest_vm_admission_20261111T0034Z": {
+    "observed_at_utc": "2026-11-11T00:34:26Z",
+    "host": "vps1 qualification host",
+    "guest": "ubuntu24",
+    "profile": "qualification4",
+    "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "attempts": [
+      {
+        "at_utc": "2026-11-11T00:33Z",
+        "result": "refused_before_vm_start",
+        "sample": "1/3",
+        "blockers": [
+          "Go test binary pid 418872",
+          "go test pid 418677",
+          "shell test script pid 418395"
+        ]
+      },
+      {
+        "at_utc": "2026-11-11T00:34Z",
+        "result": "refused_before_vm_start",
+        "sample": "2/3",
+        "blockers": [
+          "shell test script pid 419228"
+        ]
+      }
+    ],
+    "followup_observation": {
+      "at_utc": "2026-11-11T00:34:26Z",
+      "go_test_pid": 419769,
+      "command_scope": "Go race tests in repository ./internal/repository ./internal/service ./internal/handler",
+      "cpu_psi_some_avg10_percent": 0.08,
+      "io_psi_some_avg10_percent": 3.15,
+      "io_psi_full_avg10_percent": 3.06,
+      "vm_state": "inactive"
+    },
+    "suites_started": false,
+    "interpretation": "Admission guard refused to start the guest when unrelated Go build/test jobs appeared between samples. No Dux test ran; host pressure admission was preserved."
   }
 }
