@@ -1,0 +1,60 @@
+{
+  "observed_at_utc": "2026-11-11T04:05:00Z",
+  "source_commit": "6db90925b0d9307e93083d0cb7700c3e85d61840",
+  "source_tree_sha256": "c83182752ca9141529b1662b85428edad7b8d58f4d7c891e850d1018574fbdde",
+  "worktree_clean_at_build": true,
+  "production_binary": {
+    "sha256": "acae65556a79306354316729b0365b0b7d630f1d4d8e21e25ca1f18323f635d6",
+    "version_output": "dux 0.6.3 (6db90925b0d9) [production] source-sha256=c83182752ca9141529b1662b85428edad7b8d58f4d7c891e850d1018574fbdde"
+  },
+  "fault_binary": {
+    "sha256": "a025e08529d555e4862341a8bad0a9e9a22553b99a32382d7d8cd8b11ca62e23",
+    "version_output": "dux 0.6.3 (6db90925b0d9) [fault-injection] source-sha256=c83182752ca9141529b1662b85428edad7b8d58f4d7c891e850d1018574fbdde"
+  },
+  "packages": {
+    "deb": {
+      "version": "0.6.3-67",
+      "sha256": "24afb078b58a6ffc0bcfacf57265d63050865e2d189e42dec8fc4d51825f4ba4",
+      "payload_binary_sha256": "acae65556a79306354316729b0365b0b7d630f1d4d8e21e25ca1f18323f635d6"
+    },
+    "rpm": {
+      "version": "0.6.3-67",
+      "sha256": "adc0eaf223aac6fc63b0e7f6abc467d860ee01ff1e0fb7edbafa6ba853741f80",
+      "payload_binary_sha256": "acae65556a79306354316729b0365b0b7d630f1d4d8e21e25ca1f18323f635d6",
+      "rpm_header_and_payload_digests": "passed"
+    }
+  },
+  "checks": {
+    "artifact_sha256_manifest": "passed",
+    "deb_payload_matches_standalone_production_binary": true,
+    "rpm_payload_matches_standalone_production_binary": true,
+    "production_fault_embedded_source_digest_match": true,
+    "dpkg_upgrade_order_0_6_3_67_gt_0_6_3_66": "passed",
+    "systemd_analyze_verify_deb_and_rpm_units": "passed",
+    "cargo_audit": {
+      "locked_dependencies": 229,
+      "advisories": 0,
+      "warnings": 0,
+      "database_commit": "28d73fc95e5972af3403225a217def57dcaba3c4"
+    }
+  },
+  "runtime_qualification": {
+    "guarded_vm_started_at_utc": "2026-11-11T04:02:28Z",
+    "guarded_vm_stopped_at_utc": "2026-11-11T04:02:58Z",
+    "stop_reason": "The required runtime guard found active Go compiler/build/test workloads on admission sample 3/3 and stopped the disposable VM.",
+    "admission_pressure_at_stop": {
+      "load1": 5.19,
+      "cpu_psi_some_avg10_percent": 33.45,
+      "active_workloads": ["Go compiler", "go build", "go test"]
+    },
+    "fault_matrix_suites_started": 0,
+    "package_install_upgrade_rollback_run": false
+  },
+  "artifact_directory": "/dev/shm/dux-r133-r67-20261111T0355Z",
+  "qualification_share": "/dev/shm/dux-r133-qualified-20261111T0401Z",
+  "limitations": [
+    "Packages are unsigned qualification artifacts.",
+    "No installation, upgrade, rollback, or package-created account lifecycle test was run.",
+    "Successful artifact integrity checks do not establish runtime or production readiness."
+  ]
+}
