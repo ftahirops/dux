@@ -176,6 +176,16 @@ suites; the latest admission sample found Go tests and load average 11.57, so
 the guard correctly kept waiting. No guard was bypassed. See the
 [06:35 progress evidence](docs/qualification/progress-20261111T0635Z.json).
 
+At 06:39 UTC, a source/artifact cross-check found the waiting VM matrix would
+have tested stale artifacts: its production/fault binaries embed source
+`b0ed3078`, before the current fanotify truncated-tail fix, and its staged
+qualification harness hash differs from `scripts/dux-readiness.py`. The runner
+had started zero suites and its VM unit was inactive; it was stopped before
+starting a VM. No result from that runner is counted as qualification. The next
+matrix attempt must rebuild both binaries from the current clean worktree,
+refresh the staged harness, verify digests, and then pass host admission. At
+06:40, Go test workloads were still active. See the [stale artifact audit](docs/qualification/stale-matrix-artifacts-20261111T0640Z.json).
+
 ### Newly found service-state defect (2026-11-11)
 
 At 03:01 UTC, VPS2 systemd reported `dux.service` as
