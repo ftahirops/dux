@@ -1,0 +1,46 @@
+{
+  "observed_at_utc": "2026-11-11T00:23:25Z",
+  "binary": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "service": {
+    "active_state": "active",
+    "main_pid": 1073891,
+    "historical_restarts": 4
+  },
+  "status": {
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "fanotify queue overflow",
+    "behind_seconds": 283953.367,
+    "kernel_overflow_notifications": 891,
+    "events_dropped": 2518862,
+    "pending_updates": 93952,
+    "last_scan_age_seconds": 473643,
+    "scan_in_progress": false,
+    "index_nodes": 1290412,
+    "index_bytes_on_disk": 3733057536,
+    "index_bytes": 122539675648,
+    "wal_bytes": 134217728,
+    "write_error": null,
+    "events_seen": 281097705,
+    "events_resolved": 163586941,
+    "updates_committed": 45903464,
+    "userspace_updates_dropped": 2518862,
+    "throttled_since_timestamp_seconds": 1794072651
+  },
+  "host_storage": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 126356004864,
+    "root_available_bytes": 62905077760,
+    "root_use_percent": 67,
+    "tmp_human": "13G",
+    "var_tmp_human": "675M",
+    "var_log_human": "1.7G",
+    "var_lib_dux_human": "3.7G",
+    "target_human": "3.6G",
+    "var_lib_dux_bytes": 3868839936,
+    "tmp_apparent_bytes": 16514666702,
+    "var_tmp_apparent_bytes": 694919083,
+    "target_apparent_bytes": 3786470777
+  },
+  "interpretation": "Production remains on the old event-apply daemon. It is live but not caught up; the historical fanotify-overflow dirty state remains, and pending work has increased substantially since the prior snapshot."
+}

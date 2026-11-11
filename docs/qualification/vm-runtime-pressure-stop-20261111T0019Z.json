@@ -27,12 +27,18 @@
     "dev_shm_available_human": "9.3G"
   },
   "latest_host_guard_sample": {
-    "observed_at_utc": "2026-11-11T00:20:50Z",
-    "load1": 3.92,
+    "observed_at_utc": "2026-11-11T00:22:39Z",
+    "load1": 21.53,
+    "cpu_psi_some_avg10_percent": 28.54,
+    "io_psi_some_avg10_percent": 1.69,
+    "memory_psi_some_avg10_percent": 0.58,
     "active_host_workloads": [
-      "Go tests and test binaries in wordpress and backup packages"
+      "Go compiler x2",
+      "Go test binaries x1",
+      "go test x2"
     ],
     "admission_blocked": true
   },
-  "interpretation": "The fail-safe runtime guard worked: unrelated Go workloads appeared after preflight and the disposable VM was stopped before SSH readiness or Dux suite execution. This is not a failed Dux test."
+  "interpretation": "The fail-safe runtime guard worked: unrelated Go workloads appeared after preflight and the disposable VM was stopped before SSH readiness or Dux suite execution. This is not a failed Dux test.",
+  "latest_vm_state": "inactive; ephemeral overlay cleaned"
 }
