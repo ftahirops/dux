@@ -1,0 +1,32 @@
+{
+  "observed_at_utc": "2026-11-11T05:32:30Z",
+  "host": "192.168.5.106",
+  "database": "/var/lib/dux/dux.db",
+  "database_open_mode": "read-only",
+  "database_file_bytes_at_2026-11-11T05:31Z": 882106368,
+  "sqlite_version": "3.45.1",
+  "sqlite_page_count": 215358,
+  "sqlite_page_size": 4096,
+  "accounting_query_source": "Store::totals_consistent in src/store.rs",
+  "most_recent_measured_accounting_duration_ms": 85180,
+  "explain_query_plan": [
+    "MATERIALIZE inode_totals; SCAN inodes",
+    "SEARCH root inode USING PRIMARY KEY (dev_id,inode)",
+    "SCAN dirents for dangling references; primary-key lookups for child and parent inode rows",
+    "MATERIALIZE child_totals; SCAN dirents USING idx_dirents_parent; SEARCH each prime child by inodes primary key",
+    "SCAN directory inode rows USING idx_inodes_linode; build/use automatic covering index to join child_totals",
+    "SCAN leaf inode rows USING idx_inodes_lfiles"
+  ],
+  "dirents_indexes": [
+    "idx_dirents_parent(parent_dev,parent_inode)",
+    "idx_dirents_target(dev_id,inode)",
+    "UNIQUE(parent_dev,parent_inode,name)"
+  ],
+  "scope_and_caveats": [
+    "EXPLAIN QUERY PLAN was compiled against the live index through a read-only connection; the accounting query itself was not run by this diagnostic.",
+    "The 85.180-second duration came from the service's normal post-scan accounting verification, not from this plan inspection.",
+    "The plan confirms repeated large-table scans and joins but does not attribute elapsed time to individual operators.",
+    "No index, schema, service, database, or production configuration was changed."
+  ],
+  "next_step": "Benchmark candidate query/index strategies against a consistent disposable copy under bounded resources; compare exact detection of injected rollup corruption, wall/CPU/I/O time, database growth, and scan write overhead before adopting any change."
+}
