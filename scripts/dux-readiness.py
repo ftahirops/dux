@@ -101,6 +101,51 @@ class OperationPacer:
             self.next_deadline = now
 
 
+def summarize_soak_latency(samples):
+    """Summarize exact-convergence latency overall and across soak progress.
+
+    Percentiles use the deterministic lower order statistic at
+    ``floor((n - 1) * q)``. Time windows help distinguish a stable latency
+    distribution from one that drifts as a long-running fixture evolves.
+    """
+    values = [
+        sample["exact_convergence_ms"]
+        for sample in samples
+        if isinstance(sample.get("exact_convergence_ms"), (int, float))
+    ]
+
+    def summarize(window):
+        if not window:
+            return {"count": 0, "min_ms": None, "p50_ms": None,
+                    "p95_ms": None, "p99_ms": None, "max_ms": None}
+
+        ordered = sorted(window)
+
+        def percentile(q):
+            return ordered[int((len(ordered) - 1) * q)]
+
+        return {
+            "count": len(ordered),
+            "min_ms": ordered[0],
+            "p50_ms": percentile(0.50),
+            "p95_ms": percentile(0.95),
+            "p99_ms": percentile(0.99),
+            "max_ms": ordered[-1],
+        }
+
+    count = len(values)
+    first_end = count // 4
+    middle_start = first_end
+    middle_end = (3 * count) // 4
+    return {
+        "quantile_method": "sorted observations at floor((n-1)*q)",
+        "overall": summarize(values),
+        "first_quarter": summarize(values[:first_end]),
+        "middle_half": summarize(values[middle_start:middle_end]),
+        "last_quarter": summarize(values[middle_end:]),
+    }
+
+
 def snapshot(db, immutable=False, attachments=()):
     uri = db.as_uri() + "?mode=ro" + ("&immutable=1" if immutable else "")
     connection = sqlite3.connect(uri, uri=True, timeout=1)
@@ -1541,6 +1586,7 @@ def soak_test(case, args, evidence):
                     'final_exact_passed': final_checks['exact'],
                     'final_history_passed': final_checks['history'],
                     'sqlite_integrity': final_checks['sqlite_integrity'],
+                    'exact_convergence_summary': summarize_soak_latency(samples),
                     'samples': samples, 'recent_operations': list(recent_operations)}
         temporary = progress_path.with_suffix('.json.tmp')
         temporary.write_text(json.dumps(progress, indent=2) + '\n')
@@ -1657,6 +1703,7 @@ def soak_test(case, args, evidence):
                     operations=count, samples=samples,
                     exact_convergence_ms=exact_convergence_ms,
                     max_exact_convergence_ms=max(exact_convergence_ms, default=0),
+                    exact_convergence_summary=summarize_soak_latency(samples),
                     exact_check_interval_operations=args.soak_check_interval,
                     controlled_crashes=crashes, held_readers=readers, mutation_bursts=bursts)
     checkpoint('passed', elapsed_seconds=workload_elapsed_seconds)

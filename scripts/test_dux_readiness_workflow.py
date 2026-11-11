@@ -22,6 +22,31 @@ READINESS_SPEC.loader.exec_module(READINESS)
 
 
 class ReadinessHarnessTests(unittest.TestCase):
+    def test_soak_latency_summary_reports_percentiles_and_time_windows(self):
+        values = list(range(100, 125)) + list(range(1, 51)) + list(range(75, 100))
+        summary = READINESS.summarize_soak_latency([
+            {"exact_convergence_ms": value} for value in values
+        ])
+        self.assertEqual(
+            summary["overall"],
+            {"count": 100, "min_ms": 1, "p50_ms": 50, "p95_ms": 119,
+             "p99_ms": 123, "max_ms": 124},
+        )
+        self.assertEqual(summary["first_quarter"]["count"], 25)
+        self.assertEqual(summary["middle_half"]["count"], 50)
+        self.assertEqual(summary["last_quarter"]["count"], 25)
+        self.assertEqual(summary["first_quarter"]["p50_ms"], 112)
+        self.assertEqual(summary["middle_half"]["p50_ms"], 25)
+        self.assertEqual(summary["last_quarter"]["p50_ms"], 87)
+
+    def test_soak_latency_summary_handles_missing_and_empty_samples(self):
+        summary = READINESS.summarize_soak_latency([
+            {"exact_convergence_ms": None}, {"rss_kib": 1234},
+        ])
+        self.assertEqual(summary["overall"]["count"], 0)
+        self.assertIsNone(summary["overall"]["p95_ms"])
+        self.assertEqual(summary["last_quarter"]["count"], 0)
+
     def test_operation_pacer_accounts_for_mutation_time(self):
         class FakeClock:
             def __init__(self):

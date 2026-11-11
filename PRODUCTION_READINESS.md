@@ -251,6 +251,16 @@ reporting. The guarded fault-matrix runner simultaneously entered its required
 120-second quiet admission window; no matrix suite had started at the time of
 the test record. See the [focused scan-first test record](docs/qualification/scan-first-rust-focused-tests-20261111T0544Z.json).
 
+At 06:07 UTC, the qualification harness was updated to include exact-convergence
+latency percentiles and first-quarter/middle-half/last-quarter summaries in
+each soak checkpoint and terminal report. Two focused tests passed, covering
+percentile values, chronological windows, missing observations, and empty
+samples; `py_compile` and `git diff --check` passed. A shuffled latency fixture
+guards that the time windows preserve chronology before computing percentiles.
+The live r132 soak uses a copy of the older harness on VPS2, so this change does
+not alter its current run or retroactively qualify that candidate. The complete
+Python suite has not been rerun for this harness change.
+
 ### Accounting-query optimization experiment — 2026-11-11 05:39 UTC
 
 A low-priority, temporary 20k-file SQLite fixture compared the existing
