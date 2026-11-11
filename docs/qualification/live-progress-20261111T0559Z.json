@@ -1,0 +1,77 @@
+{
+  "observed_at_utc": "2026-11-11T05:59:51Z",
+  "vps2_installed_service": {
+    "observed_at_utc": "2026-11-11T05:59:49Z",
+    "active_state": "reloading",
+    "sub_state": "reload-notify",
+    "main_pid": 576850,
+    "historical_restarts": 0,
+    "dux_status": {
+      "dirty": true,
+      "dirty_reason": "periodic filesystem observation in progress",
+      "scan_first": true,
+      "scan_in_progress": true,
+      "scan_started_at_epoch": 1794376274,
+      "last_scan_age_seconds": 1080,
+      "scan_progress_files_seen": 1834260,
+      "scan_progress_directories_seen": 220880,
+      "events_dropped": 0,
+      "kernel_overflow_notifications": 0,
+      "pending_updates": 0,
+      "index_nodes": 2047434,
+      "write_error": null
+    }
+  },
+  "r132_soak": {
+    "observed_at_utc": "2026-11-11T05:59:12Z",
+    "status": "running",
+    "candidate_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "elapsed_seconds": 75261.7,
+    "target_hours": 72,
+    "completion_percent": 29.04,
+    "operations": 1639435,
+    "requested_operations_per_second": 25,
+    "aggregate_observed_operations_per_second": 21.783,
+    "mutation_bursts": 20,
+    "controlled_crash_recoveries": 1,
+    "held_reader_checks": 3,
+    "held_reader_snapshot_inode_counts": [2502, 4308, 6230],
+    "exact_convergence_samples": {
+      "count": 1634,
+      "latest_sample_ms": 10061,
+      "p50_ms": 3910,
+      "p95_ms": 10343,
+      "p99_ms": 14012,
+      "max_ms": 20447,
+      "quartile_trend": {
+        "first_quarter": {"n": 408, "p50_ms": 1509, "p95_ms": 4379, "max_ms": 9537},
+        "middle_half": {"n": 816, "p50_ms": 3974, "p95_ms": 8900, "max_ms": 17393},
+        "last_quarter": {"n": 409, "p50_ms": 6513, "p95_ms": 13162, "max_ms": 20447}
+      },
+      "quantile_method": "sorted observations at floor((n-1)*q)"
+    },
+    "final_exact_passed": false,
+    "final_history_passed": false,
+    "sqlite_integrity": null,
+    "pending_crash_checkpoints": 4,
+    "progress_file_last_modified_utc": "2026-11-11T05:59:12Z"
+  },
+  "guarded_fault_matrix": {
+    "runner_pid": 1837002,
+    "status": "waiting_for_host_admission",
+    "matrix_suites_started": 0,
+    "last_logged_sample_utc": "2026-11-11T05:59:51Z",
+    "last_logged_blockers": [
+      "active Go compiler, go test, and shell test workloads",
+      "host load1 52.97 exceeds threshold 10",
+      "CPU PSI some avg10 80.50% exceeds hard admission limit 55%"
+    ],
+    "guard_bypassed": false
+  },
+  "performance_interpretation": [
+    "The soak's exact-convergence observations rose across elapsed-time quartiles: p50 1.509s, 3.974s, then 6.513s; p95 4.379s, 8.900s, then 13.162s.",
+    "The soak retains 250 paths per hourly mutation burst, so its fixture grows over time. Held-reader snapshots grew from 2,502 to 4,308 to 6,230 inode rows; fixture growth is a plausible contributor to the latency trend, but causality is not isolated by this run.",
+    "Aggregate observed operations per second is below the configured 25/s request. The aggregate counter includes periodic burst operations, so it is not a direct measurement of only paced loop mutations. No explicit throughput or convergence SLO is declared, so these measurements are a performance concern requiring interpretation, not a threshold-based test failure.",
+    "The full soak assertions remain pending and these r132 measurements do not qualify the newer r133 packaged candidate."
+  ]
+}
