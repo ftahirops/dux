@@ -1,0 +1,45 @@
+{
+  "observed_at_utc": "2026-11-11T00:04:41Z",
+  "host": "qualification host (VPS1/local workspace)",
+  "action": "cleared only inactive Go build caches using go clean -cache with per-cache GOCACHE",
+  "cleared_caches": [
+    {
+      "path": "/tmp/xgs-emdash-restore-agent",
+      "before_gib": 1.762,
+      "after_bytes": 12288,
+      "last_modified_age_hours": 25.7
+    },
+    {
+      "path": "/tmp/xtop-gocache-r1",
+      "before_gib": 1.603,
+      "after_bytes": 12288,
+      "last_modified_age_hours": 19.3
+    },
+    {
+      "path": "/tmp/xtop-racecache1",
+      "before_gib": 0.696,
+      "after_bytes": 12288,
+      "last_modified_age_hours": 18.1
+    }
+  ],
+  "safety_checks": {
+    "active_process_cwd_exe_fd_cmdline_or_environment_references_before_cleanup": 0,
+    "active_go_builds_left_untouched": true,
+    "source_and_failure_evidence_left_untouched": true
+  },
+  "host_root_before": {
+    "used_bytes": 127875158016,
+    "available_bytes": 61385924608,
+    "use_percent": 68
+  },
+  "host_root_after": {
+    "used_bytes": 123405086720,
+    "available_bytes": 65855995904,
+    "use_percent": 66
+  },
+  "root_used_bytes_reclaimed": 4470071296,
+  "root_used_gib_reclaimed": 4.163,
+  "tmp_before_human": "17G",
+  "tmp_after_human": "12G",
+  "note": "The three named cache directories account for about 4.06 GiB by du; the observed df used-space decrease was 4.16 GiB. Aggregate /tmp also changed due concurrent host activity, so its full decrease is not attributed solely to this cleanup. No active Go build/test directory was removed."
+}
