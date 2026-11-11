@@ -1,0 +1,55 @@
+{
+  "observed_at_utc": "2026-11-11T06:36:35Z",
+  "source_commit": "8ea030b",
+  "vps2": {
+    "disk_observed_at_utc": "2026-11-11T06:35:51Z",
+    "root_used_percent": 90,
+    "root_available": "9.7G",
+    "dev_shm_available": "2.1G",
+    "dux_service": "active",
+    "soak_candidate_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "soak_progress_file_mtime_utc": "2026-11-11T06:35:43Z",
+    "soak_status": "running",
+    "soak_elapsed_seconds": 77452.9,
+    "soak_target_hours": 72,
+    "soak_completion_percent": 29.88,
+    "operations": 1683999,
+    "mutation_bursts": 21,
+    "controlled_crash_recoveries": 1,
+    "held_reader_checks": 3,
+    "all_held_reader_checks_reclaimed_wal": true,
+    "exact_convergence_samples": {
+      "count": 1678,
+      "p50_ms": 3974,
+      "p95_ms": 10457,
+      "max_ms": 20447
+    },
+    "final_exact_passed": false,
+    "final_history_passed": false,
+    "sqlite_integrity": null,
+    "other_planned_suites_run": [],
+    "other_planned_suites_not_run": [
+      "capability", "churn", "coverage", "cpu", "crash", "disk", "mount",
+      "oom", "overflow", "postscan-hint", "pressure", "retry", "root",
+      "startup", "wal"
+    ]
+  },
+  "local_guarded_fault_matrix": {
+    "runner_pid": 1837002,
+    "process_state": "alive",
+    "elapsed": "01:22:35",
+    "matrix_suites_started": 0,
+    "latest_admission_sample_utc": "2026-11-11T06:36:24Z",
+    "blockers": [
+      "Go test binary pid=2218671",
+      "go test pid=2216011",
+      "host load1=11.57 exceeds 10"
+    ],
+    "guard_bypassed": false
+  },
+  "assessment": [
+    "Soak progress advanced since the 06:29 snapshot, but candidate qualification remains incomplete.",
+    "VPS2 remains at 90% root-disk utilization; no cleanup was performed.",
+    "The guarded matrix remains safely waiting and has not begun any suite."
+  ]
+}

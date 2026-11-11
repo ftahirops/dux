@@ -163,6 +163,19 @@ Latest evidence: [02:49 reconciliation cycle](docs/qualification/vps2-reconcilia
 
 ## Tests, coverage, and open release gates
 
+### Qualification progress refresh (2026-11-11 06:36 UTC)
+
+The r132 soak advanced to 21.51 hours of its 72-hour target (29.88%), with
+1,683,999 operations, 21 mutation bursts, one controlled crash recovery, three
+held-reader checks (all reclaimed WAL), and 1,678 exact-convergence samples
+(p50 3.974 s, p95 10.457 s, max 20.447 s). Final exactness and history checks
+remain false, SQLite integrity is not yet reported, and the other 15 planned
+fault suites remain unrun. VPS2 root storage is still 90% used with 9.7 GB
+available. The local guarded matrix runner remains alive but has started zero
+suites; the latest admission sample found Go tests and load average 11.57, so
+the guard correctly kept waiting. No guard was bypassed. See the
+[06:35 progress evidence](docs/qualification/progress-20261111T0635Z.json).
+
 ### Newly found service-state defect (2026-11-11)
 
 At 03:01 UTC, VPS2 systemd reported `dux.service` as
