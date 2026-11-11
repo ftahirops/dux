@@ -1,0 +1,42 @@
+{
+  "started_at_utc": "2026-11-11T05:39:36.001159Z",
+  "workspace_commit": "8e1cc70fe74abc805f2d7dd25b1733d7ad9b9da4",
+  "runtime": {
+    "python": "3.12.3",
+    "sqlite": "3.45.1",
+    "priority": "nice 19, ionice idle"
+  },
+  "fixture": {
+    "kind": "temporary synthetic SQLite tree",
+    "directories": 200,
+    "files": 20000,
+    "inode_rows": 20201,
+    "dirent_rows": 20200,
+    "valid_totals_predicate_passed_in_every_timed_run": true
+  },
+  "comparison": {
+    "predicate": "same logical SQL as Store::totals_consistent",
+    "candidate_index": "dirents(parent_dev,parent_inode,prime,dev_id,inode)",
+    "order": ["baseline", "covering index", "baseline after DROP INDEX", "covering index again"],
+    "warmup_runs_per_phase": 3,
+    "timed_runs_per_phase": 10,
+    "phases": [
+      {"mode": "baseline-1", "median_seconds": 0.0330514640, "min_seconds": 0.0290748221, "max_seconds": 0.0356325509},
+      {"mode": "covering-1", "median_seconds": 0.0334781165, "min_seconds": 0.0282336920, "max_seconds": 0.0377879930},
+      {"mode": "baseline-2", "median_seconds": 0.0358326895, "min_seconds": 0.0332808378, "max_seconds": 0.0381678001},
+      {"mode": "covering-2", "median_seconds": 0.0326550205, "min_seconds": 0.0298936700, "max_seconds": 0.0550067150}
+    ],
+    "separate_same_cardinality_index_storage_observation_bytes": 327680,
+    "separate_base_fixture_bytes": 2035712,
+    "separate_indexed_fixture_bytes": 2363392
+  },
+  "decision": "Do not add the index based on this evidence. The two paired results disagree in direction and overlap materially; the apparent second-pair gain is within fixture/cache/system noise. The measured index added 327680 bytes on a roughly 2 MiB fixture, and production write amplification has not been measured.",
+  "limitations": [
+    "This is a 20k-file synthetic microbenchmark, not the 1.8M-path production-shaped database or a cold-cache test.",
+    "Python sqlite3 uses SQLite 3.45.1; Dux's bundled/runtime SQLite configuration may differ.",
+    "The full accounting predicate was checked for valid fixture state only; no corruption mutations were part of this benchmark.",
+    "A separate 100k-path fixture-generation attempt failed the initial expected-valid predicate and was discarded; it is not a product-test failure or a passing benchmark, and the fixture generator error remains unidentified.",
+    "No production code, schema, package, service, or database was modified."
+  ],
+  "next_step": "If pursuing this optimization, repeat on a consistent disposable copy of the production-shaped database with interleaved warm/cold measurements, injected corruption cases, index build/storage cost, and write-heavy scan overhead."
+}

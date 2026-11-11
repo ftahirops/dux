@@ -236,6 +236,21 @@ a low-cost regression check while the guarded VM remains inadmissible; it does
 not replace or expand the full suite or runtime qualification. See the
 [focused rerun record](docs/qualification/exact-mismatch-followup-focused-rerun-20261111T0527Z.json).
 
+### Accounting-query optimization experiment — 2026-11-11 05:39 UTC
+
+A low-priority, temporary 20k-file SQLite fixture compared the existing
+accounting predicate with and without a proposed covering index on
+`dirents(parent_dev,parent_inode,prime,dev_id,inode)`. The interleaved pairs
+did not show a repeatable improvement: baseline/indexed medians were
+33.05/33.48 ms, then 35.83/32.66 ms. The runs overlapped in range and the
+winning direction changed between pairs. A separate same-cardinality fixture
+grew by 327,680 bytes after adding the index. This is insufficient evidence to
+add the index, especially without measuring production write amplification.
+No source, schema, or live database change was made. The 100k fixture expansion
+failed its initial synthetic-validity assertion and was discarded; it is not
+counted as a product failure or a passing run. Full details and limitations are
+in the [microbenchmark evidence](docs/qualification/accounting-covering-index-microbenchmark-20261111T0539Z.json).
+
 ## Next gates
 
 1. Let the exact r132 soak reach 72 hours and require all terminal assertions to
