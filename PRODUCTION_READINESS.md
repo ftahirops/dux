@@ -198,6 +198,15 @@ closed by active Go compiler/test/vet workloads and load above its threshold.
 See the [06:45 capacity recheck](docs/qualification/vps2-capacity-recheck-20261111T0645Z.json)
 and [02:05 targeted disk audit](docs/qualification/vps2-disk-audit-20261111T0205Z.json).
 
+At 06:55 UTC, current-source production and fault-injection release binaries
+were rebuilt with one Cargo job at low CPU/I/O priority. Both embed commit
+`129ff59` and the same source SHA-256; the staged harness and sandbox helper
+match the repository. An artifact preflight passed before starting the guarded
+matrix driver as a transient systemd unit. The driver remains active but has
+started zero suites because Go build/test/vet workloads and severe host load
+reappeared immediately. No VM test has run. The exact binary and harness
+identities are recorded in the [current-source build evidence](docs/qualification/current-source-matrix-build-20261111T0658Z.json).
+
 ### Newly found service-state defect (2026-11-11)
 
 At 03:01 UTC, VPS2 systemd reported `dux.service` as
