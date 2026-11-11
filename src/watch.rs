@@ -831,6 +831,14 @@ fn background_reconciliation_scan_options(
         ..Default::default()
     }
 }
+
+fn reconciliation_systemd_status(reconcile_first: bool) -> &'static str {
+    if reconcile_first {
+        "READY=1\nSTATUS=Observing filesystem; collecting concurrent change hints"
+    } else {
+        "READY=1\nSTATUS=Rebuilding index; collecting concurrent changes"
+    }
+}
 // Reuse resolved directory paths across target-only updates until a flush changes
 // the committed graph. Bound the cache during storms over very wide trees.
 const MAX_INDEXED_PARENT_PATH_CACHE: usize = 16_384;
@@ -3662,11 +3670,7 @@ pub fn run_daemon(
                     "starting background reconciliation of {}; event ingestion remains active",
                     root_canon.display()
                 );
-                crate::util::systemd_notify(if reconcile_first {
-                    "RELOADING=1\nSTATUS=Observing filesystem; collecting concurrent change hints"
-                } else {
-                    "RELOADING=1\nSTATUS=Rebuilding index; collecting concurrent changes"
-                });
+                crate::util::systemd_notify(reconciliation_systemd_status(reconcile_first));
                 scan_cancel = Some(cancel);
                 let install_tx = fresh_install_tx.clone();
                 // Scan-first mode treats events as hints and does not mutate the
@@ -7621,6 +7625,15 @@ fn check_alerts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconciliation_status_keeps_systemd_unit_active_during_scans() {
+        for first_observation in [true, false] {
+            let status = reconciliation_systemd_status(first_observation);
+            assert!(status.starts_with("READY=1\nSTATUS="));
+            assert!(!status.contains("RELOADING=1"));
+        }
+    }
 
     #[test]
     fn fanotify_mark_rejects_invalid_descriptor_with_ebadf() {

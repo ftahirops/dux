@@ -122,6 +122,33 @@ Latest evidence: [02:49 reconciliation cycle](docs/qualification/vps2-reconcilia
 
 ## Tests, coverage, and open release gates
 
+### Newly found service-state defect (2026-11-11)
+
+VPS2 systemd reported `dux.service` as `reloading (reload-notify)` continuously
+for 22 hours, while the daemon remained alive and continued its reconciliation
+and event-ingestion work. The watcher source was sending `RELOADING=1` for
+ordinary full observations and rebuilds. That notification means a service
+configuration reload to systemd, so it made normal indexing look like a
+service reload and left service managers/monitors with misleading lifecycle
+state. The workspace now sends `READY=1` with the same scan status instead;
+the added regression test covers both observation modes. On this modified
+workspace, the complete Rust suite passed **342 tests, 0 failed, 2 ignored**;
+both ignored cases (ext4 stale-parent classification and the 100k-entry scale
+smoke on `/dev/shm`) then passed when run explicitly. Strict Clippy and
+`cargo fmt --check` also pass. One initial 100k invocation on ext4 was refused
+by the fixture safety guard before creating data; the `/dev/shm` rerun passed.
+
+This correction is not yet included in the staged r132 binaries or installed
+on either VPS. Rebuild the candidate, test the notification with systemd,
+rerun the full suites, and verify the service reaches `active/running` during
+and after a long reconciliation before treating the finding as resolved in a
+release. The live host was not modified.
+
+This workspace regression run is separate from the r132 candidate evidence
+below. Its Rust instrumentation coverage was not measured. The existing 72.61%
+line coverage is from the earlier r132 instrumented build and must not be
+presented as coverage of this fix.
+
 | Area | Latest evidence | Still open |
 |---|---|---|
 | Rust automated tests | Full suite: 341 passed, 0 failed, 2 ignored on source matching r132. Both ignored cases then passed in targeted runs: ext4 stale-parent classification and 100k-entry reconciliation. The ext4 case also passed under a non-root UID with exactly the planned service capability masks. Strict Clippy and formatting passed. | The full suite was not rerun after those focused cases; 100k timing is debug-profile and does not prove large-scale production performance. The non-root test used UID 65534 because the `dux` account is not installed on this host. |
