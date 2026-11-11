@@ -1,0 +1,50 @@
+{
+  "observed_at_utc": "2026-11-11T04:06:32Z",
+  "method": "read-only systemctl show, dux --version, dux --json status, and df -B1 /",
+  "vps1": {
+    "host": "qualification host / VPS1",
+    "service": {"active_state": "active", "sub_state": "running", "historical_restarts": 4},
+    "installed_version": "dux 0.6.3 (e0cc915f8f37) [production]",
+    "dirty": true,
+    "caught_up": false,
+    "paused": true,
+    "pause_reason": "io pressure",
+    "dirty_reason": "fanotify queue overflow",
+    "kernel_overflow_notifications": 933,
+    "events_dropped": 2518862,
+    "pending_updates": 1869,
+    "behind_seconds": 297340.742,
+    "last_scan_age_seconds": 487030,
+    "scan_in_progress": false,
+    "index_nodes": 1280721,
+    "index_bytes_on_disk": 3841363968,
+    "wal_bytes": 134217728,
+    "disk": {"root_use_percent": 67, "root_available_human": "60G (rounded df -h output)"}
+  },
+  "vps2": {
+    "host": "192.168.5.106",
+    "service": {"active_state": "reloading", "sub_state": "reload-notify", "historical_restarts": 0},
+    "installed_version": "dux 0.6.3 (8b02799b4132) [production]",
+    "dirty": true,
+    "caught_up": false,
+    "paused": false,
+    "dirty_reason": "periodic filesystem observation in progress",
+    "kernel_overflow_notifications": 0,
+    "events_dropped": 0,
+    "pending_updates": 0,
+    "behind_seconds": 22150.2,
+    "last_scan_age_seconds": 907,
+    "scan_in_progress": true,
+    "scan_progress": {"files_seen": 687243, "directories_seen": 118218, "allocated_bytes_seen": 58970173440},
+    "index_nodes": 2026231,
+    "index_bytes_on_disk": 874491904,
+    "wal_bytes": 60110832,
+    "disk": {"root_use_percent": 89, "root_available_bytes": 10806423552}
+  },
+  "interpretation": [
+    "VPS1 has a persistent correctness/freshness incident: it is paused and materially behind after repeated fanotify loss.",
+    "VPS2 is actively scanning without reported kernel loss, but its older binary reports normal scanning as systemd reloading; the candidate READY notification fix is not installed.",
+    "The two status samples are point-in-time observations, not proof of a stable recovery rate or exact path-level correctness.",
+    "No production service or database was modified."
+  ]
+}
