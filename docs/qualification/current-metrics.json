@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-11T00:17Z",
+  "snapshot_at_utc": "2026-11-11T00:21Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -173,13 +173,15 @@
     "evidence": "docs/qualification/host-go-cache-cleanup-20261111T0004Z.json"
   },
   "qualification_host_admission": {
-    "observed_at_utc": "2026-11-11T00:16:23Z",
-    "vm_started": false,
-    "decision": "blocked_no_vm_started",
-    "reason": "Admission blocked by active Go tests; latest host sample at 00:16 showed load1 9.93, CPU PSI some 12.66%, and active test binaries.",
-    "evidence": "docs/qualification/vm-admission-20261111T0007Z.json",
+    "observed_at_utc": "2026-11-11T00:20:50Z",
+    "vm_started": true,
+    "decision": "runtime_guard_stopped_disposable_vm_before_tests",
+    "reason": "Go compiler/test workloads appeared after admission; runtime guard terminated the guest after 28 seconds, before SSH readiness",
+    "evidence": "docs/qualification/vm-runtime-pressure-stop-20261111T0019Z.json",
     "latest_load1": 9.93,
-    "latest_cpu_psi_some_avg10_percent": 12.66
+    "latest_cpu_psi_some_avg10_percent": 12.66,
+    "vm_active_now": false,
+    "matrix_started": false
   },
   "rust_tests": {
     "candidate_source_commit": "f02ba7ad235ea841a99de27b69fcd402e3c3927c",

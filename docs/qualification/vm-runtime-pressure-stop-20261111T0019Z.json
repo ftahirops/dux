@@ -1,0 +1,38 @@
+{
+  "observed_at_utc": "2026-11-11T00:20:50Z",
+  "host": "qualification host",
+  "vm_unit": "dux-qualification-vm-ubuntu24",
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "fault_binary_sha256": "3b17b46c2f3c4baf18ed78bc3dc868e4ac92a9fb8ed4241141a12d659fee88b7",
+  "vm_started_at_utc": "2026-11-11T00:19:24Z",
+  "vm_stopped_at_utc": "2026-11-11T00:19:52Z",
+  "vm_runtime_seconds": 28,
+  "stop_action": "runtime pressure guard stopped disposable QEMU guest; systemd reports clean deactivation",
+  "stop_reason": {
+    "active_host_workloads": [
+      "Go compiler pid 368378",
+      "go test pid 368316"
+    ],
+    "load1": 3.54,
+    "cpu_psi_some_avg10_percent": 34.23,
+    "io_psi_some_avg10_percent": 2.85
+  },
+  "guest_ssh_ready": false,
+  "matrix_suites_started": false,
+  "test_fixture_created": false,
+  "ephemeral_runtime_cleaned": true,
+  "post_stop_storage": {
+    "root_use_percent": 67,
+    "root_available_human": "60G",
+    "dev_shm_available_human": "9.3G"
+  },
+  "latest_host_guard_sample": {
+    "observed_at_utc": "2026-11-11T00:20:50Z",
+    "load1": 3.92,
+    "active_host_workloads": [
+      "Go tests and test binaries in wordpress and backup packages"
+    ],
+    "admission_blocked": true
+  },
+  "interpretation": "The fail-safe runtime guard worked: unrelated Go workloads appeared after preflight and the disposable VM was stopped before SSH readiness or Dux suite execution. This is not a failed Dux test."
+}
