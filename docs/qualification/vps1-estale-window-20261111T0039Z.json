@@ -12,5 +12,24 @@
     "mask_0x14a_info_0x6_compound": 1
   },
   "distinct_fsids": 1,
-  "interpretation": "89/93 observed ESTALE warnings (95.7%) were FAN_ATTRIB target-only FID records; four were compound masks. Candidate suppression applies only to the narrow target-only case on a known handle-capable filesystem. This bounded journal count is not a complete event-rate measurement, a causal link to overflow, or proof the candidate fixes the live dirty state."
+  "interpretation": "89/93 observed ESTALE warnings (95.7%) were FAN_ATTRIB target-only FID records; four were compound masks. Candidate suppression applies only to the narrow target-only case on a known handle-capable filesystem. This bounded journal count is not a complete event-rate measurement, a causal link to overflow, or proof the candidate fixes the live dirty state.",
+  "filesystem_mapping": {
+    "observed_at_utc": "2026-11-11T00:51:07Z",
+    "event_fsid_signed_words": [
+      -751860846,
+      210811603
+    ],
+    "event_fsid_hex": "d32f83920c90bad3",
+    "host_root_statfs_fsid_hex": "d32f83920c90bad3",
+    "root_mount_source": "/dev/mapper/ubuntu--vg-ubuntu--lv",
+    "root_mount_fstype": "ext4",
+    "tmp_statfs_fsid_hex": "d32f83920c90bad3",
+    "event_fsid_matches_root_and_tmp": true,
+    "candidate_filter_gate": "stale_target_attrib_is_benign requires the fsid to have passed the startup handle-capability probe; the running production service is older and has not executed this candidate probe.",
+    "candidate_test_evidence": [
+      "docs/qualification/r132-focused-qualification-20261110/README.md",
+      "docs/qualification/regression-20261110T1823Z/rust-tests.log"
+    ],
+    "candidate_test_scope": "The r132 full Rust suite and focused real-handle ext4 case passed against source f02ba7ad. The focused test created and deleted real ext4 handles on /tmp, which shares this host root filesystem. This supports the filesystem capability assumption but is not a live candidate daemon run."
+  }
 }

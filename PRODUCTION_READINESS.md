@@ -37,12 +37,15 @@ comparison has not been run. See the [sample and limitations](docs/qualification
 
 A fresh bounded journal sample from 00:35:00 through 00:39:20 UTC counted 93
 `ESTALE` warnings. Eighty-nine were target-only `FAN_ATTRIB` FID records on one
-filesystem ID; four were compound events. The candidate’s narrow predicate
-covers only the target-only class on a known handle-capable filesystem. The
-remaining compound records stay uncertain. This supports the candidate’s
-classification logic, but the sample is not a complete event-rate measurement
-and does not show these failures caused the overflow or dirty status. See the
-[00:39 sample](docs/qualification/vps1-estale-window-20261111T0039Z.json).
+filesystem ID; four were compound events. That ID matches VPS1’s root ext4
+filesystem, and `/tmp` has the same filesystem ID. The r132 focused ext4 test
+used real handles on `/tmp`, while the full r132 Rust suite passed the stale
+classification and startup-probe tests. The candidate predicate still requires
+a successful per-filesystem startup handle probe; the old production daemon
+has not run that candidate probe. The remaining compound records stay
+uncertain. This supports the candidate’s classification logic, but the sample
+is not a complete event-rate measurement and does not show these failures
+caused the overflow or dirty status. See the [00:39 sample](docs/qualification/vps1-estale-window-20261111T0039Z.json), [focused ext4 qualification](docs/qualification/r132-focused-qualification-20261110/README.md), and [r132 Rust regression log](docs/qualification/regression-20261110T1823Z/rust-tests.log).
 
 A separate 30-second status sample at 23:17:47–23:18:17 showed 132,067 new
 events seen, 75,130 resolved, 12,544 updates committed, and a net decrease of

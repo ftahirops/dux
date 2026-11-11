@@ -154,7 +154,9 @@
       "target_only_fan_attrib": 89,
       "compound_masks": 4,
       "window_start_utc": "2026-11-11T00:35:00Z",
-      "window_end_utc": "2026-11-11T00:39:20Z"
+      "window_end_utc": "2026-11-11T00:39:20Z",
+      "event_fsid_matches_root_ext4": true,
+      "filesystem_mapping_evidence": "docs/qualification/vps1-estale-window-20261111T0039Z.json"
     }
   },
   "disk": {
