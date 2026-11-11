@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-11T03:39Z",
+  "snapshot_at_utc": "2026-11-11T03:48Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -2279,5 +2279,17 @@
     "package_install_upgrade_rollback_qualified": false,
     "signed": false,
     "evidence": "docs/qualification/r133-package-build-20261111T0338Z.json"
+  },
+  "r133_current_build_pair_20261111T0344Z": {
+    "source_commit": "8d23515713d4d9a095ed4fd814c5a13f79d5c050",
+    "source_tree_sha256": "f87457c3afa021c939dbf992fb97b65682420fbbf161278abff1c29cafc54209",
+    "production_binary_sha256": "0f0cd38d4c107dcf14f2aea9ef06adcee01d31edee5c83606790fd1b936326f2",
+    "fault_binary_sha256": "cfade697984f34c435a3ac3f596d5a4855c4689530ba5afcef3f5dec1ddaed00",
+    "embedded_digests_match": true,
+    "deb_sha256": "df25c27e2b168a777c87874e11e928b5cb02eee369a663aa064a2f866cc7ae87",
+    "rpm_sha256": "76d60a12b8c1f9e42a85965b542ae2baed223fb1620266c9157631db437367b8",
+    "package_lifecycle_qualified": false,
+    "signed": false,
+    "evidence": "docs/qualification/r133-current-build-pair-20261111T0344Z.json"
   }
 }
