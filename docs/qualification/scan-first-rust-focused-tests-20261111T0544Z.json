@@ -1,0 +1,37 @@
+{
+  "observed_at_utc": "2026-11-11T05:44:20Z",
+  "workspace_commit": "45d7bed4edc290effc4d56811fb23e82690deb81",
+  "command": "CARGO_BUILD_JOBS=1 nice -n 19 cargo test --locked --all-features --bin dux scan_first_ -- --test-threads=1",
+  "result": {
+    "passed": 16,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 328,
+    "elapsed_seconds": 0.23
+  },
+  "tests": [
+    "tests::scan_first_cli_waits_for_transient_accounting_status_to_settle",
+    "tests::scan_first_manual_rescan_completes_on_last_observation_without_claiming_caught_up",
+    "tests::scan_first_metrics_never_report_event_caught_up_or_applicable_behind_time",
+    "watch::tests::scan_first_accepts_a_complete_last_observation_after_hint_loss",
+    "watch::tests::scan_first_cadence_is_anchored_to_observation_start",
+    "watch::tests::scan_first_does_not_drop_manual_followup_when_observation_races",
+    "watch::tests::scan_first_event_counter_validates_metadata_and_skips_self_events",
+    "watch::tests::scan_first_hint_loss_waits_for_fixed_cadence_but_event_mode_repairs",
+    "watch::tests::scan_first_hint_parser_coalesces_parent_handles_and_bounds_memory",
+    "watch::tests::scan_first_hint_parser_fails_closed_for_bad_or_unresolvable_parent_handles",
+    "watch::tests::scan_first_hint_parser_rejects_malformed_record_lengths",
+    "watch::tests::scan_first_never_classifies_event_apply_age_as_throttled_backlog",
+    "watch::tests::scan_first_post_observation_hint_invalidates_pending_accounting_clear",
+    "watch::tests::scan_first_reader_drains_events_without_a_bounded_payload_queue",
+    "watch::tests::scan_first_unresolved_hint_only_invalidates_an_active_observation",
+    "watch::tests::scan_first_uses_atomic_upgrade_until_a_v7_baseline_is_ready"
+  ],
+  "interpretation": "Focused source-level coverage passed for scan-first status reporting, hint loss, malformed records, cadence, and pending-accounting invalidation. This does not establish live fault, overflow, package, scale, or soak qualification.",
+  "guarded_fault_matrix_state_at_observation": {
+    "runner_session_confirmed_alive": true,
+    "admission_clear_observed_at_utc": "2026-11-11T05:44:03Z",
+    "quiet_window_seconds": 120,
+    "matrix_suite_started": false
+  }
+}

@@ -244,6 +244,14 @@ strengthens correctness evidence for the accounting invariant but does not
 measure the full production database's 85-second verification cost. See the
 [focused accounting test record](docs/qualification/accounting-integrity-rust-tests-20261111T0542Z.json).
 
+At 05:44 UTC, a separate focused scan-first Rust run passed **16 tests, 0
+failed, 0 ignored** in 0.23 seconds. It includes pending-accounting
+invalidation after a late hint, fail-closed malformed/unresolvable hint cases,
+manual follow-up preservation, fixed-cadence recovery, and scan-first status
+reporting. The guarded fault-matrix runner simultaneously entered its required
+120-second quiet admission window; no matrix suite had started at the time of
+the test record. See the [focused scan-first test record](docs/qualification/scan-first-rust-focused-tests-20261111T0544Z.json).
+
 ### Accounting-query optimization experiment — 2026-11-11 05:39 UTC
 
 A low-priority, temporary 20k-file SQLite fixture compared the existing
