@@ -147,7 +147,8 @@ release. The live host was not modified.
 This workspace regression run is separate from the r132 candidate evidence
 below. Its Rust instrumentation coverage was not measured. The existing 72.61%
 line coverage is from the earlier r132 instrumented build and must not be
-presented as coverage of this fix.
+presented as coverage of this fix. Detailed commands and outcomes are recorded
+in the [workspace regression evidence](docs/qualification/workspace-regression-20261111T0306Z.json).
 
 | Area | Latest evidence | Still open |
 |---|---|---|
