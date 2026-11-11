@@ -1,0 +1,22 @@
+{
+  "attempt_window_utc": [
+    "2026-11-11T02:25:58Z",
+    "2026-11-11T02:26:18Z"
+  ],
+  "host": "vps1 qualification host",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "command": "python3 scripts/dux-qualification-vm.py --profile qualification4 --ephemeral-runtime --read-only-share /dev/shm/dux-r132-qualification-20261110 start ubuntu24",
+  "result": "refused_before_vm_start",
+  "sample": "3/3",
+  "blockers": [
+    "Go compiler processes pid 982364, 982385, 982388, 982417, 982428, 982440, 982468, 982502, 982521, 982533",
+    "go build pid 979308",
+    "shell test script pid 979235"
+  ],
+  "vm_started": false,
+  "fault_suites_started": false,
+  "vm_state_after_attempt": "missing",
+  "interpretation": "The guard refused before QEMU as unrelated build/test workloads appeared during admission. No fault suite ran; this is not a Dux test failure."
+}

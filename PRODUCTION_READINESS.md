@@ -1,11 +1,10 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This snapshot is current to
-**2026-11-11 02:06 UTC**. VPS1 was rechecked at 01:01 UTC and remains on the old event-apply
-daemon. The r132 candidate remains
-in a separate soak, and release, scale, fault-matrix, and canary gates remain
-open. A green unit suite or a successful VPS2 observation does not close those
-gates.
+**2026-11-11 02:34 UTC**. VPS1 was last rechecked at 01:01 UTC and remains on the old event-apply
+daemon. VPS2 also still runs the older root-owned 0.6.3 binary; r132 remains
+isolated in a separate soak. Release, scale, fault-matrix, and canary gates remain
+open. A green unit suite or a successful VPS2 observation does not close those gates.
 
 The detailed evidence trail is
 [`PRODUCTION_READINESS_STATUS.md`](PRODUCTION_READINESS_STATUS.md); the
@@ -17,9 +16,9 @@ machine-readable snapshot is
 | System | Latest verified state |
 |---|---|
 | **VPS1 production** | At 01:01 UTC the installed Dux remains 0.6.3 build `e0cc915f8f37`, running as root with four historical restarts; dirty and not caught up, 892 lifetime overflows, 2,518,862 dropped updates, and 3 pending updates. Dirty reason is `non-watched filesystem mounts changed; reconciling visible paths`; last scan is 5.48 days old and reported behind time is 3.29 days. See the [01:01 VPS1 status](docs/qualification/vps1-live-status-20261111T0101Z.json), [pressure pause/resume sample](docs/qualification/vps1-critical-io-pause-recovery-20261110T2328Z.json), and [unresolved log-volume sample](docs/qualification/vps1-unresolved-log-volume-20261110T2321Z.json). |
-| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode. The 01:55:20–02:02:39 full observation completed in 438 s over 1,789,159 files and 215,822 directories with zero coverage issues or reuse conflicts. Accounting passed at 02:04:01 in 82.5 s. At 02:04:51 the service was active with zero restarts, overflows, drops, and pending updates; it remained dirty because filesystem hints changed during the scan. This is another successful reconciliation, not proof of caught-up status. See [02:04 cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0204Z.json). |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 02:04 it had run 16h59m39s of a 72-hour target (23.60%), with 1,351,085 operations and 1,348 exactness samples, 16 mutation bursts, two held-reader/WAL-reclaim passes, and one controlled crash/restart recovery. Whole-run average is 22.08 ops/s; synchronous exactness/accounting checks pause the pacer, so this is not a sustained 25/s capacity result. Sampled convergence latency: mean 3.885s, median 3.360s, p95 8.688s, max 17.393s. Four crash checkpoints and terminal exactness, history, and SQLite checks remain pending. See the [02:05 checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0205Z.json). |
-| **Disk and VM admission** | At 02:05 VPS2 root was 88% used with 10.9 GiB available; `/var/lib/dux` was 0.86 GiB. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB. A GlitchTip worker has a 3.96 GiB active Docker `json-file` log; inspected container and daemon settings contain no rotation limits. A 1.58 GiB ClickHouse merge file appeared in the 02:03 top-file sample and was gone 27 seconds later, demonstrating transient merge space. No files were deleted. See [disk audit](docs/qualification/vps2-disk-audit-20261111T0205Z.json). The latest guarded VM attempt at 02:05 was refused before QEMU due to Go tests/shell scripts and I/O PSI 10.68%; no fault suite ran. See [02:05 admission result](docs/qualification/vm-admission-20261111T0205Z.json). The 15-suite matrix remains unrun. VPS2 has no KVM. |
+| **VPS2 installed service** | Dux 0.6.3 build `8b02799b`, scan-first mode, still running as root. The 02:25:29–02:32:17 observation completed in 408 s over 1,793,572 files and 216,442 directories with zero coverage issues; 113 paths vanished during inode-reuse races and were discarded, with no unresolved paths. Accounting passed at 02:33:33 in 75.7 s. At 02:33 the service had zero restarts, overflows, drops, and pending updates, but remained dirty/not caught up because filesystem hints changed during the scan. This is a successful reconciliation, not proof of caught-up status or an r132 production run. See the [02:33 cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0233Z.json). |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 02:33 it had run 17h28m of a 72-hour target (24.28%), with 1,387,735 operations and 1,383 exactness samples, 17 mutation bursts, two held-reader/WAL-reclaim passes, and one controlled crash/restart recovery. Whole-run average is 22.06 ops/s; synchronous exactness/accounting checks pause the pacer, so this is not a sustained 25/s capacity result. Sampled convergence latency p95 is 8.908s, max 17.393s. Four crash checkpoints and terminal exactness, history, and SQLite checks remain pending. See the [02:33 checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0233Z.json). |
+| **Disk and VM admission** | VPS2 root briefly reached 95% used with 5.66 GB available at 02:28, then returned to 88% used with 11.48 GB available by 02:33. The allocation source is not confirmed; ClickHouse was at 439% CPU near the peak, but its I/O counters are cumulative. The 02:32 Dux index is a path-tree total and cannot be directly compared with root-device `df` without mount normalization. `/var/lib/dux` held an 866 MB DB, 57 MB WAL, and a scan staging DB that peaked near 751 MB. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; a GlitchTip worker has a 3.96 GiB active Docker `json-file` log without rotation limits. No files were deleted. See [02:28 disk pressure and recovery evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), [02:33 scan](docs/qualification/vps2-reconciliation-cycle-20261111T0233Z.json), and [02:05 disk inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). The latest guarded VM attempt refused before QEMU when Go build/compiler and shell-test work appeared; no fault suite ran. VPS2 has no KVM. |
 
 ### Recent live reliability and throughput evidence
 
@@ -91,11 +90,31 @@ VPS2 service, not a controlled capacity test for r132. Dux reported zero event
 resolution in this window, as expected in scan-first mode. The scan-first
 `behind_seconds` field is marked inapplicable; it is not a freshness measure.
 
-Evidence: [latest scheduled scans](docs/qualification/vps2-reconciliation-cycle-20261110T2006Z.log), [latest VPS2 status](docs/qualification/vps2-live-status-20261110T2012Z.json), [scan retry and recovery](docs/qualification/vps2-reconciliation-retry-20261110T1911Z.log),
-[next scheduled scan](docs/qualification/vps2-reconciliation-cycle-20261110T1922Z.log),
-[throughput profile](docs/qualification/vps2-event-throughput-20261110T1925Z/profile.json),
-[latest VPS2 status](docs/qualification/vps2-live-status-20261110T1926Z.json),
-[latest r132 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261110T2138Z.json), [latest VPS2 reconciliation cycle](docs/qualification/vps2-reconciliation-cycle-20261110T2137Z.json).
+The latest VPS2 observation started at 02:25:29 and completed at 02:32:17 UTC
+(408 s), covering 1,793,572 files and 216,442 directories. It reported zero
+coverage issues and 113 vanished inode-reuse paths discarded, with no unresolved
+reuse paths. Independent accounting passed at 02:33:33 in 75.7 s. At 02:33 the
+service had zero restarts, overflows, dropped updates, and pending updates, but
+was dirty/not caught up because filesystem hints changed during the scan. The
+installed unit has no `User=` override, so it still runs as root despite the
+candidate package unit's dedicated `dux` account. This is a live correctness
+observation and a deployment/security gap, not proof of exact freshness. See
+the [02:33 cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0233Z.json).
+
+At 02:33 the isolated r132 soak had run 17h29m (24.28% of its 72-hour target),
+with 1,387,735 operations, 1,383 exactness samples, 17 mutation bursts, one
+controlled crash recovery, and two held-reader WAL reclaim checks. Sampled
+convergence p95 was 8.908 s and maximum 17.393 s. Terminal exactness, history,
+and SQLite integrity are still pending; these interim numbers do not qualify
+the candidate. See the [02:33 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0233Z.json).
+
+VPS2 root space changed from 5.66 GiB available at 02:28 to 11.48 GiB at
+02:33. This confirms a short-lived disk-pressure episode; available evidence
+does not identify its allocation source. ClickHouse was highly active during
+the peak, but cumulative block-I/O counters do not establish causation. No
+cleanup was performed. See the [pressure sample and follow-up](docs/qualification/vps2-disk-pressure-20261111T0228Z.json).
+
+Latest evidence: [02:33 reconciliation cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0233Z.json), [02:28 disk pressure sample](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), [02:33 soak checkpoint](docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0233Z.json), and [02:26 VM admission refusal](docs/qualification/vm-admission-20261111T0226Z.json). Earlier VPS2 evidence: [02:04 cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0204Z.json) and [02:05 disk audit](docs/qualification/vps2-disk-audit-20261111T0205Z.json).
 
 ## Tests, coverage, and open release gates
 
@@ -106,7 +125,7 @@ Evidence: [latest scheduled scans](docs/qualification/vps2-reconciliation-cycle-
 | Rust instrumentation | 72.61% lines, 71.44% regions, 76.19% functions. | Branch counters unavailable; critical syscall and race paths remain incompletely covered. |
 | Dependency audit | `cargo audit -D warnings` at 00:07 exited 0 for 229 locked dependencies against the 1,446-advisory RustSec DB at commit `28d73fc95e5972af3403225a217def57dcaba3c4`; zero advisories and warnings. | Dependency hygiene only, not a source-code or runtime security review. See [00:07 audit evidence](docs/qualification/cargo-audit-20261111T0007Z.json). |
 | Package lifecycle | r132 Ubuntu DEB lifecycle passed in an earlier disposable-VM run. | Current package/rollback path is not VM-qualified; Rocky RPM lifecycle is not qualified. Trusted publisher key/fingerprint is unavailable, so release authenticity is open. |
-| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. The admission-wrapper module passed 41/41 and the complete Python suite now passes. A production and fault-injection binary pair for source commit `f02ba7ad` is staged and their embedded source digest matches. | The complete 15-suite guarded matrix remains unrun; the r132 soak has passed one of five scheduled controlled crash-recovery checkpoints. A fresh 00:04 preflight cleared, but the guarded VM start refused at sample 1/3 when unrelated Go workloads returned; the 00:07 check also failed admission. No matrix suite ran. The matching r132 production/fault binaries remain staged. See [latest admission result](docs/qualification/vm-admission-20261111T0007Z.json), [fault-binary verification](docs/qualification/r132-fault-binary-20261110.json), [admission fix evidence](docs/qualification/vm-admission-wrapper-detection-20261110.md), and the [22:35 guard event](docs/qualification/vm-admission-20261110T2235Z.json). |
+| Fault matrix and crashes | Some individual runtime tests and live recovery observations passed. The admission-wrapper module passed 41/41 and the complete Python suite passed. A production and fault-injection binary pair for source commit `f02ba7ad` is staged and their embedded source digest matches. | The complete 15-suite guarded matrix remains unrun; the r132 soak has passed one of five scheduled controlled crash-recovery checkpoints. The latest guarded VM start at 02:26 refused before QEMU because Go build/compiler and shell test work were active; no matrix suite ran. The matching r132 production/fault binaries remain staged. See [02:26 admission result](docs/qualification/vm-admission-20261111T0226Z.json), [fault-binary verification](docs/qualification/r132-fault-binary-20261110.json), and [admission guard fix](docs/qualification/vm-admission-wrapper-detection-20261110.md). |
 | Scale and platform | 100k-file churn, 1.37M-path scale, forced overflow recovery, non-root probe, and repeated VPS2 scans have prior evidence. | 10M-file scale, broader filesystem/kernel matrix, and exact path-level freshness remain unqualified or unmeasured. |
 | Systemd sandbox event visibility | Exact r132 binary in a separate mount namespace with package-equivalent capabilities, syscall filters, `ProtectKernelTunables`, and `ProtectControlGroups` indexed host-namespace create, rename, and delete events on ext4; create appeared in 187 ms, with zero test-group overflows or drops. Production service counters did not change during the test. | Actual package-created UID, install/upgrade/rollback lifecycle, other filesystems/kernels, and long-duration packaged service remain open. See [namespace event result](docs/qualification/systemd-hardening-20261110/cross-namespace-event-test-20261110T2004Z.json). |
 | Production canary | Not started. | VPS1 rollback-ready canary, service-account migration, and rollback evidence remain required. |

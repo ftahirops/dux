@@ -1,0 +1,52 @@
+{
+  "host": "192.168.5.106",
+  "observed_at_utc": "2026-11-11T02:28:39Z",
+  "root_total_bytes": 99012476928,
+  "root_used_bytes": 88770420736,
+  "root_available_bytes": 5662306304,
+  "root_use_percent": 95,
+  "prior_observation_utc": "2026-11-11T02:20:07Z",
+  "prior_root_available_bytes": 10709020672,
+  "available_space_drop_bytes_since_prior_observation": 5046704368,
+  "dux_last_completed_scan_utc": "2026-11-11T02:18:25.850Z",
+  "dux_scan_in_progress": true,
+  "dux_scan_progress_at_observation": {
+    "started_at_utc": "2026-11-11T02:25:29Z",
+    "files_seen": 1613968,
+    "directories_seen": 192231,
+    "allocated_bytes_seen": 74486013952,
+    "indexing_phase": false,
+    "staging_database_bytes": 207237120
+  },
+  "dux_database_bytes": 866070528,
+  "dux_wal_bytes": 60110832,
+  "kernel_overflows": 0,
+  "dropped_updates": 0,
+  "pending_updates": 0,
+  "indexed_unique_bytes_at_last_completed_scan": 82103382016,
+  "filesystem_used_exceeds_indexed_unique_bytes_by_bytes": 6667038720,
+  "top_live_container_observation": {
+    "container": "signoz-clickhouse",
+    "cpu_percent_at_2026_11_11T0227Z": 439.08,
+    "block_io_cumulative": "726GB read / 1.07TB written"
+  },
+  "largest_known_active_docker_log_bytes": 3960304520,
+  "clickhouse_tmp_directory_observation": "empty at 2026-11-11T02:28:05Z",
+  "deleted_open_file_check": "lsof +L1 showed no large deleted-open files",
+  "cause_of_recent_space_drop": "not established; the live Dux index predates this interval and the current scan has not completed",
+  "cleanup_performed": false,
+  "limitations": [
+    "The 02:18 indexed tree is stale relative to the 02:28 filesystem measurement; the byte difference is not an identified allocation source.",
+    "Docker block-I/O totals are cumulative counters, not a measured ten-minute write delta.",
+    "No recursive disk walk was run while the Dux scan and ClickHouse workload were active."
+  ],
+  "followup_observation": {
+    "observed_at_utc": "2026-11-11T02:33:36Z",
+    "root_used_bytes": 82953261056,
+    "root_available_bytes": 11479465984,
+    "root_use_percent": 88,
+    "available_space_increase_from_0228_sample_bytes": 5817159680,
+    "elapsed_seconds_from_peak_sample": 297,
+    "interpretation": "The elevated 95% reading was transient and space returned; the allocation source remains unconfirmed."
+  }
+}
