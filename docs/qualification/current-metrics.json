@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-11T01:51Z",
+  "snapshot_at_utc": "2026-11-11T02:06Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -242,12 +242,12 @@
   },
   "r132_72h_soak": {
     "host": "192.168.5.106",
-    "observed_at_utc": "2026-11-11T01:50:50Z",
+    "observed_at_utc": "2026-11-11T02:04:51Z",
     "state": "running",
     "restarts": 0,
-    "elapsed_seconds": 60328.3,
-    "operations": 1333872,
-    "exact_check_samples": 1330,
+    "elapsed_seconds": 61179.3,
+    "operations": 1351085,
+    "exact_check_samples": 1348,
     "completed_hourly_bursts": 16,
     "held_reader_scenarios": 2,
     "controlled_crash_recovery_scenarios": 1,
@@ -257,7 +257,7 @@
     "rate_measurement_at_utc": "2026-11-10T11:27:01Z",
     "running_harness_has_pacing_fix": false,
     "observed_operations_per_second_elapsed": 22.228,
-    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0151Z.json",
+    "evidence_checkpoint": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0205Z.json",
     "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
     "coverage_duration_fraction": 0.2124837962962963,
     "held_reader_result": {
@@ -382,17 +382,17 @@
       "max_ms": 17393
     },
     "sampled_exact_convergence_ms": {
-      "count": 1330,
-      "mean": 3849.304,
-      "median": 3297,
-      "p95_nearest_rank": 8616,
+      "count": 1348,
+      "mean": 3884.728,
+      "median": 3360,
+      "p95_nearest_rank": 8688,
       "max": 17393
     },
     "latest_checkpoint_progress_file_mtime_utc": "2026-11-10T23:56:31.813Z",
     "latest_checkpoint_progress_file_size_bytes": 184891,
-    "completion_fraction": 0.23274807098765432,
-    "sample_count": 1330,
-    "operations_per_second_average": 22.11022024489336,
+    "completion_fraction": 0.23603125,
+    "sample_count": 1348,
+    "operations_per_second_average": 22.084021883218668,
     "controlled_crashes": 1,
     "mutation_bursts": 16,
     "held_reader_wal_reclaim_passes": 2,
@@ -405,8 +405,8 @@
       "main_pid": 1304929,
       "restarts": 0
     },
-    "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0151Z.json",
-    "evidence_checkpoint_mtime_utc": "2026-11-11T01:50:18.810Z"
+    "evidence": "docs/qualification/r132-72h-soak-vps2-20261110/soak-progress-20261111T0205Z.json",
+    "evidence_checkpoint_mtime_utc": "2026-11-11T02:04:29.817Z"
   },
   "package_lifecycle": {
     "ubuntu_deb_r132": "passed",
@@ -1786,5 +1786,55 @@
     "wal_bytes": 60110832,
     "scan_stage_bytes_observed": 648777728,
     "evidence": "docs/qualification/vps2-reconciliation-cycle-20261111T0150Z.json"
+  },
+  "latest_vps2_reconciliation_cycle_20261111T0204Z": {
+    "host": "192.168.5.106",
+    "scan_start_utc": "2026-11-11T01:55:20.960Z",
+    "scan_complete_utc": "2026-11-11T02:02:39.358Z",
+    "scan_duration_seconds": 438.398,
+    "files": 1789159,
+    "directories": 215822,
+    "path_instances": 2004981,
+    "coverage_issues": 0,
+    "accounting_verification": "passed",
+    "accounting_elapsed_ms": 82501,
+    "accounting_completed_utc": "2026-11-11T02:04:01.886Z",
+    "dirty_reason_after_observation": "filesystem changes await the next full observation",
+    "pending_updates": 0,
+    "kernel_overflows": 0,
+    "dropped_updates": 0,
+    "service_restarts": 0,
+    "root_available_bytes": 11590381568,
+    "root_use_percent": 88,
+    "evidence": "docs/qualification/vps2-reconciliation-cycle-20261111T0204Z.json"
+  },
+  "vps2_disk_audit_20261111T0205Z": {
+    "root_available_bytes": 11730300928,
+    "root_use_percent": 88,
+    "var_lib_dux_bytes": 924567536,
+    "unrotated_json_file_log_bytes": 3959779693,
+    "unrotated_log_container": "glitchtip-worker-1",
+    "clickhouse_persistent_volume_indexed_bytes": 20062015488,
+    "containerd_indexed_bytes": 17274834944,
+    "xgs_incidents_indexed_bytes": 10879942656,
+    "root_indexed_bytes": 8503164928,
+    "journal_indexed_bytes": 4337475584,
+    "swap_file_bytes": 4294967296,
+    "clickhouse_merge_temp_bytes_at_020340": 1576153088,
+    "clickhouse_merge_temp_absent_at_020407": true,
+    "cleanup_performed": false,
+    "evidence": "docs/qualification/vps2-disk-audit-20261111T0205Z.json"
+  },
+  "latest_vm_admission_20261111T0205Z": {
+    "result": "refused_before_vm_start",
+    "vm_started": false,
+    "fault_suites_started": false,
+    "blockers": [
+      "Go test binary",
+      "go test",
+      "shell test scripts",
+      "I/O PSI some avg10 10.68%"
+    ],
+    "evidence": "docs/qualification/vm-admission-20261111T0205Z.json"
   }
 }
