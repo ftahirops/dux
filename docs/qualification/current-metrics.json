@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-11T03:34Z",
+  "snapshot_at_utc": "2026-11-11T03:37Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -422,7 +422,7 @@
     "disposable_key_signature_mechanics_verified": true
   },
   "dependency_audit": {
-    "observed_at_utc": "2026-11-11T00:07:58Z",
+    "observed_at_utc": "2026-11-11T03:37:11Z",
     "locked_dependencies": 229,
     "known_advisories": 0,
     "warnings": 0,
@@ -431,7 +431,8 @@
     "advisory_database_count": 1446,
     "cargo_audit_version": "0.22.2",
     "lockfile_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3",
-    "evidence": "docs/qualification/cargo-audit-20261111T0007Z.json"
+    "evidence": "docs/qualification/cargo-audit-20261111T0337Z.json",
+    "database_fetch_at_utc": "2026-11-11T03:37:11Z"
   },
   "production_canary": "not_started",
   "evidence": {
