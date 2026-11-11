@@ -1,0 +1,34 @@
+{
+  "observed_at_utc": "2026-11-11T02:49:36Z",
+  "progress_file_mtime_utc": "2026-11-11T02:48:48Z",
+  "status": "running",
+  "started_at_utc": "2026-11-10T09:04:50Z",
+  "elapsed_seconds": 63837.9,
+  "duration_target_seconds": 259200,
+  "completion_fraction": 0.24628819444444444,
+  "operations": 1406747,
+  "exactness_samples": 1402,
+  "operations_per_second_average": 22.03623552779775,
+  "sampled_exact_convergence_ms": {
+    "count": 1402,
+    "mean": 3989.16,
+    "median": 3446.5,
+    "p95_nearest_rank": 9002,
+    "max": 17393
+  },
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "controlled_crashes": 1,
+  "controlled_crash_recovery_scenarios_planned": 5,
+  "mutation_bursts": 17,
+  "held_reader_wal_reclaim_passes": 2,
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "limitations": [
+    "The 15 fault suites remain unrun.",
+    "One of five planned controlled crash/recovery checkpoints is complete.",
+    "Terminal exactness, history continuity, and SQLite integrity have not passed.",
+    "The soak is separate from the installed Dux service and does not substitute for live host qualification.",
+    "The whole-run operation rate includes pauses for exactness and accounting checks; it is not a sustained 25 operations/second capacity result."
+  ]
+}

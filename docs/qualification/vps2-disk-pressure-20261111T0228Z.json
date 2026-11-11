@@ -47,6 +47,14 @@
     "root_use_percent": 88,
     "available_space_increase_from_0228_sample_bytes": 5817159680,
     "elapsed_seconds_from_peak_sample": 297,
-    "interpretation": "The elevated 95% reading was transient and space returned; the allocation source remains unconfirmed."
+    "interpretation": "A roughly 518 MiB ClickHouse part present in the completed Dux snapshot was absent at recheck, confirming some transient indexed data. It does not account for the full 5.82 GB recovered; the rest of the space change remains unexplained.",
+    "stable_recheck_at_utc": "2026-11-11T02:38:45Z",
+    "root_use_percent_at_stable_recheck": 88,
+    "top_file_recheck_at_utc": "2026-11-11T02:37:25Z",
+    "indexed_clickhouse_part_missing_after_scan": {
+      "path": "/var/lib/docker/volumes/signoz-clickhouse/_data/store/f90/f90d4ead-2a2d-4c9e-b477-6ebec68453be/202611_1300273_1306815_10/timestamp_ns.bin",
+      "indexed_bytes": 542904320,
+      "exists_at_recheck": false
+    }
   }
 }
