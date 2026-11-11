@@ -1,5 +1,5 @@
 {
-  "snapshot_at_utc": "2026-11-11T03:48Z",
+  "snapshot_at_utc": "2026-11-11T03:51Z",
   "decision": "not_ready_for_production_rollout",
   "candidate": {
     "release": "r132",
@@ -2291,5 +2291,14 @@
     "package_lifecycle_qualified": false,
     "signed": false,
     "evidence": "docs/qualification/r133-current-build-pair-20261111T0344Z.json"
+  },
+  "r133_static_production_systemd_smoke_20261111T0351Z": {
+    "source_commit": "8d23515713d4d9a095ed4fd814c5a13f79d5c050",
+    "binary_sha256": "0f0cd38d4c107dcf14f2aea9ef06adcee01d31edee5c83606790fd1b936326f2",
+    "unit_state": "active/running",
+    "status_text": "Observing filesystem; collecting concurrent change hints",
+    "stop_result": "success",
+    "package_sandbox_tested": false,
+    "evidence": "docs/qualification/r133-static-production-systemd-smoke-20261111T0351Z.json"
   }
 }
