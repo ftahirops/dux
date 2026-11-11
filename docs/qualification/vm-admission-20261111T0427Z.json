@@ -1,0 +1,18 @@
+{
+  "observed_at_utc": "2026-11-11T04:27:09Z",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "start_attempted": true,
+  "vm_started": false,
+  "matrix_suites_started": 0,
+  "decision": "blocked_before_vm_start",
+  "reasons": [
+    "The guard found active unrelated Go test binaries and go test processes.",
+    "Host load1 was 19.48, exceeding the admission limit of 10.",
+    "The same pre-attempt host sample reported CPU PSI some avg10 at 35.82%."
+  ],
+  "r133_binary_pair_ready": true,
+  "guard_bypassed": false,
+  "existing_vm_unit_after_attempt": "inactive",
+  "evidence": "The guard returned exit code 1 at admission sample 1/3 before QEMU started."
+}

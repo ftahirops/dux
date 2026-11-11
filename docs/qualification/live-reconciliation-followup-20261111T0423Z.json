@@ -1,0 +1,86 @@
+{
+  "observed_at_utc": "2026-11-11T04:24:49Z",
+  "method": "read-only dux --json status, systemctl show, df, and VPS2 journal excerpts",
+  "vps1": {
+    "observed_at_utc": "2026-11-11T04:23:40Z",
+    "installed_release": "0.6.3 (e0cc915f8f37)",
+    "service": {"active_state": "active", "sub_state": "running", "historical_restarts": 4},
+    "dirty": true,
+    "caught_up": false,
+    "paused": false,
+    "dirty_reason": "fanotify queue overflow",
+    "kernel_overflow_notifications": 946,
+    "events_dropped": 2518862,
+    "pending_updates": 60034,
+    "behind_seconds": 298368.761,
+    "last_scan_age_seconds": 488058,
+    "scan_in_progress": false,
+    "index_nodes": 1309281,
+    "index_bytes_on_disk": 3858083840,
+    "disk": {"root_use_percent": 70, "root_available_human": "55G (rounded df -h output)"},
+    "note": "Writes resumed after the earlier I/O-pressure pause, but new overflow notifications accumulated and the backlog rose."
+  },
+  "vps2": {
+    "observed_at_utc": "2026-11-11T04:24:49Z",
+    "installed_release": "0.6.3 (8b02799b4132)",
+    "service": {"active_state": "active", "sub_state": "running", "historical_restarts": 0},
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "behind_seconds": 23246.255,
+    "last_scan_age_seconds": 239,
+    "failed_reconciliation_attempts": null,
+    "kernel_overflow_notifications": 0,
+    "events_dropped": 0,
+    "scan_in_progress": false,
+    "index_nodes": 2030739,
+    "index_bytes_on_disk": 877469696,
+    "wal_bytes": 60110832,
+    "disk": {"root_use_percent": 89, "root_available_human": "11G (rounded df -h output)"},
+    "recent_reconciliations": [
+      {
+        "scan_error_at_utc": "2026-11-11T04:03:13Z",
+        "completion_at_utc": "2026-11-11T04:04:21Z",
+        "error": "one inode number observed with different birth-time incarnations during the scan",
+        "coverage_issues": 1,
+        "failed_attempts": 1,
+        "automatic_retry_seconds": 59
+      },
+      {
+        "scan_error_at_utc": "2026-11-11T04:09:42Z",
+        "completion_at_utc": "2026-11-11T04:11:08Z",
+        "error": "one inode number observed with different birth-time incarnations during the scan",
+        "coverage_issues": 1,
+        "failed_attempts": 2,
+        "automatic_retry_seconds": 119
+      },
+      {
+        "started_at_utc": "2026-11-11T04:13:08Z",
+        "completed_at_utc": "2026-11-11T04:20:50Z",
+        "duration_seconds": 461.847,
+        "files": 1815415,
+        "directories": 218718,
+        "path_instances": 2034133,
+        "coverage_issues": 0,
+        "inode_reuse_conflicts": 0,
+        "post_scan_event_race": true,
+        "result": "complete filesystem observation; accounting verification still pending at 04:22:23Z"
+      }
+    ],
+    "post_scan_status_transition_at_utc": "2026-11-11T04:24:49Z",
+    "post_scan_transition": "The dirty reason changed from accounting verification pending to filesystem changes await the next full observation; failed-attempt status was cleared. No direct accounting-pass log was captured, so this state change is evidence consistent with the check completing, not direct proof of its success.",
+    "evidence_log_events": [
+      "2026-11-11T04:04:21Z: reconciliation incomplete; scan_errors=1, lost_events=true; one coverage issue",
+      "2026-11-11T04:11:08Z: reconciliation incomplete; scan_errors=1, lost_events=true; one coverage issue",
+      "2026-11-11T04:20:50Z: filesystem or fanotify hints changed during scan-first observation; next full observation scheduled",
+      "2026-11-11T04:20:50Z: complete scan reported zero coverage issues"
+    ]
+  },
+  "analysis": [
+    "The two failed VPS2 attempts coincided with inode-number reuse during the walk and correctly failed closed; this is distinct from fanotify queue overflow.",
+    "The next scan completed without inode-incarnation conflicts, but event hints changed during the observation. At 04:24:49 the dirty reason had transitioned to awaiting the next full observation; this remains dirty and not caught up.",
+    "The 7m42s duration was observed while the host was under CPU pressure; the sample does not isolate whether pressure caused the duration.",
+    "These samples do not establish exact path-level correctness or prove that the accounting check will never complete."
+  ],
+  "production_modified": false
+}
