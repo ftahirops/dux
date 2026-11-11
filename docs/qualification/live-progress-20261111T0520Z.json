@@ -1,0 +1,108 @@
+{
+  "observed_at_utc": "2026-11-11T05:20:04Z",
+  "vps1_production": {
+    "host": "local production VPS1",
+    "service": {
+      "active_state": "active",
+      "sub_state": "running",
+      "main_pid": 1073891,
+      "historical_restarts": 4
+    },
+    "status": {
+      "dirty": true,
+      "dirty_reason": "fanotify queue overflow",
+      "caught_up": false,
+      "behind_seconds": 301786.072,
+      "last_scan_age_seconds": 491475,
+      "events_seen": 303605141,
+      "events_resolved": 175190787,
+      "pending_updates": 957,
+      "events_dropped": 2518862,
+      "kernel_overflow_notifications": 964,
+      "index_nodes": 1304623,
+      "index_bytes": 123947892736,
+      "index_bytes_on_disk": 3895185408,
+      "wal_bytes": 134217728,
+      "write_error": null
+    },
+    "root_filesystem": {
+      "used_percent": 68,
+      "available_human_readable": "58G"
+    }
+  },
+  "vps2_scan_first": {
+    "host": "192.168.5.106",
+    "service": {
+      "active_state": "active",
+      "sub_state": "running",
+      "main_pid": 576850,
+      "historical_restarts": 0
+    },
+    "latest_observation": {
+      "completed_at_utc": "2026-11-11T05:12:05Z",
+      "files": 1824343,
+      "directories": 219824,
+      "path_instances": 2044167,
+      "visible_bytes": 83118047232,
+      "unique_bytes": 82985336832,
+      "unique_inodes": 2040773,
+      "coverage_issues": 0,
+      "vanished_reuse_paths": 72,
+      "revalidated_reuse_paths": 0,
+      "unresolved_reuse_paths": 0
+    },
+    "accounting_verification": {
+      "result": "passed",
+      "completed_at_utc": "2026-11-11T05:13:29Z",
+      "elapsed_ms": 84244
+    },
+    "status_at_2026-11-11T05:20:04Z": {
+      "dirty": true,
+      "dirty_reason": "filesystem changes await the next full observation",
+      "scan_in_progress": false,
+      "last_scan_age_seconds": 479,
+      "events_seen": 2217262928,
+      "events_dropped": 0,
+      "kernel_overflow_notifications": 0,
+      "pending_updates": 0,
+      "behind_seconds": 26561.524,
+      "behind_seconds_applicable": false
+    }
+  },
+  "r132_72h_soak": {
+    "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "status": "running",
+    "started_at_utc": "2026-11-10T09:04:50Z",
+    "elapsed_seconds": 72949.8,
+    "target_hours": 72,
+    "completion_percent": 28.18,
+    "operations": 1593189,
+    "mutation_bursts": 20,
+    "controlled_crash_recoveries": 1,
+    "held_reader_checks": 3,
+    "exact_convergence_samples": 1588,
+    "exact_convergence_p95_ms": 10047.25,
+    "exact_convergence_max_ms": 17963,
+    "maximum_sampled_rss_kib": 6568,
+    "maximum_sampled_wal_bytes": 7519032,
+    "final_exactness": "pending",
+    "final_history_validation": "pending",
+    "sqlite_integrity": "pending"
+  },
+  "guarded_fault_matrix": {
+    "runner_process_confirmed_alive_at_2026-11-11T05:20:31Z": true,
+    "matrix_suites_started": 0,
+    "last_admission_wait_reasons": [
+      "unrelated Go compiler/test/staticcheck workloads active",
+      "I/O PSI some avg10 12.82 percent exceeded 10 percent admission limit"
+    ],
+    "guard_bypassed": false
+  },
+  "interpretation": [
+    "This is a time-bounded status snapshot, not proof of overall production readiness.",
+    "VPS2 completed a full observation and independent accounting verification, but ongoing changes left the service dirty; scan-first behind_seconds is not an applicable freshness metric.",
+    "The VPS2 soak is still running and has not passed terminal exactness, history, or SQLite integrity checks.",
+    "VPS1 remains dirty with accumulated event loss and a multi-day-old full scan despite recent reduction in pending updates.",
+    "The fault matrix has not started; admission remains blocked by unrelated host workloads and I/O pressure."
+  ]
+}
