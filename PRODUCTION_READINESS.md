@@ -1,14 +1,13 @@
 # Dux production readiness
 
 **Decision: NOT READY for production rollout.** This report was refreshed at
-**2026-11-11 05:59 UTC**. VPS1 still runs the old event-apply 0.6.3 daemon and
-is 5.71 days past its last full scan, with 979 lifetime fanotify overflows and
-2.52M dropped updates. Pending updates have fallen to 47, but the index remains
-dirty. VPS2's older 0.6.3 service remains dirty between scans; at 05:54 it was
-again in `reloading` during a scan. The r132 candidate is 20.82 hours into a
-72-hour isolated soak; final exactness, history, and SQLite checks remain
-pending. The guarded 15-suite fault matrix is still waiting on unrelated Go
-build/test workloads and extreme CPU pressure. Release,
+**2026-11-11 06:09 UTC**. VPS1 still runs the old event-apply 0.6.3 daemon and
+is 5.72 days past its last full scan, with 979 lifetime fanotify overflows and
+2.52M dropped updates. The pending count has risen to 2,632 while the index
+remains dirty. VPS2's older 0.6.3 service is again in `reloading` during a
+scan. The r132 candidate is 21.08 hours into a 72-hour isolated soak; final
+exactness, history, and SQLite checks remain pending. The guarded 15-suite
+fault matrix is still waiting on unrelated Go build/test workloads. Release,
 scale, package-lifecycle, and canary gates remain open.
 
 The detailed evidence trail is
@@ -16,7 +15,7 @@ The detailed evidence trail is
 latest live host/service sample is
 [`live-reconciliation-followup-20261111T0423Z.json`](docs/qualification/live-reconciliation-followup-20261111T0423Z.json),
 and the latest consolidated live VPS1/VPS2/soak/admission snapshot is
-[`live-progress-20261111T0559Z.json`](docs/qualification/live-progress-20261111T0559Z.json).
+[`live-progress-20261111T0609Z.json`](docs/qualification/live-progress-20261111T0609Z.json).
 The broader aggregate snapshot in
 [`current-metrics.json`](docs/qualification/current-metrics.json) is from
 03:51 UTC and should be read with these newer samples.
@@ -25,10 +24,10 @@ The broader aggregate snapshot in
 
 | System | Latest verified state |
 |---|---|
-| **VPS1 production** | At 05:48 UTC the installed Dux remained active/running with four historical restarts. It is dirty/not caught up: 979 lifetime overflow notifications, 2,518,862 dropped updates, and 47 pending updates. Last full scan age was 5.71 days; event-mode behind time was 3.51 days. Dux reported 1,268,287 nodes and 118.34 GB indexed bytes; the index database occupied 3.91 GB. Root disk use was 65% (63G available). Low pending work does not establish recovery or exactness. See the [05:49 consolidated snapshot](docs/qualification/live-progress-20261111T0549Z.json). |
-| **VPS2 installed service** | At 05:59 UTC the service remained `reloading (reload-notify)` during a scan, with zero historical restarts, pending updates, event drops, and kernel overflows. The scan had run about 8.5 minutes and covered 1,834,260 files and 220,880 directories; last completed scan age was 1,080s. This reproduces the old installed-build service-state reporting defect; the r133 READY-notification fix is not installed. See the [05:59 snapshot](docs/qualification/live-progress-20261111T0559Z.json) and the [05:28 completed cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0528Z.json). |
-| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 05:59 it had run 20.91h of 72h (29.04%) with 1,639,435 operations. It has completed 20 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Across 1,634 exact-convergence samples, p50 was 3.91s, p95 10.34s, and max 20.45s; p50 increased from 1.51s in the first soak quartile to 6.51s in the last. The fixture grows with retained burst files, so this trend is not an isolated daemon regression. Aggregate throughput was 21.783 operations/s against a configured 25/s request, but the aggregate includes burst operations and no explicit throughput SLO is defined. Final exactness, history, and SQLite checks remain pending; four planned crash checkpoints remain. See the [05:59 performance snapshot](docs/qualification/live-progress-20261111T0559Z.json). |
-| **Disk and VM admission** | VPS2 root was 90% used with 9.1G available at 05:57; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; indexed totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. The guarded matrix runner remains alive but has started zero suites; at 05:59 host load1 was 52.97 and CPU PSI some avg10 was 80.50%, far above the admission limits. See the [05:59 snapshot](docs/qualification/live-progress-20261111T0559Z.json), [VPS2 admission constraints](docs/qualification/vps2-test-admission-20261111T0525Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). |
+| **VPS1 production** | At 06:09 UTC the installed Dux remained active/running with four historical restarts. It is dirty/not caught up: 979 lifetime overflow notifications, 2,518,862 dropped updates, and 2,632 pending updates. Last full scan age was 5.72 days; event-mode behind time was 3.53 days. Dux reported 1,267,969 nodes; the index database occupied 3.93 GB. Root disk use was 65% (64G available); `/var/lib/dux` was 3.8 GiB. The nonzero/increasing pending count does not indicate recovery after recorded drops. See the [06:09 live snapshot](docs/qualification/live-progress-20261111T0609Z.json). |
+| **VPS2 installed service** | At 06:09 UTC the service was `reloading (reload-notify)` during a scan, with zero historical restarts, pending updates, event drops, and kernel overflows. The scan reported 1,836,868 files and 221,192 directories; last completed scan age was 585s. Root was 90% used (9.3G available). This repeats the old installed-build service-state reporting defect; the r133 READY-notification fix is not installed. See the [06:09 snapshot](docs/qualification/live-progress-20261111T0609Z.json) and the [05:28 completed cycle](docs/qualification/vps2-reconciliation-cycle-20261111T0528Z.json). |
+| **r132 soak candidate** | Static candidate SHA-256 `998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76`, isolated on VPS2. At 06:09 it had run 21.08h of 72h (29.27%) with 1,652,000 operations. It has completed 21 mutation bursts, three held-reader/WAL-reclaim checks, and one controlled crash/restart recovery. Across 1,647 exact-convergence samples, p50 was 3.92s, p95 10.40s, and max 20.45s; the measured latency trend remains confounded by a growing fixture. Aggregate throughput was 21.774 operations/s against a configured 25/s request. Final exactness, history, and SQLite checks remain pending; four planned crash checkpoints remain. The running soak still uses the copied pre-summary harness. See the [06:09 snapshot](docs/qualification/live-progress-20261111T0609Z.json). |
+| **Disk and VM admission** | At 06:09 VPS2 root was 90% used with 9.3G available; it briefly reached 95% used with 5.66 GB available at 02:28, with allocation source still unconfirmed. The indexed tree ranks ClickHouse data at 20 GiB, containerd at 17 GiB, XGS incidents at 12 GiB, and `/root` qualification/rollback files at 8.5 GiB; indexed totals are not directly comparable with root-device `df` without mount normalization. No files were deleted. The guarded matrix runner remains alive but has started zero suites; load1 was 15.15 at 06:09 with active Go compile/test jobs. See the [06:09 snapshot](docs/qualification/live-progress-20261111T0609Z.json), [VPS2 admission constraints](docs/qualification/vps2-test-admission-20261111T0525Z.json), [02:28 pressure evidence](docs/qualification/vps2-disk-pressure-20261111T0228Z.json), and [02:05 inventory](docs/qualification/vps2-disk-audit-20261111T0205Z.json). |
 
 At 05:25 UTC, VPS2 was also ruled out as an alternate host for the additional
 fault matrix: it has no `/dev/kvm`, its root filesystem is 90% used with 9.6G
