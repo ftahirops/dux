@@ -1,0 +1,62 @@
+# /etc/dux/notify.conf — settings for `dux sentinel` and `dux notify-test`.
+# KEY=VALUE lines. Environment variables with the same names override this file.
+# Keep it private: chmod 600 /etc/dux/notify.conf
+# Test every channel with:  dux notify-test            (warning)
+#                           dux notify-test --severity critical   (also tests wall)
+
+# ---- Channels: fill in the ones you use, leave the rest empty -------------
+
+# ntfy phone push (https://ntfy.sh or your own server). Critical = urgent priority.
+DUX_NTFY_URL=
+DUX_NTFY_TOKEN=
+
+# Slack incoming webhook (Slack app > Incoming Webhooks).
+DUX_SLACK_WEBHOOK=
+
+# Any HTTP endpoint; receives JSON {source,severity,title,body,key,host,timestamp}.
+DUX_WEBHOOK_URL=
+DUX_WEBHOOK_TOKEN=
+
+# Email through your SMTP server. smtp://host:587 uses STARTTLS (required);
+# smtps://host:465 uses TLS. Separate several recipients with commas.
+DUX_SMTP_URL=
+DUX_SMTP_USER=
+DUX_SMTP_PASS=
+DUX_MAIL_FROM=
+DUX_MAIL_TO=
+
+# Urgent message on every logged-in terminal, for critical alerts only.
+DUX_WALL=yes
+
+# Lowest severity for push channels (ntfy, Slack, webhook) and for email.
+# info | warning | critical. Recoveries are always sent.
+DUX_MIN_PUSH=warning
+DUX_MIN_EMAIL=warning
+
+# ---- Thresholds ------------------------------------------------------------
+DUX_SENTINEL_INTERVAL=2s
+DUX_WARN_PCT=85
+DUX_CRIT_PCT=95
+DUX_INODE_WARN_PCT=85
+DUX_INODE_CRIT_PCT=95
+# Points below a threshold before an alert clears.
+DUX_HYSTERESIS_PCT=3
+# Alert when, at the current growth rate, the disk is full within this time.
+DUX_FILL_WARN_HOURS=24
+DUX_FILL_CRIT_HOURS=2
+# Alert when a filesystem grows this much within the window.
+DUX_BURST=5G
+DUX_BURST_WINDOW=10m
+# Only watch these mount points (comma separated); empty = all real filesystems.
+DUX_MOUNTS=
+
+# ---- Flood control ---------------------------------------------------------
+# Repeat a still-active alert after this long (sooner if it gets 2 points worse).
+DUX_WARN_REPEAT=1h
+DUX_CRIT_REPEAT=15m
+DUX_WORSEN_PCT=2
+# wall: at most once per filesystem per 30 min, and 4 per hour in total.
+DUX_WALL_MIN_GAP=30m
+DUX_WALL_MAX_PER_HOUR=4
+# All channels: at most this many alerts per hour (criticals always go out).
+DUX_MAX_ALERTS_PER_HOUR=30

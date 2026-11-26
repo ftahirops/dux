@@ -1,0 +1,29 @@
+[Unit]
+Description=dux sentinel: free-space and inode alerts
+Documentation=man:dux(1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/dux sentinel --config /etc/dux/notify.conf
+Restart=always
+RestartSec=5
+WatchdogSec=60
+Nice=10
+CPUQuota=5%
+MemoryMax=64M
+TasksMax=32
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

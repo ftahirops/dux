@@ -4,8 +4,10 @@ mod deleted;
 mod emit;
 mod fault;
 mod guard;
+mod notify;
 mod query;
 mod scan;
+mod sentinel;
 mod store;
 mod tui;
 mod tunnel;
@@ -257,6 +259,29 @@ enum Cmd {
         #[arg(long, hide = true, conflicts_with = "event_apply")]
         reconcile_first: bool,
     },
+    /// Watch free space and inodes on every mount every few seconds and send
+    /// alerts: system log, ntfy, Slack, webhook, email, and wall for critical
+    /// ones. Exact and cheap: one statvfs call per mount, no scanning.
+    Sentinel {
+        /// KEY=VALUE settings file with channels and thresholds
+        #[arg(long, default_value = notify::DEFAULT_CONFIG)]
+        config: PathBuf,
+        /// Check once: print a df-style summary, alert on thresholds, exit
+        #[arg(long)]
+        once: bool,
+        /// Print the alerts that would be sent instead of sending them
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Send a test alert to every configured channel
+    NotifyTest {
+        /// KEY=VALUE settings file with channels
+        #[arg(long, default_value = notify::DEFAULT_CONFIG)]
+        config: PathBuf,
+        /// info, warning or critical (critical also tests wall)
+        #[arg(long, default_value = "warning")]
+        severity: String,
+    },
     /// Reverse-SSH tunnel management (reach this host behind NAT via a home
     /// endpoint). Run it separately with the optional dux-tunnel.service;
     /// this subcommand can also provision the identity key.
@@ -277,6 +302,17 @@ enum TunnelCmd {
         #[arg(long)]
         force: bool,
     },
+}
+
+/// Log to stderr (the journal under systemd) at info unless RUST_LOG says otherwise.
+fn init_alert_logging() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_writer(std::io::stderr)
+        .try_init();
 }
 
 fn main() {
@@ -563,6 +599,44 @@ fn real_main() -> Result<()> {
                     format!("{sign}{}", util::human_magnitude(r.delta)),
                     display_growth_path(&r.path)
                 );
+            }
+        }
+        Some(Cmd::Sentinel {
+            config,
+            once,
+            dry_run,
+        }) => {
+            init_alert_logging();
+            let mut cfg = notify::NotifyConfig::load(&config)?;
+            cfg.dry_run = dry_run;
+            let settings = sentinel::Settings::from_config(&cfg)?;
+            if once {
+                print!("{}", sentinel::snapshot_report(&settings)?);
+            }
+            sentinel::run(&cfg, settings, once)?;
+        }
+        Some(Cmd::NotifyTest { config, severity }) => {
+            init_alert_logging();
+            let cfg = notify::NotifyConfig::load(&config)?;
+            let severity = notify::Severity::parse(&severity)
+                .context("--severity must be info, warning or critical")?;
+            let alert = notify::Alert {
+                severity,
+                title: "test alert from dux".into(),
+                body: format!(
+                    "If you can read this, this channel works. Configured: {}",
+                    cfg.channels().join(", ")
+                ),
+                key: "test".into(),
+                host: sentinel::hostname(),
+            };
+            let report = notify::send(&cfg, &alert, true, util::now_secs());
+            println!("sent: {}", report.sent.join(", "));
+            for (name, err) in &report.failed {
+                println!("FAILED {name}: {err}");
+            }
+            if !report.failed.is_empty() {
+                anyhow::bail!("{} channel(s) failed", report.failed.len());
             }
         }
         Some(Cmd::DeletedOpen) => {
