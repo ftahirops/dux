@@ -60,3 +60,17 @@ DUX_WALL_MIN_GAP=30m
 DUX_WALL_MAX_PER_HOUR=4
 # All channels: at most this many alerts per hour (criticals always go out).
 DUX_MAX_ALERTS_PER_HOUR=30
+
+# ---- Folder attribution (which folder is growing) -------------------------
+# Walk local filesystems (ext4, xfs, btrfs...) hourly and soon after an alert
+# or fast growth, then send a follow-up naming the folders that grew.
+DUX_WALK=yes
+DUX_WALK_EVERY=1h
+DUX_WALK_MIN_GAP=10m
+DUX_WALK_TRIGGER=1G
+DUX_WALK_THREADS=2
+DUX_SNAPSHOT_DIR=/var/lib/dux/sentinel
+# Repeat and recovery behaviour.
+DUX_WORSEN_MIN_GAP=5m
+DUX_EASE_AFTER=2m
+DUX_FILL_WARN_HISTORY=5m

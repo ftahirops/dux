@@ -77,11 +77,25 @@ pub struct Settings {
     pub crit_repeat: Duration,
     /// Resend early when used % rises this many points above the last alert.
     pub worsen_pct: f64,
+    /// Never resend an unchanged-level alert sooner than this.
+    pub worsen_min_gap: Duration,
+    /// A level steps down only after holding the lower level this long.
+    pub ease_after: Duration,
+    /// History needed before a full-in-hours warning (critical needs 1 min).
+    pub fill_warn_history: Duration,
     pub wall_min_gap: Duration,
     pub wall_max_per_hour: usize,
     pub max_alerts_per_hour: usize,
     /// Only these mount points, if set.
     pub only_mounts: Vec<String>,
+    /// Walk local filesystems to say which folder is growing.
+    pub walk: bool,
+    pub walk_every: Duration,
+    pub walk_min_gap: Duration,
+    /// Growth since the last walk that triggers an early walk.
+    pub walk_trigger_bytes: u64,
+    pub walk_threads: usize,
+    pub snapshot_dir: std::path::PathBuf,
 }
 
 impl Default for Settings {
@@ -101,10 +115,19 @@ impl Default for Settings {
             warn_repeat: Duration::from_secs(3600),
             crit_repeat: Duration::from_secs(900),
             worsen_pct: 2.0,
+            worsen_min_gap: Duration::from_secs(300),
+            ease_after: Duration::from_secs(120),
+            fill_warn_history: Duration::from_secs(300),
             wall_min_gap: Duration::from_secs(1800),
             wall_max_per_hour: 4,
             max_alerts_per_hour: 30,
             only_mounts: Vec::new(),
+            walk: true,
+            walk_every: Duration::from_secs(3600),
+            walk_min_gap: Duration::from_secs(600),
+            walk_trigger_bytes: 1 << 30,
+            walk_threads: 2,
+            snapshot_dir: std::path::PathBuf::from(crate::snapshot::DEFAULT_DIR),
         }
     }
 }
@@ -187,10 +210,26 @@ impl Settings {
         s.warn_repeat = dur("DUX_WARN_REPEAT", s.warn_repeat)?;
         s.crit_repeat = dur("DUX_CRIT_REPEAT", s.crit_repeat)?;
         s.worsen_pct = num("DUX_WORSEN_PCT", s.worsen_pct)?;
+        s.worsen_min_gap = dur("DUX_WORSEN_MIN_GAP", s.worsen_min_gap)?;
+        s.ease_after = dur("DUX_EASE_AFTER", s.ease_after)?;
+        s.fill_warn_history = dur("DUX_FILL_WARN_HISTORY", s.fill_warn_history)?;
         s.wall_min_gap = dur("DUX_WALL_MIN_GAP", s.wall_min_gap)?;
         s.wall_max_per_hour = num("DUX_WALL_MAX_PER_HOUR", s.wall_max_per_hour as f64)? as usize;
         s.max_alerts_per_hour =
             num("DUX_MAX_ALERTS_PER_HOUR", s.max_alerts_per_hour as f64)? as usize;
+        if let Some(v) = get("DUX_WALK") {
+            s.walk = matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true" | "on");
+        }
+        s.walk_every = dur("DUX_WALK_EVERY", s.walk_every)?;
+        s.walk_min_gap = dur("DUX_WALK_MIN_GAP", s.walk_min_gap)?;
+        if let Some(v) = get("DUX_WALK_TRIGGER") {
+            s.walk_trigger_bytes =
+                parse_bytes(&v).with_context(|| format!("DUX_WALK_TRIGGER={v}"))?;
+        }
+        s.walk_threads = (num("DUX_WALK_THREADS", s.walk_threads as f64)? as usize).clamp(1, 16);
+        if let Some(v) = get("DUX_SNAPSHOT_DIR") {
+            s.snapshot_dir = std::path::PathBuf::from(v);
+        }
         if let Some(v) = get("DUX_MOUNTS") {
             s.only_mounts = v
                 .split(',')
@@ -227,7 +266,7 @@ pub struct Mount {
 }
 
 /// Unescape the octal escapes mountinfo uses for spaces and the like.
-fn unescape_mount(s: &str) -> String {
+pub(crate) fn unescape_mount(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -382,6 +421,20 @@ struct CondState {
     level: Level,
     last_sent: i64,
     last_value: f64,
+    /// When the value first fell to a lower level; the level steps down
+    /// only after it stays there for `ease_after`.
+    lower_since: Option<i64>,
+}
+
+/// What counts as "clearly worse" for an early repeat.
+#[derive(Clone, Copy, Debug)]
+enum Worse {
+    /// The value rose by this many points (percentages).
+    Points(f64),
+    /// The value fell to half (time left).
+    Halves,
+    /// The value doubled (bytes grown).
+    Doubles,
 }
 
 /// What the sentinel decided to send this tick.
@@ -447,64 +500,91 @@ impl Sentinel {
     }
 
     /// Decide on one condition. Returns an alert when it should be sent.
+    ///
+    /// - Entering a worse level alerts at once.
+    /// - The same level repeats after `warn_repeat`/`crit_repeat`, or sooner
+    ///   when the value gets clearly worse, but never sooner than
+    ///   `worsen_min_gap` after the previous alert.
+    /// - Stepping down (critical to warning, or clearing) happens only after
+    ///   the lower level has held for `ease_after`, so a value bouncing around
+    ///   a threshold cannot flap.
     #[allow(clippy::too_many_arguments)]
     fn judge(
         &mut self,
         key: String,
         level: Level,
         value: f64,
-        worse_is_higher: bool,
+        worse: Worse,
         title: String,
         body: String,
         now: i64,
     ) -> Option<Alert> {
         let s = &self.settings;
-        let prev = self.conds.get(&key).cloned().unwrap_or(CondState {
+        let mut st = self.conds.get(&key).cloned().unwrap_or(CondState {
             level: Level::Ok,
             last_sent: 0,
             last_value: value,
+            lower_since: None,
         });
-        let send = if level > prev.level {
-            true
-        } else if level == Level::Ok {
-            false
-        } else if level < prev.level {
-            // Dropped from critical to warning: tell people it eased.
-            true
-        } else {
-            let repeat = if level == Level::Critical {
-                s.crit_repeat
-            } else {
-                s.warn_repeat
-            };
-            let worse = if worse_is_higher {
-                value >= prev.last_value + s.worsen_pct
-            } else {
-                value <= prev.last_value / 2.0
-            };
-            now - prev.last_sent >= repeat.as_secs() as i64 || worse
-        };
-        let recovered = level == Level::Ok && prev.level > Level::Ok;
-        if recovered {
-            self.conds.remove(&key);
-            return Some(Alert {
-                severity: Severity::Recovered,
+        if level >= st.level {
+            st.lower_since = None;
+        }
+        if level < st.level {
+            let since = *st.lower_since.get_or_insert(now);
+            if now - since < s.ease_after.as_secs() as i64 {
+                self.conds.insert(key, st);
+                return None;
+            }
+            let alert = Alert {
+                severity: if level == Level::Ok {
+                    Severity::Recovered
+                } else {
+                    level.severity()
+                },
                 title,
                 body,
-                key,
+                key: key.clone(),
                 host: self.host.clone(),
-            });
+            };
+            if level == Level::Ok {
+                self.conds.remove(&key);
+            } else {
+                self.conds.insert(
+                    key,
+                    CondState {
+                        level,
+                        last_sent: now,
+                        last_value: value,
+                        lower_since: None,
+                    },
+                );
+            }
+            return Some(alert);
         }
         if level == Level::Ok {
             return None;
         }
-        if send {
+        let escalated = level > st.level;
+        let repeat = if level == Level::Critical {
+            s.crit_repeat
+        } else {
+            s.warn_repeat
+        };
+        let clearly_worse = match worse {
+            Worse::Points(p) => value >= st.last_value + p,
+            Worse::Halves => value <= st.last_value / 2.0,
+            Worse::Doubles => value >= st.last_value * 2.0,
+        };
+        let since_sent = now - st.last_sent;
+        let worsened = clearly_worse && since_sent >= s.worsen_min_gap.as_secs() as i64;
+        if escalated || since_sent >= repeat.as_secs() as i64 || worsened {
             self.conds.insert(
                 key.clone(),
                 CondState {
                     level,
                     last_sent: now,
                     last_value: value,
+                    lower_since: None,
                 },
             );
             Some(Alert {
@@ -515,8 +595,7 @@ impl Sentinel {
                 host: self.host.clone(),
             })
         } else {
-            // Keep the level, remember the old send time and value.
-            self.conds.insert(key, CondState { level, ..prev });
+            self.conds.insert(key, st);
             None
         }
     }
@@ -564,7 +643,15 @@ impl Sentinel {
         } else {
             format!("{path} is {pct:.0}% full")
         };
-        if let Some(a) = self.judge(key, lvl, pct, true, title, size_line.clone(), now) {
+        if let Some(a) = self.judge(
+            key,
+            lvl,
+            pct,
+            Worse::Points(self.settings.worsen_pct),
+            title,
+            size_line.clone(),
+            now,
+        ) {
             out.push(a);
         }
 
@@ -586,7 +673,15 @@ impl Sentinel {
                 "{} of {} inodes used; new files will fail when inodes run out even if space is free",
                 u.inodes_used, u.inodes_total
             );
-            if let Some(a) = self.judge(key, lvl, ip, true, title, body, now) {
+            if let Some(a) = self.judge(
+                key,
+                lvl,
+                ip,
+                Worse::Points(self.settings.worsen_pct),
+                title,
+                body,
+                now,
+            ) {
                 out.push(a);
             }
         }
@@ -602,9 +697,11 @@ impl Sentinel {
                     f64::INFINITY
                 };
                 let current = self.conds.get(&key).map(|c| c.level).unwrap_or(Level::Ok);
+                let enough_history = span >= self.settings.fill_warn_history.as_secs() as i64;
                 let lvl = if hours <= self.settings.fill_crit_hours {
                     Level::Critical
-                } else if hours <= self.settings.fill_warn_hours
+                } else if (hours <= self.settings.fill_warn_hours
+                    && (enough_history || current >= Level::Warning))
                     || (current >= Level::Warning && hours <= self.settings.fill_warn_hours * 1.5)
                 {
                     Level::Warning
@@ -621,7 +718,7 @@ impl Sentinel {
                     h((rate * 3600.0) as u64),
                     span / 60
                 );
-                if let Some(a) = self.judge(key, lvl, hours, false, title, body, now) {
+                if let Some(a) = self.judge(key, lvl, hours, Worse::Halves, title, body, now) {
                     out.push(a);
                 }
 
@@ -642,7 +739,8 @@ impl Sentinel {
                     h(self.settings.burst_bytes),
                     window / 60
                 );
-                if let Some(a) = self.judge(key, lvl, grew as f64, true, title, body, now) {
+                if let Some(a) = self.judge(key, lvl, grew as f64, Worse::Doubles, title, body, now)
+                {
                     out.push(a);
                 }
             }
@@ -653,11 +751,7 @@ impl Sentinel {
         let key = format!("readonly:{path}");
         match (was, u.readonly) {
             (Some(false), true) => {
-                if let Some(a) = self.judge(
-                    key,
-                    Level::Critical,
-                    1.0,
-                    true,
+                if let Some(a) = self.judge(key, Level::Critical, 1.0, Worse::Points(1.0),
                     format!("{path} has become read-only"),
                     format!("{} ({}) was writable and is now read-only, usually after filesystem errors; check the kernel log", m.device, m.fstype),
                     now,
@@ -665,8 +759,8 @@ impl Sentinel {
                     out.push(a);
                 }
             }
-            (Some(true), false) if self.conds.contains_key(&key) => {
-                if let Some(a) = self.judge(key, Level::Ok, 0.0, true, format!("{path} is writable again"), String::new(), now) {
+            (_, false) if self.conds.contains_key(&key) => {
+                if let Some(a) = self.judge(key, Level::Ok, 0.0, Worse::Points(1.0), format!("{path} is writable again"), String::new(), now) {
                     out.push(a);
                 }
             }
@@ -773,16 +867,37 @@ pub fn snapshot_report(settings: &Settings) -> Result<String> {
 /// Run until stopped. With `once`, take one sample, alert on thresholds
 /// (growth needs history, so it is skipped) and exit.
 pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
+    use crate::attrib::{self, WalkScheduler, Writers};
     let host = hostname();
     tracing::info!(
         channels = ?cfg.channels(),
         interval_s = settings.interval.as_secs(),
         warn_pct = settings.warn_pct,
         crit_pct = settings.crit_pct,
+        walk = settings.walk,
         "dux sentinel started"
     );
-    let mut sentinel = Sentinel::new(settings, host);
-    let mut mount_list = mounts(&sentinel.settings)?;
+    let mut mount_list = mounts(&settings)?;
+    let walk_mounts = |ms: &[Mount]| -> Vec<String> {
+        ms.iter()
+            .filter(|m| attrib::walkable(&m.fstype))
+            .map(|m| m.path.clone())
+            .collect()
+    };
+    let mut sched = (settings.walk && !once && !cfg.dry_run).then(|| {
+        let mut s = WalkScheduler::new(
+            settings.walk_every.as_secs() as i64,
+            settings.walk_min_gap.as_secs() as i64,
+            settings.walk_trigger_bytes,
+            settings.walk_threads,
+            Some(settings.snapshot_dir.clone()),
+        );
+        s.load_snapshots(&walk_mounts(&mount_list));
+        s
+    });
+    let mut writers = Writers::default();
+    let mut last_writers = 0i64;
+    let mut sentinel = Sentinel::new(settings, host.clone());
     let mut last_mount_refresh = now_secs();
     crate::util::systemd_notify("READY=1\nSTATUS=watching free space and inodes");
     loop {
@@ -794,10 +909,42 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
             last_mount_refresh = now;
         }
         let mut alerts = Vec::new();
+        let mut used: Vec<(String, u64)> = Vec::new();
         for m in &mount_list {
             match statvfs(&m.path) {
-                Ok(u) => alerts.extend(sentinel.observe(m, &u, now)),
+                Ok(u) => {
+                    if attrib::walkable(&m.fstype) {
+                        used.push((m.path.clone(), u.used));
+                    }
+                    alerts.extend(sentinel.observe(m, &u, now));
+                }
                 Err(e) => tracing::debug!("skipping {}: {e:#}", m.path),
+            }
+        }
+        if now - last_writers >= 10 {
+            writers.sample(now);
+            last_writers = now;
+        }
+        if let Some(s) = sched.as_mut() {
+            for a in &alerts {
+                if let Some((_, mount)) = a.key.split_once(':') {
+                    s.note_alert(mount, a.severity);
+                }
+            }
+            s.poll(now, &used);
+            if let Some((mount, reason, tree, changes)) = s.collect(now) {
+                let used_now = used.iter().find(|(m, _)| *m == mount).map(|(_, u)| *u);
+                if let Some(a) = attrib::attribution_alert(
+                    &host,
+                    &mount,
+                    reason,
+                    &tree,
+                    &changes,
+                    used_now,
+                    &writers.summary(3),
+                ) {
+                    alerts.push(a);
+                }
             }
         }
         for d in sentinel.admit(alerts, now) {
@@ -910,38 +1057,52 @@ mod tests {
         };
         let mut s = Sentinel::new(st, "h".into());
         let m = mount("/");
-        assert!(sent(&mut s, &m, &usage(100, 50.0), 0).is_empty());
+        let one = |s: &mut Sentinel, pct: f64, t: i64| sent(s, &m, &usage(100, pct), t);
+        assert!(one(&mut s, 50.0, 0).is_empty());
         assert_eq!(
-            sent(&mut s, &m, &usage(100, 86.0), 2),
+            one(&mut s, 86.0, 2),
             vec![(Severity::Warning, "space:/".into())]
         );
-        // Same level, not worse enough, too soon: quiet.
-        assert!(sent(&mut s, &m, &usage(100, 87.0), 4).is_empty());
-        // Two points worse: resend early.
-        assert_eq!(sent(&mut s, &m, &usage(100, 88.1), 6).len(), 1);
+        assert!(one(&mut s, 87.0, 4).is_empty());
+        // Two points worse, but within the 5-minute minimum gap: quiet.
+        assert!(one(&mut s, 88.1, 6).is_empty());
+        assert_eq!(
+            one(&mut s, 88.5, 310).len(),
+            1,
+            "worse and past the minimum gap"
+        );
         // Escalates to critical immediately.
         assert_eq!(
-            sent(&mut s, &m, &usage(100, 96.0), 8),
+            one(&mut s, 96.0, 312),
             vec![(Severity::Critical, "space:/".into())]
         );
-        // Critical repeats after 15 minutes, not before.
-        assert!(sent(&mut s, &m, &usage(100, 96.0), 600).is_empty());
-        assert_eq!(sent(&mut s, &m, &usage(100, 96.0), 8 + 900).len(), 1);
-        // 93% is inside the 3-point hysteresis band below 95: still critical, no new alert.
-        assert!(sent(&mut s, &m, &usage(100, 93.0), 1000).is_empty());
-        // 91% drops to warning: one "eased" alert.
+        assert!(one(&mut s, 96.0, 600).is_empty());
         assert_eq!(
-            sent(&mut s, &m, &usage(100, 91.0), 1002),
-            vec![(Severity::Warning, "space:/".into())]
+            one(&mut s, 96.0, 312 + 900).len(),
+            1,
+            "critical repeats after 15 min"
         );
-        // 83% is inside the band below 85: still warning.
-        assert!(sent(&mut s, &m, &usage(100, 83.0), 1004).is_empty());
-        // 80% clears: one recovery.
+        // 93% is inside the 3-point band below 95: still critical.
+        assert!(one(&mut s, 93.0, 1300).is_empty());
+        // 91% starts the 2-minute step-down hold; bouncing back up is silent.
+        assert!(one(&mut s, 91.0, 1302).is_empty());
+        assert!(one(&mut s, 96.0, 1350).is_empty(), "no flapping alert");
+        assert!(one(&mut s, 91.0, 1400).is_empty());
         assert_eq!(
-            sent(&mut s, &m, &usage(100, 80.0), 1006),
+            one(&mut s, 91.0, 1521),
+            vec![(Severity::Warning, "space:/".into())],
+            "eased after holding 2 min"
+        );
+        assert!(one(&mut s, 83.0, 1523).is_empty());
+        assert!(
+            one(&mut s, 80.0, 1525).is_empty(),
+            "recovery waits for the hold too"
+        );
+        assert_eq!(
+            one(&mut s, 80.0, 1700),
             vec![(Severity::Recovered, "space:/".into())]
         );
-        assert!(sent(&mut s, &m, &usage(100, 80.0), 1008).is_empty());
+        assert!(one(&mut s, 80.0, 1702).is_empty());
     }
 
     #[test]
@@ -951,7 +1112,7 @@ mod tests {
         // 1000 GiB disk, 50% used, growing 6 GiB per 2 minutes = 180 GiB/h.
         let mut used = 500.0;
         let mut keys = Vec::new();
-        for t in (0..=120).step_by(2) {
+        for t in (0..=320).step_by(2) {
             keys.extend(sent(&mut s, &m, &usage(1000, used), t));
             used += 0.1;
         }
@@ -997,8 +1158,12 @@ mod tests {
         );
         assert!(sent(&mut s, &m, &u, 4).is_empty());
         u.readonly = false;
+        assert!(
+            sent(&mut s, &m, &u, 6).is_empty(),
+            "recovery waits for the hold"
+        );
         assert_eq!(
-            sent(&mut s, &m, &u, 6),
+            sent(&mut s, &m, &u, 130),
             vec![(Severity::Recovered, "readonly:/".into())]
         );
         // A filesystem mounted read-only from the start never alerts.

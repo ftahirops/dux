@@ -587,6 +587,12 @@ pub fn send(c: &NotifyConfig, a: &Alert, allow_wall: bool, now: i64) -> SendRepo
         }
     };
 
+    // Local channels first, so a slow network endpoint can't delay them.
+    attempt(
+        "wall",
+        c.wall && allow_wall && a.severity == Severity::Critical,
+        &mut || run_wall(c, &wall_text(a)),
+    );
     if let Some(url) = c.ntfy_url.clone() {
         attempt("ntfy", push, &mut || {
             run_curl(c, &ntfy_curl_config(c, &url, a))
@@ -609,11 +615,6 @@ pub fn send(c: &NotifyConfig, a: &Alert, allow_wall: bool, now: i64) -> SendRepo
     let email =
         c.email_enabled() && (a.severity >= c.min_email || a.severity == Severity::Recovered);
     attempt("email", email, &mut || send_email(c, a, now));
-    attempt(
-        "wall",
-        c.wall && allow_wall && a.severity == Severity::Critical,
-        &mut || run_wall(c, &wall_text(a)),
-    );
     r
 }
 
@@ -746,7 +747,7 @@ mod tests {
         };
         let r = send(&c, &alert(Severity::Critical), true, 0);
         assert_eq!(r.sent, vec!["log"]);
-        assert_eq!(r.skipped, vec!["ntfy", "wall"]);
+        assert_eq!(r.skipped, vec!["wall", "ntfy"]);
         // Info stays in the log and does not reach push channels or wall.
         let r = send(&c, &alert(Severity::Info), true, 0);
         assert!(r.skipped.is_empty());
@@ -785,7 +786,7 @@ mod tests {
         let r = send(&c, &alert(Severity::Critical), true, 0);
         assert_eq!(
             r.sent,
-            vec!["log", "ntfy", "slack", "wall"],
+            vec!["log", "wall", "ntfy", "slack"],
             "{:?}",
             r.failed
         );

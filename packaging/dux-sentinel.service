@@ -1,5 +1,5 @@
 [Unit]
-Description=dux sentinel: free-space and inode alerts
+Description=dux sentinel: disk alerts and folder attribution
 Documentation=man:dux(1)
 After=network-online.target
 Wants=network-online.target
@@ -11,8 +11,11 @@ Restart=always
 RestartSec=5
 WatchdogSec=60
 Nice=10
-CPUQuota=5%
-MemoryMax=64M
+CPUQuota=50%
+MemoryMax=384M
+Environment=MALLOC_ARENA_MAX=2
+# Folder snapshots and growth history live here.
+StateDirectory=dux/sentinel
 TasksMax=32
 NoNewPrivileges=yes
 ProtectSystem=strict

@@ -1,3 +1,4 @@
+mod attrib;
 mod classify;
 mod containers;
 mod deleted;
@@ -8,10 +9,12 @@ mod notify;
 mod query;
 mod scan;
 mod sentinel;
+mod snapshot;
 mod store;
 mod tui;
 mod tunnel;
 mod util;
+mod walker;
 mod watch;
 
 use anyhow::{Context, Result};
@@ -272,6 +275,46 @@ enum Cmd {
         /// Print the alerts that would be sent instead of sending them
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Walk one filesystem fast into an in-memory folder tree and show the
+    /// largest folders. Needs no index and writes nothing.
+    Walk {
+        /// Directory to walk (stays on its filesystem)
+        #[arg(default_value = "/")]
+        path: PathBuf,
+        /// Worker threads
+        #[arg(long, default_value_t = 4)]
+        threads: usize,
+        /// Depth below the path to rank folders at
+        #[arg(long, default_value_t = 1)]
+        depth: usize,
+        /// How many folders to show
+        #[arg(long, default_value_t = 15)]
+        top: usize,
+    },
+    /// One-shot disk health report: walks a filesystem once and shows the
+    /// biggest folders, known culprits with their safe fix, folders with the
+    /// most files, space held by deleted-but-open files and the top writers.
+    Doctor {
+        /// Filesystem to check
+        #[arg(default_value = "/")]
+        path: PathBuf,
+        /// Worker threads for the walk
+        #[arg(long, default_value_t = 4)]
+        threads: usize,
+    },
+    /// Where the space is, from the latest sentinel folder snapshot, and
+    /// what grew since the snapshot before it. Instant; walks nothing.
+    Where {
+        /// Mount point
+        #[arg(default_value = "/")]
+        mount: String,
+        /// Snapshot directory
+        #[arg(long, default_value = snapshot::DEFAULT_DIR)]
+        dir: PathBuf,
+        /// How many folders to show
+        #[arg(long, default_value_t = 15)]
+        top: usize,
     },
     /// Send a test alert to every configured channel
     NotifyTest {
@@ -614,6 +657,177 @@ fn real_main() -> Result<()> {
                 print!("{}", sentinel::snapshot_report(&settings)?);
             }
             sentinel::run(&cfg, settings, once)?;
+        }
+        Some(Cmd::Walk {
+            path,
+            threads,
+            depth,
+            top,
+        }) => {
+            let tree = walker::walk(&path.to_string_lossy(), threads)?;
+            let s = &tree.stats;
+            let rows = walker::largest_at_depth(&tree.root, depth, top);
+            if json {
+                let folders: Vec<_> = rows
+                    .iter()
+                    .map(|(p, b)| serde_json::json!({"path": p, "bytes": b}))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "path": tree.root_path,
+                        "total_bytes": tree.root.total_bytes,
+                        "apparent_bytes": tree.root.total_apparent,
+                        "entries": s.entries,
+                        "dirs": s.dirs,
+                        "files": s.files,
+                        "errors": s.errors,
+                        "hardlinks_deduped": s.hardlinks_deduped,
+                        "seconds": s.seconds,
+                        "entries_per_second": s.entries_per_second(),
+                        "folders": folders,
+                    })
+                );
+            } else {
+                println!(
+                    "{}: {} in {} entries ({} dirs, {} files), {:.2}s, {:.0} entries/s, {} errors",
+                    tree.root_path,
+                    human(tree.root.total_bytes as i64),
+                    s.entries,
+                    s.dirs,
+                    s.files,
+                    s.seconds,
+                    s.entries_per_second(),
+                    s.errors
+                );
+                for (p, b) in rows {
+                    println!("{:>12}  {p}", human(b as i64));
+                }
+            }
+        }
+        Some(Cmd::Doctor { path, threads }) => {
+            let p = path.to_string_lossy().into_owned();
+            let fs = sentinel::statvfs(&p)?;
+            let mut writers = attrib::Writers::default();
+            writers.sample(util::now_secs());
+            let tree = walker::walk(&p, threads)?;
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            writers.sample(util::now_secs());
+            let deleted = deleted::deleted_open().unwrap_or_default();
+            let held: i64 = deleted.iter().map(|d| d.size).sum();
+            let st = &tree.stats;
+            println!(
+                "{p}: {} used of {} ({:.1}%), {} free; inodes {}",
+                human(fs.used as i64),
+                human(fs.total as i64),
+                fs.used_pct(),
+                human(fs.avail as i64),
+                fs.inode_pct()
+                    .map(|x| format!("{x:.1}% used"))
+                    .unwrap_or_else(|| "n/a".into())
+            );
+            println!(
+                "walked {} entries in {:.2}s ({:.0}/s); files found: {}",
+                st.entries,
+                st.seconds,
+                st.entries_per_second(),
+                human(tree.root.total_bytes as i64)
+            );
+            println!("\nLargest folders");
+            for (f, b) in walker::largest_at_depth(&tree.root, 2, 12) {
+                println!("{:>12}  {f}", human(b as i64));
+            }
+            println!("\nKnown culprits");
+            let mut any = false;
+            for (c, cpath, b) in attrib::catalog_sizes(&tree) {
+                if b >= 100 << 20 {
+                    any = true;
+                    println!("{:>12}  {cpath}  {}: {}", human(b as i64), c.label, c.fix);
+                }
+            }
+            if !any {
+                println!("  none over 100 MiB");
+            }
+            println!("\nMost files (inodes)");
+            let mut by_entries: Vec<(String, u64)> = Vec::new();
+            for c in &tree.root.children {
+                for g in &c.children {
+                    by_entries.push((
+                        format!("{}/{}/{}", p.trim_end_matches('/'), c.name, g.name),
+                        g.total_entries,
+                    ));
+                }
+            }
+            by_entries.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+            for (f, n) in by_entries.into_iter().take(5) {
+                println!("{n:>12}  {f}");
+            }
+            let gap = fs.used.saturating_sub(tree.root.total_bytes);
+            println!(
+                "\nDeleted but still open: {} in {} files",
+                human(held),
+                deleted.len()
+            );
+            for d in deleted.iter().take(5) {
+                println!(
+                    "{:>12}  pid {} {}  {}",
+                    human(d.size),
+                    d.pid,
+                    d.process,
+                    d.path
+                );
+            }
+            if gap >= (1u64 << 30) {
+                println!(
+                    "  note: {} more is used than all files add up to",
+                    human(gap as i64)
+                );
+            }
+            let w = writers.summary(5);
+            println!(
+                "\nWriting now: {}",
+                if w.is_empty() {
+                    "nothing significant".to_string()
+                } else {
+                    w
+                }
+            );
+        }
+        Some(Cmd::Where { mount, dir, top }) => {
+            let cur_path = snapshot::file_for(&dir, &mount);
+            let cur = snapshot::load_path(&cur_path)?.with_context(|| {
+                format!(
+                    "no snapshot for {mount} in {} yet; is `dux sentinel` running?",
+                    dir.display()
+                )
+            })?;
+            let age = util::now_secs() - cur.started_at;
+            println!(
+                "{mount}: {} in folders, as of {}",
+                human(cur.root.total_bytes as i64),
+                util::ago(age)
+            );
+            for (f, b) in walker::largest_at_depth(&cur.root, 2, top) {
+                println!("{:>12}  {f}", human(b as i64));
+            }
+            if let Some(prev) = snapshot::load_path(&cur_path.with_extension("prev.snap"))? {
+                let changes = walker::diff(&prev.root, &cur.root, 16 << 20);
+                println!(
+                    "\nChanged since {} (previous snapshot)",
+                    util::ago(util::now_secs() - prev.started_at)
+                );
+                if changes.is_empty() {
+                    println!("  nothing over 16 MiB");
+                }
+                for c in changes.iter().take(top) {
+                    let sign = if c.delta() >= 0 { "+" } else { "-" };
+                    println!(
+                        "{:>12}  {}",
+                        format!("{sign}{}", util::human_magnitude(c.delta())),
+                        c.path
+                    );
+                }
+            }
         }
         Some(Cmd::NotifyTest { config, severity }) => {
             init_alert_logging();
