@@ -53,6 +53,79 @@ pub struct DirNode {
     /// Children skipped because they are another filesystem or a mount point.
     pub skipped_mounts: u32,
     pub errors: u32,
+    /// Project marker files found directly in this directory (see `MARK_*`).
+    pub markers: u16,
+    /// Newest ctime of the entries directly in this directory.
+    pub own_change: i64,
+}
+
+pub const MARK_NODE: u16 = 1;
+pub const MARK_RUST: u16 = 1 << 1;
+pub const MARK_GO: u16 = 1 << 2;
+pub const MARK_PYTHON: u16 = 1 << 3;
+pub const MARK_PHP: u16 = 1 << 4;
+pub const MARK_RUBY: u16 = 1 << 5;
+pub const MARK_JAVA: u16 = 1 << 6;
+pub const MARK_COMPOSE: u16 = 1 << 7;
+pub const MARK_GIT: u16 = 1 << 8;
+pub const MARK_CMAKE: u16 = 1 << 9;
+pub const MARK_DOTNET: u16 = 1 << 10;
+
+/// Marker bit for a file name, if it identifies a project.
+pub fn marker_for(name: &[u8]) -> u16 {
+    match name {
+        b"package.json" => MARK_NODE,
+        b"Cargo.toml" => MARK_RUST,
+        b"go.mod" => MARK_GO,
+        b"pyproject.toml" | b"requirements.txt" | b"setup.py" | b"Pipfile" => MARK_PYTHON,
+        b"composer.json" => MARK_PHP,
+        b"Gemfile" => MARK_RUBY,
+        b"pom.xml" | b"build.gradle" | b"build.gradle.kts" => MARK_JAVA,
+        b"docker-compose.yml" | b"docker-compose.yaml" | b"compose.yml" | b"compose.yaml" => {
+            MARK_COMPOSE
+        }
+        b"CMakeLists.txt" => MARK_CMAKE,
+        n if n.ends_with(b".csproj") || n.ends_with(b".sln") => MARK_DOTNET,
+        _ => 0,
+    }
+}
+
+/// Metadata of one file, offered to a walk's file filter. Not every filter
+/// reads every field.
+#[allow(dead_code)]
+pub struct FileView<'a> {
+    pub dir: &'a [u8],
+    pub name: &'a [u8],
+    pub bytes: u64,
+    pub apparent: u64,
+    pub mtime: i64,
+    pub uid: u32,
+    pub mode: u32,
+    pub nlink: u64,
+}
+
+/// A file a walk's filter selected, with its full path.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FoundFile {
+    pub path: String,
+    pub bytes: u64,
+    pub apparent: u64,
+    pub mtime: i64,
+    pub uid: u32,
+    pub dev: u64,
+    pub ino: u64,
+}
+
+type FileFilter = dyn Fn(&FileView) -> bool + Send + Sync;
+
+/// Extra work a walk can do while it already has every file's metadata.
+#[derive(Default)]
+pub struct WalkOptions {
+    /// Collect files this returns true for (up to `max_found`).
+    pub filter: Option<Box<FileFilter>>,
+    pub max_found: usize,
+    /// Incremented once per entry, for progress display.
+    pub progress: Option<std::sync::Arc<AtomicU64>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -96,6 +169,8 @@ struct Ctx {
     files: AtomicU64,
     errors: AtomicU64,
     deduped: AtomicU64,
+    opts: WalkOptions,
+    found: Mutex<Vec<FoundFile>>,
 }
 
 const SHARDS: usize = 64;
@@ -214,6 +289,9 @@ fn walk_dir(ctx: &Ctx, fd: libc::c_int, path: &[u8], name: String, self_blocks: 
     let mut subdirs: Vec<(CString, u64)> = Vec::new();
     for (ename, d_type) in entries {
         ctx.entries.fetch_add(1, Ordering::Relaxed);
+        if let Some(p) = &ctx.opts.progress {
+            p.fetch_add(1, Ordering::Relaxed);
+        }
         let Some(st) = stat_at(fd, &ename) else {
             node.errors += 1;
             ctx.errors.fetch_add(1, Ordering::Relaxed);
@@ -224,6 +302,9 @@ fn walk_dir(ctx: &Ctx, fd: libc::c_int, path: &[u8], name: String, self_blocks: 
         let bytes = (st.st_blocks as u64).saturating_mul(512);
         node.newest_change = node.newest_change.max(st.st_ctime as i64);
         if is_dir {
+            if ename.to_bytes() == b".git" {
+                node.markers |= MARK_GIT;
+            }
             if st.st_dev as u64 != ctx.dev {
                 node.skipped_mounts += 1;
                 continue;
@@ -241,6 +322,7 @@ fn walk_dir(ctx: &Ctx, fd: libc::c_int, path: &[u8], name: String, self_blocks: 
             continue;
         }
         ctx.files.fetch_add(1, Ordering::Relaxed);
+        node.markers |= marker_for(ename.to_bytes());
         if st.st_nlink > 1 {
             let ino = st.st_ino as u64;
             let shard = &ctx.hardlinks[(ino as usize) % SHARDS];
@@ -255,6 +337,37 @@ fn walk_dir(ctx: &Ctx, fd: libc::c_int, path: &[u8], name: String, self_blocks: 
         node.own_files += 1;
         if bytes >= TOP_MIN_BYTES {
             push_top(&mut node.top_files, &ename, bytes);
+        }
+        if let Some(filter) = &ctx.opts.filter {
+            let view = FileView {
+                dir: path,
+                name: ename.to_bytes(),
+                bytes,
+                apparent: st.st_size.max(0) as u64,
+                mtime: st.st_mtime as i64,
+                uid: st.st_uid,
+                mode: st.st_mode,
+                nlink: st.st_nlink as u64,
+            };
+            if filter(&view) {
+                let mut found = ctx.found.lock().unwrap();
+                if found.len() < ctx.opts.max_found {
+                    let mut p = path.to_vec();
+                    if p != b"/" {
+                        p.push(b'/');
+                    }
+                    p.extend_from_slice(ename.to_bytes());
+                    found.push(FoundFile {
+                        path: String::from_utf8_lossy(&p).into_owned(),
+                        bytes,
+                        apparent: view.apparent,
+                        mtime: view.mtime,
+                        uid: st.st_uid,
+                        dev: st.st_dev as u64,
+                        ino: st.st_ino as u64,
+                    });
+                }
+            }
         }
     }
     use rayon::prelude::*;
@@ -308,6 +421,7 @@ impl DirNode {
 }
 
 fn finish(mut n: DirNode) -> DirNode {
+    n.own_change = n.newest_change;
     n.total_bytes = n.own_bytes + n.children.iter().map(|c| c.total_bytes).sum::<u64>();
     n.total_apparent += n.children.iter().map(|c| c.total_apparent).sum::<u64>();
     n.total_entries = 1 + n.own_files + n.children.iter().map(|c| c.total_entries).sum::<u64>();
@@ -320,8 +434,13 @@ fn finish(mut n: DirNode) -> DirNode {
 }
 
 /// Walk `root` (one filesystem only) with `threads` worker threads.
-#[allow(clippy::unnecessary_cast)]
 pub fn walk(root: &str, threads: usize) -> Result<Tree> {
+    walk_with(root, threads, WalkOptions::default()).map(|(t, _)| t)
+}
+
+/// Walk and also collect the files `opts.filter` selects.
+#[allow(clippy::unnecessary_cast)]
+pub fn walk_with(root: &str, threads: usize, opts: WalkOptions) -> Result<(Tree, Vec<FoundFile>)> {
     let started_at = crate::util::now_secs();
     let t = Instant::now();
     let croot = CString::new(root).context("path contains NUL")?;
@@ -336,6 +455,8 @@ pub fn walk(root: &str, threads: usize) -> Result<Tree> {
         files: AtomicU64::new(0),
         errors: AtomicU64::new(0),
         deduped: AtomicU64::new(0),
+        opts,
+        found: Mutex::new(Vec::new()),
     };
     let fd = open_dir_at(libc::AT_FDCWD, &croot);
     if fd < 0 {
@@ -365,12 +486,16 @@ pub fn walk(root: &str, threads: usize) -> Result<Tree> {
         hardlinks_deduped: ctx.deduped.load(Ordering::Relaxed),
         seconds: t.elapsed().as_secs_f64(),
     };
-    Ok(Tree {
-        root_path: root.to_string(),
-        root: root_node,
-        stats,
-        started_at,
-    })
+    let found = ctx.found.into_inner().unwrap_or_default();
+    Ok((
+        Tree {
+            root_path: root.to_string(),
+            root: root_node,
+            stats,
+            started_at,
+        },
+        found,
+    ))
 }
 
 /// One folder whose size changed between two walks.
@@ -620,6 +745,33 @@ mod tests {
         assert!(m[0].0.ends_with("var/lib/app/sessions"), "{m:?}");
         assert!(m[0].1 >= 200);
         assert!(m[1].0.ends_with("/usr"));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn walk_with_collects_filtered_files_and_marks_projects() {
+        let d = tmpdir("filter");
+        std::fs::create_dir_all(d.join("app/.git")).unwrap();
+        std::fs::create_dir_all(d.join("app/node_modules/x")).unwrap();
+        std::fs::write(d.join("app/package.json"), b"{}").unwrap();
+        std::fs::write(d.join("app/node_modules/x/package.json"), b"{}").unwrap();
+        write(&d.join("app/server.log"), 200_000);
+        write(&d.join("app/small.log"), 10);
+        let opts = WalkOptions {
+            filter: Some(Box::new(|f: &FileView| {
+                f.name.ends_with(b".log") && f.apparent >= 4096
+            })),
+            max_found: 10,
+            progress: Some(std::sync::Arc::new(AtomicU64::new(0))),
+        };
+        let (t, found) = walk_with(d.to_str().unwrap(), 2, opts).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].path.ends_with("/app/server.log"));
+        let app = t.root.find("app").unwrap();
+        assert_eq!(app.markers & (MARK_NODE | MARK_GIT), MARK_NODE | MARK_GIT);
+        assert_eq!(t.root.markers, 0);
+        assert_eq!(marker_for(b"Cargo.toml"), MARK_RUST);
+        assert_eq!(marker_for(b"App.csproj"), MARK_DOTNET);
         std::fs::remove_dir_all(&d).unwrap();
     }
 

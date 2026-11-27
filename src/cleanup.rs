@@ -69,6 +69,8 @@ pub enum Action {
     Remove { path: PathBuf },
     /// Copy the last `keep` bytes to `<path>.dux-tail`, then truncate in place.
     TailAndTruncate { path: PathBuf, keep: u64 },
+    /// Remove a build-output folder (`node_modules`, `target`...) and everything in it.
+    RemoveTree { path: PathBuf },
 }
 
 #[derive(Clone, Debug)]
@@ -86,7 +88,17 @@ const PROTECTED: &[&str] = &[
     "auth.log", "secure", "wtmp", "btmp", "lastlog", "faillog", "audit",
 ];
 
-fn is_protected(rel_to_log: &Path) -> bool {
+/// Binary logs that are never truncated or deleted by path: journald's
+/// database (shrink it with `journalctl --vacuum-*` only) and sysstat data.
+pub fn is_binary_log(path: &Path) -> bool {
+    let p = path.to_string_lossy();
+    p.contains("/journal/")
+        || p.ends_with(".journal")
+        || p.ends_with(".journal~")
+        || p.contains("/sysstat/")
+}
+
+pub fn is_protected(rel_to_log: &Path) -> bool {
     rel_to_log.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
         PROTECTED
@@ -240,7 +252,7 @@ pub fn glob_match(pat: &str, s: &str) -> bool {
     rec(pat.as_bytes(), s.as_bytes())
 }
 
-fn journal_usage() -> Option<u64> {
+pub fn journal_usage() -> Option<u64> {
     let out = Command::new("journalctl")
         .arg("--disk-usage")
         .output()
@@ -294,7 +306,7 @@ pub fn plan(o: &Options) -> Vec<Item> {
     let mut groups: HashMap<(PathBuf, String), Vec<(PathBuf, std::fs::Metadata)>> = HashMap::new();
     for (p, m) in files_under(&log_dir, 6) {
         let rel = p.strip_prefix(&log_dir).unwrap_or(&p).to_path_buf();
-        if is_protected(&rel) || open.contains(&(m.dev(), m.ino())) {
+        if is_protected(&rel) || is_binary_log(&p) || open.contains(&(m.dev(), m.ino())) {
             continue;
         }
         let name = p
@@ -332,6 +344,7 @@ pub fn plan(o: &Options) -> Vec<Item> {
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
                 rotated_base(&name).is_none()
                     && !is_protected(p.strip_prefix(&log_dir).unwrap_or(p))
+                    && !is_binary_log(p)
             })
             .map(|(p, m)| (p, m, false))
             .collect();
@@ -511,7 +524,15 @@ pub fn apply(item: &Item) -> Result<()> {
             );
             std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))
         }
-        Action::TailAndTruncate { path, keep } => tail_and_truncate(path, *keep),
+        Action::TailAndTruncate { path, keep } => {
+            anyhow::ensure!(
+                !is_binary_log(path),
+                "{} is a binary log; use journalctl --vacuum-* instead",
+                path.display()
+            );
+            tail_and_truncate(path, *keep)
+        }
+        Action::RemoveTree { path } => remove_tree(path),
     };
     audit(serde_json::json!({
         "t": crate::util::now_secs(),
@@ -523,6 +544,37 @@ pub fn apply(item: &Item) -> Result<()> {
         "error": result.as_ref().err().map(|e| format!("{e:#}")),
     }));
     result
+}
+
+/// Remove a build-output folder. Refuses anything that is not a real folder
+/// with a known build-output name, or that has a filesystem mounted inside it
+/// (removing it would delete files on the other filesystem).
+pub fn remove_tree(path: &Path) -> Result<()> {
+    let m = std::fs::symlink_metadata(path)?;
+    anyhow::ensure!(
+        m.is_dir() && !m.file_type().is_symlink(),
+        "{} is not a real folder",
+        path.display()
+    );
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    anyhow::ensure!(
+        crate::insight::ARTIFACTS.contains(&name.as_ref()),
+        "{} is not a known build-output folder",
+        path.display()
+    );
+    let p = path.to_string_lossy().into_owned();
+    let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
+    let inside = mounts
+        .lines()
+        .filter_map(|l| l.split(' ').nth(4))
+        .map(crate::sentinel::unescape_mount)
+        .any(|mp| mp == p || mp.starts_with(&format!("{p}/")));
+    anyhow::ensure!(
+        !inside,
+        "{} has a filesystem mounted inside it",
+        path.display()
+    );
+    std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))
 }
 
 /// Keep the last `keep` bytes in `<path>.dux-tail` and truncate the log in
@@ -573,6 +625,27 @@ mod tests {
     }
 
     #[test]
+    fn remove_tree_only_takes_build_output_folders() {
+        let r = tmp("rmtree");
+        std::fs::create_dir_all(r.join("proj/node_modules/a/b")).unwrap();
+        std::fs::write(r.join("proj/node_modules/a/b/f.js"), b"x").unwrap();
+        std::fs::create_dir_all(r.join("proj/src")).unwrap();
+        std::os::unix::fs::symlink(r.join("proj/src"), r.join("proj/dist")).unwrap();
+        assert!(
+            remove_tree(&r.join("proj/src")).is_err(),
+            "not a build-output name"
+        );
+        assert!(
+            remove_tree(&r.join("proj/dist")).is_err(),
+            "symlinks are refused"
+        );
+        remove_tree(&r.join("proj/node_modules")).unwrap();
+        assert!(!r.join("proj/node_modules").exists());
+        assert!(r.join("proj/src").exists());
+        std::fs::remove_dir_all(&r).unwrap();
+    }
+
+    #[test]
     fn rotated_names() {
         assert_eq!(rotated_base("syslog.1").as_deref(), Some("syslog"));
         assert_eq!(rotated_base("syslog.2.gz").as_deref(), Some("syslog"));
@@ -594,6 +667,47 @@ mod tests {
         assert!(is_protected(Path::new("btmp.1")));
         assert!(!is_protected(Path::new("syslog.1")));
         assert!(!is_protected(Path::new("nginx/access.log.2.gz")));
+    }
+
+    #[test]
+    fn binary_logs_are_never_truncated() {
+        let r = tmp("binary");
+        std::fs::create_dir_all(r.join("var/log/journal/abc")).unwrap();
+        std::fs::write(
+            r.join("var/log/journal/abc/system.journal"),
+            vec![0u8; 3 << 20],
+        )
+        .unwrap();
+        std::fs::write(
+            r.join("var/log/journal/abc/system@x.journal~"),
+            vec![0u8; 3 << 20],
+        )
+        .unwrap();
+        let o = Options {
+            level: 2,
+            root: r.clone(),
+            big_log: 1 << 20,
+            used_pct: 95.0,
+            ..Options::default()
+        };
+        assert!(plan(&o).is_empty(), "journal files are never planned");
+        let item = Item {
+            level: 2,
+            what: "x".into(),
+            action: Action::TailAndTruncate {
+                path: r.join("var/log/journal/abc/system.journal"),
+                keep: 1,
+            },
+            frees: 1,
+        };
+        assert!(apply(&item).is_err(), "apply refuses too");
+        assert_eq!(
+            std::fs::metadata(r.join("var/log/journal/abc/system.journal"))
+                .unwrap()
+                .len(),
+            3 << 20
+        );
+        std::fs::remove_dir_all(&r).unwrap();
     }
 
     #[test]
@@ -690,6 +804,7 @@ mod tests {
                     format!("tail:{}", path.file_name().unwrap().to_string_lossy())
                 }
                 Action::Remove { path } => format!("rm:{}", path.display()),
+                Action::RemoveTree { path } => format!("rmtree:{}", path.display()),
             })
             .collect();
         kinds.sort();

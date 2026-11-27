@@ -3,9 +3,12 @@ mod classify;
 mod cleanup;
 mod containers;
 mod deleted;
+mod docker;
 mod emit;
 mod fault;
+mod fix;
 mod guard;
+mod insight;
 mod notify;
 mod probes;
 mod query;
@@ -185,7 +188,6 @@ enum Cmd {
         top: usize,
     },
     /// Disk usage by container (Docker/Podman): writable layer, logs, volumes
-    #[command(alias = "docker")]
     Containers {
         #[arg(long, default_value_t = 20)]
         limit: usize,
@@ -304,6 +306,8 @@ enum Cmd {
         /// Worker threads for the walk
         #[arg(long, default_value_t = 4)]
         threads: usize,
+        #[command(flatten)]
+        fixes: fix::FixArgs,
     },
     /// Where the space is, from the latest sentinel folder snapshot, and
     /// what grew since the snapshot before it. Instant; walks nothing.
@@ -335,6 +339,81 @@ enum Cmd {
         /// An active log counts as big from this size (level 2)
         #[arg(long, default_value = "50M")]
         big_log: String,
+    },
+    /// Where Docker's disk space goes: images (unique vs shared), container
+    /// writable layers and logs, volumes, build cache, real folder sizes on
+    /// disk and a per compose project roll-up, plus a previewed cleanup plan.
+    Docker {
+        #[command(flatten)]
+        fixes: fix::FixArgs,
+        /// Container logs at least this big are trimmed to their last 10 MiB
+        #[arg(long, default_value = "100M")]
+        big_log: String,
+        /// Rows per section
+        #[arg(long, default_value_t = 10)]
+        top: usize,
+    },
+    /// Biggest files and folders on a filesystem, from one fast walk, plus
+    /// what grew since the last sentinel snapshot.
+    Biggest {
+        #[arg(default_value = "/")]
+        path: PathBuf,
+        #[arg(long, default_value_t = 25)]
+        top: usize,
+        /// Only list files at least this big
+        #[arg(long, default_value = "50M")]
+        min: String,
+        #[arg(long, default_value_t = 4)]
+        threads: usize,
+        #[command(flatten)]
+        fixes: fix::FixArgs,
+    },
+    /// Every log on a filesystem: journal, system, Docker and application logs,
+    /// active vs rotated, live growth per minute and the process writing each.
+    Logs {
+        #[arg(default_value = "/")]
+        path: PathBuf,
+        #[arg(long, default_value_t = 25)]
+        top: usize,
+        /// Only list logs at least this big
+        #[arg(long, default_value = "1M")]
+        min: String,
+        /// Seconds to sample log growth (0 = skip)
+        #[arg(long, default_value_t = 3)]
+        sample: u64,
+        #[arg(long, default_value_t = 4)]
+        threads: usize,
+        #[command(flatten)]
+        fixes: fix::FixArgs,
+    },
+    /// Per project and per app breakdown: source, build output and git
+    /// history for every project found, app data folders, Docker compose
+    /// projects, and a previewed cleanup of build output in idle projects.
+    Pp {
+        #[arg(default_value = "/")]
+        path: PathBuf,
+        #[arg(long, default_value_t = 25)]
+        top: usize,
+        /// Projects idle this many days are offered for build-output cleanup
+        #[arg(long, default_value_t = 30)]
+        stale_days: u64,
+        #[arg(long, default_value_t = 4)]
+        threads: usize,
+        #[command(flatten)]
+        fixes: fix::FixArgs,
+    },
+    /// Guided cleanup: every suggestion rated SAFE, CAUTION or RISKY, with what
+    /// it is, how much it frees and how to undo it. Asks before each step on a
+    /// terminal; RISKY items are never done by dux, only explained.
+    Fix {
+        #[command(flatten)]
+        fixes: fix::FixArgs,
+        /// Projects idle this many days are offered for build-output cleanup
+        #[arg(long, default_value_t = 30)]
+        stale_days: u64,
+        /// Skip the project and big-old-file walk (faster)
+        #[arg(long)]
+        quick: bool,
     },
     /// Send a test alert to every configured channel
     NotifyTest {
@@ -432,6 +511,11 @@ fn real_main() -> Result<()> {
                 | Cmd::Doctor { .. }
                 | Cmd::Where { .. }
                 | Cmd::Cleanup { .. }
+                | Cmd::Docker { .. }
+                | Cmd::Biggest { .. }
+                | Cmd::Logs { .. }
+                | Cmd::Pp { .. }
+                | Cmd::Fix { .. }
         )
     );
     let db = match &cli.db {
@@ -740,7 +824,11 @@ fn real_main() -> Result<()> {
                 }
             }
         }
-        Some(Cmd::Doctor { path, threads }) => {
+        Some(Cmd::Doctor {
+            path,
+            threads,
+            fixes,
+        }) => {
             let p = path.to_string_lossy().into_owned();
             let fs = sentinel::statvfs(&p)?;
             let mut writers = attrib::Writers::default();
@@ -817,6 +905,29 @@ fn real_main() -> Result<()> {
                     w
                 }
             );
+            let opts = cleanup::Options {
+                level: 3,
+                used_pct: fs.used_pct(),
+                ..cleanup::Options::default()
+            };
+            let mut s: Vec<fix::Suggestion> =
+                cleanup::plan(&opts).into_iter().map(fix::assess).collect();
+            if let Ok(r) = docker::collect() {
+                s.extend(
+                    docker::plan(&r, false, false, 100 << 20)
+                        .into_iter()
+                        .map(fix::assess),
+                );
+            }
+            for d in deleted.iter().filter(|d| d.size >= 100 << 20) {
+                s.push(fix::risky(
+                    format!("{} held by deleted file {} (pid {} {})", human(d.size), d.path, d.pid, d.process),
+                    "Already deleted but still open; the space returns when that process closes it.",
+                    format!("restart the service of pid {} at a quiet time", d.pid),
+                    d.size as u64,
+                ));
+            }
+            fix::offer("this disk", s, &fixes)?;
         }
         Some(Cmd::Where { mount, dir, top }) => {
             let cur_path = snapshot::file_for(&dir, &mount);
@@ -896,6 +1007,9 @@ fn real_main() -> Result<()> {
                             path.display()
                         )
                     }
+                    cleanup::Action::RemoveTree { path } => {
+                        format!("remove folder {}", path.display())
+                    }
                 };
                 println!(
                     "  L{} {:>10}  {}  [{how}]",
@@ -923,6 +1037,472 @@ fn real_main() -> Result<()> {
                     human(before.used.saturating_sub(after.used) as i64),
                     after.used_pct(),
                     cleanup::AUDIT_LOG
+                );
+            }
+        }
+        Some(Cmd::Docker {
+            fixes,
+            big_log,
+            top,
+        }) => {
+            let r = docker::collect()?;
+            if json {
+                let imgs: Vec<_> = r.images.iter().map(|i| serde_json::json!({"name": i.name, "id": i.id, "size": i.size, "unique": i.unique, "shared": i.shared, "containers": i.containers, "created": i.created})).collect();
+                let cons: Vec<_> = r.containers.iter().map(|c| serde_json::json!({"name": c.name, "image": c.image, "state": c.state, "status": c.status, "writable": c.writable, "log_bytes": c.log_bytes, "project": c.project})).collect();
+                let vols: Vec<_> = r.volumes.iter().map(|v| serde_json::json!({"name": v.name, "size": v.size, "links": v.links, "project": v.project})).collect();
+                let disk: Vec<_> = r
+                    .on_disk
+                    .iter()
+                    .map(|(p, b)| serde_json::json!({"path": p, "bytes": b}))
+                    .collect();
+                let proj: Vec<_> = r.by_project().into_iter().map(|(k, v)| serde_json::json!({"project": k, "images": v[0], "writable": v[1], "logs": v[2], "volumes": v[3]})).collect();
+                println!(
+                    "{}",
+                    serde_json::json!({"root": r.root_dir, "images": imgs, "containers": cons, "volumes": vols, "build_cache": r.build_cache, "build_cache_reclaimable": r.build_cache_reclaimable, "on_disk": disk, "projects": proj})
+                );
+                return Ok(());
+            }
+            let h = |b: u64| human(b as i64);
+            let unused_img: u64 = r.unused_images().map(|i| i.unique).sum();
+            let unused_vol: u64 = r.unused_volumes().map(|v| v.size).sum();
+            println!("Docker at {}", r.root_dir);
+            println!(
+                "  images      {:>10}  {} images, {} unused ({} reclaimable)",
+                h(r.images_total()),
+                r.images.len(),
+                r.unused_images().count(),
+                h(unused_img)
+            );
+            println!(
+                "  containers  {:>10}  writable layers of {} containers ({} running)",
+                h(r.writable_total()),
+                r.containers.len(),
+                r.containers.iter().filter(|c| c.state == "running").count()
+            );
+            println!("  logs        {:>10}  container logs", h(r.logs_total()));
+            println!(
+                "  volumes     {:>10}  {} volumes, {} unused ({})",
+                h(r.volumes_total()),
+                r.volumes.len(),
+                r.unused_volumes().count(),
+                h(unused_vol)
+            );
+            println!(
+                "  build cache {:>10}  ({} reclaimable)",
+                h(r.build_cache),
+                h(r.build_cache_reclaimable)
+            );
+            println!("\nOn disk");
+            for (p, b) in r.on_disk.iter().take(top) {
+                println!("  {:>10}  {p}", h(*b));
+            }
+            println!("\nImages (by unique size)");
+            for i in r.images.iter().take(top) {
+                println!(
+                    "  {:>10}  {:<48} {}  {}",
+                    h(i.unique),
+                    i.name,
+                    if i.containers == 0 {
+                        "UNUSED".to_string()
+                    } else {
+                        format!("{} container(s)", i.containers)
+                    },
+                    i.created
+                );
+            }
+            println!("\nContainers (writable layer + log)");
+            for c in r.containers.iter().take(top) {
+                println!(
+                    "  {:>10} + {:>10} log  {:<32} {:<8} {}",
+                    h(c.writable),
+                    h(c.log_bytes),
+                    c.name,
+                    c.state,
+                    c.project.as_deref().unwrap_or("")
+                );
+            }
+            println!("\nVolumes");
+            for v in r.volumes.iter().take(top) {
+                println!(
+                    "  {:>10}  {:<40} {}",
+                    h(v.size),
+                    v.name,
+                    if v.links == 0 {
+                        "UNUSED (remove by hand: docker volume rm NAME)".to_string()
+                    } else {
+                        format!(
+                            "{} container(s) {}",
+                            v.links,
+                            v.project.as_deref().unwrap_or("")
+                        )
+                    }
+                );
+            }
+            println!("\nBy compose project            images   writable       logs    volumes");
+            for (k, v) in r.by_project() {
+                println!(
+                    "  {:<26} {:>9} {:>10} {:>10} {:>10}",
+                    k,
+                    h(v[0]),
+                    h(v[1]),
+                    h(v[2]),
+                    h(v[3])
+                );
+            }
+            let mut s: Vec<fix::Suggestion> =
+                docker::plan(&r, true, true, sentinel::parse_bytes(&big_log)?)
+                    .into_iter()
+                    .map(fix::assess)
+                    .collect();
+            s.extend(
+                r.unused_volumes()
+                    .filter(|v| v.size >= 1 << 20)
+                    .map(|v| fix::delete_volume(&v.name, v.size)),
+            );
+            fix::offer("Docker", s, &fixes)?;
+        }
+        Some(Cmd::Biggest {
+            path,
+            top,
+            min,
+            threads,
+            fixes,
+        }) => {
+            let p = path.to_string_lossy().into_owned();
+            let b = insight::biggest(&p, threads, top, sentinel::parse_bytes(&min)?)?;
+            let users = insight::users();
+            let now = util::now_secs();
+            if json {
+                let files: Vec<_> = b.files.iter().map(|f| serde_json::json!({"path": f.path, "bytes": f.bytes, "apparent": f.apparent, "mtime": f.mtime, "owner": users.get(&f.uid)})).collect();
+                let dirs: Vec<_> = walker::largest_at_depth(&b.tree.root, 2, top)
+                    .into_iter()
+                    .map(|(p, b)| serde_json::json!({"path": p, "bytes": b}))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::json!({"files": files, "folders": dirs, "entries": b.tree.stats.entries, "seconds": b.tree.stats.seconds})
+                );
+                return Ok(());
+            }
+            println!(
+                "{p}: {} in {} entries, walked in {:.1}s",
+                human(b.tree.root.total_bytes as i64),
+                b.tree.stats.entries,
+                b.tree.stats.seconds
+            );
+            println!("\nBiggest files                     owner        age");
+            for f in &b.files {
+                println!(
+                    "  {:>10}  {:<12} {:>5}  {}",
+                    human(f.bytes as i64),
+                    users
+                        .get(&f.uid)
+                        .cloned()
+                        .unwrap_or_else(|| f.uid.to_string()),
+                    insight::age_text(f.mtime, now),
+                    f.path
+                );
+            }
+            println!("\nBiggest folders");
+            for (f, s) in walker::largest_at_depth(&b.tree.root, 2, top.min(15)) {
+                println!("  {:>10}  {f}", human(s as i64));
+            }
+            if let Ok(Some(prev)) = snapshot::load(std::path::Path::new(snapshot::DEFAULT_DIR), &p)
+            {
+                let ch = walker::diff(&prev.root, &b.tree.root, 64 << 20);
+                if !ch.is_empty() {
+                    println!(
+                        "\nGrew since the sentinel snapshot ({} ago)",
+                        util::ago(prev.started_at)
+                    );
+                    for c in ch.iter().filter(|c| c.delta() > 0).take(10) {
+                        println!("  +{:>9}  {}", human(c.delta()), c.path);
+                    }
+                }
+            }
+            let s: Vec<fix::Suggestion> = b
+                .files
+                .iter()
+                .map(|f| fix::delete_file(&f.path, "One of the biggest files on this disk; dux cannot know whether you still need it.", f.bytes))
+                .collect();
+            fix::offer("the biggest files", s, &fixes)?;
+        }
+        Some(Cmd::Logs {
+            path,
+            top,
+            min,
+            sample,
+            threads,
+            fixes,
+        }) => {
+            let p = path.to_string_lossy().into_owned();
+            let r = insight::logs(&p, threads, sentinel::parse_bytes(&min)?, sample)?;
+            let now = util::now_secs();
+            if json {
+                let logs: Vec<_> = r.logs.iter().map(|l| serde_json::json!({"path": l.path, "bytes": l.bytes, "kind": l.kind.label(), "rotated": l.rotated, "protected": l.protected, "bytes_per_min": l.per_min, "writer": l.writer, "container": l.container, "mtime": l.mtime})).collect();
+                println!(
+                    "{}",
+                    serde_json::json!({"journal_bytes": r.journal_bytes, "logs": logs})
+                );
+                return Ok(());
+            }
+            let h = |b: u64| human(b as i64);
+            use insight::LogKind;
+            println!("Logs on {p} (walked in {:.1}s)", r.walk_seconds);
+            if let Some(j) = r.journal_bytes {
+                println!("  journal     {:>10}  (journalctl --disk-usage)", h(j));
+            }
+            println!(
+                "  system      {:>10}  /var/log",
+                h(r.total(Some(LogKind::System)))
+            );
+            println!(
+                "  docker      {:>10}  container logs",
+                h(r.total(Some(LogKind::Docker)))
+            );
+            println!(
+                "  apps        {:>10}  application logs elsewhere",
+                h(r.total(Some(LogKind::App)))
+            );
+            println!(
+                "  rotated     {:>10}  old rotated copies (safe to remove: dux cleanup --level 2)",
+                h(r.rotated_total())
+            );
+            println!("\n      size   growth/min  age  kind    path");
+            for l in r.logs.iter().take(top) {
+                let g = l
+                    .per_min
+                    .map(|g| {
+                        if g > 0.0 {
+                            format!("+{}", h(g as u64))
+                        } else {
+                            "-".into()
+                        }
+                    })
+                    .unwrap_or_default();
+                let mut note = String::new();
+                if l.rotated {
+                    note.push_str(" [rotated]");
+                }
+                if l.protected {
+                    note.push_str(" [protected]");
+                }
+                if let Some(c) = &l.container {
+                    note.push_str(&format!(" [{c}]"));
+                }
+                if let Some(w) = &l.writer {
+                    note.push_str(&format!(" [written by {w}]"));
+                }
+                println!(
+                    "  {:>9}  {:>10}  {:>4}  {:<6}  {}{note}",
+                    h(l.bytes),
+                    g,
+                    insight::age_text(l.mtime, now),
+                    l.kind.label(),
+                    l.path
+                );
+            }
+            let mut s: Vec<fix::Suggestion> = Vec::new();
+            if let Some(j) = r.journal_bytes.filter(|j| *j > 1 << 30) {
+                s.push(fix::assess(cleanup::Item {
+                    level: 1,
+                    what: format!(
+                        "shrink the systemd journal from {} to 1 GiB",
+                        human(j as i64)
+                    ),
+                    action: cleanup::Action::Run {
+                        program: "journalctl".into(),
+                        args: vec!["--vacuum-size=1G".into()],
+                    },
+                    frees: j - (1 << 30),
+                }));
+            }
+            for l in r
+                .logs
+                .iter()
+                .filter(|l| !l.protected && !cleanup::is_binary_log(std::path::Path::new(&l.path)))
+            {
+                if l.rotated && l.writer.is_none() {
+                    let item = cleanup::Item {
+                        level: 2,
+                        what: format!("remove rotated log {}", l.path),
+                        action: cleanup::Action::Remove {
+                            path: l.path.clone().into(),
+                        },
+                        frees: l.bytes,
+                    };
+                    s.push(fix::suggestion(
+                        fix::Safety::Safe,
+                        item.what.clone(),
+                        "An old rotated copy; the active log is untouched.",
+                        "Not needed unless investigating that period.",
+                        l.bytes,
+                        Some(item),
+                        None,
+                    ));
+                } else if !l.rotated && l.bytes >= 50 << 20 {
+                    s.push(fix::assess(cleanup::Item {
+                        level: 2,
+                        what: format!("truncate {} (keep its last 10 MiB)", l.path),
+                        action: cleanup::Action::TailAndTruncate {
+                            path: l.path.clone().into(),
+                            keep: 10 << 20,
+                        },
+                        frees: l.bytes.saturating_sub(10 << 20),
+                    }));
+                }
+            }
+            fix::offer("logs", s, &fixes)?;
+        }
+        Some(Cmd::Pp {
+            path,
+            top,
+            stale_days,
+            threads,
+            fixes,
+        }) => {
+            let p = path.to_string_lossy().into_owned();
+            let (tree, _) = walker::walk_with(&p, threads, walker::WalkOptions::default())?;
+            let projects = insight::projects(&tree);
+            let apps = insight::apps(&tree);
+            let now = util::now_secs();
+            let h = |b: u64| human(b as i64);
+            if json {
+                let ps: Vec<_> = projects.iter().map(|x| serde_json::json!({"path": x.path, "kinds": x.kinds, "total": x.total, "source": x.source(), "build_output": x.artifacts, "git": x.git, "last_activity": x.last_activity, "build_output_dirs": x.artifact_dirs})).collect();
+                let ap: Vec<_> = apps.iter().map(|(n, p, b, t)| serde_json::json!({"app": n, "path": p, "bytes": b, "newest_change": t})).collect();
+                println!("{}", serde_json::json!({"projects": ps, "apps": ap}));
+                return Ok(());
+            }
+            println!(
+                "{p}: {} projects found, walked {} entries in {:.1}s",
+                projects.len(),
+                tree.stats.entries,
+                tree.stats.seconds
+            );
+            println!("\nProjects            total     source  build-out        git   idle  kind          path");
+            for x in projects.iter().take(top) {
+                println!(
+                    "  {:>16} {:>10} {:>10} {:>10} {:>5}d  {:<13} {}",
+                    h(x.total),
+                    h(x.source()),
+                    h(x.artifacts),
+                    h(x.git),
+                    ((now - x.last_activity).max(0) / 86_400),
+                    x.kinds.join(","),
+                    x.path
+                );
+            }
+            let reclaim: u64 = projects.iter().map(|x| x.artifacts).sum();
+            println!(
+                "  build output in all projects: {} (rebuildable)",
+                h(reclaim)
+            );
+            println!("\nApps and data                  size  changed  path");
+            for (n, ap, b, t) in apps.iter().take(top) {
+                println!(
+                    "  {:<24} {:>10} {:>7}  {ap}",
+                    n,
+                    h(*b),
+                    insight::age_text(*t, now)
+                );
+            }
+            if let Ok(r) = docker::collect() {
+                println!("\nDocker compose projects       images   writable       logs    volumes");
+                for (k, v) in r.by_project() {
+                    println!(
+                        "  {:<26} {:>9} {:>10} {:>10} {:>10}",
+                        k,
+                        h(v[0]),
+                        h(v[1]),
+                        h(v[2]),
+                        h(v[3])
+                    );
+                }
+            }
+            let mut s: Vec<fix::Suggestion> = insight::pp_plan(&projects, 0, now)
+                .into_iter()
+                .map(fix::assess)
+                .collect();
+            for x in &mut s {
+                if !insight::idle_at_least(&x.title, stale_days) {
+                    x.title.push_str(" [active project: rebuild needed]");
+                }
+            }
+            fix::offer("projects", s, &fixes)?;
+        }
+        Some(Cmd::Fix {
+            fixes,
+            stale_days,
+            quick,
+        }) => {
+            let before = sentinel::statvfs("/")?;
+            let mut s: Vec<fix::Suggestion> = Vec::new();
+            let opts = cleanup::Options {
+                level: 3,
+                used_pct: before.used_pct(),
+                ..cleanup::Options::default()
+            };
+            s.extend(cleanup::plan(&opts).into_iter().map(fix::assess));
+            if let Ok(r) = docker::collect() {
+                s.extend(
+                    docker::plan(&r, true, true, 100 << 20)
+                        .into_iter()
+                        .map(fix::assess),
+                );
+                for v in r.unused_volumes().filter(|v| v.size >= 1 << 20) {
+                    s.push(fix::delete_volume(&v.name, v.size));
+                }
+            }
+            let mut held: std::collections::BTreeMap<(i32, String), i64> = Default::default();
+            for d in deleted::deleted_open().unwrap_or_default() {
+                *held.entry((d.pid, d.process.clone())).or_default() += d.size;
+            }
+            for ((pid, proc_name), size) in held {
+                if size >= 100 << 20 {
+                    s.push(fix::risky(
+                        format!("deleted files still held open by pid {pid} ({proc_name})"),
+                        "The files are already deleted; the space comes back only when this process closes them, so restarting it interrupts that service.",
+                        format!("systemctl status {pid}  # find its service, then restart it at a quiet time"),
+                        size as u64,
+                    ));
+                }
+            }
+            if !quick {
+                eprintln!("dux fix: walking / for idle projects and big old files...");
+                let now = util::now_secs();
+                let opts = walker::WalkOptions {
+                    filter: Some(Box::new(move |f: &walker::FileView| {
+                        let d = String::from_utf8_lossy(f.dir);
+                        f.bytes >= 1 << 30
+                            && now - f.mtime >= 180 * 86_400
+                            && (d.starts_with("/home")
+                                || d.starts_with("/root")
+                                || d.starts_with("/srv")
+                                || d.starts_with("/opt")
+                                || d.contains("backup"))
+                    })),
+                    max_found: 200,
+                    progress: None,
+                };
+                let (tree, old_big) = walker::walk_with("/", 4, opts)?;
+                let projects = insight::projects(&tree);
+                s.extend(
+                    insight::pp_plan(&projects, stale_days, now)
+                        .into_iter()
+                        .map(fix::assess),
+                );
+                for f in old_big {
+                    s.push(fix::delete_file(&f.path, &format!("Untouched for {} days; it may be an old backup or download, or something important.", (now - f.mtime) / 86_400), f.bytes));
+                }
+            }
+            let freed = fix::offer("everything", s, &fixes)?;
+            if freed > 0 {
+                let after = sentinel::statvfs("/")?;
+                println!(
+                    "/ was {:.1}% full, now {:.1}% ({} actually freed)",
+                    before.used_pct(),
+                    after.used_pct(),
+                    human(before.used.saturating_sub(after.used) as i64)
                 );
             }
         }
@@ -2270,6 +2850,39 @@ mod tests {
         assert_eq!(util::parse_duration("1h").unwrap(), 3600);
         assert_eq!(util::parse_duration("7d").unwrap(), 604800);
         assert!(util::parse_duration("12x").is_err());
+    }
+
+    #[test]
+    fn fix_commands_parse_with_shared_fix_options() {
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "docker"]).unwrap().cmd,
+            Some(Cmd::Docker { .. })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "containers"]).unwrap().cmd,
+            Some(Cmd::Containers { .. })
+        ));
+        match Cli::try_parse_from(["dux", "pp", "/srv", "--select", "1,3-4"])
+            .unwrap()
+            .cmd
+        {
+            Some(Cmd::Pp { fixes, .. }) => assert_eq!(fixes.select.as_deref(), Some("1,3-4")),
+            _ => panic!("pp"),
+        }
+        match Cli::try_parse_from(["dux", "logs", "--apply-safe"])
+            .unwrap()
+            .cmd
+        {
+            Some(Cmd::Logs { fixes, .. }) => assert!(fixes.apply_safe && !fixes.apply_all),
+            _ => panic!("logs"),
+        }
+        assert!(matches!(
+            Cli::try_parse_from(["dux", "fix", "--apply-all", "--quick"])
+                .unwrap()
+                .cmd,
+            Some(Cmd::Fix { quick: true, .. })
+        ));
+        assert!(Cli::try_parse_from(["dux", "biggest", "--no-fix"]).is_ok());
     }
 
     #[test]
