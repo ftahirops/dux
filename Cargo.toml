@@ -1,6 +1,6 @@
 [package]
 name = "dux"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
 description = "Disk-full alerts with folder attribution, fast disk walks and safe cleanup for Linux servers."
 license = "MIT"

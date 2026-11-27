@@ -31,12 +31,39 @@ pub fn parse_si(s: &str) -> u64 {
     (n * mult) as u64
 }
 
+/// Docker prints labels as `k=v,k=v`, but a value can itself contain
+/// commas (compose `config_files` lists several files): a segment without
+/// `=` belongs to the previous value.
+fn labels_map(labels: &str) -> BTreeMap<String, String> {
+    let mut m: BTreeMap<String, String> = BTreeMap::new();
+    let mut last: Option<String> = None;
+    for seg in labels.split(',') {
+        match seg.split_once('=') {
+            Some((k, v)) if !k.is_empty() && !k.contains('/') => {
+                m.insert(k.to_string(), v.to_string());
+                last = Some(k.to_string());
+            }
+            _ => {
+                if let Some(v) = last.as_ref().and_then(|k| m.get_mut(k)) {
+                    v.push(',');
+                    v.push_str(seg);
+                }
+            }
+        }
+    }
+    m
+}
+
 fn label(labels: &str, key: &str) -> Option<String> {
-    labels
-        .split(',')
-        .find_map(|kv| kv.strip_prefix(&format!("{key}=")))
+    labels_map(labels).remove(key).filter(|v| !v.is_empty())
+}
+
+fn list(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|x| !x.is_empty())
         .map(str::to_string)
-        .filter(|v| !v.is_empty())
+        .collect()
 }
 
 #[derive(Clone, Debug, Default)]
@@ -61,6 +88,25 @@ pub struct Container {
     pub log_bytes: u64,
     pub log_path: String,
     pub project: Option<String>,
+    /// Compose service name.
+    pub service: Option<String>,
+    /// Compose project folder and compose files (where the stack comes from).
+    pub working_dir: Option<String>,
+    pub config_files: Vec<String>,
+    pub command: String,
+    pub created: String,
+    pub running_for: String,
+    pub ports: String,
+    pub networks: Vec<String>,
+    /// Volume names or bind-mount sources (Docker may shorten long names with "…").
+    pub mounts: Vec<String>,
+    pub health: String,
+}
+
+impl Container {
+    pub fn running(&self) -> bool {
+        self.state == "running"
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -69,7 +115,37 @@ pub struct Volume {
     pub size: u64,
     pub links: u32,
     pub project: Option<String>,
+    pub driver: String,
+    pub mountpoint: String,
+    /// Compose volume name inside its project.
+    pub compose_name: Option<String>,
 }
+
+/// A compose project (or the standalone containers), with everything it owns.
+#[derive(Clone, Debug, Default)]
+pub struct Stack {
+    pub name: String,
+    pub working_dir: Option<String>,
+    pub config_files: Vec<String>,
+    /// Indexes into Report.containers / images / volumes.
+    pub containers: Vec<usize>,
+    pub images: Vec<usize>,
+    pub volumes: Vec<usize>,
+    pub running: usize,
+    pub writable: u64,
+    pub logs: u64,
+    pub image_bytes: u64,
+    pub volume_bytes: u64,
+}
+
+impl Stack {
+    pub fn total(&self) -> u64 {
+        self.writable + self.logs + self.image_bytes + self.volume_bytes
+    }
+}
+
+/// Label used for containers that belong to no compose project.
+pub const STANDALONE: &str = "(standalone containers)";
 
 #[derive(Clone, Debug, Default)]
 pub struct Report {
@@ -84,6 +160,92 @@ pub struct Report {
 }
 
 impl Report {
+    /// Does this container mount this volume? (Docker shortens long names.)
+    pub fn mounts_volume(c: &Container, v: &Volume) -> bool {
+        c.mounts.iter().any(|m| {
+            m == &v.name
+                || m.strip_suffix('…')
+                    .is_some_and(|p| !p.is_empty() && v.name.starts_with(p))
+        })
+    }
+
+    pub fn image_of(&self, c: &Container) -> Option<usize> {
+        self.images.iter().position(|i| {
+            i.name == c.image
+                || i.name == format!("{}:latest", c.image)
+                || (!i.id.is_empty()
+                    && (c.image == i.id
+                        || i.id
+                            .trim_start_matches("sha256:")
+                            .starts_with(c.image.trim_start_matches("sha256:"))))
+        })
+    }
+
+    /// Containers using image `i`.
+    pub fn users_of_image(&self, i: usize) -> Vec<usize> {
+        (0..self.containers.len())
+            .filter(|&c| self.image_of(&self.containers[c]) == Some(i))
+            .collect()
+    }
+
+    /// Containers mounting volume `v`.
+    pub fn users_of_volume(&self, v: usize) -> Vec<usize> {
+        (0..self.containers.len())
+            .filter(|&c| Self::mounts_volume(&self.containers[c], &self.volumes[v]))
+            .collect()
+    }
+
+    /// Compose stacks with their containers, images and volumes, biggest first.
+    pub fn stacks(&self) -> Vec<Stack> {
+        let mut m: BTreeMap<String, Stack> = BTreeMap::new();
+        for (ci, c) in self.containers.iter().enumerate() {
+            let name = c.project.clone().unwrap_or_else(|| STANDALONE.into());
+            let st = m.entry(name.clone()).or_insert_with(|| Stack {
+                name,
+                ..Stack::default()
+            });
+            if st.working_dir.is_none() {
+                st.working_dir = c.working_dir.clone();
+            }
+            for f in &c.config_files {
+                if !st.config_files.contains(f) {
+                    st.config_files.push(f.clone());
+                }
+            }
+            st.containers.push(ci);
+            st.running += usize::from(c.running());
+            st.writable += c.writable;
+            st.logs += c.log_bytes;
+            if let Some(ii) = self.image_of(c) {
+                if !st.images.contains(&ii) {
+                    st.images.push(ii);
+                    st.image_bytes += self.images[ii].unique;
+                }
+            }
+        }
+        for (vi, v) in self.volumes.iter().enumerate() {
+            let owner = v.project.clone().or_else(|| {
+                self.users_of_volume(vi).first().map(|&c| {
+                    self.containers[c]
+                        .project
+                        .clone()
+                        .unwrap_or_else(|| STANDALONE.into())
+                })
+            });
+            if let Some(o) = owner {
+                let st = m.entry(o.clone()).or_insert_with(|| Stack {
+                    name: o,
+                    ..Stack::default()
+                });
+                st.volumes.push(vi);
+                st.volume_bytes += v.size;
+            }
+        }
+        let mut v: Vec<Stack> = m.into_values().collect();
+        v.sort_by_key(|s| std::cmp::Reverse(s.total()));
+        v
+    }
+
     pub fn images_total(&self) -> u64 {
         // Shared layers count once: sum of unique sizes plus the largest shared size.
         self.images.iter().map(|i| i.unique).sum::<u64>()
@@ -170,7 +332,8 @@ pub fn parse_df(text: &str) -> Result<Report> {
         });
     }
     for c in v["Containers"].as_array().into_iter().flatten() {
-        let labels = s(c, "Labels");
+        let labels = labels_map(&s(c, "Labels"));
+        let lab = |k: &str| labels.get(k).filter(|v| !v.is_empty()).cloned();
         r.containers.push(Container {
             name: s(c, "Names"),
             id: s(c, "ID"),
@@ -178,7 +341,19 @@ pub fn parse_df(text: &str) -> Result<Report> {
             state: s(c, "State"),
             status: s(c, "Status"),
             writable: parse_si(s(c, "Size").split_whitespace().next().unwrap_or("0B")),
-            project: label(&labels, "com.docker.compose.project"),
+            project: lab("com.docker.compose.project"),
+            service: lab("com.docker.compose.service"),
+            working_dir: lab("com.docker.compose.project.working_dir"),
+            config_files: lab("com.docker.compose.project.config_files")
+                .map(|f| list(&f))
+                .unwrap_or_default(),
+            command: s(c, "Command").trim_matches('"').to_string(),
+            created: s(c, "CreatedAt"),
+            running_for: s(c, "RunningFor"),
+            ports: s(c, "Ports"),
+            networks: list(&s(c, "Networks")),
+            mounts: list(&s(c, "Mounts")),
+            health: s(c, "HealthStatus"),
             ..Container::default()
         });
     }
@@ -189,6 +364,9 @@ pub fn parse_df(text: &str) -> Result<Report> {
             size: parse_si(&s(vol, "Size")),
             links: s(vol, "Links").parse().unwrap_or(0),
             project: label(&labels, "com.docker.compose.project"),
+            compose_name: label(&labels, "com.docker.compose.volume"),
+            driver: s(vol, "Driver"),
+            mountpoint: s(vol, "Mountpoint"),
         });
     }
     for b in v["BuildCache"].as_array().into_iter().flatten() {
@@ -342,6 +520,54 @@ mod tests {
       {"Labels":"com.docker.compose.project=shop,com.docker.compose.volume=db","Links":"1","Name":"shop_db","Size":"2.5GB"},
       {"Labels":"","Links":"0","Name":"orphan","Size":"300MB"}],
      "BuildCache":[{"ID":"b1","InUse":false,"Size":"400MB"},{"ID":"b2","InUse":true,"Size":"100MB"}]}"#;
+
+    #[test]
+    fn labels_with_commas_in_values_and_stacks() {
+        let l = "com.docker.compose.project=xgm,com.docker.compose.project.config_files=/opt/x/a.yml,/opt/x/b.yml,com.docker.compose.service=db";
+        let m = labels_map(l);
+        assert_eq!(
+            m["com.docker.compose.project.config_files"],
+            "/opt/x/a.yml,/opt/x/b.yml"
+        );
+        assert_eq!(m["com.docker.compose.service"], "db");
+        let mut r = Report::default();
+        r.images.push(Image {
+            name: "pg:16".into(),
+            unique: 100,
+            ..Image::default()
+        });
+        r.volumes.push(Volume {
+            name: "xgm_data_0123456789abcdef".into(),
+            size: 50,
+            ..Volume::default()
+        });
+        r.containers.push(Container {
+            name: "db".into(),
+            image: "pg:16".into(),
+            state: "running".into(),
+            project: Some("xgm".into()),
+            working_dir: Some("/opt/x".into()),
+            mounts: vec!["xgm_data_0123…".into()],
+            writable: 7,
+            ..Container::default()
+        });
+        r.containers.push(Container {
+            name: "db2".into(),
+            image: "pg:16".into(),
+            project: Some("xgm".into()),
+            ..Container::default()
+        });
+        assert_eq!(r.users_of_image(0), vec![0, 1]);
+        assert_eq!(r.users_of_volume(0), vec![0]);
+        let st = r.stacks();
+        assert_eq!(st.len(), 1);
+        assert_eq!(
+            (st[0].running, st[0].image_bytes, st[0].volume_bytes),
+            (1, 100, 50),
+            "image counted once"
+        );
+        assert_eq!(st[0].working_dir.as_deref(), Some("/opt/x"));
+    }
 
     #[test]
     fn si_sizes() {

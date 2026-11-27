@@ -123,7 +123,7 @@ pub fn is_log(dir: &[u8], name: &[u8]) -> bool {
         || d.ends_with("/logs")
 }
 
-fn classify_log(path: &str) -> LogKind {
+pub fn classify_log(path: &str) -> LogKind {
     if path.contains("/docker/containers/") && path.ends_with("-json.log") {
         LogKind::Docker
     } else if path.starts_with("/var/log/") {

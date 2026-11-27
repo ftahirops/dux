@@ -26,6 +26,21 @@ dux where /            # where the space is, and what grew since last time (inst
 
 ---
 
+## New in 0.8.3: organised Docker, Logs and Projects views, live cleanup progress
+
+- **Docker (key 4) has its own views**, switched with `←` `→`:
+  - **Overview**: where Docker's space goes (images, writable layers, logs, volumes, build cache) and the biggest stacks.
+  - **Stacks**: every compose project with its source folder and compose files, running/total containers, and its images, writable layers, logs and volumes. `Enter` opens the stack page: services with status, ports and sizes, plus the stack's images and volumes.
+  - **Containers**: state, stack and service, writable layer, log size, mounts and image. `Enter` shows everything: id, command, ports, networks, mounts resolved to volumes and their sizes, the log file, and the commands to inspect it.
+  - **Images**: size, unique and shared bytes, and *which containers use each image*; unused ones are marked.
+  - **Volumes**: size, stack, *which containers mount it*, and where it lives on disk; unused ones are marked.
+  - **Logs** (container logs) and **Storage** (overlay2, containerd snapshots and content, volumes, build cache, each explained).
+  - Actions: `t` truncate a container log (or all big logs of a stack), `x` remove a stopped container, an unused image or an unused volume (RISKY, typed `D`), `b` prune the build cache.
+- **Logs (key 5) are grouped by what they belong to**: Operating system, Journal, Web server, Database, Docker container or the app (by folder or project). `Enter` opens a group; the details panel shows the folder, writer, rotated copies, safety rating and the last lines. `t` truncate an active log, `r` remove the rotated copies of a group or file, `v` vacuum the journal.
+- **Projects (key 6) are grouped by place** (`/home/<user>`, `/opt`, `/srv`, `/var/www`...) with totals per place and a details panel.
+- **Every cleanup shows live progress**: after `y` (or `D`), a window lists each step as it runs (done, failed with the reason), with a progress bar and the space **measured** as freed on disk next to the expected amount.
+- **History (key 8)**: every action dux took, with result, space and errors, from `/var/log/dux/actions.log`.
+
 ## New in 0.8.2: ncdu-style browsing, project cleanup, never-touch
 
 - **Plain `dux` opens a browser first**, like ncdu: folders and files of the

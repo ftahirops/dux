@@ -496,7 +496,7 @@ pub fn plan(o: &Options) -> Vec<Item> {
     items
 }
 
-fn audit(entry: serde_json::Value) {
+pub fn audit(entry: serde_json::Value) {
     if let Some(dir) = Path::new(AUDIT_LOG).parent() {
         let _ = std::fs::create_dir_all(dir);
     }

@@ -30,7 +30,9 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const TABS: [&str; 7] = [
+mod views;
+
+const TABS: [&str; 8] = [
     "1 Browse",
     "2 Disks",
     "3 Activity",
@@ -38,6 +40,7 @@ const TABS: [&str; 7] = [
     "5 Logs",
     "6 Projects",
     "7 Fixes",
+    "8 History",
 ];
 const BROWSE: usize = 0;
 const DISKS: usize = 1;
@@ -46,6 +49,7 @@ const DOCKER: usize = 3;
 const LOGS: usize = 4;
 const PROJECTS: usize = 5;
 const FIXES: usize = 6;
+const HISTORY: usize = 7;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Sort {
@@ -102,7 +106,7 @@ struct App {
     loading: bool,
     progress: Arc<AtomicU64>,
     rx: Option<Receiver<Gathered>>,
-    sel: [usize; 7],
+    sel: [usize; 8],
     cwd: String,
     entries: Vec<Entry>,
     sort: Sort,
@@ -118,6 +122,9 @@ struct App {
     protected: Vec<String>,
     overlay: Overlay,
     message: String,
+    /// State of the organised views (Docker, Logs, Projects, History) and
+    /// the running action job.
+    v: views::State,
 }
 
 impl App {
@@ -129,7 +136,7 @@ impl App {
             loading: true,
             progress: Arc::new(AtomicU64::new(0)),
             rx: None,
-            sel: [0; 7],
+            sel: [0; 8],
             cwd: root.to_string(),
             entries: Vec::new(),
             sort: Sort::Size,
@@ -145,6 +152,7 @@ impl App {
             protected: crate::protect::load(),
             overlay: Overlay::None,
             message: String::new(),
+            v: views::State::default(),
         }
     }
 
@@ -272,13 +280,7 @@ impl App {
             BROWSE => self.entries.len(),
             DISKS => self.data.disks.len(),
             ACTIVITY => self.live.writing.len(),
-            DOCKER => self
-                .data
-                .docker
-                .as_ref()
-                .map_or(0, |d| d.containers.len() + d.images.len() + d.volumes.len()),
-            LOGS => self.data.logs.len(),
-            PROJECTS => self.data.projects.len(),
+            DOCKER | LOGS | PROJECTS | HISTORY => views::rows(self),
             _ => self.data.fixes.len(),
         }
     }
@@ -342,31 +344,18 @@ impl App {
         root
     }
 
+    /// Run the items in the background with a live progress window; each
+    /// step and the measured space freed are logged to the History.
     fn apply_items(&mut self, items: Vec<Item>) {
         if !self.is_root() {
             return;
         }
-        let (mut ok, mut failed, mut freed) = (0, 0, 0u64);
-        let mut first_error = String::new();
-        for item in &items {
-            match crate::cleanup::apply(item) {
-                Ok(()) => {
-                    ok += 1;
-                    freed += item.frees;
-                }
-                Err(e) => {
-                    failed += 1;
-                    if first_error.is_empty() {
-                        first_error = format!(" First: {}: {e:#}.", item.what);
-                    }
-                }
-            }
-        }
-        self.message = format!(
-            "Done: {ok} applied, about {} freed, {failed} skipped.{first_error} Full log: /var/log/dux/actions.log. Rescanning...",
-            human(freed as i64)
-        );
-        self.reload();
+        let title = if items.len() == 1 {
+            "Applying 1 action".to_string()
+        } else {
+            format!("Applying {} actions", items.len())
+        };
+        self.v.job = Some(views::Job::start(title, items));
     }
 }
 
@@ -450,16 +439,20 @@ fn draw(f: &mut Frame, app: &mut App) {
         BROWSE => draw_browse(f, app, body, &mut state),
         DISKS => draw_disks(f, app, body, &mut state),
         ACTIVITY => draw_activity(f, app, body, &mut state),
-        DOCKER => draw_docker(f, app, body, &mut state),
-        LOGS => draw_logs(f, app, body, &mut state),
+        DOCKER => views::draw_docker(f, app, body, &mut state),
+        LOGS => views::draw_logs(f, app, body, &mut state),
         PROJECTS => match app.project_open {
             Some(i) => draw_project(f, app, i, body),
-            None => draw_projects(f, app, body, &mut state),
+            None => views::draw_projects(f, app, body, &mut state),
         },
+        HISTORY => views::draw_history(f, app, body, &mut state),
         _ => draw_fixes(f, app, body, &mut state),
     }
     draw_footer(f, app, chunks[2]);
     draw_overlay(f, app, area);
+    if let Some(job) = &app.v.job {
+        views::draw_job(f, job, area);
+    }
 }
 
 fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
@@ -598,185 +591,6 @@ fn draw_disks(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Disks (live) "),
-        )
-        .row_highlight_style(hl()),
-        body,
-        state,
-    );
-}
-
-fn draw_docker(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
-    let Some(d) = &app.data.docker else {
-        f.render_widget(
-            Paragraph::new("Docker is not available on this host.")
-                .block(Block::default().borders(Borders::ALL)),
-            body,
-        );
-        return;
-    };
-    let mut rows: Vec<Row> = Vec::new();
-    for c in &d.containers {
-        rows.push(Row::new(vec![
-            "container".into(),
-            human((c.writable + c.log_bytes) as i64),
-            format!("{} (log {})", c.name, human(c.log_bytes as i64)),
-            format!("{} {}", c.state, c.project.clone().unwrap_or_default()),
-        ]));
-    }
-    for i in &d.images {
-        rows.push(Row::new(vec![
-            "image".into(),
-            human(i.unique as i64),
-            i.name.clone(),
-            if i.containers == 0 {
-                "UNUSED".into()
-            } else {
-                format!("{} container(s)", i.containers)
-            },
-        ]));
-    }
-    for v in &d.volumes {
-        rows.push(Row::new(vec![
-            "volume".into(),
-            human(v.size as i64),
-            v.name.clone(),
-            if v.links == 0 {
-                "UNUSED".into()
-            } else {
-                v.project.clone().unwrap_or_default()
-            },
-        ]));
-    }
-    let title = format!(
-        " Docker: images {} · containers {} · logs {} · volumes {} · build cache {} ",
-        human(d.images_total() as i64),
-        human(d.writable_total() as i64),
-        human(d.logs_total() as i64),
-        human(d.volumes_total() as i64),
-        human(d.build_cache as i64)
-    );
-    f.render_stateful_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Length(10),
-                Constraint::Length(11),
-                Constraint::Min(20),
-                Constraint::Length(30),
-            ],
-        )
-        .header(hdr(&["kind", "size", "name", "status"]))
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .row_highlight_style(hl()),
-        body,
-        state,
-    );
-}
-
-fn draw_logs(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
-    let now = crate::util::now_secs();
-    let rows: Vec<Row> = app
-        .data
-        .logs
-        .iter()
-        .map(|l| {
-            let mut note = Vec::new();
-            if l.rotated {
-                note.push("rotated".to_string());
-            }
-            if l.protected {
-                note.push("protected".to_string());
-            }
-            if let Some(c) = &l.container {
-                note.push(c.clone());
-            }
-            if let Some(w) = &l.writer {
-                note.push(format!("by {w}"));
-            }
-            Row::new(vec![
-                human(l.bytes as i64),
-                crate::insight::age_text(l.mtime, now),
-                l.kind.label().to_string(),
-                l.path.clone(),
-                note.join(" · "),
-            ])
-        })
-        .collect();
-    let total: u64 = app.data.logs.iter().map(|l| l.bytes).sum();
-    f.render_stateful_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Length(11),
-                Constraint::Length(5),
-                Constraint::Length(7),
-                Constraint::Min(30),
-                Constraint::Length(34),
-            ],
-        )
-        .header(hdr(&["size", "age", "kind", "path", "note"]))
-        .block(Block::default().borders(Borders::ALL).title(format!(
-                " Logs: {} in {} files · journal {} ",
-                human(total as i64),
-                app.data.logs.len(),
-                app.data
-                    .journal_bytes
-                    .map(|j| human(j as i64))
-                    .unwrap_or_else(|| "-".into())
-            )))
-        .row_highlight_style(hl()),
-        body,
-        state,
-    );
-}
-
-fn draw_projects(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
-    let now = crate::util::now_secs();
-    let rows: Vec<Row> = app
-        .data
-        .projects
-        .iter()
-        .map(|p| {
-            Row::new(vec![
-                p.name.clone(),
-                p.type_label(),
-                human(p.total as i64),
-                human(p.artifacts as i64),
-                human(p.git as i64),
-                format!("{}d", (now - p.last_activity).max(0) / 86_400),
-                p.branch.clone().unwrap_or_default(),
-                p.path.clone(),
-            ])
-        })
-        .collect();
-    f.render_stateful_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Length(24),
-                Constraint::Length(30),
-                Constraint::Length(11),
-                Constraint::Length(11),
-                Constraint::Length(10),
-                Constraint::Length(6),
-                Constraint::Length(14),
-                Constraint::Min(20),
-            ],
-        )
-        .header(hdr(&[
-            "project",
-            "type",
-            "total",
-            "build/cache",
-            "git",
-            "idle",
-            "branch",
-            "path",
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Projects (Enter: details and cleanup) "),
         )
         .row_highlight_style(hl()),
         body,
@@ -1204,11 +1018,15 @@ fn draw_activity(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let help = match app.tab {
-        BROWSE => "↑↓ move · Enter/→ open · ←/Bksp up · s/n/C/M sort · i info · d delete · N never touch · 2-7 views · q quit",
+        BROWSE => "↑↓ move · Enter/→ open · ←/Bksp up · s/n/C/M sort · i info · d delete · N never touch · 2-8 views · q quit",
+        DOCKER if app.v.ddetail.is_some() => "t truncate log · x remove · Esc back",
+        DOCKER => "←→ Overview/Stacks/Containers/Images/Volumes/Logs/Storage · ↑↓ move · Enter details · t truncate · x remove · b prune cache",
+        LOGS => "↑↓ move · Enter open/close group · t truncate · r remove rotated · v vacuum journal · 1-8 views",
         PROJECTS if app.project_open.is_some() => "r remove · k keep · n never touch · a all · Enter apply · Esc back",
-        PROJECTS => "↑↓ move · Enter details and cleanup · 1-7 views · q quit",
+        PROJECTS => "↑↓ move · Enter open group / project page · 1-8 views · q quit",
         FIXES => "Space toggle · s safe · a all · c clear · n never touch · Enter apply · q quit",
-        _ => "↑↓ move · 1-7 views · r rescan · q quit",
+        HISTORY => "↑↓ move · every action dux took, newest first · 1-8 views · q quit",
+        _ => "↑↓ move · 1-8 views · r rescan · q quit",
     };
     let msg = if app.message.is_empty() {
         help.to_string()
@@ -1476,17 +1294,29 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     if code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
         return true;
     }
+    // A running or finished job owns the screen until it is closed.
+    if let Some(job) = &app.v.job {
+        if job.done() && matches!(code, KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q')) {
+            app.v.job = None;
+            app.message = "Rescanning after the cleanup...".into();
+            app.reload();
+        }
+        return false;
+    }
     if overlay_key(app, code) {
         return false;
     }
     if app.tab == PROJECTS && app.project_open.is_some() {
         return project_key(app, code);
     }
+    if views::key(app, code) {
+        return false;
+    }
     let rows = app.rows();
     let t = app.tab;
     match code {
         KeyCode::Char('q') => return true,
-        KeyCode::Char(c @ '1'..='7') => app.tab = (c as usize) - ('1' as usize),
+        KeyCode::Char(c @ '1'..='8') => app.tab = (c as usize) - ('1' as usize),
         KeyCode::Tab => app.tab = (app.tab + 1) % TABS.len(),
         KeyCode::BackTab => app.tab = (app.tab + TABS.len() - 1) % TABS.len(),
         KeyCode::Down | KeyCode::Char('j') => {
@@ -1565,10 +1395,6 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
                 }
             }
         }
-        KeyCode::Enter | KeyCode::Right if t == PROJECTS => {
-            let i = app.sel[PROJECTS];
-            app.open_project(i);
-        }
         KeyCode::Char(' ') if t == FIXES => {
             let i = app.sel[FIXES];
             if app.data.fixes.get(i).is_some_and(|x| x.item.is_some()) {
@@ -1644,6 +1470,9 @@ pub fn run(root: &str) -> Result<()> {
     let mut term = Terminal::new(CrosstermBackend::new(stdout()))?;
     loop {
         app.poll();
+        if let Some(j) = app.v.job.as_mut() {
+            j.poll();
+        }
         if app.tab == ACTIVITY
             && app
                 .last_sample
@@ -1695,7 +1524,7 @@ mod tests {
         );
         assert!(names.contains(&"shop") && names.contains(&"logs"));
         let mut term = Terminal::new(TestBackend::new(140, 45)).unwrap();
-        for tab in 0..7 {
+        for tab in 0..8 {
             app.tab = tab;
             term.draw(|f| draw(f, &mut app)).unwrap();
         }
@@ -1717,6 +1546,7 @@ mod tests {
         assert!(matches!(app.overlay, Overlay::None));
         app.tab = PROJECTS;
         assert_eq!(app.data.projects.len(), 1);
+        app.sel[PROJECTS] = 1; // row 0 is the location group
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
         assert!(app.project_open.is_some());
         key(&mut app, KeyCode::Char('r'), KeyModifiers::NONE);
