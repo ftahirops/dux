@@ -276,6 +276,9 @@ const NOT_PROJECTS: &[&str] = &[
     "/run",
     "/var/lib",
     "/var/cache",
+    "/tmp",
+    "/var/tmp",
+    "/dev/shm",
     "/root/.cargo",
     "/root/.rustup",
     "/root/go/pkg",
@@ -290,9 +293,45 @@ pub struct Project {
     pub artifact_dirs: Vec<(String, u64)>,
     pub git: u64,
     pub last_activity: i64,
+    /// From the manifest (package.json, Cargo.toml, go.mod...), else the folder name.
+    pub name: String,
+    pub description: String,
+    pub branch: Option<String>,
+    /// Git remote with any credentials removed.
+    pub remote: Option<String>,
 }
 
 impl Project {
+    /// Human-readable type, e.g. "Node.js + Docker Compose (git)".
+    pub fn type_label(&self) -> String {
+        let mut parts: Vec<&str> = self
+            .kinds
+            .iter()
+            .filter(|k| **k != "git")
+            .map(|k| match *k {
+                "node" => "Node.js",
+                "rust" => "Rust",
+                "go" => "Go",
+                "python" => "Python",
+                "php" => "PHP",
+                "ruby" => "Ruby",
+                "java" => "Java",
+                ".net" => ".NET",
+                "c/c++" => "C/C++",
+                "compose" => "Docker Compose",
+                other => other,
+            })
+            .collect();
+        if parts.is_empty() {
+            parts.push("Git repository");
+        }
+        let mut s = parts.join(" + ");
+        if self.kinds.contains(&"git") && s != "Git repository" {
+            s.push_str(" (git)");
+        }
+        s
+    }
+
     pub fn source(&self) -> u64 {
         self.total.saturating_sub(self.artifacts + self.git)
     }
@@ -341,17 +380,24 @@ fn collect_artifacts(n: &DirNode, path: &str, depth: usize, out: &mut Vec<(Strin
 }
 
 /// Find projects: the top-most folder with a marker file on each branch.
+/// System, temp and top-level folders never count, unless the walk itself
+/// was started inside one of them (`dux pp /tmp/build` asks for exactly that).
 pub fn projects(tree: &Tree) -> Vec<Project> {
     let mut out = Vec::new();
-    fn rec(n: &DirNode, path: &str, out: &mut Vec<Project>) {
+    fn under(path: &str, x: &str) -> bool {
+        path == x || path.starts_with(&format!("{x}/"))
+    }
+    fn rec(n: &DirNode, path: &str, root: &str, out: &mut Vec<Project>) {
         if NOT_PROJECTS
             .iter()
-            .any(|x| path == *x || path.starts_with(&format!("{x}/")))
+            .any(|x| under(path, x) && !under(root, x))
             || ARTIFACTS.contains(&n.name.as_str())
         {
             return;
         }
-        if n.markers != 0 && path != "/" {
+        // Top-level folders (/root, /home, /srv...) are never projects themselves.
+        let depth = path.matches('/').count();
+        if n.markers != 0 && path != "/" && depth >= 2 {
             let mut arts = Vec::new();
             collect_artifacts(n, path, 0, &mut arts);
             arts.sort_by_key(|(_, b)| std::cmp::Reverse(*b));
@@ -367,6 +413,10 @@ pub fn projects(tree: &Tree) -> Vec<Project> {
                     .map_or(0, |g| g.total_bytes),
                 last_activity: activity(n),
                 artifact_dirs: arts,
+                name: String::new(),
+                description: String::new(),
+                branch: None,
+                remote: None,
             });
             return;
         }
@@ -376,17 +426,143 @@ pub fn projects(tree: &Tree) -> Vec<Project> {
             } else {
                 format!("{path}/{}", c.name)
             };
-            rec(c, &p, out);
+            rec(c, &p, root, out);
         }
     }
     let root = tree.root_path.trim_end_matches('/');
-    rec(
-        &tree.root,
-        if root.is_empty() { "/" } else { root },
-        &mut out,
-    );
+    let root = if root.is_empty() { "/" } else { root };
+    rec(&tree.root, root, root, &mut out);
     out.sort_by_key(|p| std::cmp::Reverse(p.total));
+    for p in &mut out {
+        fill_details(p);
+    }
     out
+}
+
+/// Remove user:password@ or token@ from a remote URL.
+pub fn redact_url(url: &str) -> String {
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let end = rest.find('/').unwrap_or(rest.len());
+            match rest[..end].rfind('@') {
+                Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+                None => url.to_string(),
+            }
+        }
+        None => url.to_string(),
+    }
+}
+
+fn toml_value(text: &str, section: &str, key: &str) -> Option<String> {
+    let mut in_sec = section.is_empty();
+    for line in text.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            in_sec = l == format!("[{section}]");
+            continue;
+        }
+        if in_sec {
+            if let Some((k, v)) = l.split_once('=') {
+                if k.trim() == key {
+                    return Some(v.trim().trim_matches('"').trim_matches('\'').to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Read the project's name, description, git branch and remote from disk.
+pub fn fill_details(p: &mut Project) {
+    let dir = std::path::Path::new(&p.path);
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).ok();
+    if let Some(t) = read("package.json") {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
+            p.name = v["name"].as_str().unwrap_or("").to_string();
+            p.description = v["description"].as_str().unwrap_or("").to_string();
+        }
+    }
+    if p.name.is_empty() {
+        if let Some(t) = read("Cargo.toml") {
+            p.name = toml_value(&t, "package", "name").unwrap_or_default();
+            p.description = toml_value(&t, "package", "description").unwrap_or_default();
+        }
+    }
+    if p.name.is_empty() {
+        if let Some(t) = read("pyproject.toml") {
+            p.name = toml_value(&t, "project", "name")
+                .or_else(|| toml_value(&t, "tool.poetry", "name"))
+                .unwrap_or_default();
+            p.description = toml_value(&t, "project", "description").unwrap_or_default();
+        }
+    }
+    if p.name.is_empty() {
+        if let Some(t) = read("go.mod") {
+            p.name = t
+                .lines()
+                .find_map(|l| l.strip_prefix("module "))
+                .unwrap_or("")
+                .trim()
+                .to_string();
+        }
+    }
+    if p.name.is_empty() {
+        if let Some(t) = read("composer.json") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
+                p.name = v["name"].as_str().unwrap_or("").to_string();
+                p.description = v["description"].as_str().unwrap_or("").to_string();
+            }
+        }
+    }
+    if p.name.is_empty() {
+        p.name = p.path.rsplit('/').next().unwrap_or("").to_string();
+    }
+    if let Some(head) = read(".git/HEAD") {
+        p.branch = Some(
+            head.trim()
+                .strip_prefix("ref: refs/heads/")
+                .unwrap_or("(detached)")
+                .to_string(),
+        );
+    }
+    if let Some(cfg) = read(".git/config") {
+        let mut in_origin = false;
+        for line in cfg.lines() {
+            let l = line.trim();
+            if l.starts_with('[') {
+                in_origin = l == "[remote \"origin\"]";
+            } else if in_origin {
+                if let Some(u) = l
+                    .strip_prefix("url")
+                    .and_then(|r| r.trim_start().strip_prefix('='))
+                {
+                    p.remote = Some(redact_url(u.trim()));
+                }
+            }
+        }
+    }
+    // Manifests are untrusted text: no control characters, bounded length.
+    p.name = clean_text(&p.name, 60);
+    p.description = clean_text(&p.description, 200);
+    p.branch = p.branch.as_deref().map(|b| clean_text(b, 60));
+    p.remote = p.remote.as_deref().map(|r| clean_text(r, 200));
+}
+
+/// Make text safe for one terminal line: control characters become spaces,
+/// and it is cut to `max` characters (with an ellipsis).
+pub fn clean_text(s: &str, max: usize) -> String {
+    let t: String = s
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let t = t.trim();
+    if t.chars().count() > max {
+        let mut cut: String = t.chars().take(max.saturating_sub(1)).collect();
+        cut.push('…');
+        cut
+    } else {
+        t.to_string()
+    }
 }
 
 /// Well-known application data folders and every folder under /opt, /srv, /home.
@@ -538,6 +714,97 @@ mod tests {
         assert_eq!(names, vec!["app.log", "app.log.1"]);
         assert!(!r.logs[0].rotated && r.logs[1].rotated);
         assert_eq!(r.total(Some(LogKind::App)), r.total(None));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn remote_urls_lose_credentials() {
+        assert_eq!(
+            redact_url("https://user:tok3n@github.com/o/r.git"),
+            "https://github.com/o/r.git"
+        );
+        assert_eq!(
+            redact_url("https://ghp_abc@github.com/o/r"),
+            "https://github.com/o/r"
+        );
+        assert_eq!(
+            redact_url("https://github.com/o/r"),
+            "https://github.com/o/r"
+        );
+        assert_eq!(
+            redact_url("git@github.com:o/r.git"),
+            "git@github.com:o/r.git"
+        );
+    }
+
+    #[test]
+    fn top_level_and_temp_folders_are_never_projects_and_details_are_read() {
+        let d = tmp("top");
+        // tmp() lives under /tmp, which is excluded, so build a fake root tree instead.
+        let mk = |name: &str, children: Vec<DirNode>, markers: u16| DirNode {
+            name: name.into(),
+            children,
+            markers,
+            total_bytes: 1,
+            ..DirNode::default()
+        };
+        let tree = Tree {
+            root_path: "/".into(),
+            root: mk(
+                "/",
+                vec![
+                    mk(
+                        "root",
+                        vec![mk("app", vec![], crate::walker::MARK_NODE)],
+                        crate::walker::MARK_GIT,
+                    ),
+                    mk("tmp", vec![mk("x", vec![], crate::walker::MARK_GIT)], 0),
+                ],
+                0,
+            ),
+            stats: Default::default(),
+            started_at: 0,
+        };
+        let ps = projects(&tree);
+        let paths: Vec<&str> = ps.iter().map(|p| p.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["/root/app"],
+            "/root itself and /tmp/x are excluded"
+        );
+        std::fs::write(
+            d.join("package.json"),
+            r#"{"name":"shop","description":"web shop"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.join(".git")).unwrap();
+        std::fs::write(d.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(
+            d.join(".git/config"),
+            "[remote \"origin\"]\n\turl = https://u:secret@github.com/a/shop.git\n",
+        )
+        .unwrap();
+        let mut p = Project {
+            path: d.to_string_lossy().into_owned(),
+            kinds: vec!["node", "compose", "git"],
+            total: 0,
+            artifacts: 0,
+            artifact_dirs: vec![],
+            git: 0,
+            last_activity: 0,
+            name: String::new(),
+            description: String::new(),
+            branch: None,
+            remote: None,
+        };
+        fill_details(&mut p);
+        assert_eq!(
+            (p.name.as_str(), p.description.as_str()),
+            ("shop", "web shop")
+        );
+        assert_eq!(p.branch.as_deref(), Some("main"));
+        assert_eq!(p.remote.as_deref(), Some("https://github.com/a/shop.git"));
+        assert_eq!(p.type_label(), "Node.js + Docker Compose (git)");
         std::fs::remove_dir_all(&d).unwrap();
     }
 

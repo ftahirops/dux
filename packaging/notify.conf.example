@@ -25,8 +25,11 @@ DUX_SMTP_PASS=
 DUX_MAIL_FROM=
 DUX_MAIL_TO=
 
-# Urgent message on every logged-in terminal, for critical alerts only.
+# Urgent message on every logged-in terminal. Sent ONLY when a disk is
+# critically full right now (space or inodes at or above DUX_WALL_PCT),
+# never for projections such as "full in 2 hours".
 DUX_WALL=yes
+DUX_WALL_PCT=97
 
 # Lowest severity for push channels (ntfy, Slack, webhook) and for email.
 # info | warning | critical. Recoveries are always sent.
@@ -41,7 +44,12 @@ DUX_INODE_WARN_PCT=85
 DUX_INODE_CRIT_PCT=95
 # Points below a threshold before an alert clears.
 DUX_HYSTERESIS_PCT=3
-# Alert when, at the current growth rate, the disk is full within this time.
+# Growth alerts are OFF by default (they predicted, they did not measure).
+# Set to yes to get "full in N hours" (fill) and "grew N GiB" (burst) alerts
+# on push channels and email. They never reach the terminal broadcast.
+DUX_FILL_ALERTS=no
+DUX_BURST_ALERTS=no
+# When fill alerts are on: alert when, at the current rate, the disk is full within this time.
 DUX_FILL_WARN_HOURS=24
 DUX_FILL_CRIT_HOURS=2
 # Alert when a filesystem grows this much within the window.

@@ -13,12 +13,12 @@ mod insight;
 mod live;
 mod notify;
 mod probes;
+mod protect;
 mod query;
 mod scan;
 mod sentinel;
 mod snapshot;
 mod store;
-mod tui;
 mod tunnel;
 mod ui;
 mod util;
@@ -218,9 +218,13 @@ enum Cmd {
     Tui {
         #[arg(default_value = "/")]
         path: PathBuf,
-        /// Open the old 0.6 browser on the per-file index instead
-        #[arg(long, hide = true)]
-        legacy: bool,
+    },
+    /// Paths dux must never delete, truncate or offer as a fix
+    /// (/etc/dux/never-touch). `add PATH`, `remove PATH`, or `list`.
+    NeverTouch {
+        #[arg(value_parser = ["add", "remove", "list"], default_value = "list")]
+        op: String,
+        path: Option<PathBuf>,
     },
     /// Index status
     Status,
@@ -563,7 +567,8 @@ fn real_main() -> Result<()> {
                 | Cmd::Fix { .. }
                 | Cmd::Ui { .. }
                 | Cmd::Io { .. }
-                | Cmd::Tui { legacy: false, .. }
+                | Cmd::Tui { .. }
+                | Cmd::NeverTouch { .. }
                 | Cmd::Web { .. }
         )
     );
@@ -1059,6 +1064,9 @@ fn real_main() -> Result<()> {
                     cleanup::Action::RemoveTree { path } => {
                         format!("remove folder {}", path.display())
                     }
+                    cleanup::Action::RemoveUserPath { path } => {
+                        format!("delete {}", path.display())
+                    }
                 };
                 println!(
                     "  L{} {:>10}  {}  [{how}]",
@@ -1417,7 +1425,7 @@ fn real_main() -> Result<()> {
             let now = util::now_secs();
             let h = |b: u64| human(b as i64);
             if json {
-                let ps: Vec<_> = projects.iter().map(|x| serde_json::json!({"path": x.path, "kinds": x.kinds, "total": x.total, "source": x.source(), "build_output": x.artifacts, "git": x.git, "last_activity": x.last_activity, "build_output_dirs": x.artifact_dirs})).collect();
+                let ps: Vec<_> = projects.iter().map(|x| serde_json::json!({"name": x.name, "type": x.type_label(), "description": x.description, "branch": x.branch, "remote": x.remote, "path": x.path, "kinds": x.kinds, "total": x.total, "source": x.source(), "build_output": x.artifacts, "git": x.git, "last_activity": x.last_activity, "build_output_dirs": x.artifact_dirs})).collect();
                 let ap: Vec<_> = apps.iter().map(|(n, p, b, t)| serde_json::json!({"app": n, "path": p, "bytes": b, "newest_change": t})).collect();
                 println!("{}", serde_json::json!({"projects": ps, "apps": ap}));
                 return Ok(());
@@ -1428,16 +1436,20 @@ fn real_main() -> Result<()> {
                 tree.stats.entries,
                 tree.stats.seconds
             );
-            println!("\nProjects            total     source  build-out        git   idle  kind          path");
+            println!(
+                "\n  {:<22} {:<26} {:>10} {:>10} {:>10} {:>6}  {:<14} path",
+                "project", "type", "total", "build-out", "git", "idle", "branch"
+            );
             for x in projects.iter().take(top) {
                 println!(
-                    "  {:>16} {:>10} {:>10} {:>10} {:>5}d  {:<13} {}",
+                    "  {:<22} {:<26} {:>10} {:>10} {:>10} {:>5}d  {:<14} {}",
+                    insight::clean_text(&x.name, 22),
+                    insight::clean_text(&x.type_label(), 26),
                     h(x.total),
-                    h(x.source()),
                     h(x.artifacts),
                     h(x.git),
                     ((now - x.last_activity).max(0) / 86_400),
-                    x.kinds.join(","),
+                    x.branch.as_deref().unwrap_or("-"),
                     x.path
                 );
             }
@@ -1981,22 +1993,31 @@ fn real_main() -> Result<()> {
             );
             println!("  TOTAL RECLAIMABLE               {}", human(waste.total()));
         }
-        Some(Cmd::Tui {
-            path,
-            legacy: false,
-        }) => {
+        Some(Cmd::Tui { path }) => {
             ui::run(&path.to_string_lossy())?;
         }
-        Some(Cmd::Tui { path, legacy: true }) => {
-            // Resolve the start node, then DROP this connection before the TUI runs
-            // — run() owns its own reopenable store, so we must not pin this one for
-            // the whole session (it would hold a deleted inode open after a rescan).
-            let start = {
-                let store = Store::open_ro(&db)?;
-                resolve_start(&store, &path)?
-            };
-            tui::run(&db, start)?;
-        }
+        Some(Cmd::NeverTouch { op, path }) => match (op.as_str(), path) {
+            ("add", Some(p)) => {
+                let p = std::path::absolute(&p)?;
+                protect::add(&p.to_string_lossy())?;
+                println!("dux will never touch {}", p.display());
+            }
+            ("remove", Some(p)) => {
+                let p = std::path::absolute(&p)?;
+                protect::remove(&p.to_string_lossy())?;
+                println!("removed {} from the never-touch list", p.display());
+            }
+            ("list", _) => {
+                let l = protect::load();
+                if l.is_empty() {
+                    println!("never-touch list ({}) is empty", protect::FILE);
+                }
+                for p in l {
+                    println!("{p}");
+                }
+            }
+            _ => anyhow::bail!("usage: dux never-touch add|remove PATH, or dux never-touch list"),
+        },
         Some(Cmd::Status) => {
             // On a fresh box the FIRST scan hasn't produced dux.db yet, so open_ro
             // would hard-fail with a cryptic error. Instead: if a scan is running,
@@ -2541,10 +2562,6 @@ fn metrics_text(store: &Store, db: &std::path::Path, topn: usize) -> Result<Stri
     Ok(s)
 }
 
-fn resolve_start(store: &Store, path: &std::path::Path) -> Result<Option<(i64, i64)>> {
-    query::resolve_scope(store, path)
-}
-
 fn print_rows(rows: &[query::Row]) {
     println!("{:<14} {:<6} PATH", "SIZE", "AGE");
     for r in rows {
@@ -2751,19 +2768,6 @@ mod tests {
             .try_get_matches_from(["dux", "du", "--help"])
             .unwrap_err();
         assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
-    }
-
-    #[test]
-    fn resolve_start_preserves_database_errors() {
-        let store = Store {
-            conn: rusqlite::Connection::open_in_memory().unwrap(),
-            schema_version: store::SCHEMA_VERSION,
-        };
-        let error = resolve_start(&store, std::path::Path::new("/"))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("no such table: inodes"), "{error}");
-        assert!(!error.contains("is not in the index"), "{error}");
     }
 
     #[test]

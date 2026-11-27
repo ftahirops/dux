@@ -26,6 +26,34 @@ dux where /            # where the space is, and what grew since last time (inst
 
 ---
 
+## New in 0.8.2: ncdu-style browsing, project cleanup, never-touch
+
+- **Plain `dux` opens a browser first**, like ncdu: folders and files of the
+  current directory by size, with a bar, share, item count and age. `Enter`/`→`
+  opens a folder, `←`/`Backspace` goes up, `s` `n` `C` `M` sort by size, name,
+  items or change time, `i` shows details (owner, what it is, whether it may be
+  deleted), `d` deletes after a typed `D` confirmation, `N` puts it on the
+  never-touch list. The other views (Disks, Activity, Docker, Logs, Projects,
+  Fixes) are on keys `2`-`7`.
+- **Projects show what they are**: name, description, type (Node.js, Rust, Go,
+  Python, PHP, Ruby, Java, .NET, C/C++, Docker Compose, git), branch and remote
+  (credentials removed from URLs). `/`, top-level folders such as `/root` and
+  `/home`, and temp folders (`/tmp`, `/var/tmp`, `/dev/shm`) are never listed as
+  projects. `Enter` on a project opens its page: details and every build-output
+  or cache folder, each marked `r` remove, `k` keep or `n` never touch; `Enter`
+  applies.
+- **Never-touch list** (`/etc/dux/never-touch`, or `dux never-touch add|remove|list`):
+  dux will not delete, truncate or offer a fix for a listed path or anything
+  under it, from any command, the UI or the web dashboard. Paths are normalized
+  and checked on their real location, so a symlinked folder cannot bypass it.
+- **Deletes from the browser are guarded**: `/`, top-level folders, system
+  folders (`/etc`, `/usr`, `/var/lib`, `/boot`, ...), folders with a mount
+  inside, and files still open are refused.
+- **Terminal broadcasts only when a disk is critically full** (97 % by default,
+  `DUX_WALL_PCT`), never for a projection. Fill and burst alerts are off by
+  default (`DUX_FILL_ALERTS`, `DUX_BURST_ALERTS`).
+- The old 0.6 browser (`dux tui --legacy`) is removed; `dux tui` is the new UI.
+
 ## New in 0.8.1: live I/O, and who is writing
 
 Plain `dux` now opens the new UI. Its **Activity** tab, and `dux io` on the
@@ -43,8 +71,7 @@ command line, refresh every second and show:
 It samples `/proc` directly (disk counters, per-process I/O, open file
 positions and sizes), so it needs no event stream and costs a few
 milliseconds per second while it is open. Container logs are attributed to
-the container, not to dockerd. The old 0.6 browser is still available as
-`dux tui --legacy`.
+the container, not to dockerd.
 
 ## New in 0.8.0: see where space goes, fix it in one pick
 

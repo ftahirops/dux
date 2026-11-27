@@ -90,6 +90,12 @@ pub struct Settings {
     pub max_alerts_per_hour: usize,
     /// Only these mount points, if set.
     pub only_mounts: Vec<String>,
+    /// Alert on projected time-to-full (off by default: noisy on build hosts).
+    pub fill_alerts: bool,
+    /// Alert on growth bursts (off by default).
+    pub burst_alerts: bool,
+    /// wall broadcasts only when a disk is at least this full (or out of inodes).
+    pub wall_pct: f64,
     /// Walk local filesystems to say which folder is growing.
     pub walk: bool,
     pub walk_every: Duration,
@@ -128,6 +134,9 @@ impl Default for Settings {
             wall_max_per_hour: 4,
             max_alerts_per_hour: 30,
             only_mounts: Vec::new(),
+            fill_alerts: false,
+            burst_alerts: false,
+            wall_pct: 97.0,
             walk: true,
             walk_every: Duration::from_secs(3600),
             walk_min_gap: Duration::from_secs(600),
@@ -225,6 +234,14 @@ impl Settings {
         s.wall_max_per_hour = num("DUX_WALL_MAX_PER_HOUR", s.wall_max_per_hour as f64)? as usize;
         s.max_alerts_per_hour =
             num("DUX_MAX_ALERTS_PER_HOUR", s.max_alerts_per_hour as f64)? as usize;
+        let yes = |v: &str| matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true" | "on");
+        if let Some(v) = get("DUX_FILL_ALERTS") {
+            s.fill_alerts = yes(&v);
+        }
+        if let Some(v) = get("DUX_BURST_ALERTS") {
+            s.burst_alerts = yes(&v);
+        }
+        s.wall_pct = pct("DUX_WALL_PCT", s.wall_pct)?;
         if let Some(v) = get("DUX_WALK") {
             s.walk = matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true" | "on");
         }
@@ -462,6 +479,9 @@ pub struct Sentinel {
     walls: VecDeque<i64>,
     sent: VecDeque<i64>,
     suppressed: usize,
+    /// Alert keys allowed to broadcast with wall this tick: space or inode
+    /// alerts on a disk that is critically full.
+    wall_eligible: std::collections::HashSet<String>,
     was_readonly: HashMap<String, bool>,
 }
 
@@ -490,6 +510,7 @@ impl Sentinel {
             walls: VecDeque::new(),
             sent: VecDeque::new(),
             suppressed: 0,
+            wall_eligible: Default::default(),
             was_readonly: HashMap::new(),
         }
     }
@@ -661,6 +682,9 @@ impl Sentinel {
 
         // space
         let key = format!("space:{path}");
+        if pct >= self.settings.wall_pct {
+            self.wall_eligible.insert(key.clone());
+        }
         let lvl = self.pct_level(&key, pct, self.settings.warn_pct, self.settings.crit_pct);
         let title = if lvl == Level::Ok {
             format!("{path} is back to {pct:.0}% full")
@@ -682,6 +706,9 @@ impl Sentinel {
         // inodes
         if let Some(ip) = u.inode_pct() {
             let key = format!("inodes:{path}");
+            if ip >= self.settings.wall_pct {
+                self.wall_eligible.insert(key.clone());
+            }
             let lvl = self.pct_level(
                 &key,
                 ip,
@@ -711,7 +738,9 @@ impl Sentinel {
         }
 
         // growth-based conditions
-        if u.total >= self.settings.min_fs_bytes {
+        if u.total >= self.settings.min_fs_bytes
+            && (self.settings.fill_alerts || self.settings.burst_alerts)
+        {
             if let Some((rate, grew, span)) = self.growth(&path, now) {
                 // fill
                 let key = format!("fill:{path}");
@@ -735,6 +764,11 @@ impl Sentinel {
                 } else {
                     Level::Ok
                 };
+                let lvl = if self.settings.fill_alerts {
+                    lvl
+                } else {
+                    Level::Ok
+                };
                 let title = if lvl == Level::Ok {
                     format!("{path} is no longer on track to fill")
                 } else {
@@ -753,6 +787,11 @@ impl Sentinel {
                 let key = format!("burst:{path}");
                 let lvl = if grew >= self.settings.burst_bytes {
                     Level::Warning
+                } else {
+                    Level::Ok
+                };
+                let lvl = if self.settings.burst_alerts {
+                    lvl
                 } else {
                     Level::Ok
                 };
@@ -822,7 +861,7 @@ impl Sentinel {
             }
             self.sent.push_back(now);
             let mut wall = false;
-            if a.severity == Severity::Critical {
+            if a.severity == Severity::Critical && self.wall_eligible.contains(&a.key) {
                 let mount = a
                     .key
                     .split_once(':')
@@ -840,6 +879,7 @@ impl Sentinel {
             }
             out.push(Decision { alert: a, wall });
         }
+        self.wall_eligible.clear();
         out
     }
 }
@@ -1250,7 +1290,12 @@ mod tests {
 
     #[test]
     fn fill_and_burst_need_history_then_fire() {
-        let mut s = Sentinel::new(Settings::default(), "h".into());
+        let st = Settings {
+            fill_alerts: true,
+            burst_alerts: true,
+            ..Settings::default()
+        };
+        let mut s = Sentinel::new(st, "h".into());
         let m = mount("/data");
         // 1000 GiB disk, 50% used, growing 6 GiB per 2 minutes = 180 GiB/h.
         let mut used = 500.0;
@@ -1273,7 +1318,11 @@ mod tests {
 
     #[test]
     fn fill_goes_critical_when_close() {
-        let mut s = Sentinel::new(Settings::default(), "h".into());
+        let st = Settings {
+            fill_alerts: true,
+            ..Settings::default()
+        };
+        let mut s = Sentinel::new(st, "h".into());
         let m = mount("/");
         // 100 GiB disk at 70%: 30 GiB free, growing 0.1 GiB per 2 s = 180 GiB/h -> minutes.
         let mut out = Vec::new();
@@ -1300,6 +1349,48 @@ mod tests {
     fn remote_fstypes() {
         assert!(is_remote("fuse.sshfs") && is_remote("nfs4") && is_remote("cifs"));
         assert!(!is_remote("ext4") && !is_remote("xfs") && !is_remote("tmpfs"));
+    }
+
+    #[test]
+    fn wall_only_for_a_critically_full_disk_never_for_projections() {
+        // Defaults: fill and burst alerts are off entirely.
+        let mut s = Sentinel::new(Settings::default(), "h".into());
+        let m = mount("/");
+        let mut out = Vec::new();
+        let mut used = 70.0;
+        for t in (0..=400).step_by(2) {
+            out.extend(
+                {
+                    let a = s.observe(&m, &usage(100, used), t);
+                    s.admit(a, t)
+                }
+                .into_iter()
+                .map(|d| (d.alert.key, d.wall)),
+            );
+            used += 0.02;
+        }
+        assert!(
+            !out.iter()
+                .any(|(k, _)| k.starts_with("fill:") || k.starts_with("burst:")),
+            "{out:?}"
+        );
+        // 95% critical: alert, but no broadcast below 97%.
+        let d = {
+            let a = s.observe(&m, &usage(100, 95.5), 500);
+            s.admit(a, 500)
+        };
+        assert!(d.iter().any(|x| x.alert.key == "space:/"
+            && x.alert.severity == Severity::Critical
+            && !x.wall));
+        // 97%+: broadcast.
+        let d = {
+            let a = s.observe(&m, &usage(100, 98.0), 1500);
+            s.admit(a, 1500)
+        };
+        assert!(
+            d.iter().any(|x| x.alert.key == "space:/" && x.wall),
+            "{d:?}"
+        );
     }
 
     #[test]
@@ -1339,14 +1430,21 @@ mod tests {
             key: k.into(),
             host: "h".into(),
         };
+        let elig = |s: &mut Sentinel, k: &str| {
+            s.wall_eligible.insert(k.to_string());
+        };
+        elig(&mut s, "space:/");
         let d = s.admit(vec![crit("space:/")], 0);
         assert!(d[0].wall);
         // Same mount within 30 min: alert goes out, wall does not.
         let d = s.admit(vec![crit("fill:/")], 600);
         assert!(!d[0].wall);
+        elig(&mut s, "space:/");
         assert!(s.admit(vec![crit("space:/")], 1800)[0].wall);
         // Hourly cap of 4 walls across mounts.
+        elig(&mut s, "space:/a");
         assert!(s.admit(vec![crit("space:/a")], 1801)[0].wall);
+        elig(&mut s, "space:/b");
         assert!(s.admit(vec![crit("space:/b")], 1802)[0].wall);
         assert!(
             !s.admit(vec![crit("space:/c")], 1803)[0].wall,

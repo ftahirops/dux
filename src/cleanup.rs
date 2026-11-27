@@ -71,6 +71,8 @@ pub enum Action {
     TailAndTruncate { path: PathBuf, keep: u64 },
     /// Remove a build-output folder (`node_modules`, `target`...) and everything in it.
     RemoveTree { path: PathBuf },
+    /// Remove a file or folder the user picked by hand (browser `d`).
+    RemoveUserPath { path: PathBuf },
 }
 
 #[derive(Clone, Debug)]
@@ -493,6 +495,20 @@ fn audit(entry: serde_json::Value) {
 
 /// Apply one action. Re-checks safety at run time, not only when planning.
 pub fn apply(item: &Item) -> Result<()> {
+    let target = match &item.action {
+        Action::Remove { path }
+        | Action::TailAndTruncate { path, .. }
+        | Action::RemoveTree { path }
+        | Action::RemoveUserPath { path } => Some(path.clone()),
+        Action::Run { .. } => None,
+    };
+    if let Some(p) = &target {
+        anyhow::ensure!(
+            !crate::protect::is_protected(p),
+            "{} is on the never-touch list",
+            p.display()
+        );
+    }
     anyhow::ensure!(
         !Path::new(KILL_SWITCH).exists(),
         "actions disabled by {KILL_SWITCH}"
@@ -533,6 +549,7 @@ pub fn apply(item: &Item) -> Result<()> {
             tail_and_truncate(path, *keep)
         }
         Action::RemoveTree { path } => remove_tree(path),
+        Action::RemoveUserPath { path } => remove_user_path(path),
     };
     audit(serde_json::json!({
         "t": crate::util::now_secs(),
@@ -544,6 +561,66 @@ pub fn apply(item: &Item) -> Result<()> {
         "error": result.as_ref().err().map(|e| format!("{e:#}")),
     }));
     result
+}
+
+/// Paths a user may never delete from the browser: the system and the
+/// top-level folders themselves.
+pub fn system_path(p: &str) -> bool {
+    const UNDER: &[&str] = &[
+        "/proc",
+        "/sys",
+        "/dev",
+        "/boot",
+        "/etc",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/lib",
+        "/lib32",
+        "/lib64",
+        "/run",
+        "/snap",
+        "/var/lib/dpkg",
+        "/var/lib/apt",
+        "/var/lib/rpm",
+        "/var/lib/systemd",
+    ];
+    let p = p.trim_end_matches('/');
+    p.is_empty()
+        || p.matches('/').count() <= 1
+        || p == "/var/lib"
+        || p == "/var/log"
+        || p == "/home"
+        || UNDER
+            .iter()
+            .any(|u| p == *u || p.starts_with(&format!("{u}/")))
+}
+
+/// Delete a file or folder the user chose. Refuses system paths, top-level
+/// folders, symlinked folders, folders with a mount inside, and open files.
+pub fn remove_user_path(path: &Path) -> Result<()> {
+    let p = path.to_string_lossy().into_owned();
+    anyhow::ensure!(
+        !system_path(&p),
+        "{p} is a system or top-level path; dux will not delete it"
+    );
+    let m = std::fs::symlink_metadata(path)?;
+    if m.is_dir() {
+        let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
+        let inside = mounts
+            .lines()
+            .filter_map(|l| l.split(' ').nth(4))
+            .map(crate::sentinel::unescape_mount)
+            .any(|mp| mp == p || mp.starts_with(&format!("{p}/")));
+        anyhow::ensure!(!inside, "{p} has a filesystem mounted inside it");
+        std::fs::remove_dir_all(path).with_context(|| format!("removing {p}"))
+    } else {
+        anyhow::ensure!(
+            !open_files().contains(&(m.dev(), m.ino())),
+            "{p} is open by a running process"
+        );
+        std::fs::remove_file(path).with_context(|| format!("removing {p}"))
+    }
 }
 
 /// Remove a build-output folder. Refuses anything that is not a real folder
@@ -642,6 +719,38 @@ mod tests {
         remove_tree(&r.join("proj/node_modules")).unwrap();
         assert!(!r.join("proj/node_modules").exists());
         assert!(r.join("proj/src").exists());
+        std::fs::remove_dir_all(&r).unwrap();
+    }
+
+    #[test]
+    fn user_deletes_refuse_system_and_top_level_paths() {
+        for p in [
+            "/",
+            "/home",
+            "/root",
+            "/tmp",
+            "/var",
+            "/var/log",
+            "/etc/nginx",
+            "/usr/bin/x",
+            "/boot/vmlinuz",
+            "/var/lib/dpkg/status",
+        ] {
+            assert!(system_path(p), "{p} must be refused");
+        }
+        for p in [
+            "/home/ann/Downloads/big.iso",
+            "/srv/app/cache",
+            "/var/log/app/old.log",
+            "/root/tmp/x",
+        ] {
+            assert!(!system_path(p), "{p} may be deleted by the user");
+        }
+        let r = tmp("userdel");
+        std::fs::create_dir_all(r.join("a/b")).unwrap();
+        std::fs::write(r.join("a/b/f"), b"x").unwrap();
+        remove_user_path(&r.join("a")).unwrap();
+        assert!(!r.join("a").exists());
         std::fs::remove_dir_all(&r).unwrap();
     }
 
@@ -805,6 +914,7 @@ mod tests {
                 }
                 Action::Remove { path } => format!("rm:{}", path.display()),
                 Action::RemoveTree { path } => format!("rmtree:{}", path.display()),
+                Action::RemoveUserPath { path } => format!("rmuser:{}", path.display()),
             })
             .collect();
         kinds.sort();

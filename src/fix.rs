@@ -160,6 +160,7 @@ pub fn assess(item: Item) -> Suggestion {
             }
         }
         Action::TailAndTruncate { .. } => (Safety::Caution, "Empties a big active log in place; its last 10 MiB are saved as .dux-tail and the app keeps writing.", "Older lines are gone; the saved tail and rotated copies remain."),
+        Action::RemoveUserPath { .. } => (Safety::Risky, "Deletes a file or folder you picked; dux cannot know if you still need it.", "Only from your own backup."),
         Action::RemoveTree { .. } => (Safety::Caution, "Deletes build output (node_modules, target, .venv...). Source code and git history are untouched.", "Rebuild with the project's tools: npm install, cargo build..."),
     };
     Suggestion {
@@ -242,6 +243,25 @@ fn read_line(prompt: &str) -> String {
     line.trim().to_string()
 }
 
+/// The path a suggestion would change, if any.
+pub fn target_path(s: &Suggestion) -> Option<String> {
+    match &s.item.as_ref()?.action {
+        Action::Remove { path }
+        | Action::TailAndTruncate { path, .. }
+        | Action::RemoveTree { path }
+        | Action::RemoveUserPath { path } => Some(path.to_string_lossy().into_owned()),
+        Action::Run { .. } => None,
+    }
+}
+
+/// Drop suggestions on the never-touch list; returns how many were dropped.
+pub fn drop_protected(s: &mut Vec<Suggestion>) -> usize {
+    let list = crate::protect::load();
+    let before = s.len();
+    s.retain(|x| target_path(x).is_none_or(|p| !crate::protect::covered(&list, &p)));
+    before - s.len()
+}
+
 /// Print the numbered fix list, then apply what the user picks.
 /// Returns bytes the applied actions were expected to free.
 pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Result<u64> {
@@ -249,6 +269,13 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
     if s.is_empty() {
         println!("\nFixes: nothing to suggest for {title}.");
         return Ok(0);
+    }
+    let skipped = drop_protected(&mut s);
+    if skipped > 0 {
+        println!(
+            "\n({skipped} suggestions skipped: on the never-touch list {})",
+            crate::protect::FILE
+        );
     }
     s.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
     let mut t = [0u64; 3];

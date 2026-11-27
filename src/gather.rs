@@ -202,6 +202,7 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
             size as u64,
         ));
     }
+    crate::fix::drop_protected(&mut fixes);
     fixes.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
     g.fixes = fixes;
     g
