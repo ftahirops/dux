@@ -7,17 +7,70 @@ and a fast walker instead of a per-file database, so it costs almost nothing to
 run and never falls behind.
 
 ```
+dux ui                 # terminal UI: Disks, Folders, Docker, Logs, Projects, Fixes
+dux web                # local web dashboard (token-protected, read-only by default)
+dux doctor /           # disk health report in ~15 s, ending with a fix list
+dux docker             # where Docker's space goes, with fixes
+dux logs               # every log, its growth and its writer, with fixes
+dux pp                 # per project / app: source, build output, git, with fixes
+dux biggest            # biggest files and folders
+dux fix                # every fix on the host in one rated list
 dux sentinel           # the always-on monitor (installed as dux-sentinel.service)
-dux doctor /           # one-shot disk health report in ~15 s
 dux where /            # where the space is, and what grew since last time (instant)
-dux cleanup --level 2  # preview a safe cleanup; add --apply to run it
-dux notify-test        # send a test alert to every configured channel
 ```
 
-> **Release status: 0.7.0 is a pre-release.** The new design is built and load
-> tested (see [measured results](#measured-results)), but it has not yet had a
-> multi-day soak on a production host. Cleanup level 4, the setup wizard and a
-> TUI on the new data are not built yet.
+> **Release status: 0.8.0.** Built and load tested (see [measured results](#measured-results))
+> on Ubuntu 24.04 hosts; a multi-day soak on a busy production host is still to come. Not built
+> yet: opt-in level 4 cleanup categories and the setup wizard.
+
+---
+
+## New in 0.8.0: see where space goes, fix it in one pick
+
+Every report now ends with a **numbered fix list**. Each fix is rated
+**SAFE** (rebuilds itself or is an old copy), **CAUTION** (recoverable, but
+costs a re-download, a rebuild or old log lines) or **RISKY** (can lose
+data), with what it does, how much it frees and how to undo it.
+
+```
+Fixes for logs: SAFE 9.26 MiB, CAUTION 1.07 GiB, RISKY 0 B
+    1. SAFE      7.96 MiB  remove rotated log /var/log/syslog.1
+    3. CAUTION 831.55 MiB  truncate .../xgm-postgres-json.log (keep its last 10 MiB)
+Choose: numbers (1,3,5-7) | safe | all | truncate | remove | clean | Enter = nothing:
+```
+
+| You type | It applies |
+|---|---|
+| `1,3,5-7` | those items |
+| `safe` | every SAFE item |
+| `all` | every SAFE and CAUTION item |
+| `truncate` / `remove` / `clean` | every log truncation / file or folder removal / cleanup command shown |
+
+RISKY items (deleting one of your big files, an unused Docker volume) can
+only be picked by number and need `delete` typed. In scripts use
+`--select 1,3`, `--apply-safe` or `--apply-all`; scripts cannot pick RISKY
+items. Every action is logged to `/var/log/dux/actions.log`.
+
+| Command | What it shows | Fixes it offers |
+|---|---|---|
+| `dux docker` | images (unique vs shared, unused), container writable layers and logs, volumes, build cache, real folder sizes under the Docker and containerd roots, per compose project | build cache, dangling and unused images, old stopped containers, oversized container logs, unused volumes (RISKY) |
+| `dux logs` | journal, system, Docker and app logs; active vs rotated; growth per minute; the process writing each | rotated copies, truncating big active text logs (keeps the last 10 MiB), journal vacuum |
+| `dux pp` | every project found by its marker files (`package.json`, `Cargo.toml`, `go.mod`, `.git`...), split into source, build output and git history, with idle days; app data folders; compose projects | removing build output (`node_modules`, `target`, `.venv`, `dist`...) |
+| `dux biggest` | biggest files (owner, age) and folders, plus growth since the last snapshot | deleting a specific big file (RISKY) |
+| `dux doctor` | the whole-disk health report | package caches, temp files, core dumps, Docker build cache, deleted-but-open files |
+| `dux fix` | all of the above in one list | all of the above |
+
+**`dux ui`** is a terminal UI with tabs for Disks, Folders (drill in with
+Enter), Docker, Logs, Projects and Fixes (Space toggles, `s` picks all SAFE,
+`a` picks SAFE + CAUTION, Enter applies after a confirm screen).
+
+**`dux web`** serves the same view in a browser. It listens on 127.0.0.1 and
+prints a URL with a random access token. It is read-only unless started with
+`--allow-actions`. Applying is a POST that must carry the token in a header,
+so other websites cannot trigger it.
+
+Binary logs (journald files, sysstat data) are never truncated or removed by
+path; the journal is only shrunk with `journalctl --vacuum-*`.
 
 ---
 
@@ -125,8 +178,8 @@ Load tests on throwaway filesystems:
 
 ```bash
 # Debian/Ubuntu (glibc 2.39+, e.g. Ubuntu 24.04, Debian 13)
-curl -LO https://github.com/ftahirops/dux/releases/download/v0.7.1/dux_0.7.1-1_amd64.deb
-sudo apt install ./dux_0.7.1-1_amd64.deb
+curl -LO https://github.com/ftahirops/dux/releases/download/v0.8.0/dux_0.8.0-1_amd64.deb
+sudo apt install ./dux_0.8.0-1_amd64.deb
 ```
 
 The package:

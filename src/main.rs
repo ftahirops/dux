@@ -7,6 +7,7 @@ mod docker;
 mod emit;
 mod fault;
 mod fix;
+mod gather;
 mod guard;
 mod insight;
 mod notify;
@@ -18,9 +19,11 @@ mod snapshot;
 mod store;
 mod tui;
 mod tunnel;
+mod ui;
 mod util;
 mod walker;
 mod watch;
+mod web;
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
@@ -415,6 +418,30 @@ enum Cmd {
         #[arg(long)]
         quick: bool,
     },
+    /// Terminal UI on the new design: Disks, Folders, Docker, Logs, Projects
+    /// and Fixes (pick with Space, s, a; apply with Enter).
+    Ui {
+        #[arg(default_value = "/")]
+        path: PathBuf,
+    },
+    /// Local web dashboard with the same data and fix picker. Listens on
+    /// 127.0.0.1 and needs a token; read-only unless --allow-actions.
+    Web {
+        /// Filesystem to report on
+        #[arg(default_value = "/")]
+        path: PathBuf,
+        #[arg(long, default_value = "127.0.0.1:8099")]
+        listen: String,
+        /// Access token (default: a new random one, printed at start)
+        #[arg(long)]
+        token: Option<String>,
+        /// Allow applying fixes from the dashboard
+        #[arg(long)]
+        allow_actions: bool,
+        /// Seconds between background refreshes
+        #[arg(long, default_value_t = 900)]
+        refresh: u64,
+    },
     /// Send a test alert to every configured channel
     NotifyTest {
         /// KEY=VALUE settings file with channels
@@ -516,6 +543,8 @@ fn real_main() -> Result<()> {
                 | Cmd::Logs { .. }
                 | Cmd::Pp { .. }
                 | Cmd::Fix { .. }
+                | Cmd::Ui { .. }
+                | Cmd::Web { .. }
         )
     );
     let db = match &cli.db {
@@ -1505,6 +1534,40 @@ fn real_main() -> Result<()> {
                     human(before.used.saturating_sub(after.used) as i64)
                 );
             }
+        }
+        Some(Cmd::Ui { path }) => {
+            ui::run(&path.to_string_lossy())?;
+        }
+        Some(Cmd::Web {
+            path,
+            listen,
+            token,
+            allow_actions,
+            refresh,
+        }) => {
+            let token = token.unwrap_or_else(web::random_token);
+            let loopback = listen.starts_with("127.")
+                || listen.starts_with("localhost")
+                || listen.starts_with("[::1]");
+            if !loopback {
+                eprintln!("dux web: WARNING listening on {listen}, reachable from other machines; keep the token secret");
+            }
+            println!("dux web: open http://{listen}/?token={token}");
+            println!(
+                "dux web: {}",
+                if allow_actions {
+                    "fixes CAN be applied from the page"
+                } else {
+                    "read-only (add --allow-actions to apply fixes)"
+                }
+            );
+            let srv = web::Server::new(
+                path.to_string_lossy().into_owned(),
+                token,
+                allow_actions,
+                refresh,
+            );
+            web::serve(srv, &listen)?;
         }
         Some(Cmd::NotifyTest { config, severity }) => {
             init_alert_logging();

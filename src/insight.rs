@@ -167,17 +167,8 @@ impl LogReport {
     }
 }
 
-/// Find every log of at least `min_bytes` on `root`'s filesystem, then sample
-/// the growth of the largest active ones for `sample_secs`.
-pub fn logs(root: &str, threads: usize, min_bytes: u64, sample_secs: u64) -> Result<LogReport> {
-    let opts = WalkOptions {
-        filter: Some(Box::new(move |f: &FileView| {
-            f.bytes >= min_bytes && is_log(f.dir, f.name)
-        })),
-        max_found: 200_000,
-        progress: None,
-    };
-    let (tree, found) = walker::walk_with(root, threads, opts)?;
+/// Classify found log files: kind, rotated, protected, writer, container.
+pub fn logs_from_found(found: Vec<FoundFile>) -> Vec<LogFile> {
     let owners = open_file_owners();
     let mut logs: Vec<LogFile> = found
         .into_iter()
@@ -201,6 +192,22 @@ pub fn logs(root: &str, threads: usize, min_bytes: u64, sample_secs: u64) -> Res
         })
         .collect();
     logs.sort_by_key(|l| std::cmp::Reverse(l.bytes));
+    logs
+}
+
+/// Find every log of at least `min_bytes` on `root`'s filesystem, then sample
+/// the growth of the largest active ones for `sample_secs`.
+pub fn logs(root: &str, threads: usize, min_bytes: u64, sample_secs: u64) -> Result<LogReport> {
+    let opts = WalkOptions {
+        filter: Some(Box::new(move |f: &FileView| {
+            f.bytes >= min_bytes && is_log(f.dir, f.name)
+        })),
+        max_found: 200_000,
+        progress: None,
+    };
+    let (tree, found) = walker::walk_with(root, threads, opts)?;
+    let mut logs = logs_from_found(found);
+
     if sample_secs > 0 {
         let watch: Vec<usize> = logs
             .iter()
