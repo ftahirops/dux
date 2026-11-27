@@ -1,0 +1,34 @@
+[Unit]
+Description=dux sentinel: disk alerts and folder attribution
+Documentation=man:dux(1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/dux sentinel --config /etc/dux/notify.conf
+Restart=always
+RestartSec=5
+WatchdogSec=60
+Nice=10
+CPUQuota=50%
+# No MemoryMax: the kernel charges the file metadata cache a walk reads to
+# this unit, and a tight limit evicts it mid-walk and makes walks thrash.
+# The process itself stays near 5 MB idle and about 100 MB while walking.
+Environment=MALLOC_ARENA_MAX=2
+# Folder snapshots and growth history live here.
+StateDirectory=dux/sentinel
+TasksMax=32
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target
