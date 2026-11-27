@@ -133,7 +133,7 @@ fn classify_log(path: &str) -> LogKind {
     }
 }
 
-fn container_name(path: &str) -> Option<String> {
+pub fn container_name(path: &str) -> Option<String> {
     let id = path.split("/containers/").nth(1)?.split('/').next()?;
     let cfg = std::fs::read_to_string(format!(
         "{}/containers/{id}/config.v2.json",

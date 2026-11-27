@@ -10,6 +10,7 @@ mod fix;
 mod gather;
 mod guard;
 mod insight;
+mod live;
 mod notify;
 mod probes;
 mod query;
@@ -212,10 +213,14 @@ enum Cmd {
     },
     /// Explain what an indexed file belongs to and whether/how it may be removed
     Explain { path: PathBuf },
-    /// ncdu-style interactive browser
+    /// Terminal UI (same as plain `dux`): Disks, Activity, Folders, Docker,
+    /// Logs, Projects, Fixes
     Tui {
-        #[arg(default_value = ".")]
+        #[arg(default_value = "/")]
         path: PathBuf,
+        /// Open the old 0.6 browser on the per-file index instead
+        #[arg(long, hide = true)]
+        legacy: bool,
     },
     /// Index status
     Status,
@@ -442,6 +447,19 @@ enum Cmd {
         #[arg(long, default_value_t = 900)]
         refresh: u64,
     },
+    /// Live disk I/O: per-disk speed, the processes writing and reading most,
+    /// each file being written (speed, growth, writer) or read, and full
+    /// details of the top writers so a culprit can be tracked down.
+    Io {
+        /// Seconds between samples
+        #[arg(long, default_value_t = 2)]
+        interval: u64,
+        /// Number of samples to print (0 = until Ctrl-C)
+        #[arg(long, default_value_t = 1)]
+        count: u32,
+        #[arg(long, default_value_t = 15)]
+        top: usize,
+    },
     /// Send a test alert to every configured channel
     NotifyTest {
         /// KEY=VALUE settings file with channels
@@ -531,7 +549,7 @@ fn real_main() -> Result<()> {
     // where HOME is unset and /var/lib/dux is read-only).
     let index_free = matches!(
         cli.cmd,
-        Some(
+        None | Some(
             Cmd::Sentinel { .. }
                 | Cmd::NotifyTest { .. }
                 | Cmd::Walk { .. }
@@ -544,6 +562,8 @@ fn real_main() -> Result<()> {
                 | Cmd::Pp { .. }
                 | Cmd::Fix { .. }
                 | Cmd::Ui { .. }
+                | Cmd::Io { .. }
+                | Cmd::Tui { legacy: false, .. }
                 | Cmd::Web { .. }
         )
     );
@@ -1569,6 +1589,130 @@ fn real_main() -> Result<()> {
             );
             web::serve(srv, &listen)?;
         }
+        Some(Cmd::Io {
+            interval,
+            count,
+            top,
+        }) => {
+            let mut s = live::Sampler::default();
+            let _ = s.sample();
+            let mut n = 0u32;
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
+                let l = s.sample();
+                n += 1;
+                let r = live::rate_text;
+                if json {
+                    let w: Vec<_> = l.writing.iter().take(top).map(|x| serde_json::json!({"path": x.path, "pid": x.pid, "process": x.process, "unit": x.unit, "write_bps": x.write_bps, "growth_bps": x.growth_bps, "size": x.size})).collect();
+                    let rd: Vec<_> = l.reading.iter().take(top).map(|x| serde_json::json!({"path": x.path, "pid": x.pid, "process": x.process, "read_bps": x.read_bps})).collect();
+                    let p: Vec<_> = l.procs.iter().take(top).map(|x| serde_json::json!({"pid": x.pid, "name": x.name, "unit": x.unit, "read_bps": x.read_bps, "write_bps": x.write_bps})).collect();
+                    let d: Vec<_> = l.disks.iter().map(|x| serde_json::json!({"disk": x.name, "read_bps": x.read_bps, "write_bps": x.write_bps})).collect();
+                    println!(
+                        "{}",
+                        serde_json::json!({"disks": d, "processes": p, "writing": w, "reading": rd})
+                    );
+                } else {
+                    let (tr, tw) = l
+                        .disks
+                        .iter()
+                        .fold((0.0, 0.0), |a, x| (a.0 + x.read_bps, a.1 + x.write_bps));
+                    println!(
+                        "Disk I/O over {:.1}s: read {}  write {}",
+                        l.seconds,
+                        r(tr),
+                        r(tw)
+                    );
+                    for x in &l.disks {
+                        println!(
+                            "  {:<10} read {:>12}  write {:>12}",
+                            x.name,
+                            r(x.read_bps),
+                            r(x.write_bps)
+                        );
+                    }
+                    println!("\nWho is writing and reading       writes        reads  service / container");
+                    for p in l.procs.iter().take(top) {
+                        println!(
+                            "  {:>7} {:<22} {:>12} {:>12}  {}",
+                            p.pid,
+                            p.name,
+                            r(p.write_bps),
+                            r(p.read_bps),
+                            p.unit
+                        );
+                    }
+                    println!("\nWriting now      write       growth        size  pid process        file");
+                    for x in l.writing.iter().take(top) {
+                        let g = if x.growth_bps > 0.0 {
+                            format!("+{}", r(x.growth_bps))
+                        } else {
+                            "-".into()
+                        };
+                        let who = if x.unit.starts_with("docker:") {
+                            format!("  [{}]", x.unit)
+                        } else {
+                            String::new()
+                        };
+                        println!(
+                            "  {:>13} {:>12} {:>11}  {:>6} {:<14} {}{who}",
+                            r(x.write_bps),
+                            g,
+                            human(x.size as i64),
+                            x.pid,
+                            x.process,
+                            x.path
+                        );
+                    }
+                    println!("\nReading now       read  pid process        file");
+                    for x in l.reading.iter().take(top) {
+                        println!(
+                            "  {:>13}  {:>6} {:<14} {}",
+                            r(x.read_bps),
+                            x.pid,
+                            x.process,
+                            x.path
+                        );
+                    }
+                    let mut seen = std::collections::BTreeSet::new();
+                    let writers: Vec<i32> = l
+                        .writing
+                        .iter()
+                        .map(|x| x.pid)
+                        .filter(|p| seen.insert(*p))
+                        .take(3)
+                        .collect();
+                    for pid in writers {
+                        if let Some(d) = live::details(pid) {
+                            println!(
+                                "\nWriter pid {} {}  (user {}, running {}, {} threads, {} memory)",
+                                d.pid,
+                                d.name,
+                                d.user,
+                                insight::age_text(
+                                    util::now_secs() - d.running_secs as i64,
+                                    util::now_secs()
+                                ),
+                                d.threads,
+                                human(d.rss_bytes as i64)
+                            );
+                            println!("  command  {}", d.cmdline);
+                            println!("  exe      {}   cwd {}", d.exe, d.cwd);
+                            println!(
+                                "  parent   pid {} {}   service/container {}",
+                                d.ppid,
+                                d.parent,
+                                if d.unit.is_empty() { "-" } else { &d.unit }
+                            );
+                            println!("  next     {}", live::next_steps(&d));
+                        }
+                    }
+                    println!();
+                }
+                if count != 0 && n >= count {
+                    break;
+                }
+            }
+        }
         Some(Cmd::NotifyTest { config, severity }) => {
             init_alert_logging();
             let cfg = notify::NotifyConfig::load(&config)?;
@@ -1837,7 +1981,13 @@ fn real_main() -> Result<()> {
             );
             println!("  TOTAL RECLAIMABLE               {}", human(waste.total()));
         }
-        Some(Cmd::Tui { path }) => {
+        Some(Cmd::Tui {
+            path,
+            legacy: false,
+        }) => {
+            ui::run(&path.to_string_lossy())?;
+        }
+        Some(Cmd::Tui { path, legacy: true }) => {
             // Resolve the start node, then DROP this connection before the TUI runs
             // — run() owns its own reopenable store, so we must not pin this one for
             // the whole session (it would hold a deleted inode open after a rescan).
@@ -1972,16 +2122,9 @@ fn real_main() -> Result<()> {
             TunnelCmd::Keygen { force } => tunnel::keygen(force)?,
         },
         None => {
-            // bare `dux` or `dux <path>` opens the TUI. Drop this connection before
-            // the TUI runs (run() owns its own reopenable store — see above).
-            let start = {
-                let store = Store::open_ro(&db)?;
-                match &cli.path {
-                    Some(p) => resolve_start(&store, p)?,
-                    None => None,
-                }
-            };
-            tui::run(&db, start)?;
+            // Bare `dux` or `dux <path>` opens the 0.7+ terminal UI.
+            let root = cli.path.clone().unwrap_or_else(|| PathBuf::from("/"));
+            ui::run(&root.to_string_lossy())?;
         }
     }
     Ok(())

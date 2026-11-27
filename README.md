@@ -7,7 +7,8 @@ and a fast walker instead of a per-file database, so it costs almost nothing to
 run and never falls behind.
 
 ```
-dux ui                 # terminal UI: Disks, Folders, Docker, Logs, Projects, Fixes
+dux                    # terminal UI: Disks, Activity, Folders, Docker, Logs, Projects, Fixes
+dux io                 # live: which files are being written/read, how fast, and by whom
 dux web                # local web dashboard (token-protected, read-only by default)
 dux doctor /           # disk health report in ~15 s, ending with a fix list
 dux docker             # where Docker's space goes, with fixes
@@ -19,11 +20,31 @@ dux sentinel           # the always-on monitor (installed as dux-sentinel.servic
 dux where /            # where the space is, and what grew since last time (instant)
 ```
 
-> **Release status: 0.8.0.** Built and load tested (see [measured results](#measured-results))
+> **Release status: 0.8.1.** Built and load tested (see [measured results](#measured-results))
 > on Ubuntu 24.04 hosts; a multi-day soak on a busy production host is still to come. Not built
 > yet: opt-in level 4 cleanup categories and the setup wizard.
 
 ---
+
+## New in 0.8.1: live I/O, and who is writing
+
+Plain `dux` now opens the new UI. Its **Activity** tab, and `dux io` on the
+command line, refresh every second and show:
+
+- **Disk I/O now:** read and write speed per disk.
+- **Who is writing and reading now:** processes with their service or container.
+- **Writing now:** each file being written, its write speed, size growth per second, size and writer.
+- **Writer details** for the selected file: pid, user, command line, executable,
+  working folder, parent process, service or container, how long it has run, and
+  the next commands to inspect or stop it (`systemctl status`, `docker logs`, `kill`).
+- **Reading now**, **growing now** (last minute) and **biggest changes** since the
+  last sentinel snapshot.
+
+It samples `/proc` directly (disk counters, per-process I/O, open file
+positions and sizes), so it needs no event stream and costs a few
+milliseconds per second while it is open. Container logs are attributed to
+the container, not to dockerd. The old 0.6 browser is still available as
+`dux tui --legacy`.
 
 ## New in 0.8.0: see where space goes, fix it in one pick
 
@@ -178,8 +199,8 @@ Load tests on throwaway filesystems:
 
 ```bash
 # Debian/Ubuntu (glibc 2.39+, e.g. Ubuntu 24.04, Debian 13)
-curl -LO https://github.com/ftahirops/dux/releases/download/v0.8.0/dux_0.8.0-1_amd64.deb
-sudo apt install ./dux_0.8.0-1_amd64.deb
+curl -LO https://github.com/ftahirops/dux/releases/download/v0.8.1/dux_0.8.1-1_amd64.deb
+sudo apt install ./dux_0.8.1-1_amd64.deb
 ```
 
 The package:

@@ -1,6 +1,7 @@
 //! `dux ui`: terminal UI on the 0.7 design.
 //!
-//! Tabs: 1 Disks, 2 Folders, 3 Docker, 4 Logs, 5 Projects, 6 Fixes.
+//! Tabs: 1 Disks, 2 Activity (live I/O and who is writing), 3 Folders,
+//! 4 Docker, 5 Logs, 6 Projects, 7 Fixes.
 //! Data comes from one background `gather` (disks show at once; the rest
 //! fills in when the walk finishes). In Fixes: Space toggles, s selects all
 //! SAFE, a selects SAFE+CAUTION, c clears, Enter applies after a confirm
@@ -26,13 +27,14 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::Duration;
 
-const TABS: [&str; 6] = [
+const TABS: [&str; 7] = [
     "1 Disks",
-    "2 Folders",
-    "3 Docker",
-    "4 Logs",
-    "5 Projects",
-    "6 Fixes",
+    "2 Activity",
+    "3 Folders",
+    "4 Docker",
+    "5 Logs",
+    "6 Projects",
+    "7 Fixes",
 ];
 
 #[derive(PartialEq)]
@@ -50,10 +52,16 @@ struct App {
     rx: Option<Receiver<Gathered>>,
     /// Folder navigation: child indexes from the tree root.
     path: Vec<usize>,
-    sel: [usize; 6],
+    sel: [usize; 7],
     picked: Vec<bool>,
     confirm: Confirm,
     message: String,
+    sampler: crate::live::Sampler,
+    live: crate::live::Live,
+    last_sample: Option<std::time::Instant>,
+    /// Folder changes since the sentinel's last snapshot, and its time.
+    changes: Vec<crate::walker::Change>,
+    changes_at: Option<i64>,
 }
 
 impl App {
@@ -74,6 +82,18 @@ impl App {
         if let Some(rx) = &self.rx {
             if let Ok(g) = rx.try_recv() {
                 self.picked = vec![false; g.fixes.len()];
+                self.changes.clear();
+                self.changes_at = None;
+                if let (Some(t), Ok(Some(prev))) = (
+                    g.tree.as_ref(),
+                    crate::snapshot::load(
+                        std::path::Path::new(crate::snapshot::DEFAULT_DIR),
+                        &self.root,
+                    ),
+                ) {
+                    self.changes = crate::walker::diff(&prev.root, &t.root, 16 << 20);
+                    self.changes_at = Some(prev.started_at);
+                }
                 self.data = g;
                 self.loading = false;
                 self.rx = None;
@@ -120,14 +140,15 @@ impl App {
     fn rows(&self) -> usize {
         match self.tab {
             0 => self.data.disks.len(),
-            1 => self.folder_children().len(),
-            2 => self
+            1 => self.live.writing.len(),
+            2 => self.folder_children().len(),
+            3 => self
                 .data
                 .docker
                 .as_ref()
                 .map_or(0, |d| d.containers.len() + d.images.len() + d.volumes.len()),
-            3 => self.data.logs.len(),
-            4 => self.data.projects.len() + self.data.apps.len(),
+            4 => self.data.logs.len(),
+            5 => self.data.projects.len() + self.data.apps.len(),
             _ => self.data.fixes.len(),
         }
     }
@@ -214,7 +235,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             .style(Style::default().add_modifier(Modifier::BOLD))
     };
     let hl = Style::default().bg(Color::DarkGray);
-    if app.loading && app.tab != 0 {
+    if app.loading && app.tab != 0 && app.tab != 1 {
         let msg = format!(
             "Walking {} ... {} entries so far. Disks are ready on tab 1.",
             app.root,
@@ -275,6 +296,284 @@ fn draw(f: &mut Frame, app: &mut App) {
                 f.render_stateful_widget(t, body, &mut state);
             }
             1 => {
+                let l = &app.live;
+                let rows4 = Layout::vertical([
+                    Constraint::Length(9),
+                    Constraint::Min(6),
+                    Constraint::Length(9),
+                    Constraint::Length(10),
+                ])
+                .split(body);
+                let top =
+                    Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
+                        .split(rows4[0]);
+                let (tr, tw) = l
+                    .disks
+                    .iter()
+                    .fold((0.0, 0.0), |a, x| (a.0 + x.read_bps, a.1 + x.write_bps));
+                let drows: Vec<Row> = l
+                    .disks
+                    .iter()
+                    .map(|x| {
+                        Row::new(vec![
+                            x.name.clone(),
+                            crate::live::rate_text(x.read_bps),
+                            crate::live::rate_text(x.write_bps),
+                        ])
+                    })
+                    .collect();
+                f.render_widget(
+                    Table::new(
+                        drows,
+                        [
+                            Constraint::Min(8),
+                            Constraint::Length(13),
+                            Constraint::Length(13),
+                        ],
+                    )
+                    .header(hdr(&["disk", "read", "write"]))
+                    .block(Block::default().borders(Borders::ALL).title(format!(
+                        " Disk I/O now: read {} · write {} ",
+                        crate::live::rate_text(tr),
+                        crate::live::rate_text(tw)
+                    ))),
+                    top[0],
+                );
+                let prows: Vec<Row> = l
+                    .procs
+                    .iter()
+                    .map(|p| {
+                        Row::new(vec![
+                            crate::live::rate_text(p.write_bps),
+                            crate::live::rate_text(p.read_bps),
+                            p.pid.to_string(),
+                            p.name.clone(),
+                            p.unit.clone(),
+                        ])
+                    })
+                    .collect();
+                f.render_widget(
+                    Table::new(
+                        prows,
+                        [
+                            Constraint::Length(12),
+                            Constraint::Length(12),
+                            Constraint::Length(8),
+                            Constraint::Length(16),
+                            Constraint::Min(10),
+                        ],
+                    )
+                    .header(hdr(&[
+                        "writes",
+                        "reads",
+                        "pid",
+                        "process",
+                        "service / container",
+                    ]))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Who is writing and reading now "),
+                    ),
+                    top[1],
+                );
+                let mid =
+                    Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
+                        .split(rows4[1]);
+                let wrows: Vec<Row> = l
+                    .writing
+                    .iter()
+                    .map(|x| {
+                        Row::new(vec![
+                            crate::live::rate_text(x.write_bps),
+                            if x.growth_bps > 0.0 {
+                                format!("+{}", crate::live::rate_text(x.growth_bps))
+                            } else {
+                                "-".into()
+                            },
+                            human(x.size as i64),
+                            format!("{} {}", x.pid, x.process),
+                            x.path.clone(),
+                        ])
+                    })
+                    .collect();
+                f.render_stateful_widget(
+                    Table::new(
+                        wrows,
+                        [
+                            Constraint::Length(12),
+                            Constraint::Length(13),
+                            Constraint::Length(11),
+                            Constraint::Length(18),
+                            Constraint::Min(20),
+                        ],
+                    )
+                    .header(hdr(&[
+                        "write",
+                        "growth",
+                        "size",
+                        "pid process",
+                        "file being written",
+                    ]))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Writing now (↑↓ select a row for writer details) "),
+                    )
+                    .row_highlight_style(hl),
+                    mid[0],
+                    &mut state,
+                );
+                let rrows: Vec<Row> = l
+                    .reading
+                    .iter()
+                    .map(|x| {
+                        Row::new(vec![
+                            crate::live::rate_text(x.read_bps),
+                            format!("{} {}", x.pid, x.process),
+                            x.path.clone(),
+                        ])
+                    })
+                    .collect();
+                f.render_widget(
+                    Table::new(
+                        rrows,
+                        [
+                            Constraint::Length(12),
+                            Constraint::Length(18),
+                            Constraint::Min(20),
+                        ],
+                    )
+                    .header(hdr(&["read", "pid process", "file being read"]))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Reading now "),
+                    ),
+                    mid[1],
+                );
+                let detail: Vec<Line> = match l
+                    .writing
+                    .get(app.sel[1])
+                    .and_then(|w| crate::live::details(w.pid).map(|d| (w, d)))
+                {
+                    Some((w, d)) => vec![
+                        Line::from(format!(
+                            "file    {}  ({}, writing {}, growing {})",
+                            w.path,
+                            human(w.size as i64),
+                            crate::live::rate_text(w.write_bps),
+                            crate::live::rate_text(w.growth_bps)
+                        )),
+                        Line::from(format!(
+                            "writer  pid {} {}  user {}  running {}  threads {}  memory {}",
+                            d.pid,
+                            d.name,
+                            d.user,
+                            crate::insight::age_text(
+                                crate::util::now_secs() - d.running_secs as i64,
+                                crate::util::now_secs()
+                            ),
+                            d.threads,
+                            human(d.rss_bytes as i64)
+                        )),
+                        Line::from(format!("command {}", d.cmdline)),
+                        Line::from(format!("exe     {}   cwd {}", d.exe, d.cwd)),
+                        Line::from(format!(
+                            "parent  pid {} {}   service/container {}",
+                            d.ppid,
+                            d.parent,
+                            if d.unit.is_empty() { "-" } else { &d.unit }
+                        )),
+                        Line::from(format!("next    {}", crate::live::next_steps(&d)))
+                            .style(Style::default().fg(Color::Cyan)),
+                    ],
+                    None => vec![Line::from(if l.seconds == 0.0 {
+                        "Sampling... (refreshes every second)"
+                    } else {
+                        "No file is being written right now."
+                    })],
+                };
+                f.render_widget(
+                    Paragraph::new(detail).wrap(Wrap { trim: true }).block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Writer details: who is writing the selected file "),
+                    ),
+                    rows4[2],
+                );
+                let bot =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(rows4[3]);
+                let grows: Vec<Row> = l
+                    .grown_minute
+                    .iter()
+                    .map(|(p, g, s)| {
+                        Row::new(vec![format!("+{}", human(*g)), human(*s as i64), p.clone()])
+                    })
+                    .collect();
+                f.render_widget(
+                    Table::new(
+                        grows,
+                        [
+                            Constraint::Length(12),
+                            Constraint::Length(11),
+                            Constraint::Min(20),
+                        ],
+                    )
+                    .header(hdr(&["grew", "size", "file"]))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Growing now (last minute) "),
+                    ),
+                    bot[0],
+                );
+                let crows: Vec<Row> = app
+                    .changes
+                    .iter()
+                    .take(30)
+                    .map(|c| {
+                        let dl = c.delta();
+                        Row::new(vec![
+                            format!(
+                                "{}{}",
+                                if dl >= 0 { "+" } else { "-" },
+                                crate::util::human_magnitude(dl)
+                            ),
+                            human(c.after as i64),
+                            c.path.clone(),
+                        ])
+                        .style(Style::default().fg(if dl >= 0 {
+                            Color::Yellow
+                        } else {
+                            Color::Green
+                        }))
+                    })
+                    .collect();
+                let since = match app.changes_at {
+                    Some(t) => format!(
+                        " Biggest changes since the snapshot {} ago ",
+                        crate::util::ago(t)
+                    ),
+                    None if app.loading => " Biggest changes: walking... ".to_string(),
+                    None => " Biggest changes: no sentinel snapshot yet ".to_string(),
+                };
+                f.render_widget(
+                    Table::new(
+                        crows,
+                        [
+                            Constraint::Length(12),
+                            Constraint::Length(11),
+                            Constraint::Min(20),
+                        ],
+                    )
+                    .header(hdr(&["change", "now", "folder"]))
+                    .block(Block::default().borders(Borders::ALL).title(since)),
+                    bot[1],
+                );
+            }
+            2 => {
                 let parts =
                     Layout::vertical([Constraint::Min(5), Constraint::Length(8)]).split(body);
                 let cur = app.folder().map(|n| n.total_bytes).unwrap_or(1).max(1);
@@ -330,7 +629,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                     parts[1],
                 );
             }
-            2 => {
+            3 => {
                 let Some(d) = &app.data.docker else {
                     f.render_widget(
                         Paragraph::new("Docker is not available on this host.")
@@ -394,7 +693,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                 .row_highlight_style(hl);
                 f.render_stateful_widget(t, body, &mut state);
             }
-            3 => {
+            4 => {
                 let now = crate::util::now_secs();
                 let rows: Vec<Row> = app
                     .data
@@ -447,7 +746,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                 .row_highlight_style(hl);
                 f.render_stateful_widget(t, body, &mut state);
             }
-            4 => {
+            5 => {
                 let now = crate::util::now_secs();
                 let mut rows: Vec<Row> = app
                     .data
@@ -529,7 +828,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                 let detail = app
                     .data
                     .fixes
-                    .get(app.sel[5])
+                    .get(app.sel[6])
                     .map(|x| {
                         format!(
                             "{}\nUndo: {}{}",
@@ -637,7 +936,7 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     let t = app.tab;
     match code {
         KeyCode::Char('q') | KeyCode::Esc => return true,
-        KeyCode::Char(c @ '1'..='6') => app.tab = (c as usize) - ('1' as usize),
+        KeyCode::Char(c @ '1'..='7') => app.tab = (c as usize) - ('1' as usize),
         KeyCode::Tab => app.tab = (app.tab + 1) % TABS.len(),
         KeyCode::BackTab => app.tab = (app.tab + TABS.len() - 1) % TABS.len(),
         KeyCode::Down | KeyCode::Char('j') => {
@@ -650,37 +949,37 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             app.message = "Reloading...".into();
             app.reload();
         }
-        KeyCode::Enter | KeyCode::Right if app.tab == 1 => {
+        KeyCode::Enter | KeyCode::Right if app.tab == 2 => {
             let kids = app.folder_children();
-            if let Some(&(i, c)) = kids.get(app.sel[1]) {
+            if let Some(&(i, c)) = kids.get(app.sel[2]) {
                 if !c.children.is_empty() {
                     app.path.push(i);
-                    app.sel[1] = 0;
+                    app.sel[2] = 0;
                 }
             }
         }
-        KeyCode::Left | KeyCode::Backspace if app.tab == 1 => {
+        KeyCode::Left | KeyCode::Backspace if app.tab == 2 => {
             app.path.pop();
-            app.sel[1] = 0;
+            app.sel[2] = 0;
         }
-        KeyCode::Char(' ') if app.tab == 5 => {
-            let i = app.sel[5];
+        KeyCode::Char(' ') if app.tab == 6 => {
+            let i = app.sel[6];
             if app.data.fixes.get(i).is_some_and(|x| x.item.is_some()) {
                 app.picked[i] = !app.picked[i];
             }
         }
-        KeyCode::Char('s') if app.tab == 5 => {
+        KeyCode::Char('s') if app.tab == 6 => {
             for (i, x) in app.data.fixes.iter().enumerate() {
                 app.picked[i] = x.item.is_some() && x.safety == Safety::Safe;
             }
         }
-        KeyCode::Char('a') if app.tab == 5 => {
+        KeyCode::Char('a') if app.tab == 6 => {
             for (i, x) in app.data.fixes.iter().enumerate() {
                 app.picked[i] = x.item.is_some() && x.safety != Safety::Risky;
             }
         }
-        KeyCode::Char('c') if app.tab == 5 => app.picked.iter_mut().for_each(|p| *p = false),
-        KeyCode::Enter if app.tab == 5 => {
+        KeyCode::Char('c') if app.tab == 6 => app.picked.iter_mut().for_each(|p| *p = false),
+        KeyCode::Enter if app.tab == 6 => {
             if app.picked_total().0 == 0 {
                 app.message = "Pick fixes first: Space, s (safe) or a (all).".into();
             } else {
@@ -701,10 +1000,15 @@ pub fn run(root: &str) -> Result<()> {
         progress: Arc::new(AtomicU64::new(0)),
         rx: None,
         path: Vec::new(),
-        sel: [0; 6],
+        sel: [0; 7],
         picked: Vec::new(),
         confirm: Confirm::None,
         message: String::new(),
+        sampler: crate::live::Sampler::default(),
+        live: crate::live::Live::default(),
+        last_sample: None,
+        changes: Vec::new(),
+        changes_at: None,
     };
     app.reload();
     let prev = std::panic::take_hook();
@@ -726,6 +1030,14 @@ pub fn run(root: &str) -> Result<()> {
     let mut term = Terminal::new(CrosstermBackend::new(stdout()))?;
     loop {
         app.poll();
+        if app.tab == 1
+            && app
+                .last_sample
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(1))
+        {
+            app.live = app.sampler.sample();
+            app.last_sample = Some(std::time::Instant::now());
+        }
         term.draw(|f| draw(f, &mut app))?;
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(k) = event::read()? {
@@ -752,10 +1064,15 @@ mod tests {
             progress: Arc::new(AtomicU64::new(0)),
             rx: None,
             path: Vec::new(),
-            sel: [0; 6],
+            sel: [0; 7],
             picked: vec![false; n],
             confirm: Confirm::None,
             message: String::new(),
+            sampler: crate::live::Sampler::default(),
+            live: crate::live::Live::default(),
+            last_sample: None,
+            changes: Vec::new(),
+            changes_at: None,
         }
     }
 
@@ -770,18 +1087,23 @@ mod tests {
         std::fs::write(d.join("logs/a.log.1"), vec![1u8; 2 << 20]).unwrap();
         let mut app = app_with(gather::gather(d.to_str().unwrap(), 2, None));
         let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
-        for tab in 0..6 {
+        for tab in 0..7 {
             app.tab = tab;
             term.draw(|f| draw(f, &mut app)).unwrap();
         }
-        // Folders: open the biggest child and come back.
+        // Activity samples live I/O without panicking.
+        app.live = app.sampler.sample();
+        app.live = app.sampler.sample();
         app.tab = 1;
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        // Folders: open the biggest child and come back.
+        app.tab = 2;
         assert!(!key(&mut app, KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.path.len(), 1);
         key(&mut app, KeyCode::Left, KeyModifiers::NONE);
         assert!(app.path.is_empty());
         // Fixes: select all, confirm screen, cancel.
-        app.tab = 5;
+        app.tab = 6;
         key(&mut app, KeyCode::Char('a'), KeyModifiers::NONE);
         assert!(app.picked_total().0 >= 2);
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
