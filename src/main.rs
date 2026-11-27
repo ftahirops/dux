@@ -420,8 +420,23 @@ fn ensure_scan_complete(stats: &scan::ScanStats) -> Result<()> {
 fn real_main() -> Result<()> {
     let matches = cli_command().get_matches();
     let cli = Cli::from_arg_matches(&matches)?;
+    // The 0.7 commands never open the per-file index, so they must not fail
+    // when no data directory can be resolved (for example under systemd,
+    // where HOME is unset and /var/lib/dux is read-only).
+    let index_free = matches!(
+        cli.cmd,
+        Some(
+            Cmd::Sentinel { .. }
+                | Cmd::NotifyTest { .. }
+                | Cmd::Walk { .. }
+                | Cmd::Doctor { .. }
+                | Cmd::Where { .. }
+                | Cmd::Cleanup { .. }
+        )
+    );
     let db = match &cli.db {
         Some(p) => p.clone(),
+        None if index_free => PathBuf::from("/var/lib/dux/dux.db"),
         None => util::db_path()?,
     };
     let json = cli.json;
@@ -812,9 +827,12 @@ fn real_main() -> Result<()> {
                 )
             })?;
             println!(
-                "{mount}: {} in folders, as of {} ago",
+                "{mount}: {} in folders, as of {}",
                 human(cur.root.total_bytes as i64),
-                util::ago(cur.started_at)
+                match util::ago(cur.started_at).as_str() {
+                    "now" => "just now".to_string(),
+                    a => format!("{a} ago"),
+                }
             );
             for (f, b) in walker::largest_at_depth(&cur.root, 2, top) {
                 println!("{:>12}  {f}", human(b as i64));

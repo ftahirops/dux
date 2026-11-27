@@ -12,7 +12,9 @@ RestartSec=5
 WatchdogSec=60
 Nice=10
 CPUQuota=50%
-MemoryMax=384M
+# No MemoryMax: the kernel charges the file metadata cache a walk reads to
+# this unit, and a tight limit evicts it mid-walk and makes walks thrash.
+# The process itself stays near 5 MB idle and about 100 MB while walking.
 Environment=MALLOC_ARENA_MAX=2
 # Folder snapshots and growth history live here.
 StateDirectory=dux/sentinel

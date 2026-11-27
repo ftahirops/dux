@@ -1,81 +1,198 @@
-# dux — the disk usage tool that already knows the answer
+# dux: disk-full alerts that tell you where, who and what to do
 
-**Stop running `du` and waiting. `dux` keeps a live index of your filesystem, so
-"what's eating my disk?" is answered in milliseconds — with history, growth
-rates, and realtime alerts the classic tools can't give you.**
+**dux 0.7 watches every disk every 2 seconds, alerts you the moment one starts
+filling, and follows up with the folder that grew, the service writing to it
+and the safe command that frees the space.** It uses the kernel's own counters
+and a fast walker instead of a per-file database, so it costs almost nothing to
+run and never falls behind.
 
 ```
-dux            # instant tree, sorted by size, live-updating
-dux overview   # one-shot CLI dashboard: largest, growth, changes, reclaimable
-dux top /var   # biggest dirs under /var — no rescan
-dux find /home --name '*.log' --larger 1G --newer 1h
+dux sentinel           # the always-on monitor (installed as dux-sentinel.service)
+dux doctor /           # one-shot disk health report in ~15 s
+dux where /            # where the space is, and what grew since last time (instant)
+dux cleanup --level 2  # preview a safe cleanup; add --apply to run it
+dux notify-test        # send a test alert to every configured channel
 ```
+
+> **Release status: 0.7.0 is a pre-release.** The new design is built and load
+> tested (see [measured results](#measured-results)), but it has not yet had a
+> multi-day soak on a production host. Cleanup level 4, the setup wizard and a
+> TUI on the new data are not built yet.
 
 ---
 
-## The pain (every Linux admin / SRE / DevOps has lived this)
+## New in 0.7.0: a complete redesign
 
-> **02:14 — PagerDuty: `/ at 96%`.**
+0.6 kept a live database row for every file, fed by kernel events. On busy
+build servers the event queue overflowed hundreds of times a day, every
+overflow forced a full rebuild, and the index fell days behind while writing
+over 100 GB a day to disk. 0.7 replaces that design:
 
-You SSH in and the tools fight you:
+| | 0.6 (per-file index) | 0.7 (counters first, walk on demand) |
+|---|---|---|
+| How it knows usage | every file change as an event, one database row per file | the kernel's exact `statvfs` counters, every 2 s |
+| How it finds the culprit | queries the per-file database | a fast parallel walk into an in-memory folder tree, hourly and right after growth |
+| What it stores | 4.3 GB SQLite database (3.2M files) | 23.5 MB compact folder snapshot |
+| On event loss | full rebuild; automatic repair stopped after 2 failures | nothing can be lost: there is no event stream |
 
-- **`du -sh /*` takes minutes** and hammers the disk you're already trying to
-  save — every single time, because it remembers nothing.
-- **`ncdu /` rescans from scratch** on every launch. Run it twice, scan twice.
-- **`df` says 96% full — but *where*?** It gives you a number, not a culprit.
-- **No history.** Something grew 40 GB since yesterday and nothing can tell you
-  *what* or *how fast* — by the time you look, the logs already rotated.
-- **`locate` is stale** (cron `updatedb` runs once a day) and **`find /` is slow**
-  and re-walks the whole tree for every query.
-- **A process deleted a 90 GB file but still holds it open** — `df` shows the
-  space gone, `du` can't see it, and you're grepping `lsof | grep deleted`.
-- **You're out of inodes, not bytes** — millions of tiny files somewhere
-  (a runaway cache, `node_modules`, a Go module dir) and *no tool ranks
-  directories by file count*.
-- **Which container/app is filling the disk right now?** You can't tell from a
-  point-in-time snapshot.
+### What you get
 
-Every one of these is "scan again and wait," done at the worst possible moment.
+- **Disk-full, time-to-full and inode alerts in about 1 second**, exact, never stale.
+- **A follow-up alert naming the folder that grew** (for example
+  `/var/log/app +2.1 GiB`), the service writing (from cgroup I/O counters) and
+  the safe fix from a built-in catalog of known culprits: journal, Docker
+  logs/images/build cache, package caches, core dumps, temp files, old kernels.
+- **Alert channels:** system log, `wall` to every terminal (critical only, rate
+  limited), [ntfy](https://ntfy.sh) phone push, Slack, any webhook, and email.
+- **Controlled alerting:** alerts fire on entry or when clearly worse, repeat
+  after a quiet interval, step down only after holding for 2 minutes (no
+  flapping), and respect an hourly cap.
+- **`dux doctor`:** biggest folders, known culprits with fixes, folders with the
+  most files (drilled down to the crowded one), deleted-but-open files, and who
+  is writing right now.
+- **`dux where`:** instant answer from the latest snapshot, plus what grew since
+  the previous one.
+- **`dux cleanup`:** levelled, previewed, audited cleanup (see below).
+- **Health probes every minute:** ext4 error counters, software RAID, disk
+  latency, I/O and memory pressure (PSI), and SMART on physical disks.
+- **Optional emergency mode:** when the disk holding `/var/log` goes critical,
+  run cleanup automatically up to a level you choose (off by default).
+
+### Measured results
+
+Measured on a 6 vCPU / 5.8 GB VM with 3.27 million files (46.7 GB), against
+0.6 measured on a comparable production host with 3.18 million files.
+
+| | 0.6 | 0.7 |
+|---|---|---|
+| Disk writes | 118.7 GB/day | **about 0.1 GB/day** |
+| Average CPU | 5.7% of one core | **about 0.7%** (0.08% when idle between walks) |
+| Memory | 85 MB | **5 MB idle, 95 MB peak during a walk** |
+| Stored data | 4.3 GB | **23.5 MB** |
+| Index freshness | 2.9 days behind | **disk totals live; folders as of the last walk (labelled)** |
+| Full walk of every file | ~280 s | **12.6-15.6 s** (4 threads), total within 0.0015% of `du` |
+| Disk-full alert | (behind) | **0.18 s warning, 0.98 s critical** |
+
+Load tests on throwaway filesystems:
+
+- 0.8-1.1 s alert latency with 12 CPU burners plus heavy disk I/O.
+- No flapping alerts while usage bounced between 92% and 97% for 3 minutes.
+- 10 filesystems going critical at once gave 10 alerts, with `wall` capped at 4 per hour.
+- `wall` and ntfy still arrived in 0.18 s while a webhook hung for 30 s.
+- A follow-up alert named the right folder 41 s before the disk reached 90%.
+- 392 automated tests.
 
 ---
 
-## The solution — why `dux` exists
+## Install
 
-`dux` indexes the filesystem **once**, then keeps that index **live** with a
-fanotify daemon. Queries read the index, so they're instant — and because the
-index is maintained in realtime, it can answer questions `du`/`ncdu`/`df`/`find`
-structurally cannot.
+```bash
+# Debian/Ubuntu (glibc 2.39+, e.g. Ubuntu 24.04, Debian 13)
+curl -LO https://github.com/ftahirops/dux/releases/download/v0.7.0/dux_0.7.0-1_amd64.deb
+sudo apt install ./dux_0.7.0-1_amd64.deb
+```
 
-| The pain | How `dux` fixes it |
+The package:
+- installs and starts `dux-sentinel.service`;
+- stops and disables the 0.6 `dux.service`;
+- creates `/etc/dux/notify.conf` (mode 600).
+
+The old 0.6 index (`/var/lib/dux/dux.db`) is left in place. Delete it when you
+are ready.
+
+Build from source:
+
+```bash
+cargo build --release          # binary at target/release/dux
+scripts/build-deb.sh           # .deb at target/deb/
+```
+
+## Set up alerts
+
+Edit `/etc/dux/notify.conf` (all keys are documented in
+[`packaging/notify.conf.example`](packaging/notify.conf.example)), then:
+
+```bash
+sudo systemctl restart dux-sentinel
+dux notify-test                       # warning to every channel
+dux notify-test --severity critical   # also tests wall
+```
+
+| Channel | Settings | Notes |
+|---|---|---|
+| System log | always on | `journalctl -u dux-sentinel` |
+| wall | `DUX_WALL=yes` | critical only; once per disk per 30 min, at most 4 an hour |
+| ntfy | `DUX_NTFY_URL`, `DUX_NTFY_TOKEN` | critical alerts use urgent priority |
+| Slack | `DUX_SLACK_WEBHOOK` | incoming webhook |
+| Webhook | `DUX_WEBHOOK_URL`, `DUX_WEBHOOK_TOKEN` | JSON: source, severity, title, body, key, host, timestamp |
+| Email | `DUX_SMTP_URL`, `DUX_SMTP_USER`, `DUX_SMTP_PASS`, `DUX_MAIL_FROM`, `DUX_MAIL_TO` | `smtp://` requires STARTTLS; `smtps://` for TLS |
+
+Default thresholds:
+- Warning at 85% used, critical at 95%; the same for inodes.
+- Full-in-hours: warning at 24 h, critical at 2 h.
+- A burst alert when a disk grows 5 GiB within 10 minutes.
+
+All of these can be changed in the same file. HTTP and SMTP go through `curl`,
+with secrets passed on stdin, never on the command line.
+
+## Cleanup levels
+
+`dux cleanup` always shows its plan first, including how much each step frees
+and the exact command. Nothing changes without `--apply`.
+
+| Level | What it may do |
 |---|---|
-| `du`/`ncdu` rescan every time | **Scan once, query in milliseconds** — persistent index |
-| `df` says full but not *where* | **Drill into the biggest dirs/files instantly**, df-style capacity gauge built in |
-| No idea what's growing | **`dux growth`** + live per-directory **write rates** and **ETA-to-full** |
-| `locate` stale, `find` slow | **Trigram name search on a live index** — fresh *and* fast |
-| Deleted-but-open space leaks | **`dux deleted-open`** — ranks the processes pinning freed space |
-| Out of inodes, not bytes | **Inode-usage mode** — rank directories by *file count*, not size |
-| Disk fills silently | **Growth alerts** — run a webhook/script when any path grows past a threshold |
-| "Is it safe to delete?" guesswork | **WinDirStat-style live tree** — see the hot spots at a glance |
-| "What filled the disk overnight?" | **`dux diff --since 8h`** — net per-path change (fills *and* frees), from the index |
-| Which container is bloating? | **`dux containers`** — writable-layer/log/volume usage per Docker/Podman container |
-| Feed dashboards / automation | **`--json` on every command** + **`dux metrics`** (Prometheus exposition) |
-| Drop-in for scripts | **`dux du`** — byte-exact `du`-compatible output, but instant (no re-walk) |
+| 0 | nothing (monitor only) |
+| 1 | shrink the systemd journal to a budget (`--journal-max`, default 1G) |
+| 2 | + remove rotated logs oldest first, keeping the newest 3 of each; and, only when the disk is at least 80% full, rotate big active logs with their logrotate config, or keep the last 10 MB and truncate in place |
+| 3 | + package caches (`apt-get clean`, `dnf clean packages`), old temp files (`systemd-tmpfiles --clean`), old crash and core dumps (newest 5 kept), Docker build cache older than 7 days |
 
-It's the tool you wish you'd had at 2 a.m.: **realtime, indexed, and it shows you
-the culprit — not just the symptom.**
+Safety rules applied to every action:
+- Security and accounting logs (`auth.log`, `secure`, `audit/`, `wtmp`, `btmp`, `lastlog`) are never touched.
+- Open files are never removed or truncated.
+- Symlinks are never followed, and other filesystems are never entered.
+- Commands run without a shell.
+- `/etc/dux/disable-actions` stops all actions.
+- Every applied action is logged to `/var/log/dux/actions.log`.
 
-> **Release status:** This worktree is still under production-readiness
-> qualification and is not approved for production deployment. See the
-> [readiness audit](PRODUCTION_READINESS_AUDIT.md) for the open release gates.
-> Dux answers from its latest indexed snapshot; before treating results as a
-> current view, check `dux status --json`. Dirty, paused, scanning, or a status
-> that is not caught up means results may be stale or incomplete. A clean,
-> caught-up status is not by itself proof of exact filesystem accounting after
-> an event-loss or accounting incident.
+Emergency mode (`DUX_AUTO_CLEANUP_LEVEL=1-3`, default 0) runs the same plan
+automatically when the disk holding `/var/log` goes critical. It stops 10
+points below critical and reports what it freed.
+
+## How 0.7 works
+
+```
+statvfs every 2 s ──► space / inode / fill / burst / read-only alerts ──► channels
+        │                        │
+        │ growth or alert        └──► walk scheduler (startup, hourly, after growth; ≥10 min apart)
+        ▼                                     │
+cgroup io.stat every 10 s                     ▼
+ (who is writing)              fast walker: getdents64 + fstatat, 2-4 threads,
+        │                      nice 19, idle I/O, one node per folder, no writes
+        │                                     │
+        └──────────────► diff vs previous tree ──► "growth is in /var/log/app" alert
+                                              │
+                               snapshot every 6 h + growth history
+probes every minute: ext4 errors, RAID, latency, PSI, SMART (hourly)
+```
+
+The walker:
+- never crosses into another filesystem or a bind mount;
+- counts hard links once;
+- keeps the five largest files (1 MiB or more) per folder.
+
+Listing the files in one folder is a live `readdir`, so no per-file storage
+is needed.
 
 ---
 
-## Reliability fixes in 0.6.2
+## Legacy: the 0.6 per-file index
+
+The commands below (`dux scan`, `dux daemon`, `dux top`, `dux find`,
+`dux growth`, the TUI and so on) are still in the binary and documented as
+they were. 0.7 no longer installs or starts the per-file daemon.
+
+### Reliability fixes in 0.6.2
 
 - Host load is compared with host CPUs, independently of the daemon's CPU quota.
   Resource pauses require sustained recovery before resuming.
@@ -98,9 +215,9 @@ the culprit — not just the symptom.**
 - Runtime records are published atomically and scoped to their database. SQLite
   writes use FULL synchronization; `dux --version` includes the source revision.
 
-## New in 0.6.0
+### New in 0.6.0
 
-### Clear, answer-first TUI
+#### Clear, answer-first TUI
 
 - Five prominent numbered destinations replace the crowded inline navigation:
   **1 Overview**, **2 Explore**, **3 Activity**, **4 Reclaim**, and
@@ -123,7 +240,7 @@ the culprit — not just the symptom.**
   type, or file-size band. Reclaim separates measured facts from estimates and
   labels every suggestion by safety. **Dux advises; it never deletes.**
 
-### Faster CLI answers with context
+#### Faster CLI answers with context
 
 - Added `dux overview`, `dux large --files`, `dux fastest-growth --since 1h`,
   `dux activity --since 24h`, and `dux docker`. They are friendly aliases for
@@ -138,7 +255,7 @@ the culprit — not just the symptom.**
   when the invoking user cannot traverse its parent or the file disappeared
   after the last indexed snapshot.
 
-### Bounded scanning and a smaller live workload
+#### Bounded scanning and a smaller live workload
 
 - The initial crawl no longer retains the whole filesystem plus several scratch
   copies in memory. Parallel metadata workers feed a fixed 8,192-entry queue into
@@ -156,7 +273,7 @@ the culprit — not just the symptom.**
   scan, live events, growth reports, and rankings, preventing observer feedback
   and unnecessary index growth.
 
-### Daemon and container reliability
+#### Daemon and container reliability
 
 - The packaged service uses `Restart=always`, bounded restart backoff, and a
   45-second application watchdog. It recovers from crashes/OOM kills and from a
@@ -169,7 +286,7 @@ the culprit — not just the symptom.**
   image/content storage, snapshots, and build/cache areas, then provides
   evidence-based cleanup suggestions.
 
-### Bug fixes
+#### Bug fixes
 
 - Fixed `Ctrl-C` not closing the TUI.
 - Fixed the Overview cards showing only one file instead of useful top-five
@@ -185,7 +302,7 @@ the culprit — not just the symptom.**
 
 ---
 
-## New in 0.5.2
+### New in 0.5.2
 
 **CPU/I/O controls for a lower-priority background indexer.** Dux shares host
 resources with production workloads. Its controls reduce its impact; they do not
@@ -214,7 +331,7 @@ snappier live updates on a machine with headroom.
 
 ---
 
-## New in 0.5.0
+### New in 0.5.0
 
 **SRE/DevOps integration — everything scriptable, everything from the index (no
 filesystem re-walk, no added daemon cost):**
@@ -345,7 +462,7 @@ create/rename/delete soak (stable RSS, constant fd count — no leak).
 
 ---
 
-## New in 0.4.0
+### New in 0.4.0
 
 - **Buttery-smooth TUI on huge filesystems.** The live tree's expensive periodic
   recompute (recursive growth aggregation, panels, path resolution) now runs on a
@@ -358,7 +475,7 @@ create/rename/delete soak (stable RSS, constant fd count — no leak).
 
 ---
 
-## New in 0.3.0
+### New in 0.3.0
 
 **A resource guardian that reduces load under pressure.** Dux watches host
 pressure (free RAM, free disk, load average, and kernel PSI for memory/I/O/CPU)
@@ -389,7 +506,7 @@ pairing across flush boundaries, and the dirty-state lifecycle.)
 
 ---
 
-## New in 0.2.0
+### New in 0.2.0
 
 A rebuilt, hardlink-aware index (schema **v4**) and a hardened daemon. New
 capabilities (the index format changed — upgrading rebuilds it automatically on
@@ -428,7 +545,7 @@ first start):
 
 ---
 
-## Install
+### Install
 
 The packages ship a **static musl binary** with no shared-library dependencies,
 so they run on x86-64 distributions regardless of host glibc. The live fanotify
@@ -465,7 +582,7 @@ cargo build --release
 sudo install -m755 target/release/dux /usr/local/bin/dux
 ```
 
-## 60-second start
+### 60-second start
 
 ```bash
 # index once, then everything is instant
@@ -486,7 +603,7 @@ dux deleted-open          # space held by deleted-but-open files
 dux status                # capacity + index freshness
 ```
 
-### Automate & integrate (SRE/DevOps)
+#### Automate & integrate (SRE/DevOps)
 
 ```bash
 # JSON on every read command → pipe to jq / dashboards
@@ -512,7 +629,7 @@ dux containers --json
 All read commands accept `--json`; every query above is served from the index
 (no filesystem re-walk), so it stays instant and adds no daemon overhead.
 
-### Run it live (systemd)
+#### Run it live (systemd)
 
 ```bash
 sudo cp packaging/dux.service /etc/systemd/system/
@@ -557,7 +674,7 @@ a low CPU weight under contention. Scheduling priorities reduce resource share
 but do not eliminate contention or guarantee freshness under sustained load.
 `dux status` shows whether it is caught up.
 
-### Who can read the index
+#### Who can read the index
 
 The index lists **every filename on `/`** — including names inside directories a
 user could not otherwise traverse. It exposes no file *contents*, but reading it
@@ -573,7 +690,7 @@ privileged wrapper. To lock it down to root-only, or to restore the old
 world-readable behaviour, see the `index exposure` notes at the bottom of
 `packaging/dux.service`.
 
-### Index states — and when to rescan
+#### Index states — and when to rescan
 
 `dux` never silently claims exact data. When it cannot guarantee the index
 matches the filesystem it says so, and `dux status` (and the TUI header) surface
@@ -595,7 +712,7 @@ A live heartbeat means the process is responding; it does not guarantee an exact
 index. Check pipeline state and warnings. Persistent DIRTY, write errors, or
 refresh failures need investigation even if the process is live.
 
-### Startup and alert response
+#### Startup and alert response
 
 On first install or after a restart, the daemon attaches filesystem watches
 before it builds the baseline. Queries continue to use the last complete index
@@ -631,7 +748,7 @@ refresh fails, the previous complete generation remains queryable; fix the
 reported storage or coverage issue before retrying. A readable index without a
 fresh watch-status record is a static snapshot, not a live index.
 
-### Controlled upgrade and rollback
+#### Controlled upgrade and rollback
 
 For a production canary, keep the exact previous package and binary hash until
 the canary closes. Record the service-enabled state and
@@ -662,7 +779,7 @@ replacement commits. Existing readers keep their SQLite snapshot.
 
 ---
 
-## Trust it: independent verification
+### Trust it: independent verification
 
 `dux` ships with an audit harness that checks the index against ground truth
 (`du`/`df`/`find`) and its own internal consistency, and can auto-reconcile:
@@ -680,7 +797,7 @@ job reports findings but does not reconcile.
 
 ---
 
-## How it works
+### How it works
 
 Two long-lived components and one compact SQLite WAL index — no server and no
 eBPF. A temporary staging DB exists only during a full rebuild:

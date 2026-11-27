@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        install -d -m 0700 /etc/dux
+        if [ ! -e /etc/dux/notify.conf ]; then
+            install -m 0600 /usr/share/doc/dux/notify.conf.example /etc/dux/notify.conf
+            echo "dux: created /etc/dux/notify.conf; add your ntfy/Slack/email settings there."
+        fi
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+            systemctl enable dux-sentinel.service >/dev/null 2>&1 || true
+            systemctl restart --no-block dux-sentinel.service || true
+            echo "dux: dux-sentinel is running. Test alerts with: dux notify-test"
+            echo "dux: disk report: dux doctor /    where the space is: dux where /"
+        fi
+        if [ -e /var/lib/dux/dux.db ]; then
+            echo "dux: the old index /var/lib/dux/dux.db is no longer used."
+            echo "dux: remove it when ready with: rm -f /var/lib/dux/dux.db /var/lib/dux/dux.db-*"
+        fi
+        ;;
+esac
+exit 0

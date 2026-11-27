@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+case "$1" in
+    purge)
+        rm -rf /var/lib/dux/sentinel
+        rm -f /etc/dux/notify.conf
+        rmdir /etc/dux 2>/dev/null || true
+        ;;
+esac
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+exit 0

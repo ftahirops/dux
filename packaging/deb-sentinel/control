@@ -1,0 +1,16 @@
+Package: dux
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: dux maintainers <root@localhost>
+Depends: libc6 (>= 2.39), curl
+Recommends: bsdutils | util-linux
+Suggests: smartmontools
+Description: disk-full alerts, folder attribution and safe cleanup
+ dux watches free space and inodes on every disk every 2 seconds and sends
+ alerts (system log, wall, ntfy, Slack, webhook, email). A fast walker
+ builds an in-memory folder tree hourly and after growth, so alerts say
+ which folder grew, which service is writing and the safe fix. Includes
+ `dux doctor`, `dux where`, levelled `dux cleanup` with preview, and health
+ probes for filesystem errors, RAID, latency, pressure and SMART.
