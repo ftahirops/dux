@@ -1,0 +1,39 @@
+{
+  "observed_at_utc": "2026-11-11T06:40:23Z",
+  "source_commit": "4ca8465e8d1243345316e2648bf55561e4018739",
+  "latest_code_commit": "3d29d23",
+  "latest_code_fix_commit": "2fb02fe",
+  "stale_matrix_driver": {
+    "pid": 1837002,
+    "configured_suites": 15,
+    "suites_started": 0,
+    "vm_unit_state_before_stop": "inactive",
+    "stop_reason": "staged artifacts do not contain latest source changes",
+    "process_stopped": true
+  },
+  "staged_binary_pair": {
+    "production_sha256": "9c5e361408c364c6032be0c48f80b228eebb356b00b73535e8a097aa55917a03",
+    "fault_sha256": "7bb5d2b0107a6b04901a45b0e2316d6fdf1e70bc103cf131599e420cfcd920b4",
+    "embedded_source_commit": "b0ed3078f2d8",
+    "embedded_source_sha256": "e755f897c6d79f027df83d30e8f8f50c492306923fa676526ec36d862b7df476",
+    "current_source_contains_later_fix": true
+  },
+  "staged_harness": {
+    "path": "/dev/shm/dux-r133-fault-matrix-share/dux-readiness.py",
+    "sha256": "eadc239b6c2d3824f2dfa5c486b0444a9950822d164d335a001011a5cfd689c3",
+    "current_source_sha256": "331a5276a3784c3d57b6f6b061ba0e9dd21e94671728a419aca4eff7c1d06612",
+    "matches": false
+  },
+  "admission_at_2026_11_11T064023Z": {
+    "load1": 3.43,
+    "cpu_psi_some_percent": 1.0,
+    "io_psi_some_percent": 4.86,
+    "active_host_workloads": [
+      "Go test binary pid=2231961",
+      "go test pid=2231027"
+    ],
+    "matrix_restart_allowed": false
+  },
+  "next_action": "Wait for safe host admission, rebuild production and fault-injection binaries from the current clean worktree, copy the current qualification harness to the read-only VM share, verify all source and artifact digests, then restart the guarded matrix.",
+  "assessment": "No test result was produced by the stale attempt. It was stopped before QEMU startup and before any suite began."
+}

@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-11-11T01:07Z",
+  "host": "vps1 qualification host",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "result": "refused_before_vm_start",
+  "admission_sample": "2/3",
+  "blockers": [
+    "Go compiler pid 547087",
+    "go test pid 546995"
+  ],
+  "vm_started": false,
+  "suites_started": false,
+  "interpretation": "The host admission guard refused while unrelated Go test work returned. No Dux fault suite ran."
+}

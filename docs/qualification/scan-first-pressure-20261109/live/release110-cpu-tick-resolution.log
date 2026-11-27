@@ -1,0 +1,13 @@
+Running as unit: dux-readiness-544905.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PASS 12006 events produced in 2.89s, pipeline caught up in 0.10s, exact validation in 8.10s at 0.00 CPU
+Evidence: /root/dux-readiness-6dacdf5/release110-cpu3.json
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 1min 8.988s
+CPU time consumed: 17.165s
+Memory peak: 151.1M
+Memory swap peak: 0B

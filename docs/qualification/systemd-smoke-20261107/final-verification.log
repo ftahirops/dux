@@ -1,0 +1,6 @@
+{"automatic_reconciliation_paused":null,"behind_seconds":0.0,"caught_up":true,"daemon_live":true,"dirty":false,"dirty_reason":null,"dirty_since_timestamp_seconds":null,"events_dropped":0,"events_resolved":0,"events_seen":0,"failed_reconciliation_attempts":null,"index_bytes":1167360,"index_bytes_on_disk":98304,"index_nodes":222,"kernel_overflow_notifications":0,"last_event_commit_timestamp_seconds":0,"last_scan_age_seconds":106,"last_scan_timestamp_seconds":1794030982,"max_automatic_reconciliation_retries":1,"max_pending_updates":500000,"pause_reason":null,"paused":false,"paused_since_timestamp_seconds":null,"pending_updates":0,"reconciliation_retry_state_corrupt":false,"root":"/mnt/dux-r23-systemd-smoke-20261107/tree","scan_in_progress":false,"scan_progress":null,"status_version":1,"throttled_since_timestamp_seconds":null,"updates_committed":0,"userspace_updates_dropped":0,"wal_bytes":140112,"watch_status_available":true,"watch_status_updated_at_seconds":1794031088,"write_error":null}
+PRAGMA integrity_check [('ok',)]
+exact filesystem/index check PASS schema 6 root totals (1167360, 222) paths 222
+0ce0d2eba91f6325fad8c6e6e5d61380805d56c57bc774d2714567d1be5b417e  /var/tmp/dux-r23-systemd-extract/usr/bin/dux
+41a50ea031d666c6d782d2c5432a7b1363e1271f757b39bfbf33c6ae055521e1  /var/tmp/dux-r23-systemd-smoke.deb
+systemd-analyze-verify PASS

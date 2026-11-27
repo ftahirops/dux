@@ -1,0 +1,18 @@
+VPS2 bounded churn check of current worktree candidate
+Date: 2026-11-08 UTC
+Host: vps2, Ubuntu 24.04, Linux 6.8, ext4
+Candidate: dux 0.6.3 (fe6e7357582a+modified) [production]
+Candidate binary SHA-256: 590b5638770957ce9c0821423b4d5888a91a2bb396484b1e10a49585cc5dacf6
+Embedded source SHA-256: dfa9ece4c84376c0254e5513e986baa7f12d01e86938a91118c79249fc8f72a5
+Binary: static-pie, statically linked x86-64 musl
+Service handling: ran standalone with a separate temporary fixture and index; did not replace or restart systemd dux.
+
+Fixture: 40 directories, 1,000 seeded files each. Four concurrent producers atomically replaced files and created/deleted ephemeral files during scan (8,796 completed mutation iterations; no producer errors).
+
+Churn-overlapped scan: 5.22 s. It reported 180 conflicting inode-incarnation coverage issues while paths were being atomically replaced. The command returned success but printed 180 coverage issues; this result is not counted as a clean scan. The index remains explicitly qualified by the coverage count rather than asserting that this concurrent observation is exact.
+
+After producers stopped, a stable scan completed in 4.95 s: 40,000 files, 41 directories including root, 40,041 staged path instances, 165,363,712 visible/unique allocated bytes, 40,041 visible/unique entries/inodes, 0 coverage issues.
+
+Independent Python filesystem oracle, including root and subdirectory allocated blocks: 40,000 files, 41 directories including root, 40,041 expected paths, 165,363,712 allocated bytes. SQLite reported 40,041 total paths and root totals of 165,363,712 bytes/40,041 entries; PRAGMA integrity_check returned ok. Exact stable-state match: PASS.
+
+Service remained ActiveState=active, SubState=running, NRestarts=0. The daemon itself remains on its prior installed binary; this bounded fixture does not qualify the live full-root workload. Temporary fixture/database, helper scripts, and transferred candidate binary were removed after evidence capture.

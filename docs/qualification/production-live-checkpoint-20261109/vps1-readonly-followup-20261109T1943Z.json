@@ -1,0 +1,105 @@
+{
+  "assessment": {
+    "daemon_active": true,
+    "dirty": true,
+    "dropped_update_count_unchanged": true,
+    "journal_corroborates_counter_delta": true,
+    "journal_overflow_lines_since_1927Z": 13,
+    "kernel_overflows_increased": true,
+    "last_scan_still_stale": true
+  },
+  "captured_at_utc": "2026-11-09T19:44:00.874229+00:00",
+  "collection": "read-only systemd, installed-daemon status, running binary hash, and host pressure telemetry",
+  "delta_since_1927Z": {
+    "events_resolved": 1699440,
+    "events_seen": 3062765,
+    "index_bytes": 723480576,
+    "index_bytes_on_disk": 4972544,
+    "index_nodes": -8020,
+    "kernel_overflow_notifications": 13,
+    "last_scan_age_seconds": 997,
+    "pending_updates": -1117,
+    "userspace_updates_dropped": 0
+  },
+  "host": "VPS1 production host",
+  "host_pressure": {
+    "active_host_workloads": [
+      "Go compiler pid=1950913",
+      "Go compiler pid=1951496",
+      "Go test binary pid=1950543",
+      "go test pid=1948768",
+      "go test pid=1949111",
+      "go test pid=1950384"
+    ],
+    "cpu": {
+      "full": 0.0,
+      "some": 8.93
+    },
+    "io": {
+      "full": 0.31,
+      "some": 0.45
+    },
+    "load1": 11.83,
+    "memory": {
+      "full": 0.09,
+      "some": 0.09
+    },
+    "telemetry_errors": []
+  },
+  "running_binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
+  "selected_overflow_journal_since_1927Z": [
+    "2026-11-09T19:31:50.945655+00:00 vps1 dux[1073891]: 2026-11-09T19:31:50.945507Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:31:57.274127+00:00 vps1 dux[1073891]: 2026-11-09T19:31:57.274028Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:00.095469+00:00 vps1 dux[1073891]: 2026-11-09T19:32:00.095418Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:23.405631+00:00 vps1 dux[1073891]: 2026-11-09T19:32:23.405565Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:26.602393+00:00 vps1 dux[1073891]: 2026-11-09T19:32:26.601192Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:29.398105+00:00 vps1 dux[1073891]: 2026-11-09T19:32:29.398058Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:33.632231+00:00 vps1 dux[1073891]: 2026-11-09T19:32:33.632030Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:36.995699+00:00 vps1 dux[1073891]: 2026-11-09T19:32:36.995567Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:41.787973+00:00 vps1 dux[1073891]: 2026-11-09T19:32:41.787929Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:44.234948+00:00 vps1 dux[1073891]: 2026-11-09T19:32:44.234903Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:47.030491+00:00 vps1 dux[1073891]: 2026-11-09T19:32:47.028028Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:49.476630+00:00 vps1 dux[1073891]: 2026-11-09T19:32:49.476575Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events",
+    "2026-11-09T19:32:51.935142+00:00 vps1 dux[1073891]: 2026-11-09T19:32:51.935101Z  WARN dux::watch: fanotify queue overflow \u2014 index may have missed events"
+  ],
+  "status": {
+    "behind_seconds": 180789.188,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since_timestamp_seconds": 1794252771,
+    "events_dropped": 2518862,
+    "events_resolved": 100942391,
+    "events_seen": 173134319,
+    "index_bytes": 125367734272,
+    "index_bytes_on_disk": 3256877056,
+    "index_nodes": 1320542,
+    "kernel_overflow_notifications": 649,
+    "last_event_commit_timestamp_seconds": 1794253440,
+    "last_scan_age_seconds": 370478,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 795,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794072651,
+    "updates_committed": 26474160,
+    "userspace_updates_dropped": 2518862,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794253440,
+    "write_error": null
+  },
+  "systemd": {
+    "ActiveState": "active",
+    "MainPID": "1073891",
+    "NRestarts": "4",
+    "SubState": "running"
+  }
+}

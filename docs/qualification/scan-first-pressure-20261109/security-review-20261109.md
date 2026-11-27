@@ -1,0 +1,148 @@
+# Security scan checkpoint — 2026-11-09
+
+## Results
+
+- `cargo audit --json`: **0 advisories** in the 229 dependencies in the
+  workspace lockfile. Advisory database last updated at
+  `2026-11-08T16:03:42-07:00`.
+- Trivy filesystem scan (`vuln,misconfig`, excluding build output): **0
+  vulnerabilities** in `Cargo.lock` and `vendor/jwalk/Cargo.lock`. Trivy
+  reported **0 configuration files detected**, so this run does not qualify
+  deployment configuration security.
+- Gitleaks scanned `src/` (about 1.36 MB) and `scripts/` (about 2.01 MB)
+  separately with `--no-git`: **no leaks found** in either scanned tree.
+- A broader Gitleaks `--no-git` scan of the entire workspace was stopped
+  after it spent sustained CPU scanning generated/build material. It produced
+  no report and is not counted as a pass. Git history, documentation, build
+  output, and every other workspace path were not secret-scanned.
+- Semgrep's remote `p/security-audit` ruleset invocation did not produce a
+  report; it is inconclusive and is not counted as a pass.
+
+## Refreshed local scans — 2026-11-09 09:48 UTC
+
+- A fresh `cargo audit --json` again found **0 advisories across 229
+  dependencies**. Its advisory database was updated at
+  `2026-11-09T10:22:53+01:00` (09:22 UTC).
+- Gitleaks `dir` scans found no leaks in `src/`, `scripts/`, or `packaging/`.
+  A scan of `docs/` returned three `generic-api-key` matches on Rocky Linux
+  X.509 certificate signer labels in a console log; inspection confirmed the
+  matched text was certificate-name metadata, not credentials. The preserved
+  docs finding report redacts all matched strings.
+- `.github/` does not exist in this checkout, so there are no workflow files
+  to scan here.
+- Semgrep `p/rust` could not fetch its ruleset because TLS verification of
+  `semgrep.dev` failed with `SSLCertVerificationError`. I kept certificate
+  verification enabled; the run produced no findings report and remains
+  **inconclusive**, not a pass.
+
+Refresh evidence is in
+[`live/security-current-20261109/`](live/security-current-20261109/): the
+current Cargo audit JSON and separate Gitleaks JSON reports for source,
+scripts, packaging, and the redacted documentation false positives. The empty
+Gitleaks result files are identical because each scan produced no findings.
+
+## Fresh Cargo audit rerun — 2026-11-09 11:26 UTC
+
+I reran `cargo audit --json` against the current workspace lockfile after the
+latest source/evidence checkpoint. It exited 0, scanned 229 dependencies,
+loaded 1,429 advisories (database updated at `2026-11-09T11:48:10+01:00`),
+and reported zero vulnerabilities and no warnings. This is a dependency audit,
+not a full application or deployment security review. The JSON evidence is
+[`cargo-audit-rerun-1126z.json`](live/security-current-20261109/cargo-audit-rerun-1126z.json),
+SHA256 `3f573b4c14fff8212bd90383bad8da38ab5e5113a913bd9bdfbc733e2678d01e`.
+
+## Initial current-branch history scan — 2026-11-09 11:28 UTC (superseded)
+
+Gitleaks scanned **641 commits** (16.86 MB) reachable from the checked-out
+branch. It reported three `generic-api-key` matches, all in commit
+`c70de0530edaf63cdd4fc93fbbe461c91c3b64a7`, in the Rocky Linux RPM
+qualification console log at lines 392, 405, and 421. These are the same
+three certificate-signer labels already reviewed in the scoped documentation
+scan; they are X.509 certificate metadata, not credentials. The retained JSON
+report redacts the matched values. SHA256:
+`2be325a99d85e266511994c5ef6bb66ed953be2f1af74cbfd7c25af4e1ceca5f`.
+
+This first history run predates several subsequent commits and did not cover
+all reachable refs. The complete ref scan below supersedes its scope.
+
+## Complete reachable Git history scan — 2026-11-09 12:37 UTC
+
+The refreshed current-branch scan covered **649 non-merge commits** (17.27 MB).
+It found the same three `generic-api-key` matches in the Rocky Linux
+qualification log, already verified as X.509 signer-label metadata rather than
+credentials. The checkout is not shallow; `git rev-list --all` found 654
+reachable commits, four of which are not reachable from the checked-out HEAD.
+I separately scanned the first-parent diff of the one merge commit on HEAD and
+the diffs for all four non-current-ref commits (including the non-current
+merge). All five diffs had **zero findings**. Together, these scans cover all
+654 commits reachable from local and remote-tracking refs; no confirmed secret
+was found. Gitleaks redacted all matched values in the retained reports.
+
+Evidence reports:
+
+- Current-branch history:
+  [`gitleaks-current-branch-history-20261109T1237Z.json`](live/security-current-20261109/gitleaks-current-branch-history-20261109T1237Z.json),
+  SHA256 `2be325a99d85e266511994c5ef6bb66ed953be2f1af74cbfd7c25af4e1ceca5f`.
+- Merge and four ref-divergent commit diffs are in
+  [`live/security-current-20261109/`](live/security-current-20261109/); each
+  report contains zero findings and SHA256
+  `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`.
+
+This closes Git-history coverage for reachable refs. It does not qualify
+untracked or ignored local files, the full deployment configuration, runtime
+attack surface, or application security correctness; Semgrep remains
+inconclusive because its ruleset fetch failed TLS verification.
+
+## Evidence
+
+- [`cargo-audit-20261109.json`](live/cargo-audit-20261109.json),
+  SHA256 `bd13b9d963fd12acba59b6ad1a007225bb5311bc2758a8f0cc10e4dcba74a89d`
+- [`trivy-vuln-misconfig-20261109.json`](live/trivy-vuln-misconfig-20261109.json),
+  SHA256 `c92ac4a1d14e738ac08690b63ac38298e2c5ba85b74f757cbb4ba09c906ad76e`
+
+These are scoped static scans. They do not establish absence of application
+security defects, secret exposure in unscanned paths/history, secure runtime
+configuration, or a complete release security review.
+
+## Supplemental local Semgrep rules — 2026-11-09 15:35 UTC
+
+The registry `p/rust` configuration remains unavailable because the TLS
+certificate chain for `semgrep.dev` cannot be verified. Verification was not
+disabled. As supplemental coverage, Semgrep 1.170.0 ran the Rust security
+rules from the official `semgrep/semgrep-rules` source pinned at commit
+`16b9e6d45f10649f6a531ec4838ed9924372c3bc`. It exited 0, parsed 14 Rust
+files, and produced zero scanner/parser errors. Ten rules reported 133 INFO
+audit reminders: 99 generic unsafe-use matches and 34 `temp_dir()` matches.
+Manual location review found all temp-directory uses in test fixtures/helpers;
+no production temp-file path was flagged.
+
+These are not 133 confirmed vulnerabilities. The generic unsafe rule cannot
+assess pointer validity or syscall contracts, so the 99 unsafe matches remain
+an audit inventory. Clippy's `undocumented_unsafe_blocks` lint emitted 107
+diagnostics across selected targets, with some target duplicates. A reviewed
+unsafe-block inventory and full app/runtime threat review remain open.
+
+Reports and SHA256s are in
+[`live/security-current-20261109/`](live/security-current-20261109/),
+including the local Semgrep JSON/log, the registry TLS failure log, and the
+Clippy lint output. This local ruleset does not replace the unavailable
+registry `p/rust` config.
+
+### Fanotify parser safety-comment follow-up — 2026-11-09 15:41 UTC
+
+Added `SAFETY` comments for eight bounded unaligned reads of the fanotify
+metadata and info-header structs. The guards establish full-record bounds,
+the C-layout struct sizes are compile-time asserted, and unaligned reads do not
+depend on input alignment. No parser behavior changed.
+
+The malformed-input focused filter ran **8 tests, all passed**, including
+`malformed_info_record_lengths_fail_closed_without_overread` and
+`scan_first_hint_parser_rejects_malformed_record_lengths`. Formatting,
+`git diff --check`, and strict all-target/all-feature Clippy with
+`-D warnings` passed. Running Clippy with the optional
+`undocumented_unsafe_blocks` warning dropped its emitted diagnostics from 107
+to 99; the remaining audit debt is open. Logs:
+[`parser-malformed-tests-20261109.log`](live/security-current-20261109/parser-malformed-tests-20261109.log),
+[`clippy-undocumented-unsafe-after-parser-20261109.log`](live/security-current-20261109/clippy-undocumented-unsafe-after-parser-20261109.log),
+and
+[`clippy-strict-after-safety-comments-20261109.log`](live/security-current-20261109/clippy-strict-after-safety-comments-20261109.log).

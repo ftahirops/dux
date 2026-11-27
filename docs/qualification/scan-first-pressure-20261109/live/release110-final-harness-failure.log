@@ -1,0 +1,62 @@
+Running as unit: dux-readiness-566870.service; invocation ID: 3be9d04dca54441da9872529b69ee3c3
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PROGRESS crash boundaries selected for scan-first mode: ['scan.in_place_started', 'scan.in_place_projection_ready', 'scan.in_place_before_commit', 'scan.in_place_after_commit']
+PASS crash 1/30: scan.in_place_started
+PASS crash 2/30: random timing
+PASS crash 3/30: scan.in_place_projection_ready
+PASS crash 4/30: random timing
+PASS crash 5/30: scan.in_place_before_commit
+PASS crash 6/30: random timing
+PASS crash 7/30: scan.in_place_after_commit
+PASS crash 8/30: random timing
+PASS crash 9/30: scan.in_place_started
+PASS crash 10/30: random timing
+PASS crash 11/30: scan.in_place_projection_ready
+PASS crash 12/30: random timing
+PASS crash 13/30: scan.in_place_before_commit
+PASS crash 14/30: random timing
+PASS crash 15/30: scan.in_place_after_commit
+PASS crash 16/30: random timing
+PASS crash 17/30: scan.in_place_started
+PASS crash 18/30: random timing
+PASS crash 19/30: scan.in_place_projection_ready
+PASS crash 20/30: random timing
+PASS crash 21/30: scan.in_place_before_commit
+PASS crash 22/30: random timing
+PASS crash 23/30: scan.in_place_after_commit
+PASS crash 24/30: random timing
+PASS crash 25/30: scan.in_place_started
+PASS crash 26/30: random timing
+PASS crash 27/30: scan.in_place_projection_ready
+PASS crash 28/30: random timing
+PASS crash 29/30: scan.in_place_before_commit
+PASS crash 30/30: random timing
+PROGRESS requesting and validating the scan-first baseline
+PROGRESS baseline ready: generation=569780-1794187979492514462 overflows=0 uncertain=False
+PROGRESS overflow storm created; waiting for kernel notification
+PROGRESS kernel overflow observed: count=1; requesting recovery observation
+PASS real queue overflow, visible uncertainty, exact observation recovery, and cleanup
+PASS 12008 events produced in 2.27s, pipeline caught up in 0.12s, exact validation in 5.06s at 0.01 CPU
+Evidence: /root/dux-readiness-6dacdf5/release110-final-harness.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2649, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2604, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2429, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 1307, in coverage_test
+    assert result.returncode == 0, result.stderr
+           ^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: scanned 267 files, 10 dirs, 277 staged path instances (0 directory alias paths), visible 1134592 bytes/277 entries, unique 1130496 bytes/276 inodes, 1.08 MiB in 0.2s (1 coverage issues)
+dux: scan is incomplete: 1 coverage issues; index remains marked incomplete
+
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 1min 39.633s
+CPU time consumed: 23.968s
+Memory peak: 176.4M
+Memory swap peak: 0B

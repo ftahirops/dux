@@ -1,0 +1,25 @@
+{
+  "observed_at_utc": "2026-11-11T03:19:16Z",
+  "candidate_label": "r133-workspace",
+  "source_commit": "b0ed3078f2d8",
+  "embedded_source_sha256": "e755f897c6d79f027df83d30e8f8f50c492306923fa676526ec36d862b7df476",
+  "builds": {
+    "production": {
+      "command": "CARGO_BUILD_JOBS=1 cargo build --locked --release",
+      "version": "dux 0.6.3 (b0ed3078f2d8) [production]",
+      "binary": "/dev/shm/dux-r133-qualification-20261111/dux-r133",
+      "sha256": "9c5e361408c364c6032be0c48f80b228eebb356b00b73535e8a097aa55917a03"
+    },
+    "fault_injection": {
+      "command": "CARGO_BUILD_JOBS=1 cargo build --locked --release --features fault-injection",
+      "version": "dux 0.6.3 (b0ed3078f2d8) [fault-injection]",
+      "binary": "/dev/shm/dux-r133-qualification-20261111/dux-r133-fault",
+      "sha256": "7bb5d2b0107a6b04901a45b0e2316d6fdf1e70bc103cf131599e420cfcd920b4"
+    }
+  },
+  "pair_check": "Production and fault-injection binaries report the same embedded source SHA-256.",
+  "staged": true,
+  "vm_runtime_qualified": false,
+  "installed": false,
+  "next": "Mount this directory read-only in the guarded disposable VM and run systemd-state smoke plus the full fault matrix."
+}

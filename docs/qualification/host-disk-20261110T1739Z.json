@@ -1,0 +1,10 @@
+{
+  "observed_at_utc": "2026-11-10T17:39:36Z",
+  "root_filesystem": {
+    "size": "185G",
+    "used": "120G",
+    "available": "57G",
+    "use_percent": 68
+  },
+  "note": "The prior 17:33 snapshot was 74% used with 47G available; the drop is consistent with temporary build/test files being cleaned up, but no per-directory deletion attribution was measured."
+}

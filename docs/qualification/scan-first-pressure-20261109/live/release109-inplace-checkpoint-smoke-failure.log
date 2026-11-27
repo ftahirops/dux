@@ -1,0 +1,28 @@
+Running as unit: dux-readiness-496832.service; invocation ID: d7e77a55588441f38a350691fc23f314
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PROGRESS crash boundaries selected for scan-first mode: ['scan.build_complete', 'scan.install_started', 'scan.install_midway', 'scan.install_committed']
+Evidence: /root/dux-readiness-f693786/release109-crash8.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 2615, in <module>
+    main()
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 2570, in main
+    worker(args)
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 2395, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 636, in crash_tests
+    daemon.paused_at(stage)  # existing-index startup automatically reconciles
+    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 506, in paused_at
+    self.wait(lambda: self.marker.exists() and self.marker.read_text().strip() == f"{self.process.pid} {stage}", stage)
+  File "/root/dux-readiness-f693786/scripts/dux-readiness.py", line 335, in wait
+    raise AssertionError(f"timeout waiting for {description}: {last}")
+AssertionError: timeout waiting for scan.build_complete: not ready
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 1min 1.578s
+CPU time consumed: 886ms
+Memory peak: 26.1M
+Memory swap peak: 0B

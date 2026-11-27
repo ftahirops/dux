@@ -1,0 +1,24 @@
+Running as unit: dux-readiness-617718.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+Evidence: /root/dux-readiness-6dacdf5/release110-final-independent.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2684, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2639, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2464, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 1673, in pressure_reconciliation_test
+    daemon.wait(
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 346, in wait
+    raise AssertionError(f"timeout waiting for {description}: {last}")
+AssertionError: timeout waiting for background reconciliation staging database: not ready
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 31.463s
+CPU time consumed: 654ms
+Memory peak: 33.5M
+Memory swap peak: 0B

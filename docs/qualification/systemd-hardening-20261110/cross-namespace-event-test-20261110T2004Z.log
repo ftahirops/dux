@@ -1,0 +1,24 @@
+observed_at_before 2026-11-10T20:04:49.572384+00:00
+before_events_seen 17801 before_events_resolved 17060 before_dirty False
+observed_at_after 2026-11-10T20:04:49.759198+00:00
+query_returncode 0
+query_stderr 
+marker_indexed True
+query_output [
+  {
+    "bytes": 4096,
+    "inodes": 1,
+    "kind": "file",
+    "mtime": 1794341089,
+    "path": "/var/tmp/dux-mntns-event-probe/tree/host-namespace-sentinel-20261110T2004Z",
+    "uid": 0
+  }
+]
+after_events_seen 17825 after_events_resolved 17082 after_overflows 0 after_dropped 0 after_dirty False pending 0
+delta_events_seen 24 delta_events_resolved 22
+rename_start 2026-11-10T20:05:13.771736+00:00
+rename_visible True old_still_indexed False new_indexed True
+delete_start 2026-11-10T20:05:14.045096+00:00
+delete_visible True events_seen_delta 214 events_resolved_delta 206 overflows 0 dropped 0
+
+CLEANUP_VERIFIED unit inactive; transient fixture and copied candidate removed. Production service remained active with four historical restarts; overflow and dropped-update totals unchanged; no OOM events.

@@ -1,0 +1,38 @@
+{
+  "observed_at_utc": "2026-11-11T00:03:56Z",
+  "binary": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "service": {
+    "active_state": "active",
+    "main_pid": 1073891,
+    "historical_restarts": 4
+  },
+  "status": {
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "fanotify queue overflow",
+    "behind_seconds": 282785.167,
+    "kernel_overflow_notifications": 888,
+    "events_dropped": 2518862,
+    "pending_updates": 18440,
+    "last_scan_age_seconds": 472474,
+    "scan_in_progress": false,
+    "index_nodes": 1288845,
+    "index_bytes_on_disk": 3731447808,
+    "write_error": null
+  },
+  "host_storage": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 123405086720,
+    "root_available_bytes": 65855995904,
+    "root_use_percent": 66,
+    "inode_use_percent": 11,
+    "tmp_human": "12G",
+    "var_tmp_human": "675M",
+    "var_log_human": "1.7G",
+    "var_lib_dux_human": "3.7G",
+    "target_readiness_human": "1.4G",
+    "target_readiness_vms_human": "23M",
+    "target_human": "3.6G"
+  },
+  "interpretation": "The installed production daemon remains active on the old event-apply build but its index is dirty and not caught up. The live counters show 888 lifetime overflow notifications and 2,518,862 dropped updates; lower pending work does not establish exactness."
+}

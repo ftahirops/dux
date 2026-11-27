@@ -1,0 +1,29 @@
+Running as unit: dux-readiness-535916.service; invocation ID: 562cb337c9444f8aaa91a0e84498939b
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+Evidence: /root/dux-readiness-6dacdf5/release110-cpu.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2644, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2599, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2424, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 961, in cpu_event_burst_test
+    after = daemon.wait(
+            ^^^^^^^^^^^^
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 339, in wait
+    value = predicate()
+            ^^^^^^^^^^^
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 963, in <lambda>
+    if scan_first_hint_count_reached(before, record)
+                                             ^^^^^^
+UnboundLocalError: cannot access local variable 'record' where it is not associated with a value
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 7.402s
+CPU time consumed: 1.830s
+Memory peak: 117.1M
+Memory swap peak: 0B

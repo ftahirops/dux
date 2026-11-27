@@ -1,0 +1,10 @@
+captured_at=2026-11-09T16:06:26Z
+MainPID=1073891
+Result=success
+NRestarts=4
+ActiveState=active
+SubState=running
+Filesystem                         Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-ubuntu--lv  185G  122G   55G  70% /
+Filesystem                          Inodes   IUsed    IFree IUse% Mounted on
+/dev/mapper/ubuntu--vg-ubuntu--lv 12320768 1323720 10997048   11% /

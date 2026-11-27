@@ -1,0 +1,34 @@
+{
+  "observed_at_utc": "2026-11-11T03:29:43Z",
+  "host": "local qualification host",
+  "systemd_version": "255 (255.4-1ubuntu8.18)",
+  "test_kind": "bounded transient Type=notify service A/B smoke on isolated /dev/shm fixtures",
+  "pause_point": "scan.in_place_started",
+  "new_candidate": {
+    "binary_version": "dux 0.6.3 (b0ed3078f2d8) [fault-injection]",
+    "binary_sha256": "7bb5d2b0107a6b04901a45b0e2316d6fdf1e70bc103cf131599e420cfcd920b4",
+    "embedded_source_sha256": "e755f897c6d79f027df83d30e8f8f50c492306923fa676526ec36d862b7df476",
+    "unit_state_at_pause": "active/running",
+    "status_text": "Observing filesystem; collecting concurrent change hints",
+    "result": "passed"
+  },
+  "old_control": {
+    "binary_version": "dux 0.6.3 (f02ba7ad235e) [fault-injection]",
+    "binary_sha256": "3b17b46c2f3c4baf18ed78bc3dc868e4ac92a9fb8ed4241141a12d659fee88b7",
+    "embedded_source_sha256": "5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff",
+    "unit_state_at_pause": "reloading/reload-notify",
+    "status_text": "Observing filesystem; collecting concurrent change hints",
+    "result": "reproduced_old_behavior"
+  },
+  "cleanup": {
+    "both_processes_resumed_and_stopped": true,
+    "both_transient_units_inactive": true,
+    "temporary_fixtures_removed": true,
+    "installed_daemon_or_database_modified": false
+  },
+  "limits": [
+    "The new behavior was exercised using its fault-injection build, whose production code path is otherwise the same; this was not the production-mode binary.",
+    "The transient units did not reproduce the package's full capability and syscall sandbox.",
+    "This is a focused lifecycle regression smoke, not the 15-suite fault matrix or soak."
+  ]
+}

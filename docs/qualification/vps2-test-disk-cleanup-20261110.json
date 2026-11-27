@@ -1,0 +1,74 @@
+{
+  "host": "192.168.5.106",
+  "captured_at_utc": "2026-11-10T09:44:42Z",
+  "reason": "Reclaim space on the shared qualification host without touching active services or Dux scan state.",
+  "removed_container": {
+    "name": "xgs-test-clickhouse-test-1",
+    "id": "0afb65a5a7c9",
+    "project": "xgs-test",
+    "project_compose_file": "/workspace/ftahir/xgenstack/tests/env/docker-compose.test.yml",
+    "status_before_removal": "exited (255), since 2026-11-06T09:55:25Z",
+    "writable_layer_before_removal": "about 1.95 GB (Docker-reported)",
+    "mounted_volume": "be65c16eccb04a5afc357e0bea5d09a4498a63260e9b0e2cec3791e51d4211d7",
+    "active_project_containers_before_removal": 0,
+    "container_removal_used_volume_flag": false
+  },
+  "removed_orphan_volume": {
+    "name": "be65c16eccb04a5afc357e0bea5d09a4498a63260e9b0e2cec3791e51d4211d7",
+    "created_at_utc": "2026-07-07T03:14:16Z",
+    "docker_label": "com.docker.volume.anonymous",
+    "attached_containers_before_removal": 0,
+    "reported_size_before_removal": "5.948 GB (Docker-reported)",
+    "reason": "Anonymous ClickHouse test volume left unattached after removing the stopped test container"
+  },
+  "before_snapshot_utc": "2026-11-10T09:40:50Z",
+  "before": {
+    "root_df": "93G total, 85G used, 3.1G available, 97%",
+    "docker_images": "19.53 GB, 6.402 GB reclaimable",
+    "docker_containers": "3.549 GB, 1.955 GB reclaimable",
+    "docker_volumes": "21.94 GB, 1.119 MB reclaimable"
+  },
+  "after": {
+    "root_filesystem_bytes": {
+      "total": 99012476928,
+      "used": 81893429248,
+      "available": 12539297792
+    },
+    "root_use_percent": 87,
+    "dev_shm_bytes": {
+      "total": 3221225472,
+      "used": 297431040,
+      "available": 2923794432
+    },
+    "docker_images": "17.59 GB, 7.074 GB reclaimable",
+    "docker_containers": "1.611 GB, 2.773 MB reclaimable",
+    "docker_volumes": "16.01 GB, 1.119 MB reclaimable"
+  },
+  "dux_service_after": {
+    "captured_at_utc": "2026-11-10T09:45:20Z",
+    "active": true,
+    "restarts": 0,
+    "scan_in_progress": false,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "events_dropped": 0,
+    "kernel_overflow_notifications": 0,
+    "index_nodes": 1928598,
+    "index_bytes_on_disk": 805740544,
+    "last_scan_age_seconds": 260
+  },
+  "r132_soak_after": {
+    "captured_at_utc": "2026-11-10T09:44:06Z",
+    "active": true,
+    "restarts": 0,
+    "elapsed_seconds": 2341.0,
+    "operations": 55493,
+    "latest_exact_checkpoint": 55000,
+    "latest_exact_convergence_ms": 1488
+  },
+  "preserved": [
+    "All Docker images",
+    "All other volumes, including volumes used by active services",
+    "The Dux database and WAL",
+    "The active r132 soak fixture and report"
+  ]
+}

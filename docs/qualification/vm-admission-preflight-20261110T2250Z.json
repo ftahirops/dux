@@ -1,0 +1,14 @@
+{
+  "observed_at_utc": "2026-11-10T22:50Z",
+  "decision": "blocked_no_vm_started",
+  "admission_probe": "require_stable_host_admission with three samples requested; rejected on sample 1",
+  "load_average_1m": 10.58,
+  "blockers": [
+    "active host build/test/install/analysis workload: Go test binary pid=63277",
+    "active host build/test/install/analysis workload: go test pid=62902",
+    "host load1=10.58 exceeds 10"
+  ],
+  "vm_started": false,
+  "fault_matrix_started": false,
+  "evidence": "scripts/dux-qualification-vm.py admission implementation invoked read-only via import; stdout captured in this session"
+}

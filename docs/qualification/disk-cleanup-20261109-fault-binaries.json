@@ -1,0 +1,98 @@
+{
+  "purpose": "Preserve exact unique fault-injection executables while cleaning only Cargo intermediates.",
+  "items": [
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build",
+      "binary_path": "/home/dux/target/readiness/fault-build/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-dux",
+      "sha256": "7101b654ce330a9af38ecfb4aaeb3fbf3dda454e94b791cd833980499e3a5ac8",
+      "size_bytes": 5356024,
+      "version": "dux 0.6.3 (0fc18fc28cfa) [fault-injection] source-sha256=6884e20a6d939e86653257b8d4f4a35c2d2f85042213ccf24938c85a671a8df7",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    },
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build-109",
+      "binary_path": "/home/dux/target/readiness/fault-build-109/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-109-dux",
+      "sha256": "d654725448af7d32455a91cc9c784c2c9188b6cdeb4392fbc35d7b66a8a27a19",
+      "size_bytes": 5356024,
+      "version": "dux 0.6.3 (f693786d467f) [fault-injection] source-sha256=85c7b3238491d29e0f25325d974222f6a3ed7cf41a4f9430e14bb52968e45afb",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    },
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build-110",
+      "binary_path": "/home/dux/target/readiness/fault-build-110/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-110-dux",
+      "sha256": "c76975c21aafc117ef1ec5e733998092b566a6001c967235d06f28fc2158a29a",
+      "size_bytes": 5356280,
+      "version": "dux 0.6.3 (6dacdf5cb932) [fault-injection] source-sha256=4b24695cde38ec28d2820abb0d8e3e6b321d833bc1890e0b622cbe7d9356bf51",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    },
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build-111",
+      "binary_path": "/home/dux/target/readiness/fault-build-111/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-111-dux",
+      "sha256": "c411ace8ce01872ca022114812ea24ad099a5fcc277dc305713cdd496ada5f77",
+      "size_bytes": 5356536,
+      "version": "dux 0.6.3 (be61d752fbda+modified) [fault-injection] source-sha256=2ddcc79f9b469e4b655776ca7a3b0c0cbbaf518c3bf129b0cb376364f1ef7bb9",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    },
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build-112",
+      "binary_path": "/home/dux/target/readiness/fault-build-112/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-112-dux",
+      "sha256": "67a4f20b246cd3395026328f31b24c5219795f0950566c806d4cbbdd481c4657",
+      "size_bytes": 5356536,
+      "version": "dux 0.6.3 (be61d752fbda+modified) [fault-injection] source-sha256=3a503bb28eb740693fc3ab504592205f993eb67f7c6b1a357b413b919c9d8d0f",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    },
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build-113",
+      "binary_path": "/home/dux/target/readiness/fault-build-113/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-113-dux",
+      "sha256": "5002a91b29f60c95abf93fccce21cd8a6289f08aa3f9ab6fff110e2b8741c478",
+      "size_bytes": 5356536,
+      "version": "dux 0.6.3 (be61d752fbda+modified) [fault-injection] source-sha256=0f56f642dbcd1bd360c0b46e89560547bb8aa7d1da850461cc94b145c8c69d2a",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    },
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build-114",
+      "binary_path": "/home/dux/target/readiness/fault-build-114/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-114-dux",
+      "sha256": "bb9a129c8b0537ef96eb679db49acf00b721704261435fa1dae4b87d809ef8c1",
+      "size_bytes": 5356536,
+      "version": "dux 0.6.3 (be61d752fbda+modified) [fault-injection] source-sha256=9fccdf267c971169bab36a92f90240a27ca612913c49094f89795470e5c4a1bf",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    },
+    {
+      "target_dir": "/home/dux/target/readiness/fault-build-115",
+      "binary_path": "/home/dux/target/readiness/fault-build-115/release/dux",
+      "preserved_copy": "/dev/shm/dux-fault-binary-preserve-20261109/fault-build-115-dux",
+      "sha256": "10ac111df349c6c753c3f8d10669d7ca3295e7d16116f403c2487e2ef735954a",
+      "size_bytes": 5356536,
+      "version": "dux 0.6.3 (be61d752fbda+modified) [fault-injection] source-sha256=caa8bb3189b6a5057ab21ac5b2fd1b75ac980ca9c8dae0a24330f77fce4f8347",
+      "backup_copy": "removed after exact hash/version restoration verification",
+      "cargo_cache_cleanup": "cargo clean; 1164 files and 249.6 MiB reported removed",
+      "binary_restored_at_original_path": true
+    }
+  ],
+  "verification": {
+    "all_8_hashes_match": true,
+    "all_8_versions_match": true,
+    "staging_directory_removed": true
+  }
+}

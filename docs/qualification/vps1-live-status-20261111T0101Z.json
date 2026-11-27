@@ -1,0 +1,29 @@
+{
+  "observed_at_utc": "2026-11-11T01:01:31Z",
+  "binary": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "service": {
+    "active_state": "active",
+    "main_pid": 1073891,
+    "historical_restarts": 4
+  },
+  "status": {
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+    "behind_seconds": 286240.254,
+    "kernel_overflow_notifications": 892,
+    "events_dropped": 2518862,
+    "pending_updates": 3,
+    "last_scan_age_seconds": 475929,
+    "scan_in_progress": false,
+    "index_nodes": 1264267,
+    "index_bytes_on_disk": 3742359552,
+    "index_bytes": 117140361216,
+    "wal_bytes": 134217728,
+    "events_seen": 283043980,
+    "events_resolved": 164570039,
+    "updates_committed": 46475626,
+    "write_error": null
+  },
+  "interpretation": "Production remains dirty and several days behind on the old event-apply daemon. Pending events drained to three; the historical dirty reason persists."
+}

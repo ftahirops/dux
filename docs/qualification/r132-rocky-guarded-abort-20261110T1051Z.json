@@ -1,0 +1,28 @@
+{
+  "attempt_started_at_utc": "2026-11-10T10:51:58Z",
+  "guest": "rocky9-lifecycle-ephemeral",
+  "vm_unit": "dux-qualification-vm-rocky9-lifecycle-ephemeral",
+  "runtime_pressure_guard_unit": "dux-qualification-pressure-guard-rocky9-lifecycle-ephemeral-1794307918171572222.service",
+  "admission": "passed three-sample startup guard",
+  "stopped_at_utc": "2026-11-10T10:52:08Z",
+  "stop_reason": [
+    "active host Go compiler pid=1339912",
+    "active host go test pid=1339817"
+  ],
+  "pressure_at_stop": {
+    "load1": 3.63,
+    "cpu_psi_some_avg10_percent": 17.67,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 1.5,
+    "io_psi_full_avg10_percent": 1.3,
+    "memory_psi_some_avg10_percent": 0.0,
+    "memory_psi_full_avg10_percent": 0.0
+  },
+  "ssh_reached": false,
+  "package_copy": "not attempted before the runtime guard stopped the guest",
+  "rpm_lifecycle_started": false,
+  "production_service_modified": false,
+  "test_key_fingerprint": "13474396FE1F833F862A292FA437F6B933029C54",
+  "signed_test_rpm_sha256": "5ae7144c51a71b2f75214aa009907f473b13c9f4c172838f819f70112af287ab",
+  "test_key_and_signing_workspace_removed": true
+}

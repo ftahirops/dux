@@ -1,0 +1,83 @@
+{
+  "captured_at_utc": "2026-11-07T06:07:35+00:00",
+  "window": "journal messages from the preceding 15 minutes",
+  "production_service": {
+    "MainPID": "988284",
+    "NRestarts": "1",
+    "ActiveState": "active"
+  },
+  "running_binary": {
+    "version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+    "sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060"
+  },
+  "root_filesystem": {
+    "statfs_fsid_hex": "d32f83920c90bad3",
+    "mounted_type": "ext4 (from prior mount inspection)",
+    "statfs_magic_type": "ext2/ext3"
+  },
+  "watch_status": {
+    "version": 4,
+    "updated_epoch": 1794031655,
+    "pid": 988284,
+    "pending": 14940,
+    "kernel_queue_empty": true,
+    "events_seen": 8695309,
+    "events_resolved": 6008725,
+    "updates_committed": 1882507,
+    "updates_dropped": 0,
+    "behind_ms": 13127372,
+    "max_pending": 500000,
+    "uncertain": true,
+    "last_commit_epoch": 1794031655,
+    "kernel_overflow_notifications": 3,
+    "db": "/var/lib/dux/dux.db"
+  },
+  "index_meta": {
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since": "1794031420",
+    "failed_reconciliation_attempts": "2",
+    "schema_version": "6"
+  },
+  "journal_summary": {
+    "unresolved_fanotify_warnings": 599,
+    "event_masks": {
+      "0x4": 467,
+      "0x8": 2,
+      "0x40000200": 16,
+      "0x40": 4,
+      "0x40000300": 36,
+      "0x20a": 9,
+      "0x48": 8,
+      "0x208": 2,
+      "0x30a": 11,
+      "0x10a": 6,
+      "0x40000040": 1,
+      "0x14e": 8,
+      "0xa": 19,
+      "0x40000004": 2,
+      "0x40000280": 1,
+      "0x20c": 1,
+      "0x100": 1,
+      "0x300": 2,
+      "0x200": 1,
+      "0x14a": 1,
+      "0x40000100": 1
+    },
+    "info_type_masks": {
+      "0x2": 467,
+      "0x6": 130,
+      "0x4": 2
+    },
+    "target_only_stale_attrib_shape_count": 466,
+    "event_fsids": {
+      "-751860846, 210811603": 597,
+      "missing": 2
+    },
+    "fanotify_queue_overflow_log_lines": 3,
+    "reconciliation_incomplete_log_lines": 0,
+    "rescan_complete_log_lines": 0
+  },
+  "interpretation": "The old binary records unresolved FID events and three queue overflows. The target-only ATTRIB subset matches the mask/info/length/ESTALE shape handled by the candidate filter, conditional on a successful handle-capability probe on this exact production filesystem. The production FSID was not handle-probed by this read-only collection. Compound events remain outside that filter.",
+  "candidate_binary_sha256": "952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287",
+  "mutations_performed": false
+}

@@ -1,0 +1,34 @@
+{
+  "host": "192.168.5.106",
+  "daemon_pid": 576850,
+  "installed_build": "0.6.3 (8b02799b)",
+  "scan_start_utc": "2026-11-10T21:15:22.198365Z",
+  "scan_complete_utc": "2026-11-10T21:23:53.976784Z",
+  "scan_duration_seconds": 511.778419,
+  "files": 1784140,
+  "directories": 218276,
+  "staged_path_instances": 2002416,
+  "visible_bytes": 83824189440,
+  "unique_bytes": 83691479040,
+  "coverage_issues": 0,
+  "vanished_reuse_paths": 72,
+  "revalidated_reuse_paths": 0,
+  "unresolved_reuse_paths": 0,
+  "accounting_verification": "passed",
+  "accounting_elapsed_ms": 91149,
+  "accounting_completed_utc": "2026-11-10T21:25:25.228350Z",
+  "post_observation_status_at_2126z": {
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "pending_updates": 0,
+    "kernel_overflows": 0,
+    "dropped_updates": 0
+  },
+  "temporary_staging_database": {
+    "path_pattern": "/var/lib/dux/dux.db.scan-<pid>-<nonce>.tmp",
+    "peak_observed_bytes": 745762816,
+    "observed_at_utc": "2026-11-10T21:21:11Z",
+    "removed_after_scan": true
+  },
+  "evidence_source": "remote status, systemd journal, filesystem inventory, and df captured over SSH"
+}

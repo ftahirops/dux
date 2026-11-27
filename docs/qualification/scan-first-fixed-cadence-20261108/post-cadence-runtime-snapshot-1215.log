@@ -1,0 +1,23 @@
+VPS2 runtime snapshot captured 2026-11-08T12:15:12Z.
+
+Binary: /usr/bin/dux
+Binary SHA-256: 8f9a6f631f6c08b9df2fad7516d0fe8808ce76d5cb1c5371aee23f0d67e533c1
+systemd: ActiveState=active, NRestarts=0
+CPUUsageNSec=939854114000
+IOReadBytes=9484996608
+IOWriteBytes=14447869952
+
+At 12:12:14Z the fixed-cadence full reconciliation started. At 12:13:58Z
+the scanner reported `conflicting_inode_incarnations=45`: the same ext4
+(device,inode) identity was observed with different birth times during the
+walk. It completed at 12:15:03Z with 1,300,583 files, 156,239 directories,
+1,456,822 staged paths, and 45 coverage issues.
+
+Status at 12:15:12Z:
+{"automatic_reconciliation_paused":false,"behind_seconds":2659.739,"caught_up":false,"daemon_live":true,"dirty":true,"dirty_reason":"incomplete coverage or changes lost during reconciliation","dirty_since_timestamp_seconds":1794140103,"events_dropped":0,"events_resolved":0,"events_seen":8436829,"failed_reconciliation_attempts":4,"index_bytes":83296313344,"index_bytes_on_disk":558563328,"index_nodes":1448886,"kernel_overflow_notifications":0,"last_event_commit_timestamp_seconds":0,"last_scan_age_seconds":1078,"last_scan_timestamp_seconds":1794139034,"max_automatic_reconciliation_retries":1,"max_pending_updates":500000,"pause_reason":null,"paused":false,"paused_since_timestamp_seconds":null,"pending_updates":0,"reconciliation_retry_backoff_seconds":480,"reconciliation_retry_due":false,"reconciliation_retry_remaining_seconds":471,"reconciliation_retry_state_corrupt":false,"root":"/","scan_first":true,"scan_in_progress":false,"scan_progress":null,"status_version":1,"throttled_since_timestamp_seconds":1794137453,"updates_committed":0,"userspace_updates_dropped":0,"wal_bytes":15520072,"watch_status_available":true,"watch_status_updated_at_seconds":1794140112,"write_error":null}
+
+The service did not restart. The scheduler fired at the configured cadence,
+but the scan was incomplete, so the previous successful observation remained
+the latest accepted scan and Dux scheduled a bounded retry with an 8-minute
+backoff. This reproduces failure to obtain a clean observation during ongoing
+VM churn; it is not a daemon crash or kernel fanotify queue overflow.

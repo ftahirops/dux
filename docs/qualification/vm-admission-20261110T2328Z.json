@@ -1,0 +1,14 @@
+{
+  "observed_at_utc": "2026-11-10T23:28:39Z",
+  "decision": "blocked_no_vm_started",
+  "probe": "require_stable_host_admission(samples=3, interval_seconds=10)",
+  "result": "refused at sample 1/3",
+  "blockers": [
+    "active Go compiler pid 171660",
+    "active go test pid 170057",
+    "host load1 11.15 exceeds limit 10"
+  ],
+  "vm_started": false,
+  "dux_test_suite_started": false,
+  "evidence": "read-only guarded admission probe; no bypass"
+}

@@ -1,0 +1,192 @@
+{
+  "started_at": "2026-11-07T17:42:09Z",
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "seed": 20261022,
+  "binary": "/var/tmp/dux-scanfirst-policy-20261107/dux",
+  "binary_sha256": "a908849a5d793cf76c15af8e3e1c68000f9fe899ef8badcd39d67777fc375ae2",
+  "fault_binary_sha256": null,
+  "crash_rounds": 30,
+  "filesystem": "ext4 disposable loop image",
+  "workspace_parent": "/dev/shm/dux-qualification",
+  "workspace_device": 26,
+  "workspace_filesystem_type": "tmpfs",
+  "workspace_free_bytes_at_start": 3496935424,
+  "harness_sha256": "fd669c3691da97b2fe899b441724ccd01a2839d10105ddc0a8ec4ea47123f2f2",
+  "seed_files": 100000,
+  "filesystem_image_mib": 2048,
+  "qualification_worker_limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "not_qualified_by_this_run": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "capability",
+    "coverage",
+    "cpu",
+    "crash",
+    "disk",
+    "mount",
+    "oom",
+    "overflow",
+    "pressure",
+    "retry",
+    "root",
+    "soak",
+    "startup",
+    "wal"
+  ],
+  "suites": {
+    "churn": {
+      "status": "passed",
+      "evidence": {
+        "seed_files": 100000,
+        "operations": 20000,
+        "operations_per_batch": 2000,
+        "concurrent_rebuild_during_churn": true,
+        "batches": [
+          {
+            "batch": 1,
+            "operations": 2000,
+            "seen": 4468,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 45308,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 2,
+            "operations": 4000,
+            "seen": 9874,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 43800,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 3,
+            "operations": 6000,
+            "seen": 14686,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 44594,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 4,
+            "operations": 8000,
+            "seen": 19418,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 135105,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 5,
+            "operations": 10000,
+            "seen": 24405,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 40318,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 6,
+            "operations": 12000,
+            "seen": 28509,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 152514,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 7,
+            "operations": 14000,
+            "seen": 34322,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 40213,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 8,
+            "operations": 16000,
+            "seen": 39481,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 62902,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 9,
+            "operations": 18000,
+            "seen": 44072,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 71699,
+            "exact_paths_inodes_allocations_rollups": true
+          },
+          {
+            "batch": 10,
+            "operations": 20000,
+            "seen": 49724,
+            "resolved": 0,
+            "committed": 0,
+            "growth_rows": 577,
+            "dropped": 0,
+            "uncertain": false,
+            "exact_convergence_ms": 43606,
+            "exact_paths_inodes_allocations_rollups": true
+          }
+        ],
+        "exact_paths_inodes_allocations_all_rollups": true,
+        "history_continuity": true,
+        "kernel_events_seen": 49724,
+        "updates_committed": 0,
+        "dropped_events": 0
+      },
+      "elapsed_seconds": 953.095
+    }
+  },
+  "status": "passed",
+  "current_suite": null,
+  "last_checkpoint_at": "2026-11-07T17:58:50Z",
+  "current_suite_started_at": "2026-11-07T17:42:56Z",
+  "log_tail": "er pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m11663 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:55:49.201155Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m11728 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:55:59.284726Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m11781 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:56:09.369399Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m384 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m11982 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m83.29472175105775 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:56:11.165146Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m operator requested a full reconciliation; resetting the accounting retry circuit\n\u001b[2m2026-11-07T17:56:12.571448Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m index backlog persists \u2014 15s since last caught up\n\u001b[2m2026-11-07T17:56:12.572082Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-07T17:56:12.572089Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-qualification/dux-readiness-46ghb45t/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-07T17:56:19.371103Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m12354 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m375.03608923745 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:56:29.177484Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:56:29.567614Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m12684 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:56:39.662145Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m12731 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:56:40.061689Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint resolver backlog overflowed; discarded scopes require a full observation\n\u001b[2m2026-11-07T17:56:40.062251Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint resolver backlog overflowed; discarded scopes require a full observation\n\u001b[2m2026-11-07T17:56:49.961580Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m12870 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:56:58.361196Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m filesystem changed during scan-first observation; next full observation is scheduled\n\u001b[2m2026-11-07T17:56:58.361214Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 100322 files, 73 dirs, 100395 staged path instances (0 directory alias paths), visible 414068736 bytes/100395 entries, unique 414064640 bytes/100394 inodes, 394.88 MiB (0 coverage issues); replaying 0 pending paths\n\u001b[2m2026-11-07T17:56:58.365185Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m index backlog persists \u2014 60s since last caught up\n\u001b[2m2026-11-07T17:56:59.985217Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m13114 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:57:01.860991Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m reconciliation accounting verification passed \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m3494\n\u001b[2m2026-11-07T17:57:02.006612Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m caught up \u2014 live updates resumed\n\u001b[2m2026-11-07T17:57:10.176810Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m13159 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:57:20.275898Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m13215 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:57:28.964528Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m index backlog persists \u2014 15s since last caught up\n\u001b[2m2026-11-07T17:57:29.066842Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m caught up \u2014 live updates resumed\n\u001b[2m2026-11-07T17:57:30.370260Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m13262 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:57:33.367380Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m operator requested a full reconciliation; resetting the accounting retry circuit\n\u001b[2m2026-11-07T17:57:33.367473Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-07T17:57:33.367478Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-qualification/dux-readiness-46ghb45t/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-07T17:57:39.261932Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:57:40.372385Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m13924 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m565.0798773539597 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:57:41.275869Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:57:44.583501Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify hint ring overflowed; discarded hints require a full observation\n\u001b[2m2026-11-07T17:57:50.470791Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m13971 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:57:54.368716Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m filesystem changed during scan-first observation; next full observation is scheduled\n\u001b[2m2026-11-07T17:57:54.368726Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 100355 files, 73 dirs, 100428 staged path instances (0 directory alias paths), visible 414146560 bytes/100428 entries, unique 414142464 bytes/100427 inodes, 394.96 MiB (0 coverage issues); replaying 0 pending paths\n\u001b[2m2026-11-07T17:57:54.369049Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m index backlog persists \u2014 25s since last caught up\n\u001b[2m2026-11-07T17:57:56.815345Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m reconciliation accounting verification passed \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m2444\n\u001b[2m2026-11-07T17:57:56.980427Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m caught up \u2014 live updates resumed\n\u001b[2m2026-11-07T17:58:00.574505Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m14025 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:58:10.581843Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m14065 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:58:20.663508Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m14107 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:58:30.666090Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m14150 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:58:40.668296Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify watcher pressure metrics \u001b[3mqueue_bytes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_active\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mqueue_pressure_episodes\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mqueue_pressure_total_ms\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mthrottle_sleep_total_ms\u001b[0m\u001b[2m=\u001b[0m14196 \u001b[3mevents_seen_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mevents_resolved_per_sec\u001b[0m\u001b[2m=\u001b[0m0.0\n\u001b[2m2026-11-07T17:58:44.362944Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m dux daemon: received SIGTERM/SIGINT \u2014 drained + flushed, exiting\n",
+  "finished_at": "2026-11-07T17:58:50Z"
+}

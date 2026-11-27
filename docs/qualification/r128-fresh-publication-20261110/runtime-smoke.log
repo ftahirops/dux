@@ -1,0 +1,53 @@
+EVENT_APPLY_STATUS={"caught_up": true, "daemon_live": true, "dirty": false, "events_dropped": 0, "events_resolved": 11, "events_seen": 11, "kernel_overflow_notifications": 0}
+PASS: event-apply fanotify init/mark, successful open_by_handle_at, create/rename indexed, zero drops/overflows
+SCAN_FIRST_STATUS={"daemon_live": true, "dirty": false, "events_dropped": 0, "events_resolved": 0, "events_seen": 2, "kernel_overflow_notifications": 0, "last_scan_age_seconds": 1, "scan_first": true, "scan_in_progress": false}
+PASS: default scan-first mode records hints and publishes them after a manual full observation
+
+--- event-apply daemon log ---
+[2m2026-11-10T05:09:45.210536Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m selected startup index source [3mrebuilt[0m[2m=[0mtrue [3mread_only_source[0m[2m=[0mfalse [3mschema_version[0m[2m=[0m7 [3mbaseline_ready[0m[2m=[0mfalse
+[2m2026-11-10T05:09:45.210642Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m initial baseline or schema upgrade will run after filesystem watches are active
+[2m2026-11-10T05:09:45.215700Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m fanotify queue-pressure CPU throttle thresholds [3mmax_queued_events[0m[2m=[0m16384 [3mqueue_high_watermark_bytes[0m[2m=[0m294912 [3mqueue_low_watermark_bytes[0m[2m=[0m196608 [3mreconcile_first[0m[2m=[0mfalse
+[2m2026-11-10T05:09:45.215963Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m dux daemon watching /dev/shm/dux-r128-fanotify-mnt (1 filesystem(s), FID mode: create/delete/rename/modify, flush 100ms)
+[2m2026-11-10T05:09:45.221025Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m selected reconciliation implementation [3muse_in_place_observation[0m[2m=[0mfalse [3mbaseline_ready[0m[2m=[0mfalse [3mread_only_source[0m[2m=[0mfalse
+[2m2026-11-10T05:09:45.221053Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m starting background reconciliation of /dev/shm/dux-r128-fanotify-mnt; event ingestion remains active
+[2m2026-11-10T05:09:46.242425Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m rescan complete: 0 files, 2 dirs, 2 staged path instances (0 directory alias paths), visible 20480 bytes/2 entries, unique 20480 bytes/2 inodes, 20 KiB (0 coverage issues); replaying 0 pending paths [3mvanished_reuse_paths[0m[2m=[0m0 [3mrevalidated_reuse_paths[0m[2m=[0m0 [3munresolved_reuse_paths[0m[2m=[0m0
+[2m2026-11-10T05:09:46.350833Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m reconciliation accounting verification passed [3melapsed_ms[0m[2m=[0m105
+[2m2026-11-10T05:09:47.764737Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m dux daemon: received SIGTERM/SIGINT — drained + flushed, exiting
+
+--- event-apply fanotify syscalls ---
+689303 fanotify_init(FAN_CLASS_NOTIF|FAN_CLOEXEC|FAN_NONBLOCK|FAN_REPORT_FID|FAN_REPORT_DIR_FID|FAN_REPORT_NAME|FAN_REPORT_TARGET_FID, O_RDONLY|O_LARGEFILE) = 7
+689303 fanotify_mark(7, FAN_MARK_ADD|FAN_MARK_FILESYSTEM, FAN_MODIFY|FAN_ATTRIB|FAN_CLOSE_WRITE|FAN_MOVED_FROM|FAN_MOVED_TO|FAN_CREATE|FAN_DELETE|FAN_ONDIR, AT_FDCWD, "/dev/shm/dux-r128-fanotify-mnt") = 0
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x02\x00\x00\x00\x00\x00\x00\x00"}, O_RDONLY|O_CLOEXEC|O_PATH) = 9
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x02\x00\x00\x00\x00\x00\x00\x00"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+689303 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x0c\x00\x00\x00\x99\x40\x98\xb9"}, O_RDONLY|O_CLOEXEC|O_PATH) = 11
+
+--- scan-first daemon log ---
+[2m2026-11-10T05:09:47.950893Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m selected startup index source [3mrebuilt[0m[2m=[0mtrue [3mread_only_source[0m[2m=[0mfalse [3mschema_version[0m[2m=[0m7 [3mbaseline_ready[0m[2m=[0mfalse
+[2m2026-11-10T05:09:47.950997Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m initial baseline or schema upgrade will run after filesystem watches are active
+[2m2026-11-10T05:09:47.955475Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m fanotify queue-pressure CPU throttle thresholds [3mmax_queued_events[0m[2m=[0m16384 [3mqueue_high_watermark_bytes[0m[2m=[0m294912 [3mqueue_low_watermark_bytes[0m[2m=[0m196608 [3mreconcile_first[0m[2m=[0mtrue
+[2m2026-11-10T05:09:47.955767Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m dux daemon watching /dev/shm/dux-r128-fanotify-mnt (1 filesystem(s), FID mode: create/delete/rename/modify, flush 100ms)
+[2m2026-11-10T05:09:47.955789Z[0m [33m WARN[0m [2mdux::watch[0m[2m:[0m experimental reconciliation-first mode: fanotify events are hints only; complete full-root observations merge in place after the initial baseline [3mscan_interval_seconds[0m[2m=[0m900 [3min_place_full_root_reconciliation[0m[2m=[0mfalse
+[2m2026-11-10T05:09:47.961902Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m selected reconciliation implementation [3muse_in_place_observation[0m[2m=[0mfalse [3mbaseline_ready[0m[2m=[0mfalse [3mread_only_source[0m[2m=[0mfalse
+[2m2026-11-10T05:09:47.961932Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m starting background reconciliation of /dev/shm/dux-r128-fanotify-mnt; event ingestion remains active
+[2m2026-11-10T05:09:49.370600Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m rescan complete: 8 files, 3 dirs, 11 staged path instances (0 directory alias paths), visible 57344 bytes/11 entries, unique 57344 bytes/11 inodes, 56 KiB (0 coverage issues); replaying 0 pending paths [3mvanished_reuse_paths[0m[2m=[0m0 [3mrevalidated_reuse_paths[0m[2m=[0m0 [3munresolved_reuse_paths[0m[2m=[0m0
+[2m2026-11-10T05:09:49.511080Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m reconciliation accounting verification passed [3melapsed_ms[0m[2m=[0m100
+[2m2026-11-10T05:09:52.388826Z[0m [33m WARN[0m [2mdux::watch[0m[2m:[0m operator requested a full reconciliation; resetting the accounting retry circuit
+[2m2026-11-10T05:09:52.392304Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m selected reconciliation implementation [3muse_in_place_observation[0m[2m=[0mfalse [3mbaseline_ready[0m[2m=[0mtrue [3mread_only_source[0m[2m=[0mfalse
+[2m2026-11-10T05:09:52.392332Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m starting background reconciliation of /dev/shm/dux-r128-fanotify-mnt; event ingestion remains active
+[2m2026-11-10T05:09:52.771318Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m rescan complete: 9 files, 3 dirs, 12 staged path instances (0 directory alias paths), visible 61440 bytes/12 entries, unique 61440 bytes/12 inodes, 60 KiB (0 coverage issues); replaying 0 pending paths [3mvanished_reuse_paths[0m[2m=[0m0 [3mrevalidated_reuse_paths[0m[2m=[0m0 [3munresolved_reuse_paths[0m[2m=[0m0
+[2m2026-11-10T05:09:52.874694Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m reconciliation accounting verification passed [3melapsed_ms[0m[2m=[0m100
+[2m2026-11-10T05:09:53.514344Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m dux daemon: received SIGTERM/SIGINT — drained + flushed, exiting
+
+--- scan-first fanotify syscalls ---
+689474 fanotify_init(FAN_CLASS_NOTIF|FAN_CLOEXEC|FAN_NONBLOCK|FAN_REPORT_FID|FAN_REPORT_DIR_FID|FAN_REPORT_NAME|FAN_REPORT_TARGET_FID, O_RDONLY|O_LARGEFILE) = 7
+689474 fanotify_mark(7, FAN_MARK_ADD|FAN_MARK_FILESYSTEM, FAN_MODIFY|FAN_ATTRIB|FAN_CLOSE_WRITE|FAN_MOVED_FROM|FAN_MOVED_TO|FAN_CREATE|FAN_DELETE|FAN_ONDIR, AT_FDCWD, "/dev/shm/dux-r128-fanotify-mnt") = 0
+689474 open_by_handle_at(8, {handle_bytes=8, handle_type=1, f_handle="\x02\x00\x00\x00\x00\x00\x00\x00"}, O_RDONLY|O_CLOEXEC|O_PATH) = 9

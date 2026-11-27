@@ -1,0 +1,61 @@
+{
+  "started_at": "2026-11-09T08:36:11Z",
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "seed": 20261022,
+  "binary": "/root/dux-readiness-119/dux",
+  "binary_sha256": "e4841e7b75a4785a3fcf2597d4e711b21df18ebca25639f27ec0d96b9dfa293d",
+  "fault_binary_sha256": null,
+  "crash_rounds": 30,
+  "filesystem": "ext4 disposable loop image",
+  "workspace_parent": "/dev/shm",
+  "workspace_device": 26,
+  "workspace_filesystem_type": "tmpfs",
+  "workspace_free_bytes_at_start": 3031941120,
+  "harness_sha256": "e3e864fe2379213834b4db8b80c3caab4841ecf970c701cb4fe74eb6c93c9036",
+  "seed_files": 256,
+  "filesystem_image_mib": 768,
+  "qualification_worker_limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "not_qualified_by_this_run": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "capability",
+    "churn",
+    "coverage",
+    "cpu",
+    "crash",
+    "disk",
+    "mount",
+    "oom",
+    "overflow",
+    "pressure",
+    "retry",
+    "soak",
+    "startup",
+    "wal"
+  ],
+  "suites": {
+    "root": {
+      "status": "failed",
+      "evidence": {},
+      "error": "TimeoutExpired: Command '['/root/dux-readiness-119/dux', '--db', '/dev/shm/dux-readiness-1a4qw8w7/root-scan.db', 'scan', '/', '--quiet', '--one-file-system', '--exclude', '/dev/shm/dux-readiness-1a4qw8w7', '--jobs', '2']' timed out after 780 seconds"
+    }
+  },
+  "status": "failed",
+  "current_suite": null,
+  "last_checkpoint_at": "2026-11-09T08:49:12Z",
+  "current_suite_started_at": "2026-11-09T08:36:11Z",
+  "log_tail": "",
+  "error": "TimeoutExpired: Command '['/root/dux-readiness-119/dux', '--db', '/dev/shm/dux-readiness-1a4qw8w7/root-scan.db', 'scan', '/', '--quiet', '--one-file-system', '--exclude', '/dev/shm/dux-readiness-1a4qw8w7', '--jobs', '2']' timed out after 780 seconds",
+  "finished_at": "2026-11-09T08:49:12Z"
+}

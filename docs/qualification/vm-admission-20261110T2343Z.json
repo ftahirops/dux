@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-11-10T23:43Z",
+  "decision": "blocked_no_vm_started",
+  "probe": "require_stable_host_admission(samples=3, interval_seconds=10)",
+  "result": "refused at sample 1/3",
+  "blockers": [
+    "active Go compiler pid 239520",
+    "active Go vet workers",
+    "active go test pid 238559",
+    "active go vet pid 239551"
+  ],
+  "vm_started": false,
+  "dux_test_suite_started": false,
+  "evidence": "guard refusal captured directly; unrelated builds/tests left running"
+}

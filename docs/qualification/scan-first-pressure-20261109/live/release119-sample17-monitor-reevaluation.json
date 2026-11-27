@@ -1,0 +1,19 @@
+{
+  "sample_number": 17,
+  "captured_at_utc": "2026-11-09T11:04:39.909698+00:00",
+  "original_result": "failed",
+  "original_errors": [
+    "status_before: last full observation is missing, invalid, or older than 1200 seconds"
+  ],
+  "reevaluated_result": "passed",
+  "reevaluated_errors": [],
+  "monitor_sha256": "ea1d4c98ea7bcf8fe17632095af6d5535852359b691439987480b7fedc043cad",
+  "status_before_age_seconds": 1227,
+  "scan_in_progress_before": true,
+  "status_after_age_seconds": 388,
+  "scan_in_progress_after": false,
+  "accounting_path_graph_passed": true,
+  "kernel_overflows": 0,
+  "userspace_drops": 0,
+  "dux_restarts": "0"
+}

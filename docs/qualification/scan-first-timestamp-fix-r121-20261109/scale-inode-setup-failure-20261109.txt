@@ -1,0 +1,11 @@
+Attempt: isolated 1.37M scale fixture on an 8 GiB ext4 loop image, 2026-11-09.
+
+The test panicked with ENOSPC while creating the fixture files (src/scan.rs
+scale-smoke fixture write), before the initial scan began. The image had been
+created with mkfs.ext4's default inode density, which was insufficient for
+1.37 million files. The test's RAII cleanup ran, the private mount was
+unmounted, and the image was removed. This was a test-image capacity/setup
+failure, not a Dux scan/reconciliation failure.
+
+Correction: recreate the 8 GiB image with `mkfs.ext4 -F -q -N 1800000`, which
+provided enough inodes. The subsequent 1.37M profile passed and cleaned up.

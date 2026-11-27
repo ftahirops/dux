@@ -1,0 +1,86 @@
+{
+  "candidate_package_lifecycle_attempt": {
+    "reason": "The qualification VM preflight refused twice before launching QEMU because active host Go test/compiler processes were detected. A third preflight was not attempted while Go tests continued. No Dux package or service was changed. The runner and temporary VM inputs were removed after confirming the VM unit was inactive.",
+    "result": "not_run"
+  },
+  "captured_at_utc": "2026-11-09T18:47:20.469518+00:00",
+  "dux_status": {
+    "automatic_reconciliation_paused": false,
+    "behind_seconds": 17270.932,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "periodic filesystem observation in progress",
+    "dirty_since_timestamp_seconds": 1794249870,
+    "events_dropped": 0,
+    "events_resolved": 0,
+    "events_seen": 212136379,
+    "failed_reconciliation_attempts": null,
+    "index_bytes": 86947717120,
+    "index_bytes_on_disk": 721977344,
+    "index_nodes": 1754269,
+    "kernel_overflow_notifications": 0,
+    "last_event_commit_timestamp_seconds": 0,
+    "last_scan_age_seconds": 683,
+    "last_scan_timestamp_seconds": 1794249353,
+    "max_automatic_reconciliation_retries": 1,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 0,
+    "reconciliation_retry_backoff_seconds": null,
+    "reconciliation_retry_due": false,
+    "reconciliation_retry_remaining_seconds": null,
+    "reconciliation_retry_state_corrupt": false,
+    "root": "/",
+    "scan_first": true,
+    "scan_in_progress": true,
+    "scan_progress": {
+      "allocated_bytes_seen": 87209324544,
+      "directories_seen": 187314,
+      "files_seen": 1573400,
+      "indexing": false,
+      "started_at_seconds": 1794249870
+    },
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794232765,
+    "updates_committed": 0,
+    "userspace_updates_dropped": 0,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794250036,
+    "write_error": null
+  },
+  "host": "vps2-r121-canary",
+  "latest_canary_sample": {
+    "binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+    "captured_at_utc": "2026-11-09T18:42:53.972543+00:00",
+    "collection_duration_seconds": 50.389,
+    "errors": [],
+    "events_dropped": 0,
+    "kernel_overflow_notifications": 0,
+    "last_scan_age_seconds": 420,
+    "max_observation_age_seconds": 1200,
+    "path_graph_passed": true,
+    "pending_updates": 0,
+    "quick_check": [
+      [
+        "ok"
+      ]
+    ],
+    "restarts": "0",
+    "result": "passed",
+    "sample_number": 56,
+    "scan_in_progress": false,
+    "service_active_state": "active",
+    "unit_sha256": "e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b",
+    "userspace_updates_dropped": 0
+  },
+  "systemd": {
+    "ActiveState": "reloading",
+    "ExecMainStartTimestamp": "Mon 2026-11-09 13:59:25 UTC",
+    "MainPID": "2561224",
+    "NRestarts": "0"
+  }
+}

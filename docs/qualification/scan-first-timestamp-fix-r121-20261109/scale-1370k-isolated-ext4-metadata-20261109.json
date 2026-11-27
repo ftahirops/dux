@@ -1,0 +1,29 @@
+{
+  "date_utc": "2026-11-09",
+  "entries": 1370000,
+  "filesystem": "ext4 loopback inside a private mount namespace, image backed by tmpfs",
+  "image_size_bytes": 8589934592,
+  "inode_count": 1800000,
+  "cpu_quota_percent": 50,
+  "memory_max_bytes": 12884901888,
+  "swap_max_bytes": 0,
+  "nice": 19,
+  "io_priority": "idle",
+  "baseline_seconds": 186.73,
+  "unchanged_reconcile_seconds": 141.158,
+  "database_bytes_before_after": 425861120,
+  "test_result": "passed",
+  "test_duration_seconds": 453.19,
+  "cgroup_swap_max_bytes": 0,
+  "host_du_x_service_pid_unchanged": true,
+  "host_du_x_nrestarts_before_after": 4,
+  "host_du_x_kernel_overflows_before_after": 636,
+  "host_du_x_userspace_drops_before_after": 2518862,
+  "note": "memory-backed ext4 diagnostic, not block-device I/O qualification",
+  "max_observed_cgroup_memory_current_bytes": 10762690560,
+  "cgroup_memory_events_last_observed": {
+    "oom": 0,
+    "oom_kill": 0,
+    "oom_group_kill": 0
+  }
+}

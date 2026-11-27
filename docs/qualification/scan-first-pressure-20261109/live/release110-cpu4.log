@@ -1,0 +1,13 @@
+Running as unit: dux-readiness-551413.service; invocation ID: b6fa124bf29b4f66b1cc5ed372f1d073
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PASS 12008 events produced in 3.06s, pipeline caught up in 0.15s, exact validation in 5.03s at 0.01 CPU
+Evidence: /root/dux-readiness-6dacdf5/release110-cpu4.json
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 42.280s
+CPU time consumed: 10.526s
+Memory peak: 155.4M
+Memory swap peak: 0B

@@ -1,0 +1,24 @@
+{
+  "host": "192.168.5.106",
+  "observed_at_utc": "2026-11-10T19:50:08Z",
+  "load_average_1m": 7.21,
+  "cpu_psi_some_avg10_percent": 20.58,
+  "cpu_psi_some_avg60_percent": 21.77,
+  "cpu_psi_some_avg300_percent": 22.54,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "memory_total_bytes": 6111617024,
+  "memory_available_bytes": 3239317504,
+  "root_disk_used_bytes": 85854912512,
+  "root_disk_available_bytes": 8577814528,
+  "root_disk_use_percent": 91,
+  "dominant_process": {
+    "pid": 2651,
+    "name": "clickhouse-server",
+    "cpu_percent": 90.8,
+    "elapsed": "4-04:06:49"
+  },
+  "qualification_vm_started": false,
+  "fault_matrix_started": false,
+  "decision": "do not start guarded VM: VPS2 is under sustained CPU pressure with root disk at 91 percent; fault matrix requires a guarded disposable VM",
+  "method": "read-only /proc/pressure/cpu, /proc/loadavg, free -b, df -B1 /, ps"
+}

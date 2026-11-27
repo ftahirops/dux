@@ -1,0 +1,29 @@
+{
+  "observed_at_utc": "2026-11-10T20:56:00Z",
+  "load_average_1m": 10.97,
+  "cpu_psi_some_avg10_percent": 14.59,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "io_psi_some_avg10_percent": 7.81,
+  "io_psi_full_avg10_percent": 5.21,
+  "memory_psi_some_avg10_percent": 0.0,
+  "active_host_workload_count": 10,
+  "active_host_workloads": [
+    "Go compiler pid=3735533",
+    "Go compiler pid=3736643",
+    "Go compiler pid=3736657",
+    "Go test binary pid=3736766",
+    "Go test binary pid=3736812",
+    "Go test binary pid=3736813",
+    "Go test binary pid=3736842",
+    "go test pid=3732914",
+    "go test pid=3736625",
+    "shell test script pid=3732816"
+  ],
+  "qualification_vm_started": false,
+  "fault_matrix_started": false,
+  "decision": "host_pressure_blockers rejected VM admission",
+  "blockers": [
+    "active host Go compiler and test workloads",
+    "load1=10.97 exceeds 10"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "captured_at_utc": "2026-11-07T07:37:47.314047+00:00",
+  "source_host": "192.168.5.106",
+  "source_progress_path": "/var/tmp/dux-production-build-0b81fa8/soak-progress.json",
+  "progress_file": "progress-20261107T0736Z.json",
+  "progress_sha256": "497e38d4b7b30f7247166a439e7be67f1423e028179476ebb8cf7849fb9aed6b",
+  "status": "running",
+  "started_at": "2026-11-07T01:54:13Z",
+  "elapsed_seconds": 20552.6,
+  "reported_operations": 453294,
+  "mean_reported_operations_per_second": 22.055,
+  "exact_samples": 4507,
+  "exact_convergence_ms": {
+    "median": 406,
+    "p95": 848,
+    "max": 2483
+  },
+  "peak_sampled_rss_kib": 9720,
+  "peak_sampled_fds": 13,
+  "peak_sampled_wal_bytes": 13913272,
+  "mutation_bursts": 5,
+  "controlled_crashes": [],
+  "held_readers": [],
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "candidate_binary_sha256": "952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287",
+  "interpretation": "Intermediate snapshot only; soak is not terminal. Exact convergence calls consume wall time, so observed mean throughput is below configured 25/s. The throughput is derived from harness count and elapsed time."
+}

@@ -1,0 +1,13 @@
+{
+  "checked_at_utc": "2026-11-08T10:42:00Z",
+  "host": "VPS2 disposable KVM qualification VM",
+  "source_commit": "43a7769a7abf8d62d69b3638f5b9dcd22258f718",
+  "daemon_state": "stopped and disabled after failed lifecycle run",
+  "indexed_inode_rows": 1431666,
+  "recursive_bytes_storage_classes": {
+    "integer": 1431666,
+    "real": 0
+  },
+  "sqlite_integrity_check": "ok",
+  "scope_note": "Read-only SQLite inspection after the candidate had replaced the prior invalid index; this does not show that the daemon was caught up or that the lifecycle passed."
+}

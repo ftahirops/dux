@@ -1,0 +1,20 @@
+{
+  "source_host": "192.168.5.106",
+  "source_path": "/var/tmp/claude-dux",
+  "branch": "claude/stale-dfid-classification",
+  "base_commit": "52542d9639a5da52e3703f521e4aff67e2d5e8a3",
+  "working_tree_state": "14 modified tracked files; no untracked paths reported",
+  "diff_summary": {
+    "files_changed": 14,
+    "insertions": 1886,
+    "deletions": 176,
+    "patch_bytes": 133868
+  },
+  "patch_sha256": "f0f1347715a43e0d0e213df7784d53af8314b901bfddec13a040395ff3e047ad",
+  "validation": {
+    "git_diff_check": "passed",
+    "automated_tests_for_this_dirty_tree": "not verified",
+    "reverse_apply_check_against_current_hardening_branch": "failed to apply cleanly to src/watch.rs, src/store.rs, src/scan.rs, src/query.rs, scripts/test_dux_readiness_workflow.py, and scripts/dux-readiness.py"
+  },
+  "disposition": "preserved but not integrated; it contains uncommitted candidate work and may overlap or conflict with later schema-v7, retry, and queue-pressure changes in the current branch"
+}

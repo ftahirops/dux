@@ -1,0 +1,179 @@
+{
+  "accounting_duration_seconds": {
+    "max": 103.507,
+    "mean": 62.413,
+    "min": 49.103
+  },
+  "admission_deferrals": [
+    {
+      "at_utc": "2026-11-09T18:29:27.338197+00:00",
+      "message": "\u001b[2m2026-11-09T18:29:27.337769Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m deferring full reconciliation until host pressure meets recovery admission criteria \u001b[3mpressure\u001b[0m\u001b[2m=\u001b[0mElevated \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0m\"system pressure\" \u001b[3mload1\u001b[0m\u001b[2m=\u001b[0m2.97 \u001b[3mhost_cpus\u001b[0m\u001b[2m=\u001b[0m6.0 \u001b[3mpsi_cpu_avg10\u001b[0m\u001b[2m=\u001b[0m13.98 \u001b[3mpsi_memory_avg10\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mpsi_io_avg10\u001b[0m\u001b[2m=\u001b[0m0.31 \u001b[3mavailable_memory_bytes\u001b[0m\u001b[2m=\u001b[0m3080613888 \u001b[3mavailable_disk_bytes\u001b[0m\u001b[2m=\u001b[0m6904938496"
+    }
+  ],
+  "captured_at_utc": "2026-11-09T18:34:12.100650+00:00",
+  "completed_observations": 18,
+  "daemon_pid": 2561224,
+  "deferred_admissions": 1,
+  "host": "vps2-r121-canary",
+  "interpretation": "Successful periodic full observations and accounting checks show that r121 maintained the 15-minute observation schedule during this sample. They do not prove exact path-level state under concurrent changes, a 24-hour soak, or release r123 runtime behavior.",
+  "observations": [
+    {
+      "accounting_duration_seconds": 58.368,
+      "completed_at_utc": "2026-11-09T14:04:38.257868+00:00",
+      "completion_log_summary": "1520957 files, 181140 dirs, 1702097 staged path instances (0 directory alias paths), visible 85922947072 bytes/1702097 entries, unique 85735636992 bytes/1698615 inodes, 79.85 GiB (0 coverage issues);",
+      "scan_duration_seconds": 312.871,
+      "started_at_utc": "2026-11-09T13:59:25.386669+00:00"
+    },
+    {
+      "accounting_duration_seconds": 54.851,
+      "completed_at_utc": "2026-11-09T14:20:17.663381+00:00",
+      "completion_log_summary": "1524035 files, 181489 dirs, 1705524 staged path instances (0 directory alias paths), visible 86030671872 bytes/1705524 entries, unique 85843361792 bytes/1702042 inodes, 79.95 GiB (0 coverage issues);",
+      "scan_duration_seconds": 352.27,
+      "started_at_utc": "2026-11-09T14:14:25.393871+00:00"
+    },
+    {
+      "accounting_duration_seconds": 51.511,
+      "completed_at_utc": "2026-11-09T14:33:04.001117+00:00",
+      "completion_log_summary": "1525538 files, 181764 dirs, 1707302 staged path instances (0 directory alias paths), visible 86194270208 bytes/1707302 entries, unique 86006960128 bytes/1703820 inodes, 80.10 GiB (0 coverage issues);",
+      "scan_duration_seconds": 218.472,
+      "started_at_utc": "2026-11-09T14:29:25.529613+00:00"
+    },
+    {
+      "accounting_duration_seconds": 52.839,
+      "completed_at_utc": "2026-11-09T14:48:45.257149+00:00",
+      "completion_log_summary": "1528114 files, 182095 dirs, 1710209 staged path instances (0 directory alias paths), visible 86016442368 bytes/1710209 entries, unique 85829132288 bytes/1706727 inodes, 79.93 GiB (0 coverage issues);",
+      "scan_duration_seconds": 259.345,
+      "started_at_utc": "2026-11-09T14:44:25.912533+00:00"
+    },
+    {
+      "accounting_duration_seconds": 57.886,
+      "completed_at_utc": "2026-11-09T15:03:20.279474+00:00",
+      "completion_log_summary": "1530961 files, 182422 dirs, 1713383 staged path instances (0 directory alias paths), visible 86091673600 bytes/1713383 entries, unique 85904363520 bytes/1709901 inodes, 80.00 GiB (0 coverage issues);",
+      "scan_duration_seconds": 234.179,
+      "started_at_utc": "2026-11-09T14:59:26.100235+00:00"
+    },
+    {
+      "accounting_duration_seconds": 69.013,
+      "completed_at_utc": "2026-11-09T15:19:03.170716+00:00",
+      "completion_log_summary": "1533991 files, 182758 dirs, 1716749 staged path instances (0 directory alias paths), visible 86250201088 bytes/1716749 entries, unique 86062891008 bytes/1713267 inodes, 80.15 GiB (0 coverage issues);",
+      "scan_duration_seconds": 277.048,
+      "started_at_utc": "2026-11-09T15:14:26.122538+00:00"
+    },
+    {
+      "accounting_duration_seconds": 59.44,
+      "completed_at_utc": "2026-11-09T15:33:05.186394+00:00",
+      "completion_log_summary": "1536319 files, 183060 dirs, 1719379 staged path instances (0 directory alias paths), visible 86219276288 bytes/1719379 entries, unique 86031966208 bytes/1715897 inodes, 80.12 GiB (0 coverage issues);",
+      "scan_duration_seconds": 218.789,
+      "started_at_utc": "2026-11-09T15:29:26.397559+00:00"
+    },
+    {
+      "accounting_duration_seconds": 49.103,
+      "completed_at_utc": "2026-11-09T15:48:04.032094+00:00",
+      "completion_log_summary": "1539360 files, 183404 dirs, 1722764 staged path instances (0 directory alias paths), visible 86311526400 bytes/1722764 entries, unique 86124216320 bytes/1719282 inodes, 80.21 GiB (0 coverage issues);",
+      "scan_duration_seconds": 217.634,
+      "started_at_utc": "2026-11-09T15:44:26.398144+00:00"
+    },
+    {
+      "accounting_duration_seconds": 88.078,
+      "completed_at_utc": "2026-11-09T16:04:11.334378+00:00",
+      "completion_log_summary": "1542860 files, 183774 dirs, 1726634 staged path instances (0 directory alias paths), visible 86438576128 bytes/1726634 entries, unique 86251266048 bytes/1723152 inodes, 80.33 GiB (0 coverage issues);",
+      "scan_duration_seconds": 284.929,
+      "started_at_utc": "2026-11-09T15:59:26.404945+00:00"
+    },
+    {
+      "accounting_duration_seconds": 79.726,
+      "completed_at_utc": "2026-11-09T16:21:00.188719+00:00",
+      "completion_log_summary": "1546519 files, 184120 dirs, 1730639 staged path instances (0 directory alias paths), visible 86483628032 bytes/1730639 entries, unique 86296317952 bytes/1727157 inodes, 80.37 GiB (0 coverage issues);",
+      "scan_duration_seconds": 393.781,
+      "started_at_utc": "2026-11-09T16:14:26.407528+00:00"
+    },
+    {
+      "accounting_duration_seconds": 55.346,
+      "completed_at_utc": "2026-11-09T16:35:42.239905+00:00",
+      "completion_log_summary": "1548897 files, 184422 dirs, 1733319 staged path instances (0 directory alias paths), visible 86556061696 bytes/1733319 entries, unique 86368751616 bytes/1729837 inodes, 80.44 GiB (0 coverage issues);",
+      "scan_duration_seconds": 375.801,
+      "started_at_utc": "2026-11-09T16:29:26.438706+00:00"
+    },
+    {
+      "accounting_duration_seconds": 54.197,
+      "completed_at_utc": "2026-11-09T16:47:57.881765+00:00",
+      "completion_log_summary": "1551619 files, 184733 dirs, 1736352 staged path instances (0 directory alias paths), visible 86664441856 bytes/1736352 entries, unique 86477131776 bytes/1732870 inodes, 80.54 GiB (0 coverage issues);",
+      "scan_duration_seconds": 211.443,
+      "started_at_utc": "2026-11-09T16:44:26.438802+00:00"
+    },
+    {
+      "accounting_duration_seconds": 49.54,
+      "completed_at_utc": "2026-11-09T17:03:27.860653+00:00",
+      "completion_log_summary": "1554328 files, 185061 dirs, 1739389 staged path instances (0 directory alias paths), visible 86725451776 bytes/1739389 entries, unique 86538141696 bytes/1735907 inodes, 80.59 GiB (0 coverage issues);",
+      "scan_duration_seconds": 241.275,
+      "started_at_utc": "2026-11-09T16:59:26.585315+00:00"
+    },
+    {
+      "accounting_duration_seconds": 103.507,
+      "completed_at_utc": "2026-11-09T17:20:02.857534+00:00",
+      "completion_log_summary": "1557287 files, 185397 dirs, 1742684 staged path instances (0 directory alias paths), visible 86816436224 bytes/1742684 entries, unique 86629126144 bytes/1739202 inodes, 80.68 GiB (0 coverage issues);",
+      "scan_duration_seconds": 336.159,
+      "started_at_utc": "2026-11-09T17:14:26.698355+00:00"
+    },
+    {
+      "accounting_duration_seconds": 71.076,
+      "completed_at_utc": "2026-11-09T17:34:47.005891+00:00",
+      "completion_log_summary": "1557861 files, 185625 dirs, 1743486 staged path instances (0 directory alias paths), visible 86763941888 bytes/1743486 entries, unique 86576631808 bytes/1740004 inodes, 80.63 GiB (0 coverage issues);",
+      "scan_duration_seconds": 320.307,
+      "started_at_utc": "2026-11-09T17:29:26.698418+00:00"
+    },
+    {
+      "accounting_duration_seconds": 62.982,
+      "completed_at_utc": "2026-11-09T17:48:46.630426+00:00",
+      "completion_log_summary": "1561001 files, 185960 dirs, 1746961 staged path instances (0 directory alias paths), visible 86816550912 bytes/1746961 entries, unique 86629240832 bytes/1743479 inodes, 80.68 GiB (0 coverage issues);",
+      "scan_duration_seconds": 259.932,
+      "started_at_utc": "2026-11-09T17:44:26.698796+00:00"
+    },
+    {
+      "accounting_duration_seconds": 52.915,
+      "completed_at_utc": "2026-11-09T18:02:57.184804+00:00",
+      "completion_log_summary": "1563744 files, 186274 dirs, 1750018 staged path instances (0 directory alias paths), visible 86927581184 bytes/1750018 entries, unique 86740271104 bytes/1746536 inodes, 80.78 GiB (0 coverage issues);",
+      "scan_duration_seconds": 210.486,
+      "started_at_utc": "2026-11-09T17:59:26.698900+00:00"
+    },
+    {
+      "accounting_duration_seconds": 53.049,
+      "completed_at_utc": "2026-11-09T18:18:19.990485+00:00",
+      "completion_log_summary": "1567071 files, 186646 dirs, 1753717 staged path instances (0 directory alias paths), visible 87067926528 bytes/1753717 entries, unique 86880616448 bytes/1750235 inodes, 80.91 GiB (0 coverage issues);",
+      "scan_duration_seconds": 232.661,
+      "started_at_utc": "2026-11-09T18:14:27.329273+00:00"
+    }
+  ],
+  "scan_duration_seconds": {
+    "max": 393.781,
+    "mean": 275.41,
+    "min": 210.486
+  },
+  "scan_start_interval_seconds": {
+    "all_intervals": [
+      900.007,
+      900.136,
+      900.383,
+      900.188,
+      900.022,
+      900.275,
+      900.001,
+      900.007,
+      900.003,
+      900.031,
+      900.0,
+      900.147,
+      900.113,
+      900.0,
+      900.0,
+      900.0,
+      900.63,
+      903.129
+    ],
+    "max": 903.129,
+    "min": 900.0
+  },
+  "start_events": 19,
+  "successful_accounting_checks": 18,
+  "window_start_utc": "2026-11-09T13:59:00Z"
+}

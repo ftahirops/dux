@@ -1,0 +1,51 @@
+{
+  "observed_at_utc": "2026-11-10T23:50:40Z",
+  "progress_file_mtime_utc": "2026-11-10T23:50:29.446Z",
+  "progress_file_sha256": "2c54b4e6ebdaf2187cde2c184348cdbf185a429488e1ed7427e0122ad93f49a6",
+  "progress_file_size_bytes": null,
+  "status": "running",
+  "started_at_utc": "2026-11-10T09:04:50Z",
+  "elapsed_seconds": 53199.0,
+  "duration_target_seconds": 259200,
+  "completion_fraction": 0.20524305555555555,
+  "operations": 1184363,
+  "sample_count": 1181,
+  "operations_per_second_average": 22.263,
+  "sampled_exact_convergence_ms": {
+    "count": 1181,
+    "mean": 3542.767,
+    "median": 2988,
+    "p95_nearest_rank": 8237,
+    "max": 17393
+  },
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "controlled_crashes": 1,
+  "mutation_bursts": 14,
+  "held_reader_wal_reclaim_passes": 2,
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "systemd": {
+    "unit": "dux-readiness-1304925.service",
+    "active_state": "active",
+    "main_pid": 1304929,
+    "restarts": 0,
+    "memory_current_bytes": 83664896,
+    "cpu_time_ns": 2620805881000
+  },
+  "vps2_storage": {
+    "root_size_human": "93G",
+    "root_used_human": "79G",
+    "root_available_human": "10G",
+    "root_use_percent": 89,
+    "dev_shm_size_human": "3.0G",
+    "dev_shm_used_human": "987M",
+    "dev_shm_available_human": "2.1G"
+  },
+  "interpretation": "The 72-hour endurance run is still in progress, with 1 controlled crash recovery, 2 held-reader WAL-reclaim passes, and 14 mutation bursts. Final exactness/history/SQLite integrity checks are pending; this is not a pass. Whole-wallclock average includes synchronous exactness/accounting pauses and does not establish a sustained 25 operations/s capacity result.",
+  "limitations": [
+    "Only the soak harness is running; the other 15 fault suites remain unrun.",
+    "One of five planned controlled crash/recovery checkpoints is complete.",
+    "Duration target is 72 hours; current run is about 20.5% complete."
+  ]
+}

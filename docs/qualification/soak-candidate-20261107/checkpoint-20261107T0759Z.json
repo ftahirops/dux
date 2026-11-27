@@ -1,0 +1,35 @@
+{
+  "captured_at_utc": "2026-11-07T08:00:27.035202+00:00",
+  "source_host": "192.168.5.106",
+  "source_progress_path": "/var/tmp/dux-production-build-0b81fa8/soak-progress.json",
+  "progress_file": "progress-20261107T0759Z.json",
+  "progress_sha256": "26cf192fae8948a432e295991037bc77a35fa234ed928526913a5560bad6d28d",
+  "status": "running",
+  "started_at": "2026-11-07T01:54:13Z",
+  "elapsed_seconds": 21937.8,
+  "reported_operations": 483886,
+  "mean_reported_operations_per_second": 22.057,
+  "exact_samples": 4808,
+  "exact_convergence_ms": {
+    "median": 413.0,
+    "p95": 847,
+    "max": 2483
+  },
+  "peak_sampled_rss_kib": 9872,
+  "peak_sampled_fds": 13,
+  "peak_sampled_wal_bytes": 265336272,
+  "mutation_bursts": 6,
+  "controlled_crashes": [],
+  "held_readers": [
+    {
+      "held_seconds": 300,
+      "snapshot_inodes": 2499,
+      "wal_reclaimed": true
+    }
+  ],
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "candidate_binary_sha256": "952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287",
+  "interpretation": "Intermediate snapshot, not terminal qualification. The first scheduled held-reader phase completed after 300 seconds and WAL reclamation passed. Controlled crashes, terminal exact/history/integrity checks, and full 72-hour duration remain pending."
+}

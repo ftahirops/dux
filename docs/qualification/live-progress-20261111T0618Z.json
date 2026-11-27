@@ -1,0 +1,81 @@
+{
+  "observed_at_utc": "2026-11-11T06:18:31Z",
+  "vps1_production": {
+    "active_state": "active",
+    "sub_state": "running",
+    "main_pid": 1073891,
+    "historical_restarts": 4,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "caught_up": false,
+    "behind_seconds": 305259.963,
+    "last_scan_age_seconds": 494949,
+    "events_seen": 308487461,
+    "events_resolved": 177645662,
+    "updates_committed": 50375601,
+    "pending_updates": 1117,
+    "dropped_updates": 2518862,
+    "kernel_overflow_notifications": 979,
+    "index_nodes": 1268327,
+    "index_database_bytes": 3929165824,
+    "root_disk_used_percent": 65,
+    "root_disk_available": "62G",
+    "dux_state_directory": "3.8 GiB"
+  },
+  "vps2": {
+    "observed_at_utc": "2026-11-11T06:18:06Z",
+    "service": {"active_state": "active", "sub_state": "running", "main_pid": 576850, "historical_restarts": 0},
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "scan_first": true,
+    "scan_in_progress": false,
+    "last_scan_age_seconds": 332,
+    "pending_updates": 0,
+    "dropped_updates": 0,
+    "kernel_overflow_notifications": 0,
+    "index_nodes": 2054666,
+    "root_disk_used_percent": 89,
+    "root_disk_available": "9.8G",
+    "dev_shm_available": "2.1G"
+  },
+  "r132_soak": {
+    "observed_at_utc": "2026-11-11T06:17:31Z",
+    "status": "running",
+    "candidate_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "elapsed_seconds": 76361.0,
+    "target_hours": 72,
+    "completion_percent": 29.46,
+    "operations": 1662000,
+    "mutation_bursts": 21,
+    "controlled_crash_recoveries": 1,
+    "held_reader_checks": 3,
+    "final_exact_passed": false,
+    "final_history_passed": false,
+    "sqlite_integrity": null,
+    "pending_crash_checkpoints": 4
+  },
+  "guarded_fault_matrix": {
+    "runner_pid": 1837002,
+    "status": "waiting_for_host_admission",
+    "matrix_suites_started": 0,
+    "last_logged_sample_utc": "2026-11-11T06:18:07Z",
+    "blockers": [
+      "active Go compiler and Go test workloads",
+      "host load1 11.71 exceeded threshold 10",
+      "CPU PSI some avg10 52.92% exceeded conditional admission threshold"
+    ],
+    "guard_bypassed": false
+  },
+  "source_change": {
+    "fix": "Short unparseable fanotify hint suffixes now set the lost-coverage flag before the suffix is consumed.",
+    "focused_related_tests_passed": 4,
+    "full_rust_suite_rerun": false,
+    "candidate_soak_contains_change": false
+  },
+  "assessment": [
+    "VPS1 continues committing/draining some event backlog but remains dirty and multi-day stale after 979 kernel overflows and 2.52 million dropped updates; this does not establish exactness.",
+    "VPS2's installed service is active after a completed scan and has no recorded drops/overflows, but scan-first mode is dirty between observations by design.",
+    "The r132 soak remains nonterminal; its terminal exactness, history, and SQLite checks have not completed.",
+    "The guarded 15-suite fault matrix remains unstarted due repeated unrelated Go build/test workloads."
+  ]
+}

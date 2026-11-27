@@ -1,0 +1,64 @@
+{
+  "observed_at_utc": "2026-11-10T23:40:12Z",
+  "progress_file_mtime_utc": "2026-11-10T23:39:22.156Z",
+  "progress_file_sha256": "0917eb7e7e1320e2e7cd9b37d96ad9b88ee5f6521b6570151d6bcddb808fd46f",
+  "status": "running",
+  "started_at_utc": "2026-11-10T09:04:50Z",
+  "elapsed_seconds": 52471.7,
+  "duration_target_seconds": 259200,
+  "completion_fraction": 0.202437,
+  "operations": 1168716,
+  "sample_count": 1165,
+  "operations_per_second_average": 22.273,
+  "sampled_exact_convergence_ms": {
+    "count": 1165,
+    "mean": 3520.435,
+    "median": 2943.0,
+    "p95_nearest_rank": 8105.0,
+    "max": 17393.0
+  },
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "controlled_crashes": 1,
+  "mutation_bursts": 14,
+  "held_reader_wal_reclaim_passes": 2,
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "systemd": {
+    "unit": "dux-readiness-1304925.service",
+    "active_state": "active",
+    "main_pid": 1304929,
+    "restarts": 0,
+    "cpu_quota_percent": 25,
+    "memory_max_bytes": 4294967296,
+    "memory_current_bytes": 70823936,
+    "cpu_time_ns": 2582569858000
+  },
+  "vps2_storage": {
+    "root_size_bytes": 99012476928,
+    "root_used_bytes": 83599192064,
+    "root_available_bytes": 10833534976,
+    "root_use_percent": 89,
+    "dev_shm_size_bytes": 3221225472,
+    "dev_shm_used_bytes": 1034874880,
+    "dev_shm_available_bytes": 2186350592,
+    "soak_persistent_dir_human": "6.4M",
+    "soak_tmpfs_workspace_human": "706M",
+    "journalctl_disk_usage": "4.0G",
+    "var_log_journal_human": "4.1G",
+    "var_tmp_human": "2.4G",
+    "kvm_device_present": false
+  },
+  "journal_window_since_2026_11_10T2150Z": {
+    "dux_readiness_unit_output_bytes": 0,
+    "dux_service_output_bytes": 288509,
+    "interpretation": "system journal use is not explained by current soak unit output in this time window; system-wide attribution remains unknown"
+  },
+  "interpretation": "Long-running endurance test continues with one controlled recovery and no supervisor restart. It has not passed: four additional controlled crash checkpoints and final exactness, history continuity, and SQLite integrity assertions remain pending. The observed 22.27 operations/s average is below the nominal 25/s because synchronous exactness/accounting gates pause the producer; this is not a sustained producer-capacity benchmark.",
+  "limitations": [
+    "One of five planned controlled crash/recovery checkpoints completed.",
+    "Only this candidate hash, 768 MiB ext4 fixture, kernel, and bounded workload are covered.",
+    "VPS2 has no /dev/kvm and its root filesystem is 89% full; no additional VM suite was started."
+  ],
+  "progress_file_size_bytes": 176691
+}

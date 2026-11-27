@@ -1,0 +1,55 @@
+{
+  "host": "192.168.5.106",
+  "observed_at_utc": "2026-11-11T05:00:04Z",
+  "installed_release": "dux 0.6.3 (8b02799b)",
+  "service": {
+    "active_state": "active",
+    "sub_state": "running",
+    "historical_restarts": 0
+  },
+  "scan_first": true,
+  "observation": {
+    "started_at_utc": "2026-11-11T04:51:14Z",
+    "completed_at_utc": "2026-11-11T04:58:41Z",
+    "duration_seconds": 447,
+    "files": 1821622,
+    "directories": 219503,
+    "path_instances": 2041125,
+    "directory_alias_paths": 0,
+    "visible_bytes": 83038486528,
+    "unique_bytes": 82905776128,
+    "unique_inodes": 2037731,
+    "coverage_issues": 0,
+    "vanished_reuse_paths": 72,
+    "revalidated_reuse_paths": 2,
+    "unresolved_reuse_paths": 0
+  },
+  "accounting_verification": {
+    "result": "passed",
+    "completed_at_utc": "2026-11-11T04:59:48Z",
+    "elapsed_ms": 67135
+  },
+  "status_at_2026-11-11T05:00:04Z": {
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "last_scan_age_seconds": 83,
+    "failed_reconciliation_attempts": null,
+    "pending_updates": 0,
+    "events_dropped": 0,
+    "kernel_overflow_notifications": 0,
+    "events_seen": 2204028735,
+    "behind_seconds": 25360.806,
+    "behind_seconds_applicable": false
+  },
+  "disk_at_2026-11-11T05:00:04Z": {
+    "use_percent": 89,
+    "available_human_readable": "10G (df -h rounded)"
+  },
+  "analysis": [
+    "The scan completed after 7m27 with zero reported coverage issues, and its subsequent independent accounting verification passed after 67.135 seconds.",
+    "Filesystem or fanotify hints changed during the scan, so Dux kept the view dirty and scheduled another full observation; this is not a clean/caught-up result.",
+    "The old installed build reported systemd reloading during the scan and active/running afterward. The r133 READY-notification fix remains uninstalled on this host.",
+    "No fanotify overflow, dropped updates, or service restarts were recorded during this observation. This individual cycle does not prove those outcomes under every load or establish exact path-level freshness.",
+    "The host is in scan-first mode, so behind_seconds is not an applicable freshness/backlog measure; use last_scan_age_seconds."
+  ]
+}

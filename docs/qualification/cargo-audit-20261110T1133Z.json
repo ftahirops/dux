@@ -1,0 +1,16 @@
+{
+  "sampled_at_utc": "2026-11-10T11:33:00Z",
+  "command": "cargo audit -D warnings",
+  "exit_code": 0,
+  "cargo_audit_version": "0.22.2",
+  "locked_crate_dependencies": 229,
+  "known_vulnerabilities": 0,
+  "warnings": 0,
+  "advisory_database": {
+    "git_commit": "d9cb059f3217db87aeccd190b81eaffe8cc29cb9",
+    "commit_time": "2026-11-09T17:13:08+01:00",
+    "newer_than_previous_recorded_snapshot": false
+  },
+  "cargo_lock_unchanged": true,
+  "scope": "Dependency advisory scan only; not an application security certification."
+}

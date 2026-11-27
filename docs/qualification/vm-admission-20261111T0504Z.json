@@ -1,0 +1,36 @@
+{
+  "observed_at_utc": "2026-11-11T05:04:01Z",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "decision": "do_not_start",
+  "vm_started": false,
+  "matrix_suites_started": 0,
+  "guard_bypassed": false,
+  "host_pressure": {
+    "load1": 19.57,
+    "cpu_psi_some_avg10_percent": 52.58,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 0.61,
+    "io_psi_full_avg10_percent": 0.02,
+    "active_workloads": [
+      "Go compiler pid=1769217",
+      "Go vet worker pid=1769950",
+      "go vet pid=1765173"
+    ]
+  },
+  "refusal_reasons": [
+    "Active unrelated Go build/vet workloads were detected.",
+    "Host load1 exceeded the qualification admission limit of 10.",
+    "CPU PSI some exceeded 35% while aggregate load was above 10."
+  ],
+  "post_sample_at_utc": "2026-11-11T05:04:54Z",
+  "post_sample_state": {
+    "qualification_vm_unit_active": false,
+    "qemu_system_process_observed": false,
+    "active_go_test_process": "go test ./internal/repository -run ^TestGetEmDashNativeRestoreSourceRequiresExactCompletedTenantScopedArtifact$ -count=1"
+  },
+  "limitations": [
+    "This is an admission observation, not a VM start attempt.",
+    "No test result is inferred from the refusal."
+  ]
+}

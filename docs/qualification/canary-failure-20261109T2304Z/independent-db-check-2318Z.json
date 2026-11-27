@@ -1,0 +1,14 @@
+{
+  "source": "VPS2 /var/lib/dux/dux.db opened read-only in a SQLite transaction",
+  "quick_check": ["ok"],
+  "path_count": 1815740,
+  "checks": {
+    "root_count": 1,
+    "bad_parent_count": 0,
+    "bad_prime_groups": 0,
+    "missing_directory_totals": 0,
+    "unexpected_directory_totals": 0,
+    "root_entries_match": true
+  },
+  "passed": true
+}

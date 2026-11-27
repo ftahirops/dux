@@ -1,0 +1,35 @@
+   Compiling dux v0.6.3 (/home/dux)
+    Finished `release` profile [optimized] target(s) in 46.87s
+     Running unittests src/main.rs (target/release/deps/dux-430eb4dadfdcae33)
+
+running 1 test
+test scan::tests::v6_upgrade_persists_v7_path_graph_and_preserves_growth_history has been running for over 60 seconds
+schema-v6 source fixture: files=1300000, directories=1301, path_instances=1301301, coverage_issues=0, unique_inodes=1301301
+schema-v7 migrated fixture: files=1300000, directories=1301, path_instances=1301301, visible_entries=1301301, coverage_issues=0, expected_growth_rows=27327322
+test scan::tests::v6_upgrade_persists_v7_path_graph_and_preserves_growth_history ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 325 filtered out; finished in 405.74s
+
+	Command being timed: "env DUX_V6_UPGRADE_SCALE_ENTRIES=1300000 DUX_V6_UPGRADE_GROWTH_BUCKETS=21 cargo test --locked --release --all-features --bin dux v6_upgrade_persists_v7_path_graph_and_preserves_growth_history -- --nocapture"
+	User time (seconds): 283.24
+	System time (seconds): 113.15
+	Percent of CPU this job got: 87%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 7:32.66
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1009848
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 8
+	Minor (reclaiming a frame) page faults: 895620
+	Voluntary context switches: 23548
+	Involuntary context switches: 48756
+	Swaps: 0
+	File system inputs: 4385808
+	File system outputs: 48402320
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

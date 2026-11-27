@@ -1,0 +1,20 @@
+{
+  "attempted_at_utc": "2026-11-11T02:23:38Z",
+  "host": "vps1 qualification host",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "command": "python3 scripts/dux-qualification-vm.py --profile qualification4 --ephemeral-runtime --read-only-share /dev/shm/dux-r132-qualification-20261110 start ubuntu24",
+  "result": "refused_before_vm_start",
+  "sample": "1/3",
+  "blockers": [
+    "Go compiler pid 975633",
+    "go test pid 975579",
+    "node vitest pid 972111",
+    "shell test script pid 814171"
+  ],
+  "vm_started": false,
+  "fault_suites_started": false,
+  "vm_state_after_attempt": "missing",
+  "interpretation": "The admission guard preserved host capacity and refused before QEMU. This is not a Dux test failure; no fault suite ran."
+}

@@ -1,0 +1,9 @@
+Observed 2026-11-10 12:32:05 UTC
+Unit: dux-handle-uid-1794313924.service
+UID: 996 996 996 996
+GID: 115 115 115 115
+CapEff/CapPrm/CapBnd/CapInh/CapAmb: 0x200004 each
+Payload read through open_by_handle_at from a mode-000 ext4 file:
+handle-capability-probe
+handle_type=1 handle_bytes=8 mount_id=29
+Result: success

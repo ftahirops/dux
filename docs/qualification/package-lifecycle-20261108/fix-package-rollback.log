@@ -1,0 +1,21 @@
+dpkg: warning: downgrading dux from 0.6.3-100 to 0.6.3-98
+(Reading database ... 138543 files and directories currently installed.)
+Preparing to unpack .../dux_0.6.3-98_amd64.deb ...
+Unpacking dux (0.6.3-98) over (0.6.3-100) ...
+Setting up dux (0.6.3-98) ...
+dux: starting service — the initial scan of / runs in the BACKGROUND.
+dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)
+dux: the index is readable by root and the 'dux' group (it lists every
+dux: filename on /). Grant a user access with: usermod -aG dux <user>
+{
+  "package_version": "0.6.3-98",
+  "binary_sha256": "edf9c2e56be8555c6b8e9628a388a0ac9363af097d7617b4f89433ac5c34b56f",
+  "binary_version": "dux 0.6.3 (43a7769a7abf) [production] source-sha256=35d23ab86c4f05465a864effd3970f1fb021920625aeaf84c580d4c476f0fd6b",
+  "service_active": "inactive",
+  "service_enabled": "disabled",
+  "index_restore": {
+    "sha256": "4fbb319ed601bf3b2728c5f0bff9e8d7619b563bbcc2b47b5de0eeea3944b371",
+    "mode": "0o640",
+    "quick_check": "ok"
+  }
+}

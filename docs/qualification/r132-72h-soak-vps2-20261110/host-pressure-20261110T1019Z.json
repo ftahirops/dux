@@ -1,0 +1,100 @@
+{
+  "observed_at_utc": "2026-11-10T10:19:54.790558+00:00",
+  "cpu_count": 6,
+  "loadavg_1_5_15": [
+    4.01,
+    4.17,
+    4.24
+  ],
+  "cpu_pressure": {
+    "some": {
+      "avg10": 5.58,
+      "avg60": 6.21,
+      "avg300": 8.55,
+      "total": 65383461862.0
+    },
+    "full": {
+      "avg10": 0.0,
+      "avg60": 0.0,
+      "avg300": 0.0,
+      "total": 0.0
+    }
+  },
+  "io_pressure": {
+    "some": {
+      "avg10": 0.06,
+      "avg60": 0.09,
+      "avg300": 0.42,
+      "total": 5678850492.0
+    },
+    "full": {
+      "avg10": 0.0,
+      "avg60": 0.04,
+      "avg300": 0.27,
+      "total": 4176266448.0
+    }
+  },
+  "top_processes": [
+    {
+      "comm": "runc:[2:INIT]",
+      "cpu_percent": 100.0,
+      "mem_percent": 0.2
+    },
+    {
+      "comm": "runc:[2:INIT]",
+      "cpu_percent": 100.0,
+      "mem_percent": 0.1
+    },
+    {
+      "comm": "clickhouse-serv",
+      "cpu_percent": 82.0,
+      "mem_percent": 22.2
+    },
+    {
+      "comm": "python3",
+      "cpu_percent": 66.6,
+      "mem_percent": 0.2
+    },
+    {
+      "comm": "dux",
+      "cpu_percent": 58.2,
+      "mem_percent": 0.0
+    },
+    {
+      "comm": "containerd",
+      "cpu_percent": 15.9,
+      "mem_percent": 0.8
+    },
+    {
+      "comm": "dockerd",
+      "cpu_percent": 13.0,
+      "mem_percent": 1.0
+    },
+    {
+      "comm": "xgs-agent",
+      "cpu_percent": 3.8,
+      "mem_percent": 0.8
+    },
+    {
+      "comm": "systemd",
+      "cpu_percent": 3.2,
+      "mem_percent": 0.1
+    },
+    {
+      "comm": "dux-r132",
+      "cpu_percent": 1.7,
+      "mem_percent": 0.0
+    }
+  ],
+  "soak_unit": {
+    "NRestarts": "0",
+    "MemoryPeak": "71315456",
+    "CPUUsageNSec": "150012465000",
+    "ActiveState": "active"
+  },
+  "root_disk_bytes": {
+    "total": 99012476928,
+    "used": 82054873088,
+    "free": 12377853952
+  }
+}

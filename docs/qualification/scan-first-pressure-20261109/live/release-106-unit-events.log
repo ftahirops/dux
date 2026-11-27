@@ -1,0 +1,6 @@
+2026-11-09T00:03:03+00:00 vps2 systemd[1]: dux.service: Main process exited, code=exited, status=1/FAILURE
+2026-11-09T00:03:03+00:00 vps2 systemd[1]: dux.service: Failed with result 'exit-code'.
+2026-11-09T00:03:03+00:00 vps2 systemd[1]: dux.service: Consumed 1h 25min 53.637s CPU time, 1.8G memory peak, 604.0K memory swap peak, read 48.3G from disk, written 44.8G to disk.
+2026-11-09T00:03:33+00:00 vps2 systemd[1]: dux.service: Scheduled restart job, restart counter is at 1.
+2026-11-09T00:03:33+00:00 vps2 systemd[1]: Starting dux.service - dux realtime disk-usage + file-search index...
+2026-11-09T00:03:34+00:00 vps2 systemd[1]: Started dux.service - dux realtime disk-usage + file-search index.

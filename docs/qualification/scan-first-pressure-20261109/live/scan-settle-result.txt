@@ -1,0 +1,13 @@
+Test-only release binary: 53529db2b14a9147a255fcaff1897b580c76b8da6545d522b4672ba4750f3d6a
+Host: VPS2 192.168.5.106
+Fixture: isolated ext4 loop mount /mnt/dux-r107-stress
+Systemd: CPUQuota=100%, MemoryMax=1G, NoNewPrivileges, CAP_SYS_ADMIN + CAP_DAC_READ_SEARCH,
+         SecureBits=noroot noroot-locked, deny filter includes bpf, AF_UNIX only
+
+Before scan: dirty=true, reason="filesystem changes await the next full observation".
+Command: dux-r107-settle-test scan --db /var/lib/dux-r107-stress/dux.db /mnt/dux-r107-stress --json --quiet
+Result: "filesystem observation completed and accounting verified in 5s; scan-first status reports last-observed freshness, not real-time caught-up state."
+Measured command wall time: 4.50 seconds.
+
+After scan: dirty=false; 15 path instances; zero kernel overflow notifications;
+zero userspace drops; known-present-2.txt found by indexed `find`.

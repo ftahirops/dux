@@ -1,0 +1,274 @@
+{
+  "status": "passed",
+  "kind": "deb",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "kernel": "6.8.0-147-generic",
+  "started_at_epoch": 1794279753.1003735,
+  "steps": [
+    {
+      "name": "legacy_baseline",
+      "evidence": {
+        "initial_version": "0.6.3-121",
+        "staged_version": "0.6.3-121",
+        "initial_binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+        "baseline_package_reinstalled": false,
+        "binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+        "package_payload_binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+        "service_after_install": {
+          "enabled": "enabled",
+          "active": "inactive",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        },
+        "service_runtime_verified": {
+          "enabled": "enabled",
+          "active": "active",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        },
+        "daemon_caught_up": false,
+        "daemon_status": {
+          "automatic_reconciliation_paused": false,
+          "behind_seconds": 532.885,
+          "caught_up": false,
+          "daemon_live": true,
+          "dirty": true,
+          "dirty_reason": "reconciliation accounting verification pending",
+          "dirty_since_timestamp_seconds": 1794280286,
+          "events_dropped": 0,
+          "events_resolved": 0,
+          "events_seen": 11626682,
+          "failed_reconciliation_attempts": null,
+          "index_bytes": 88779472896,
+          "index_bytes_on_disk": 766742528,
+          "index_nodes": 1840972,
+          "kernel_overflow_notifications": 0,
+          "last_event_commit_timestamp_seconds": 0,
+          "last_scan_age_seconds": 1,
+          "last_scan_timestamp_seconds": 1794280286,
+          "max_automatic_reconciliation_retries": 1,
+          "max_pending_updates": 500000,
+          "pause_reason": null,
+          "paused": false,
+          "paused_since_timestamp_seconds": null,
+          "pending_updates": 0,
+          "reconciliation_retry_backoff_seconds": null,
+          "reconciliation_retry_due": false,
+          "reconciliation_retry_remaining_seconds": null,
+          "reconciliation_retry_state_corrupt": false,
+          "root": "/",
+          "scan_first": true,
+          "scan_in_progress": false,
+          "scan_progress": null,
+          "status_version": 1,
+          "throttled_since_timestamp_seconds": 1794279754,
+          "updates_committed": 0,
+          "userspace_updates_dropped": 0,
+          "wal_bytes": 134217728,
+          "watch_status_available": true,
+          "watch_status_updated_at_seconds": 1794280286,
+          "write_error": null
+        },
+        "service": {
+          "enabled": "disabled",
+          "active": "inactive",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        }
+      }
+    },
+    {
+      "name": "upgrade_preserves_disabled_services",
+      "evidence": {
+        "version": "0.6.3-126",
+        "binary_sha256": "9428b49d5d9ee5935cf77e3042eb0a321cd7fb106de6d4464ddaaf4d3951a92b",
+        "package_payload_binary_sha256": "9428b49d5d9ee5935cf77e3042eb0a321cd7fb106de6d4464ddaaf4d3951a92b",
+        "backup_helper_sha256": "38280d4cab948b3ea92aa1ab73547c64960a93a5ecab19ad4ffad1f70f7172da",
+        "rollback_index_backup": {
+          "path": "/root/dux-r126-lifecycle-report-rollback.sqlite",
+          "sha256": "730588ede60b4773ecedb8eb8d787d86113705cbbed283476624e6d114844520",
+          "mode": "0o640",
+          "quick_check": "ok"
+        },
+        "service": {
+          "enabled": "disabled",
+          "active": "inactive",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        }
+      }
+    },
+    {
+      "name": "rollback",
+      "evidence": {
+        "version": "0.6.3-121",
+        "binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+        "package_payload_binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+        "index_restore": {
+          "sha256": "0fd1f19ccbeda2c6029658434c6bcfee502c17d70e21550ba50e0c1d14ffffb6",
+          "mode": "0o640",
+          "quick_check": "ok"
+        },
+        "service_after_install": {
+          "enabled": "disabled",
+          "active": "inactive",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        },
+        "service_runtime_verified": {
+          "enabled": "disabled",
+          "active": "active",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        },
+        "legacy_package_service_behavior": {
+          "enabled": "disabled",
+          "active": "active",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        }
+      }
+    },
+    {
+      "name": "re_upgrade",
+      "evidence": {
+        "version": "0.6.3-126",
+        "binary_sha256": "9428b49d5d9ee5935cf77e3042eb0a321cd7fb106de6d4464ddaaf4d3951a92b",
+        "package_payload_binary_sha256": "9428b49d5d9ee5935cf77e3042eb0a321cd7fb106de6d4464ddaaf4d3951a92b",
+        "backup_helper_sha256": "38280d4cab948b3ea92aa1ab73547c64960a93a5ecab19ad4ffad1f70f7172da",
+        "service": {
+          "enabled": "disabled",
+          "active": "inactive",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        }
+      }
+    },
+    {
+      "name": "remove_and_purge",
+      "evidence": {
+        "package_removed": true,
+        "state_retained_after_remove": true,
+        "purge_supported": true,
+        "state_removed_after_purge": true,
+        "state_reset_for_clean_install": true,
+        "service": {
+          "enabled": "not-found",
+          "active": "inactive",
+          "tunnel_enabled": "not-found",
+          "tunnel_active": "inactive"
+        }
+      }
+    },
+    {
+      "name": "clean_install",
+      "evidence": {
+        "version": "0.6.3-126",
+        "binary_sha256": "9428b49d5d9ee5935cf77e3042eb0a321cd7fb106de6d4464ddaaf4d3951a92b",
+        "package_payload_binary_sha256": "9428b49d5d9ee5935cf77e3042eb0a321cd7fb106de6d4464ddaaf4d3951a92b",
+        "backup_helper_sha256": "38280d4cab948b3ea92aa1ab73547c64960a93a5ecab19ad4ffad1f70f7172da",
+        "service": {
+          "enabled": "enabled",
+          "active": "active",
+          "tunnel_enabled": "disabled",
+          "tunnel_active": "inactive"
+        },
+        "daemon_observation": {
+          "automatic_reconciliation_paused": false,
+          "behind_seconds": 678.702,
+          "behind_seconds_applicable": false,
+          "caught_up": false,
+          "daemon_live": true,
+          "dirty": true,
+          "dirty_reason": "filesystem changes await the next full observation",
+          "dirty_since_timestamp_seconds": 1794281483,
+          "events_dropped": 0,
+          "events_resolved": 0,
+          "events_seen": 14876449,
+          "failed_reconciliation_attempts": null,
+          "index_bytes": 89609543680,
+          "index_bytes_on_disk": 708562944,
+          "index_nodes": 1844706,
+          "kernel_overflow_notifications": 0,
+          "last_event_commit_timestamp_seconds": 0,
+          "last_scan_age_seconds": 136,
+          "last_scan_timestamp_seconds": 1794281348,
+          "max_automatic_reconciliation_retries": 1,
+          "max_pending_updates": 500000,
+          "pause_reason": null,
+          "paused": false,
+          "paused_since_timestamp_seconds": null,
+          "pending_updates": 0,
+          "reconciliation_retry_backoff_seconds": null,
+          "reconciliation_retry_due": false,
+          "reconciliation_retry_remaining_seconds": null,
+          "reconciliation_retry_state_corrupt": false,
+          "root": "/",
+          "scan_first": true,
+          "scan_in_progress": false,
+          "scan_progress": null,
+          "status_version": 1,
+          "throttled_since_timestamp_seconds": null,
+          "updates_committed": 0,
+          "userspace_updates_dropped": 0,
+          "wal_bytes": 134217728,
+          "watch_status_available": true,
+          "watch_status_updated_at_seconds": 1794281484,
+          "write_error": null
+        },
+        "daemon_caught_up": false,
+        "service_security_policy": {
+          "MainPID": "406663",
+          "ExecStart": "{ path=/usr/bin/dux ; argv[]=/usr/bin/dux daemon / ; ignore_errors=no ; start_time=[Tue 2026-11-10 03:20:05 UTC] ; stop_time=[n/a] ; pid=406663 ; code=(null) ; status=0/0 }",
+          "IOReadBytes": "6924926976",
+          "IOWriteBytes": "7426056192",
+          "CPUQuotaPerSecUSec": "1s",
+          "IOAccounting": "yes",
+          "MemoryHigh": "2147483648",
+          "MemoryMax": "4294967296",
+          "UMask": "0027",
+          "LimitCORE": "0",
+          "OOMScoreAdjust": "0",
+          "SecureBits": "3",
+          "CapabilityBoundingSet": "cap_dac_read_search cap_sys_admin",
+          "AmbientCapabilities": "cap_dac_read_search cap_sys_admin",
+          "User": "",
+          "Group": "dux",
+          "ProtectKernelModules": "no",
+          "NoNewPrivileges": "yes",
+          "SystemCallFilter": "~_sysctl adjtimex afs_syscall bdflush bpf break chroot clock_adjtime clock_adjtime64 clock_settime clock_settime64 create_module delete_module finit_module fsconfig fsmount fsopen fspick ftime get_kernel_syms getpmsg gtty idle init_module ioperm iopl kexec_file_load kexec_load lock lookup_dcookie modify_ldt mount mount_setattr move_mount mpx open_tree pciconfig_iobase pciconfig_read pciconfig_write perf_event_open pidfd_getfd pivot_root prof profil ptrace putpmsg query_module reboot rtas s390_pci_mmio_read s390_pci_mmio_write s390_runtime_instr security settimeofday sgetmask ssetmask stime stty subpage_prot swapoff swapon switch_endian sysfs tuxcall ulimit umount umount2 uselib ustat vm86 vm86old vserver",
+          "RestrictAddressFamilies": "AF_UNIX",
+          "StateDirectoryMode": "0750",
+          "StateDirectory": "dux",
+          "ProcessOOMScoreAdjust": "0",
+          "module_tree_visible": {
+            "path": "/usr/lib/modules",
+            "device": 64512,
+            "inode": 2097327
+          }
+        },
+        "index_access_policy": {
+          "directory_owner": "root",
+          "directory_group": "dux",
+          "directory_mode": "0o750",
+          "index_file_owner": "root",
+          "index_file_group": "dux",
+          "index_files": {
+            "dux.db": "0o640",
+            "dux.db-wal": "0o640",
+            "dux.db-shm": "0o640"
+          }
+        },
+        "tunnel_identity_created": false
+      }
+    }
+  ],
+  "sandbox": {
+    "virtualization": "kvm",
+    "marker": "/etc/dux-qualification-sandbox",
+    "marker_mode": "0o400"
+  },
+  "old_package_sha256": "091930e93fd36dd7a93cdc7983ded6e893c207035b66d5d010cec585bde81d57",
+  "new_package_sha256": "25e1b79bebf1056a69147c6cfaef68da679cd82354e0065daf7709df7e10a24d",
+  "elapsed_seconds": 1732.768
+}

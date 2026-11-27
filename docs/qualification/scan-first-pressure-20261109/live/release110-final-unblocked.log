@@ -1,0 +1,30 @@
+Running as unit: dux-readiness-637757.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PASS new and unavailable mount detection, refreshed watch coverage and exact recovery
+PASS long reader keeps a consistent snapshot and WAL reclaims after release
+Evidence: /root/dux-readiness-6dacdf5/release110-final-unblocked.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2689, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2644, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2469, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 1976, in startup_test
+    daemon.exact()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 408, in exact
+    before_meta, _ = check_index(self.case.db)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 153, in check_index
+    root = int(meta["root_dev"]), int(meta["root_inode"])
+               ~~~~^^^^^^^^^^^^
+KeyError: 'root_dev'
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 27.527s
+CPU time consumed: 5.827s
+Memory peak: 64.6M
+Memory swap peak: 0B

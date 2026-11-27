@@ -1,0 +1,20 @@
+{
+  "observed_at_utc": "2026-11-11T03:34:56Z",
+  "remote_checkpoint_updated_at_utc": "2026-11-11T03:34:38Z",
+  "remote_checkpoint": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json",
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "status": "running",
+  "started_at_utc": "2026-11-10T09:04:50Z",
+  "elapsed_seconds": 66588.1,
+  "duration_target_seconds": 259200,
+  "operations": 1464000,
+  "exactness_samples": 1460,
+  "mutation_bursts": 18,
+  "controlled_crash_recoveries": 1,
+  "held_reader_wal_reclaim_checks": 3,
+  "convergence_p95_ms": 9243,
+  "convergence_max_ms": 17963,
+  "final_exactness": "pending",
+  "final_history": "pending",
+  "sqlite_integrity": "pending"
+}

@@ -1,0 +1,7 @@
+{
+  "captured_at_utc": "20261109T183047Z",
+  "host": "vps2-r121-canary",
+  "systemd": {"MainPID": "2561224", "NRestarts": "0", "ExecMainStartTimestamp": "Mon 2026-11-09 13:59:25 UTC", "ActiveState": "reloading"},
+  "dux_status": {"automatic_reconciliation_paused":false,"behind_seconds":16282.157,"caught_up":false,"daemon_live":true,"dirty":true,"dirty_reason":"periodic filesystem observation in progress","dirty_since_timestamp_seconds":1794248970,"events_dropped":0,"events_resolved":0,"events_seen":200249979,"failed_reconciliation_attempts":null,"index_bytes":86880616448,"index_bytes_on_disk":720121856,"index_nodes":1750235,"kernel_overflow_notifications":0,"last_event_commit_timestamp_seconds":0,"last_scan_age_seconds":748,"last_scan_timestamp_seconds":1794248299,"max_automatic_reconciliation_retries":1,"max_pending_updates":500000,"pause_reason":null,"paused":false,"paused_since_timestamp_seconds":null,"pending_updates":0,"reconciliation_retry_backoff_seconds":null,"reconciliation_retry_due":false,"reconciliation_retry_remaining_seconds":null,"reconciliation_retry_state_corrupt":false,"root":"/","scan_first":true,"scan_in_progress":true,"scan_progress":{"allocated_bytes_seen":62755721216,"directories_seen":67715,"files_seen":566581,"indexing":false,"started_at_seconds":1794248970},"status_version":1,"throttled_since_timestamp_seconds":1794232765,"updates_committed":0,"userspace_updates_dropped":0,"wal_bytes":134217728,"watch_status_available":true,"watch_status_updated_at_seconds":1794249047,"write_error":null}
+
+}

@@ -1,0 +1,29 @@
+{
+  "captured_at_utc": "2026-11-07T07:35:06.289130+00:00",
+  "repository_commit": "6f887e72953aab7dd707227182458b12b6feee5b",
+  "worktree_clean_at_capture": false,
+  "cargo_audit_version": "cargo-audit-audit 0.22.2",
+  "advisory_database_commit": "309392b18f6b17022f82c701f300433126901068",
+  "advisory_database_last_updated": "2026-11-06T16:34:32+01:00",
+  "cargo_lock_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3",
+  "production_binary": {
+    "path": "/usr/bin/dux",
+    "sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
+    "version": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882"
+  },
+  "results": {
+    "lockfile": {
+      "command": "cargo audit --deny warnings --file Cargo.lock --format json",
+      "exit_status": 0,
+      "log": "docs/qualification/security-audit-20261107/lockfile.log",
+      "log_sha256": "add804f57d2a2377a9c09b032392f5d9485995fe622e5fa5ee7a72d187b95a30"
+    },
+    "production_binary": {
+      "command": "cargo audit --no-fetch bin /usr/bin/dux",
+      "exit_status": 0,
+      "log": "docs/qualification/security-audit-20261107/production_binary.log",
+      "log_sha256": "2b64943370245d7989575bac17b2d75ca35f629fd6534fff2d921fbda9bf6a07"
+    }
+  },
+  "scope_limit": "This point-in-time audit covers the current lockfile and currently installed production executable metadata. It does not audit the newer VPS2 candidate binary, non-Rust components, build toolchain, runtime configuration, or future advisory updates."
+}

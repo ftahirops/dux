@@ -1,0 +1,31 @@
+{
+  "captured_at_utc": "2026-11-07T08:05:40.782351+00:00",
+  "repository_head_before_test_edit": "42b8f20d4843b0603bd338ba56a740f209bb6235",
+  "candidate_runtime_source_commit": "0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5",
+  "runtime_source_unchanged": true,
+  "test_source_change": "src/scan.rs only: explicitly assert separate birth_ns incarnations and one prime among hardlink paths",
+  "test_executable": "/dev/shm/dux-cargo-target-v7/debug/deps/dux-f830783577e924f2",
+  "test_executable_sha256": "8ef11e0b514681daf300a2c5fed4d8121be77e50d43b5a34f22b90f9b2e9fbe5",
+  "command": "cargo test --offline --locked -- --test-threads=1",
+  "result": "passed",
+  "tests_passed": 268,
+  "tests_failed": 0,
+  "test_elapsed_seconds": 74.28,
+  "systemd_unit": "dux-rust-full-v7-20261107.service",
+  "limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 2048,
+    "swap_mib": 0,
+    "io_weight": 10
+  },
+  "systemd_usage": {
+    "cpu_seconds": 16.165,
+    "memory_peak_mib": 21.5,
+    "swap_peak_bytes": 0
+  },
+  "target_directory": "/dev/shm/dux-cargo-target-v7",
+  "temporary_directory": "/dev/shm/dux-cargo-tmp-v7",
+  "test_summary": "test-summary.txt",
+  "test_summary_sha256": "fedc9de75487ce70d87aa7df3bf16ee4193500ab9fe8f9c89acd2a94466df358",
+  "scope_limit": "This is the full Rust default-feature unit test suite. The assertion exercises the staged v7 graph only; it does not qualify schema-v7 publication, watcher event updates, queries, migration, package lifecycle, or production recovery."
+}

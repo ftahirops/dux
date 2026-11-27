@@ -1,0 +1,38 @@
+{
+  "observed_at_utc": "2026-11-11T03:06:00Z",
+  "source_commit": "8c6726a",
+  "source_state": "committed workspace fix; not included in the staged r132 candidate binaries",
+  "change": "Routine reconciliation scan notifications now use READY=1 instead of RELOADING=1, so systemd does not misreport normal scans as service reloads.",
+  "tests": {
+    "rust_full_suite": {
+      "command": "CARGO_BUILD_JOBS=1 cargo test --locked --all-features -- --test-threads=1",
+      "passed": 342,
+      "failed": 0,
+      "ignored": 2,
+      "result": "passed"
+    },
+    "previously_ignored_ext4_stale_parent": {
+      "command": "CARGO_BUILD_JOBS=1 cargo test --locked --all-features stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs -- --ignored --test-threads=1",
+      "passed": 1,
+      "failed": 0,
+      "result": "passed"
+    },
+    "previously_ignored_100k_reconciliation_smoke": {
+      "command": "DUX_RECONCILE_SCALE_TMPDIR=/dev/shm CARGO_BUILD_JOBS=1 cargo test --locked --all-features reconciliation_scale_smoke_reports_scan_cost -- --ignored --test-threads=1",
+      "passed": 1,
+      "failed": 0,
+      "result": "passed"
+    },
+    "scale_fixture_guard": "The initial invocation without DUX_RECONCILE_SCALE_TMPDIR was refused before fixture creation because the host root is a real filesystem watched by live Dux. The /dev/shm rerun passed.",
+    "strict_clippy": "CARGO_BUILD_JOBS=1 cargo clippy --locked --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks — passed",
+    "formatting": "cargo fmt --all -- --check — passed",
+    "diff_check": "git diff --check — passed"
+  },
+  "coverage": "Instrumentation coverage was not rerun for this workspace change. Previously recorded r132 figures do not measure this fix.",
+  "deployment": "No VPS service or binary was changed by this qualification run.",
+  "remaining": [
+    "Rebuild and hash-verify a candidate containing source commit 8c6726a.",
+    "Verify with systemd that the unit stays active/running through a long reconciliation.",
+    "Run the full guarded fault matrix and complete the 72-hour candidate soak."
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "format_version": 1,
+  "captured_at_utc": "2026-11-09T00:25:00Z",
+  "host": "VPS2 192.168.5.106",
+  "filesystem": {
+    "type": "ext4",
+    "device": "/dev/loop0",
+    "mount": "/mnt/dux-r107-stress",
+    "image_size_bytes": 2147483648,
+    "fanotify_max_queued_events": 16384
+  },
+  "release_107_burst_service": {
+    "binary_sha256": "c301574f148be8ac42caf1800b21a9d0b66441ce38d25844d7f4ea203add0475",
+    "source_commit": "d27d3b7ccdaebc31060c57b3425baed25cb5739c",
+    "max_cpu_percent": 60,
+    "systemd_cpu_quota_percent": 100,
+    "systemd_memory_max_bytes": 1073741824,
+    "bursts": 11,
+    "create_unlink_pairs_per_burst": 32000,
+    "total_create_unlink_pairs": 352000,
+    "approx_filesystem_operations": 704000,
+    "burst_duration_seconds": [
+      0.527, 0.620, 0.499, 0.414, 0.546, 0.442,
+      0.419, 0.353, 0.375, 0.425, 0.423
+    ],
+    "events_seen": 975442,
+    "kernel_overflow_notifications": 0,
+    "userspace_updates_dropped": 0,
+    "max_sampled_events_per_second": 45948.92335083572,
+    "max_sampled_queue_bytes": 24,
+    "queue_pressure_episodes": 0,
+    "full_observation": {
+      "files": 1,
+      "directories": 13,
+      "path_instances": 14,
+      "coverage_issues": 0,
+      "accounting_verification": "passed"
+    }
+  },
+  "current_source_scan_cli_test": {
+    "binary_sha256": "53529db2b14a9147a255fcaff1897b580c76b8da6545d522b4672ba4750f3d6a",
+    "source_sha256": "29154f16536abb11db15f7d727234dbae5129d0e9e674c19f99645fcd530a297",
+    "source_commit_base": "8b47815",
+    "dirty_before_scan": true,
+    "scan_cli_elapsed_seconds": 4.5,
+    "scan_cli_result": "observation completed and accounting verified",
+    "dirty_after_scan": false,
+    "indexed_path_instances": 15,
+    "known_new_file_returned_by_find": true,
+    "kernel_overflow_notifications": 0,
+    "userspace_updates_dropped": 0
+  },
+  "release_106_root_service_during_test": {
+    "kernel_overflow_notifications_at_sample_9": 2,
+    "canary_samples_passed_before_failure": 8,
+    "canary_failure_sample": 9,
+    "canary_failure_reason": "service restart count changed during controlled test",
+    "restart_reason": "test loop mount changed watched filesystem coverage; daemon exited 1 by design and systemd restarted it"
+  },
+  "rust_suite_after_source_change": {
+    "passed": 322,
+    "failed": 0,
+    "ignored": 2,
+    "earlier_transient_failure": "ext4 inode-reuse test ENOENT; targeted rerun and following full suite passed"
+  }
+}

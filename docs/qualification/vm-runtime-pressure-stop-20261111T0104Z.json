@@ -1,0 +1,33 @@
+{
+  "observed_at_utc": "2026-11-11T01:04:36Z",
+  "host": "vps1 qualification host",
+  "vm_unit": "dux-qualification-vm-ubuntu24",
+  "guest": "ubuntu24",
+  "started_at_utc": "2026-11-11T01:02:11Z",
+  "stopped_at_utc": "2026-11-11T01:04:36Z",
+  "runtime_seconds": 145,
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "fault_binary_sha256": "3b17b46c2f3c4baf18ed78bc3dc868e4ac92a9fb8ed4241141a12d659fee88b7",
+  "guest_setup_completed": [
+    "SSH became ready",
+    "read-only 9p share mounted",
+    "candidate and fault-binary hashes verified"
+  ],
+  "runtime_guard": {
+    "active_host_workloads": [
+      "14 Go compiler processes",
+      "go test pid 517788",
+      "go vet pid 517789"
+    ],
+    "cpu_psi_some_avg10_percent": 22.97,
+    "io_psi_some_avg10_percent": 3.0,
+    "io_psi_full_avg10_percent": 2.56,
+    "load1": 3.89,
+    "memory_psi_some_avg10_percent": 0.0
+  },
+  "guest_ssh_ready": true,
+  "matrix_suites_started": false,
+  "fixture_created": false,
+  "ephemeral_runtime_cleaned": true,
+  "interpretation": "The fail-safe runtime guard stopped the disposable guest when unrelated host Go tests and vet appeared. The matrix did not start; this is not a Dux test failure."
+}

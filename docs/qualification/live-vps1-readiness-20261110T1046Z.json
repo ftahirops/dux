@@ -1,0 +1,40 @@
+{
+  "captured_at_utc": "2026-11-10T10:46:10Z",
+  "collection": "read-only dux status --json, binary identity, systemd, uptime, and df",
+  "production_binary": {
+    "version": "dux 0.6.3 (e0cc915f8f37) [production]",
+    "source_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+    "binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
+    "service_active": true,
+    "historical_restarts": 4
+  },
+  "index": {
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+    "behind_seconds": 234919.312,
+    "last_scan_timestamp_utc": "2026-11-05T12:49:22Z",
+    "last_scan_age_seconds": 424608,
+    "kernel_overflow_notifications": 742,
+    "events_dropped": 2518862,
+    "events_seen": 223165622,
+    "events_resolved": 129172304,
+    "updates_committed": 36379076,
+    "pending_updates": 9,
+    "index_nodes": 1310985,
+    "index_bytes": 123630718976,
+    "index_bytes_on_disk": 3436044288,
+    "wal_bytes": 134217728,
+    "scan_in_progress": false,
+    "paused": false,
+    "write_error": null
+  },
+  "host_disk": {
+    "filesystem": "/dev/mapper/ubuntu--vg-ubuntu--lv",
+    "size": "185G",
+    "used": "118G",
+    "available": "59G",
+    "use_percent": 67
+  },
+  "uptime_load_average": [5.72, 13.85, 13.07]
+}

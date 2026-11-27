@@ -1,0 +1,59 @@
+{
+  "captured_at_epoch": 1794263440.2406974,
+  "captured_at_utc": "2026-11-09T22:30:40Z",
+  "version": {
+    "exit_code": 0,
+    "stdout": "dux 0.6.3 (e0cc915f8f37) [production] source-sha256=b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882\n",
+    "stderr": ""
+  },
+  "status": {
+    "exit_code": 0,
+    "stdout": "{\"behind_seconds\":190788.486,\"caught_up\":false,\"daemon_live\":true,\"dirty\":true,\"dirty_reason\":\"fanotify queue overflow\",\"dirty_since_timestamp_seconds\":1794252771,\"events_dropped\":2518862,\"events_resolved\":104206533,\"events_seen\":178605877,\"index_bytes\":124933287936,\"index_bytes_on_disk\":3332632576,\"index_nodes\":1323464,\"kernel_overflow_notifications\":649,\"last_event_commit_timestamp_seconds\":1794263440,\"last_scan_age_seconds\":380478,\"last_scan_timestamp_seconds\":1793882962,\"max_pending_updates\":500000,\"pause_reason\":null,\"paused\":false,\"paused_since_timestamp_seconds\":null,\"pending_updates\":0,\"root\":\"/\",\"scan_in_progress\":false,\"scan_progress\":null,\"status_version\":1,\"throttled_since_timestamp_seconds\":1794072651,\"updates_committed\":27884522,\"userspace_updates_dropped\":2518862,\"wal_bytes\":134217728,\"watch_status_available\":true,\"watch_status_updated_at_seconds\":1794263440,\"write_error\":null}\n",
+    "stderr": "",
+    "parsed": {
+      "behind_seconds": 190788.486,
+      "caught_up": false,
+      "daemon_live": true,
+      "dirty": true,
+      "dirty_reason": "fanotify queue overflow",
+      "dirty_since_timestamp_seconds": 1794252771,
+      "events_dropped": 2518862,
+      "events_resolved": 104206533,
+      "events_seen": 178605877,
+      "index_bytes": 124933287936,
+      "index_bytes_on_disk": 3332632576,
+      "index_nodes": 1323464,
+      "kernel_overflow_notifications": 649,
+      "last_event_commit_timestamp_seconds": 1794263440,
+      "last_scan_age_seconds": 380478,
+      "last_scan_timestamp_seconds": 1793882962,
+      "max_pending_updates": 500000,
+      "pause_reason": null,
+      "paused": false,
+      "paused_since_timestamp_seconds": null,
+      "pending_updates": 0,
+      "root": "/",
+      "scan_in_progress": false,
+      "scan_progress": null,
+      "status_version": 1,
+      "throttled_since_timestamp_seconds": 1794072651,
+      "updates_committed": 27884522,
+      "userspace_updates_dropped": 2518862,
+      "wal_bytes": 134217728,
+      "watch_status_available": true,
+      "watch_status_updated_at_seconds": 1794263440,
+      "write_error": null
+    }
+  },
+  "systemd": {
+    "exit_code": 0,
+    "stdout": "MainPID=1073891\nNRestarts=4\nExecMainStartTimestamp=Sat 2026-11-07 17:30:51 UTC\nMemoryCurrent=855859200\nMemoryPeak=1430843392\nCPUUsageNSec=17319207768000\nActiveState=active\n",
+    "stderr": ""
+  },
+  "root_filesystem": {
+    "exit_code": 0,
+    "stdout": "Filesystem                           1B-blocks         Used   Available Use% Mounted on\n/dev/mapper/ubuntu--vg-ubuntu--lv 198092431360 127535595520 61725487104  68% /\n",
+    "stderr": ""
+  },
+  "scope": "read-only local production-host observation; no daemon/database/config changes"
+}

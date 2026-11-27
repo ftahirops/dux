@@ -1,0 +1,23 @@
+{
+  "observed_at_utc": "2026-11-10T13:08:34Z",
+  "guest": "rocky9",
+  "vm_unit_before_and_after": "inactive",
+  "initial_pressure_sample": {
+    "load1": 2.91,
+    "active_host_workloads": 0,
+    "blockers": []
+  },
+  "controller_admission_result": {
+    "result": "refused_before_vm_start",
+    "blocked_sample": "2/3",
+    "workloads": [
+      "Go compiler pid=1977931",
+      "Go compiler pid=1977944",
+      "Go compiler pid=1978041",
+      "go test pid=1977687"
+    ],
+    "exit_code": 1
+  },
+  "package_lifecycle_commands_run": false,
+  "evidence_source": "dux-qualification-vm.py start rocky9 captured output"
+}

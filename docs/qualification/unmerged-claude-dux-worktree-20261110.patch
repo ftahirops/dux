@@ -1,0 +1,2985 @@
+diff --git a/scripts/dux-backup-index.py b/scripts/dux-backup-index.py
+index ff6515a..31c4d58 100644
+--- a/scripts/dux-backup-index.py
++++ b/scripts/dux-backup-index.py
+@@ -20,7 +20,7 @@ from urllib.parse import quote
+ CHUNK_BYTES = 1024 * 1024
+ BACKUP_PAGES = 1024
+ MIN_FREE_RESERVE_BYTES = 1024 * 1024 * 1024
+-SUPPORTED_SCHEMA_VERSIONS = frozenset({4, 5, 6})
++SUPPORTED_SCHEMA_VERSIONS = frozenset({4, 5, 6, 7})
+ REQUIRED_INDEX_COLUMNS = {
+     "meta": {"key", "value"},
+     "inodes": {"dev_id", "inode", "kind", "blocks"},
+@@ -58,6 +58,15 @@ def _validate_dux_schema(connection: sqlite3.Connection, schema_version: int) ->
+         required_columns["inodes"].add("birth_ns")
+     if schema_version >= 6:
+         required_columns["growth"].add("birth_ns")
++    if schema_version >= 7:
++        required_columns["paths"] = {
++            "path_id", "parent_path_id", "name", "dev_id", "inode",
++            "birth_ns", "kind", "mount_id", "prime", "cycle",
++        }
++        required_columns["dir_totals"] = {
++            "path_id", "visible_bytes", "visible_entries", "unique_bytes",
++            "unique_inodes",
++        }
+ 
+     tables = {
+         name: (sql or "")
+diff --git a/scripts/dux-canary-monitor.py b/scripts/dux-canary-monitor.py
+index 25615d8..ba228d8 100644
+--- a/scripts/dux-canary-monitor.py
++++ b/scripts/dux-canary-monitor.py
+@@ -17,7 +17,7 @@ OBSERVER_PATH = Path(__file__).with_name("dux-live-observer.py")
+ OBSERVER_SPEC = importlib.util.spec_from_file_location("dux_live_observer", OBSERVER_PATH)
+ OBSERVER = importlib.util.module_from_spec(OBSERVER_SPEC)
+ OBSERVER_SPEC.loader.exec_module(OBSERVER)
+-EXPECTED_SCHEMA_VERSION = "6"
++EXPECTED_SCHEMA_VERSION = "7"
+ 
+ 
+ def sha256_file(path):
+diff --git a/scripts/dux-live-observer.py b/scripts/dux-live-observer.py
+index 78c394a..9a354c7 100644
+--- a/scripts/dux-live-observer.py
++++ b/scripts/dux-live-observer.py
+@@ -368,6 +368,45 @@ def exact_filesystem(root, conn, progress_callback=None):
+             pass
+ 
+ 
++def path_graph_snapshot(conn):
++    """Validate persisted v7 path-instance structure without touching the tree."""
++    path_count = conn.execute('SELECT COUNT(*) FROM paths').fetchone()[0]
++    root_count = conn.execute(
++        'SELECT COUNT(*) FROM paths WHERE path_id=1 AND parent_path_id=-1'
++    ).fetchone()[0]
++    bad_parent_count = conn.execute('''SELECT COUNT(*) FROM paths child
++        LEFT JOIN paths parent ON parent.path_id=child.parent_path_id
++        WHERE child.parent_path_id!=-1
++          AND (parent.path_id IS NULL OR parent.kind!='d')''').fetchone()[0]
++    bad_prime_groups = conn.execute('''SELECT COUNT(*) FROM (
++        SELECT dev_id,inode,birth_ns FROM paths
++        GROUP BY dev_id,inode,birth_ns HAVING SUM(prime)!=1)''').fetchone()[0]
++    missing_directory_totals = conn.execute('''SELECT COUNT(*) FROM paths p
++        LEFT JOIN dir_totals t USING(path_id)
++        WHERE p.kind='d' AND t.path_id IS NULL''').fetchone()[0]
++    unexpected_directory_totals = conn.execute('''SELECT COUNT(*) FROM dir_totals t
++        LEFT JOIN paths p USING(path_id)
++        WHERE p.path_id IS NULL OR p.kind!='d' ''').fetchone()[0]
++    root_entries = conn.execute('''SELECT visible_entries FROM dir_totals
++        WHERE path_id=1''').fetchone()
++    root_entries_match = root_entries is not None and root_entries[0] == path_count
++    result = {
++        'path_count': path_count,
++        'root_count': root_count,
++        'bad_parent_count': bad_parent_count,
++        'bad_prime_groups': bad_prime_groups,
++        'missing_directory_totals': missing_directory_totals,
++        'unexpected_directory_totals': unexpected_directory_totals,
++        'root_visible_entries_match': root_entries_match,
++    }
++    result['passed'] = (
++        path_count > 0 and root_count == 1 and bad_parent_count == 0
++        and bad_prime_groups == 0 and missing_directory_totals == 0
++        and unexpected_directory_totals == 0 and root_entries_match
++    )
++    return result
++
++
+ def snapshot(check_filesystem=False, progress_callback=None):
+     uri = f'file:{DB}?mode=ro'
+     with sqlite3.connect(uri, uri=True, timeout=5) as conn:
+@@ -451,12 +490,16 @@ def snapshot(check_filesystem=False, progress_callback=None):
+                                'direct_prime_child_filesystem_audit': filesystem_audit})
+         orphan = conn.execute('SELECT COUNT(*) FROM dirents d LEFT JOIN inodes p ON p.dev_id=d.parent_dev AND p.inode=d.parent_inode WHERE p.inode IS NULL').fetchone()[0]
+         primes = conn.execute('SELECT COUNT(*) FROM (SELECT i.dev_id,i.inode FROM inodes i LEFT JOIN dirents d ON d.dev_id=i.dev_id AND d.inode=i.inode GROUP BY i.dev_id,i.inode HAVING COALESCE(SUM(d.prime),0)!=1)').fetchone()[0]
++        path_graph = None
++        if int(meta.get('schema_version', '0')) >= 7:
++            path_graph = path_graph_snapshot(conn)
+         quick = conn.execute('PRAGMA quick_check').fetchall()
+         result = {'schema_version': meta.get('schema_version'), 'scan_generation': meta.get('scan_generation'),
+                 'root': root, 'inode_totals': totals, 'root_totals': root_totals,
+                 'root_matches_inode_aggregate': root_totals == totals,
+                 'sampled_rollup_mismatches': mismatches, 'orphan_dirents': orphan,
+-                'invalid_prime_attribution': primes, 'quick_check': quick}
++                'invalid_prime_attribution': primes, 'path_graph': path_graph,
++                'quick_check': quick}
+         if check_filesystem:
+             result['exact_filesystem'] = exact_filesystem(index_root, conn, progress_callback)
+         return result
+@@ -574,10 +617,15 @@ def service_diagnostics(unit):
+ def invariant_passed(observed):
+     quick_check = observed["quick_check"]
+     exact = observed.get('exact_filesystem', {'passed': True})
++    path_graph = observed.get('path_graph')
++    schema_version = int(observed.get('schema_version') or 0)
++    path_graph_ok = (schema_version < 7
++                     or (isinstance(path_graph, dict) and path_graph.get('passed') is True))
+     return (observed["root_matches_inode_aggregate"]
+             and not observed["sampled_rollup_mismatches"]
+             and observed["orphan_dirents"] == 0
+             and observed["invalid_prime_attribution"] == 0
++            and path_graph_ok
+             and exact.get('passed') is True
+             and len(quick_check) == 1
+             and tuple(quick_check[0]) == ("ok",))
+diff --git a/scripts/dux-readiness.py b/scripts/dux-readiness.py
+index 6bae7ed..cfec862 100755
+--- a/scripts/dux-readiness.py
++++ b/scripts/dux-readiness.py
+@@ -1646,7 +1646,7 @@ def startup_test(case, args, evidence):
+     # A failed upgrade scan must leave the legacy generation readable and the
+     # daemon alive; it must not try to reopen that old schema as writable and
+     # turn one scan error into a restart loop. Clear the fault trigger and let
+-    # the bounded automatic retry install v6, replaying events collected while
++    # the bounded automatic retry install v7, replaying events collected while
+     # the old generation remained read-only.
+     with contextlib.closing(sqlite3.connect(fresh.db)) as conn, conn:
+         conn.execute("UPDATE meta SET value='4' WHERE key='schema_version'")
+@@ -1684,13 +1684,13 @@ def startup_test(case, args, evidence):
+             upgraded_version = conn.execute(
+                 "SELECT value FROM meta WHERE key='schema_version'"
+             ).fetchone()[0]
+-        assert upgraded_version == '6', f'bounded retry did not install v6: {upgraded_version}'
++        assert upgraded_version == '7', f'bounded retry did not install v7: {upgraded_version}'
+         assert retry_event.exists(), 'retry fixture event disappeared'
+         evidence.update(
+             failed_upgrade_scan_kept_legacy_index=True,
+             daemon_survived_legacy_upgrade_failure=True,
+             queued_events_replayed_after_automatic_retry=True,
+-            automatic_retry_installed_v6=True,
++            automatic_retry_installed_v7=True,
+         )
+     finally:
+         fail_scan_file.unlink(missing_ok=True)
+@@ -1762,7 +1762,7 @@ def startup_test(case, args, evidence):
+             (case.tree/f'during-upgrade-{i}').write_bytes(b'upgrade window event')
+         daemon.process.send_signal(signal.SIGCONT)
+         daemon.exact()
+-        assert check_index(case.db)[0]['schema_version']=='6'
++        assert check_index(case.db)[0]['schema_version']=='7'
+         with contextlib.closing(snapshot(case.db)) as conn:
+             assert conn.execute('SELECT 1 FROM inodes WHERE inode=?', (stale_ino,)).fetchone() is None, 'upgrade retained dead inode subtree'
+             assert conn.execute('SELECT kind FROM inodes WHERE dev_id=? AND inode=?', (dev,ino)).fetchone() == ('f',), 'reused inode was not restored as a file'
+@@ -1929,7 +1929,8 @@ def root_scan_test(case, _args, evidence):
+     evidence.update(root_path_scanned=True, files=counts[0], directories=counts[1], dirents=entries,
+                     database_excluded=True, one_filesystem=True,
+                     coverage_complete=dirty_reason is None, dirty_reason=dirty_reason)
+-    print(f'PASS scan root /: {counts[0]} files, {counts[1]} dirs, {entries} entries', flush=True)
++    outcome = "PASS" if dirty_reason is None else "INCOMPLETE coverage"
++    print(f'{outcome} scan root /: {counts[0]} files, {counts[1]} dirs, {entries} entries', flush=True)
+ 
+ 
+ def validate_workspace_parent(path, image_mib):
+@@ -2017,6 +2018,20 @@ SUITES = {"crash": crash_tests, "overflow": overflow_test, "cpu": cpu_event_burs
+           # to exercise their intentional pressure deferral path accidentally.
+           "root": root_scan_test}
+ 
++
++def suite_result_status(name, evidence):
++    """Separate a successful test of fail-closed behavior from qualification."""
++    if name == "root" and evidence.get("coverage_complete") is False:
++        return "incomplete"
++    return "passed"
++
++
++def aggregate_result_status(suites):
++    """An incomplete suite makes the qualification report incomplete."""
++    if any(result.get("status") == "incomplete" for result in suites.values()):
++        return "incomplete"
++    return "passed"
++
+ # The packaged production service uses MemoryMax=4G. The consolidated worker
+ # includes both the harness and a tmpfs-backed loop fixture, so its cgroup must
+ # allow the same ceiling; a 768 MiB cap OOM-killed the harness during the
+@@ -2118,7 +2133,9 @@ def worker(args):
+                     report["last_checkpoint_at"] = report["current_suite_started_at"]
+                     write_report(args.report, report)
+                     SUITES[name](case, args, evidence)
+-                    report["suites"][name].update(status="passed", elapsed_seconds=round(time.monotonic()-started, 3))
++                    report["suites"][name].update(
++                        status=suite_result_status(name, evidence),
++                        elapsed_seconds=round(time.monotonic()-started, 3))
+                     report["current_suite"] = None
+                     report["last_checkpoint_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                     write_report(args.report, report)
+@@ -2209,7 +2226,7 @@ def worker(args):
+                 finally:
+                     log = base / "daemon.log"
+                     report["log_tail"] = log.read_text()[-12000:] if log.exists() else ""
+-        report["status"] = "passed"
++        report["status"] = aggregate_result_status(report["suites"])
+     except BaseException as error:
+         report.update(status="failed", error=f"{type(error).__name__}: {error}")
+         for suite in report["suites"].values():
+@@ -2221,7 +2238,7 @@ def worker(args):
+         report["not_qualified_by_this_run"] = not_qualified_by_this_run(
+             set(args.suites), args.duration_seconds, args.filesystem_type,
+             completed=report["status"] == "passed")
+-        if args.keep_failed_workspace and report["status"] != "passed":
++        if args.keep_failed_workspace and report["status"] == "failed":
+             report.setdefault("preserved_workspace", str(workspace))
+         else:
+             shutil.rmtree(workspace, ignore_errors=True)
+diff --git a/scripts/dux_live_test_schema.py b/scripts/dux_live_test_schema.py
+index 66f112c..c0cfd22 100644
+--- a/scripts/dux_live_test_schema.py
++++ b/scripts/dux_live_test_schema.py
+@@ -23,16 +23,33 @@ def require_live_test_schema(db: Path) -> int:
+         inode_columns = {
+             row[1] for row in conn.execute("PRAGMA table_info(inodes)")
+         }
++    path_columns = {row[1] for row in conn.execute("PRAGMA table_info(paths)")}
++    total_columns = {row[1] for row in conn.execute("PRAGMA table_info(dir_totals)")}
+ 
+     missing = []
++    if schema_version < 7:
++        missing.append("schema version 7")
+     if objects.get("growth_current") != "view":
+         missing.append("growth_current view")
+     if "birth_ns" not in inode_columns:
+         missing.append("inodes.birth_ns column")
++    if schema_version >= 7:
++        missing_path_columns = {
++            "path_id", "parent_path_id", "name", "dev_id", "inode", "birth_ns",
++            "kind", "mount_id", "prime", "cycle",
++        } - path_columns
++        missing_total_columns = {
++            "path_id", "visible_bytes", "visible_entries", "unique_bytes",
++            "unique_inodes",
++        } - total_columns
++        if missing_path_columns:
++            missing.append("paths columns: " + ", ".join(sorted(missing_path_columns)))
++        if missing_total_columns:
++            missing.append("dir_totals columns: " + ", ".join(sorted(missing_total_columns)))
+     if missing:
+         details = ", ".join(missing)
+         raise UnsupportedLiveTestSchema(
+-            f"real-fanotify harness requires growth-history schema features; "
++            f"real-fanotify harness requires current index schema features; "
+             f"binary created schema_version={schema_version}, missing: {details}"
+         )
+     return schema_version
+diff --git a/scripts/test_dux_backup_index.py b/scripts/test_dux_backup_index.py
+index 6e9900a..e7b8e80 100644
+--- a/scripts/test_dux_backup_index.py
++++ b/scripts/test_dux_backup_index.py
+@@ -42,6 +42,16 @@ class DuxBackupIndexTests(unittest.TestCase):
+             "dev_id INTEGER,inode INTEGER)"
+         )
+         conn.execute(f"CREATE TABLE growth({growth_columns})")
++        if schema_version >= 7:
++            conn.execute(
++                "CREATE TABLE paths(path_id INTEGER,parent_path_id INTEGER,name BLOB,"
++                "dev_id INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT,"
++                "mount_id INTEGER,prime INTEGER,cycle INTEGER)"
++            )
++            conn.execute(
++                "CREATE TABLE dir_totals(path_id INTEGER,visible_bytes INTEGER,"
++                "visible_entries INTEGER,unique_bytes INTEGER,unique_inodes INTEGER)"
++            )
+ 
+     def make_index(self, path: Path) -> sqlite3.Connection:
+         conn = sqlite3.connect(path)
+@@ -52,8 +62,8 @@ class DuxBackupIndexTests(unittest.TestCase):
+         conn.commit()
+         return conn
+ 
+-    def test_accepts_supported_v4_v5_v6_schema_shapes(self):
+-        for schema_version in (4, 5, 6):
++    def test_accepts_supported_v4_v5_v6_v7_schema_shapes(self):
++        for schema_version in (4, 5, 6, 7):
+             with self.subTest(schema_version=schema_version):
+                 conn = sqlite3.connect(":memory:")
+                 try:
+@@ -62,6 +72,15 @@ class DuxBackupIndexTests(unittest.TestCase):
+                 finally:
+                     conn.close()
+ 
++    def test_v7_backup_requires_persisted_path_graph(self):
++        conn = sqlite3.connect(":memory:")
++        try:
++            self.create_index_schema(conn, 6)
++            with self.assertRaisesRegex(ValueError, "dir_totals, paths"):
++                BACKUP._validate_dux_schema(conn, 7)
++        finally:
++            conn.close()
++
+     def test_live_wal_backup_is_verified_private_and_hash_bound(self):
+         with tempfile.TemporaryDirectory() as directory:
+             root = Path(directory)
+@@ -283,11 +302,11 @@ class DuxBackupIndexTests(unittest.TestCase):
+             root = Path(directory)
+             database = root / "dux.db"
+             conn = self.make_index(database)
+-            conn.execute("UPDATE meta SET value='7' WHERE key='schema_version'")
++            conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+             conn.commit()
+             conn.close()
+ 
+-            with self.assertRaisesRegex(ValueError, "unsupported Dux index schema v7"):
++            with self.assertRaisesRegex(ValueError, "unsupported Dux index schema v8"):
+                 BACKUP.create_backup(database, root / "backup.sqlite")
+ 
+     def test_reserves_free_space_before_creating_backup_artifacts(self):
+diff --git a/scripts/test_dux_canary_monitor.py b/scripts/test_dux_canary_monitor.py
+index 580a836..feb7f89 100644
+--- a/scripts/test_dux_canary_monitor.py
++++ b/scripts/test_dux_canary_monitor.py
+@@ -28,9 +28,11 @@ def status(**overrides):
+ 
+ 
+ def sample():
+-    accounting = {"schema_version": "6", "root_matches_inode_aggregate": True,
++    accounting = {"schema_version": "7", "root_matches_inode_aggregate": True,
+                   "sampled_rollup_mismatches": [], "orphan_dirents": 0,
+-                  "invalid_prime_attribution": 0, "quick_check": [("ok",)]}
++                  "invalid_prime_attribution": 0,
++                  "path_graph": {"passed": True, "path_count": 12},
++                  "quick_check": [("ok",)]}
+     return {"binary_sha256": EXPECTED_BINARY,
+             "service_binary_sha256": EXPECTED_BINARY,
+             "process_binary_sha256": EXPECTED_BINARY,
+@@ -130,10 +132,20 @@ class CanaryMonitorTests(unittest.TestCase):
+         value = sample()
+         value["accounting"]["schema_version"] = "4"
+         errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
+-        self.assertIn("database schema '4' differs from candidate schema 6", errors)
++        self.assertIn("database schema '4' differs from candidate schema 7", errors)
++
++    def test_v7_path_graph_corruption_fails_canary(self):
++        value = sample()
++        value["accounting"]["path_graph"] = {
++            "passed": False,
++            "path_count": 12,
++            "bad_parent_count": 1,
++        }
++        errors = MONITOR.evaluate_sample(value, EXPECTED_BINARY, EXPECTED_UNIT)
++        self.assertIn("exact accounting snapshot failed", errors)
+ 
+     def test_candidate_schema_version_is_explicit(self):
+-        self.assertEqual(MONITOR.EXPECTED_SCHEMA_VERSION, "6")
++        self.assertEqual(MONITOR.EXPECTED_SCHEMA_VERSION, "7")
+ 
+     def test_restart_and_resource_limit_breach_fail(self):
+         value = sample()
+diff --git a/scripts/test_dux_live_observer.py b/scripts/test_dux_live_observer.py
+index d585f99..b030ba5 100644
+--- a/scripts/test_dux_live_observer.py
++++ b/scripts/test_dux_live_observer.py
+@@ -430,5 +430,43 @@ class SnapshotClassificationTests(unittest.TestCase):
+         self.assertEqual(result['snapshot_structure_changed_fields'], ['index_nodes'])
+ 
+ 
++class V7PathGraphTests(unittest.TestCase):
++    def make_graph(self):
++        conn = sqlite3.connect(':memory:')
++        conn.executescript('''
++            CREATE TABLE paths(
++                path_id INTEGER, parent_path_id INTEGER, name BLOB,
++                dev_id INTEGER, inode INTEGER, birth_ns INTEGER, kind TEXT,
++                mount_id INTEGER, prime INTEGER, cycle INTEGER);
++            CREATE TABLE dir_totals(
++                path_id INTEGER, visible_bytes INTEGER, visible_entries INTEGER,
++                unique_bytes INTEGER, unique_inodes INTEGER);
++            INSERT INTO paths VALUES(1,-1,x'2f',1,1,0,'d',1,1,0);
++            INSERT INTO paths VALUES(2,1,x'66696c65',1,2,0,'f',1,1,0);
++            INSERT INTO dir_totals VALUES(1,8192,2,8192,2);
++        ''')
++        return conn
++
++    def test_valid_path_graph_passes_structural_checks(self):
++        conn = self.make_graph()
++        try:
++            result = observer.path_graph_snapshot(conn)
++            self.assertTrue(result['passed'])
++            self.assertEqual(result['path_count'], 2)
++            self.assertTrue(result['root_visible_entries_match'])
++        finally:
++            conn.close()
++
++    def test_missing_parent_fails_structural_checks(self):
++        conn = self.make_graph()
++        try:
++            conn.execute('UPDATE paths SET parent_path_id=99 WHERE path_id=2')
++            result = observer.path_graph_snapshot(conn)
++            self.assertFalse(result['passed'])
++            self.assertEqual(result['bad_parent_count'], 1)
++        finally:
++            conn.close()
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/scripts/test_dux_live_test_schema.py b/scripts/test_dux_live_test_schema.py
+index 05ef64d..99f3dc8 100644
+--- a/scripts/test_dux_live_test_schema.py
++++ b/scripts/test_dux_live_test_schema.py
+@@ -20,12 +20,22 @@ class LiveTestSchemaTests(unittest.TestCase):
+             if include_growth_view:
+                 conn.execute("CREATE TABLE growth(dev_id INTEGER, inode INTEGER, delta INTEGER)")
+                 conn.execute("CREATE VIEW growth_current AS SELECT * FROM growth")
++            if schema_version >= 7:
++                conn.execute(
++                    "CREATE TABLE paths(path_id INTEGER,parent_path_id INTEGER,name BLOB,"
++                    "dev_id INTEGER,inode INTEGER,birth_ns INTEGER,kind TEXT,"
++                    "mount_id INTEGER,prime INTEGER,cycle INTEGER)"
++                )
++                conn.execute(
++                    "CREATE TABLE dir_totals(path_id INTEGER,visible_bytes INTEGER,"
++                    "visible_entries INTEGER,unique_bytes INTEGER,unique_inodes INTEGER)"
++                )
+ 
+     def test_accepts_required_growth_and_incarnation_schema(self):
+         with tempfile.TemporaryDirectory(prefix="dux-live-schema-ok-") as temp:
+             db = Path(temp) / "index.db"
+-            self.create_db(db, 6, include_growth_view=True)
+-            self.assertEqual(require_live_test_schema(db), 6)
++            self.create_db(db, 7, include_growth_view=True)
++            self.assertEqual(require_live_test_schema(db), 7)
+ 
+     def test_rejects_old_schema_before_running_fanotify_workload(self):
+         with tempfile.TemporaryDirectory(prefix="dux-live-schema-old-") as temp:
+@@ -33,18 +43,28 @@ class LiveTestSchemaTests(unittest.TestCase):
+             self.create_db(db, 5, include_growth_view=False)
+             with self.assertRaisesRegex(
+                 UnsupportedLiveTestSchema,
+-                r"schema_version=5, missing: growth_current view",
++                r"schema_version=5.*schema version 7.*growth_current view",
+             ):
+                 require_live_test_schema(db)
+ 
+     def test_preflight_is_read_only(self):
+         with tempfile.TemporaryDirectory(prefix="dux-live-schema-readonly-") as temp:
+             db = Path(temp) / "index.db"
+-            self.create_db(db, 6, include_growth_view=True)
++            self.create_db(db, 7, include_growth_view=True)
+             before = db.read_bytes()
+             require_live_test_schema(db)
+             self.assertEqual(db.read_bytes(), before)
+ 
++    def test_rejects_v6_before_current_schema_live_workload(self):
++        with tempfile.TemporaryDirectory(prefix="dux-live-schema-v6-") as temp:
++            db = Path(temp) / "index.db"
++            self.create_db(db, 6, include_growth_view=True)
++            with self.assertRaisesRegex(
++                UnsupportedLiveTestSchema,
++                r"schema_version=6, missing: schema version 7",
++            ):
++                require_live_test_schema(db)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/scripts/test_dux_readiness_workflow.py b/scripts/test_dux_readiness_workflow.py
+index b7ad3b7..7c8ccfc 100644
+--- a/scripts/test_dux_readiness_workflow.py
++++ b/scripts/test_dux_readiness_workflow.py
+@@ -22,6 +22,35 @@ READINESS_SPEC.loader.exec_module(READINESS)
+ 
+ 
+ class ReadinessHarnessTests(unittest.TestCase):
++    def test_incomplete_root_coverage_does_not_pass_qualification(self):
++        self.assertEqual(
++            READINESS.suite_result_status("root", {"coverage_complete": False}),
++            "incomplete",
++        )
++        self.assertEqual(
++            READINESS.aggregate_result_status({"root": {"status": "incomplete"}}),
++            "incomplete",
++        )
++
++    def test_complete_root_coverage_passes(self):
++        self.assertEqual(
++            READINESS.suite_result_status("root", {"coverage_complete": True}),
++            "passed",
++        )
++        self.assertEqual(
++            READINESS.aggregate_result_status({"root": {"status": "passed"}}),
++            "passed",
++        )
++
++    def test_coverage_suite_can_pass_while_testing_incomplete_coverage(self):
++        # The coverage suite's purpose is to verify that incompleteness is
++        # surfaced correctly; unlike the root qualification suite, this is a
++        # successful test when its assertions pass.
++        self.assertEqual(
++            READINESS.suite_result_status("coverage", {"coverage_complete": False}),
++            "passed",
++        )
++
+     def test_wal_budget_stress_matches_guard_threshold_and_proves_pause_recovery(self):
+         source = WAL_STRESS.read_text()
+         self.assertIn('DUX_WAL_STRESS_TARGET_MIB", "256"', source)
+diff --git a/src/query.rs b/src/query.rs
+index f28a124..68507b0 100644
+--- a/src/query.rs
++++ b/src/query.rs
+@@ -935,9 +935,9 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
+                 w.events_resolved as f64 * 100.0 / w.events_seen as f64
+             };
+             let queue_state = if w.kernel_empty {
+-                "drained"
++                "kernel queue empty"
+             } else {
+-                "receiving"
++                "kernel queue has events"
+             };
+             let last_commit = if w.last_commit_at == 0 {
+                 "never".to_string()
+@@ -952,7 +952,7 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
+                 _ => String::new(),
+             };
+             out.push_str(&format!(
+-                "\npipeline:   {queue_state}; {} pending / {} cap; {} events ({resolve_pct:.1}% resolved); \
++                "\nevents:     {queue_state}; {} pending updates / {} cap; {} seen ({resolve_pct:.1}% resolved); \
+                  {} updates committed; {} userspace updates dropped; last commit {last_commit}; {}ms since caught up{}",
+                 w.pending,
+                 w.max_pending,
+@@ -994,18 +994,32 @@ pub fn status(store: &Store, db: &Path) -> Result<String> {
+             crate::util::ago(since)
+         ));
+     }
++    let retry_state = store.get_meta("failed_reconciliation_attempts")?;
++    let retry_deadline = store.get_meta("reconciliation_retry_after_unix")?;
+     let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
+-        crate::watch::reconciliation_retry_status(
+-            store.get_meta("failed_reconciliation_attempts")?.as_deref(),
+-        );
++        crate::watch::reconciliation_retry_status(retry_state.as_deref());
+     if automatic_reconciliation_paused == Some(true) {
+         if let Some(attempts) = failed_reconciliation_attempts {
++            let interval =
++                crate::watch::reconciliation_retry_backoff_seconds(retry_state.as_deref())
++                    .unwrap_or_default();
++            let remaining = crate::watch::reconciliation_retry_remaining_seconds(
++                retry_deadline.as_deref(),
++                crate::util::now_secs(),
++            );
++            let wait_state = match remaining {
++                Some(seconds) if seconds > 0 => format!("next retry in {seconds}s"),
++                Some(_) => "retry is due; waiting for host/queue gates".to_string(),
++                None => {
++                    "retry deadline unavailable; bounded automatic retry is scheduled".to_string()
++                }
++            };
+             out.push_str(&format!(
+-                "\nreconciliation: automatic scans PAUSED after {attempts} failed full scans; after resolving the cause, request one scan with `dux scan <root>`"
++                "\nreconciliation: automatic scans in backoff after {attempts} failed full scans ({interval}s interval); {wait_state}; use `dux scan <root>` to request sooner"
+             ));
+         } else {
+             out.push_str(
+-                "\nreconciliation: automatic scans PAUSED because retry metadata is corrupt; inspect the index before requesting a scan",
++                "\nreconciliation: retry metadata is corrupt; automatic recovery uses maximum backoff; inspect the cause and use `dux scan <root>` to request sooner",
+             );
+         }
+     }
+@@ -1038,9 +1052,16 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
+     let write_error = store.get_meta("flush_error")?;
+     let pause_reason = store.get_meta("pause_reason")?;
+     let dirty_reason = store.get_meta("dirty_reason")?;
++    let retry_state = store.get_meta("failed_reconciliation_attempts")?;
++    let retry_deadline = store.get_meta("reconciliation_retry_after_unix")?;
+     let (failed_reconciliation_attempts, automatic_reconciliation_paused) =
+-        crate::watch::reconciliation_retry_status(
+-            store.get_meta("failed_reconciliation_attempts")?.as_deref(),
++        crate::watch::reconciliation_retry_status(retry_state.as_deref());
++    let reconciliation_retry_backoff_seconds =
++        crate::watch::reconciliation_retry_backoff_seconds(retry_state.as_deref());
++    let reconciliation_retry_remaining_seconds =
++        crate::watch::reconciliation_retry_remaining_seconds(
++            retry_deadline.as_deref(),
++            crate::util::now_secs(),
+         );
+     let daemon_live = crate::util::daemon_live_for(db);
+     let watch = crate::util::read_watch_status(db);
+@@ -1100,6 +1121,11 @@ pub fn status_json(store: &Store, db: &Path) -> Result<serde_json::Value> {
+         "pause_reason": pause_reason,
+         "automatic_reconciliation_paused": automatic_reconciliation_paused,
+         "failed_reconciliation_attempts": failed_reconciliation_attempts,
++        "reconciliation_retry_backoff_seconds": reconciliation_retry_backoff_seconds,
++        "reconciliation_retry_remaining_seconds": reconciliation_retry_remaining_seconds,
++        "reconciliation_retry_due": automatic_reconciliation_paused == Some(true)
++            && failed_reconciliation_attempts.is_some()
++            && reconciliation_retry_remaining_seconds == Some(0),
+         "max_automatic_reconciliation_retries": crate::watch::MAX_AUTOMATIC_RECONCILIATION_RETRIES,
+         "reconciliation_retry_state_corrupt": automatic_reconciliation_paused == Some(true)
+             && failed_reconciliation_attempts.is_none(),
+@@ -1490,24 +1516,74 @@ mod tests {
+                 > 0
+         );
+ 
++        // An empty kernel queue only describes fanotify delivery. It does not
++        // mean the userspace pending set has been applied to SQLite.
++        crate::util::write_watch_status_with_overflows(
++            &db,
++            3,
++            true,
++            10,
++            10,
++            1,
++            crate::util::now_secs(),
++            0,
++            0,
++            500_000,
++            2,
++            false,
++        );
++        let human_status = status(&store, &db).unwrap();
++        assert!(human_status.contains("events:     kernel queue empty; 3 pending updates"));
++        assert!(!human_status.contains("pipeline:   drained"));
++
+         store
+             .set_meta("failed_reconciliation_attempts", "1")
+             .unwrap();
+         let retry_available = status_json(&store, &db).unwrap();
+         assert_eq!(retry_available["failed_reconciliation_attempts"], 1);
+         assert_eq!(retry_available["automatic_reconciliation_paused"], false);
++        assert_eq!(retry_available["reconciliation_retry_backoff_seconds"], 60);
+ 
+         store
+             .set_meta("failed_reconciliation_attempts", "2")
+             .unwrap();
++        store
++            .set_meta(
++                "reconciliation_retry_after_unix",
++                &(crate::util::now_secs() + 90).to_string(),
++            )
++            .unwrap();
+         let circuit_open = status_json(&store, &db).unwrap();
+         assert_eq!(circuit_open["failed_reconciliation_attempts"], 2);
+         assert_eq!(circuit_open["automatic_reconciliation_paused"], true);
+         assert_eq!(circuit_open["reconciliation_retry_state_corrupt"], false);
++        assert_eq!(circuit_open["reconciliation_retry_backoff_seconds"], 120);
++        assert!(
++            circuit_open["reconciliation_retry_remaining_seconds"] == 89
++                || circuit_open["reconciliation_retry_remaining_seconds"] == 90
++        );
++        assert_eq!(circuit_open["reconciliation_retry_due"], false);
+         let human_circuit_status = status(&store, &db).unwrap();
+-        assert!(human_circuit_status.contains("automatic scans PAUSED after 2 failed full scans"));
++        assert!(
++            human_circuit_status.contains("automatic scans in backoff after 2 failed full scans")
++        );
++        assert!(human_circuit_status.contains("120s interval"));
++        assert!(human_circuit_status.contains("next retry in"));
+         assert!(human_circuit_status.contains("dux scan <root>"));
+ 
++        store
++            .set_meta(
++                "reconciliation_retry_after_unix",
++                &(crate::util::now_secs() - 1).to_string(),
++            )
++            .unwrap();
++        let retry_due = status_json(&store, &db).unwrap();
++        assert_eq!(retry_due["reconciliation_retry_remaining_seconds"], 0);
++        assert_eq!(retry_due["reconciliation_retry_due"], true);
++        assert!(status(&store, &db)
++            .unwrap()
++            .contains("retry is due; waiting for host/queue gates"));
++
+         store
+             .set_meta("failed_reconciliation_attempts", "invalid")
+             .unwrap();
+@@ -1521,6 +1597,10 @@ mod tests {
+             corrupt_retry_state["reconciliation_retry_state_corrupt"],
+             true
+         );
++        assert_eq!(
++            corrupt_retry_state["reconciliation_retry_backoff_seconds"],
++            30_720
++        );
+         store
+             .conn
+             .execute(
+diff --git a/src/scan.rs b/src/scan.rs
+index a199f38..af3d883 100644
+--- a/src/scan.rs
++++ b/src/scan.rs
+@@ -858,6 +858,16 @@ fn scan_inner(
+                     )=1 THEN 1 ELSE 0 END
+              FROM scan_v6_nodes;
+ 
++             INSERT INTO paths
++               (path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle)
++             SELECT path_id,parent_path_id,name,dev_id,inode,birth_ns,kind,mount_id,prime,cycle
++             FROM scan.paths;
++
++             INSERT INTO dir_totals
++               (path_id,visible_bytes,visible_entries,unique_bytes,unique_inodes)
++             SELECT path_id,visible_bytes,visible_entries,unique_bytes,unique_inodes
++             FROM scan.dir_totals;
++
+              CREATE TEMP TABLE rollup (
+                dev INTEGER NOT NULL, inode INTEGER NOT NULL,
+                bytes INTEGER NOT NULL, items INTEGER NOT NULL,
+@@ -1945,6 +1955,21 @@ mod tests {
+         assert_eq!(alias_paths, 2);
+         assert_eq!(count_repeated_directory_identities(&conn).unwrap(), 2);
+         assert_eq!(count_cycle_paths(&conn).unwrap(), 1);
++        let file_incarnations: Vec<(i64, i64, i64)> = conn
++            .prepare(
++                "SELECT birth_ns,COUNT(*),SUM(prime) FROM paths
++                 WHERE dev_id=2 AND inode=42 GROUP BY birth_ns ORDER BY birth_ns",
++            )
++            .unwrap()
++            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
++            .unwrap()
++            .collect::<rusqlite::Result<_>>()
++            .unwrap();
++        assert_eq!(
++            file_incarnations,
++            vec![(4000, 2, 1), (5000, 1, 1)],
++            "same dev/inode with different birth times are distinct incarnations; hardlinks within one incarnation share a prime path",
++        );
+         assert_eq!(
+             conn.query_row("SELECT cycle FROM paths WHERE path_id=8", [], |row| row
+                 .get::<_, i64>(0))
+@@ -2399,13 +2424,95 @@ mod tests {
+         fs::File::create(&db).unwrap();
+ 
+         assert!(Store::needs_rebuild(&db).unwrap());
+-        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
++        let stats = rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
+         let store = Store::open_ro(&db).unwrap();
+         assert!(
+             crate::store::indexed_path(&store.conn, &root.join("payload"))
+                 .unwrap()
+                 .is_some()
+         );
++        let path_count: i64 = store
++            .conn
++            .query_row("SELECT COUNT(*) FROM paths", [], |row| row.get(0))
++            .unwrap();
++        assert_eq!(path_count as u64, stats.staged_path_instances);
++        let payload_path_id: i64 = store
++            .conn
++            .query_row(
++                "SELECT path_id FROM paths WHERE parent_path_id=1 AND name=?1",
++                [b"payload".as_slice()],
++                |row| row.get(0),
++            )
++            .unwrap();
++        assert_eq!(
++            crate::store::path_graph_resolve(&store.conn, payload_path_id).unwrap(),
++            Some(root.join("payload"))
++        );
++        let root_totals: (i64, i64) = store
++            .conn
++            .query_row(
++                "SELECT visible_bytes,visible_entries FROM dir_totals WHERE path_id=1",
++                [],
++                |row| Ok((row.get(0)?, row.get(1)?)),
++            )
++            .unwrap();
++        assert_eq!(root_totals.1 as u64, stats.staged_path_instances);
++        drop(store);
++        rm_db(&db);
++        let _ = fs::remove_dir_all(&root);
++    }
++
++    #[test]
++    fn v6_upgrade_persists_v7_path_graph_and_preserves_growth_history() {
++        let db = tmp("v6-to-v7-index");
++        let root = tmp("v6-to-v7-root");
++        rm_db(&db);
++        let _ = fs::remove_dir_all(&root);
++        fs::create_dir_all(&root).unwrap();
++        fs::write(root.join("payload"), b"v6 migration fixture").unwrap();
++        rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
++
++        // Model a real v6 database: the v7 path graph does not exist, but the
++        // compatibility inode/dirent and incarnation-aware growth tables do.
++        {
++            let conn = Connection::open(&db).unwrap();
++            conn.execute_batch(
++                "DROP INDEX paths_single_root;
++                 DROP INDEX paths_target;
++                 DROP INDEX paths_parent;
++                 DROP INDEX paths_prime;
++                 DROP INDEX paths_one_prime;
++                 DROP TABLE dir_totals;
++                 DROP TABLE paths;
++                 UPDATE meta SET value='6' WHERE key='schema_version';
++                 INSERT INTO growth(bucket,dev_id,inode,birth_ns,delta)
++                   VALUES(123,1,42,0,8192);",
++            )
++            .unwrap();
++        }
++        assert!(Store::needs_rebuild(&db).unwrap());
++
++        let stats = rebuild_atomic(&db, &root, &ScanOptions::default()).unwrap();
++        let store = Store::open_ro(&db).unwrap();
++        assert_eq!(store.schema_version, 7);
++        let path_count: i64 = store
++            .conn
++            .query_row("SELECT COUNT(*) FROM paths", [], |row| row.get(0))
++            .unwrap();
++        assert_eq!(path_count as u64, stats.staged_path_instances);
++        assert_eq!(
++            crate::store::path_graph_resolve(&store.conn, 1).unwrap(),
++            Some(root.clone())
++        );
++        let retained_history: i64 = store
++            .conn
++            .query_row(
++                "SELECT delta FROM growth WHERE bucket=123 AND dev_id=1 AND inode=42 AND birth_ns=0",
++                [],
++                |row| row.get(0),
++            )
++            .unwrap();
++        assert_eq!(retained_history, 8192);
+         drop(store);
+         rm_db(&db);
+         let _ = fs::remove_dir_all(&root);
+@@ -2565,6 +2672,7 @@ mod tests {
+         let db = tmp("cancel-db");
+         rm_db(&db);
+         let old = Store::create_fresh(&db).unwrap();
++        old.finalize_bulk().unwrap();
+         old.set_meta("cancellation_fixture", "old-index-preserved")
+             .unwrap();
+         drop(old);
+@@ -3061,14 +3169,14 @@ mod tests {
+                     .get::<_, i64>(0))
+                 .unwrap(),
+             0,
+-            "legacy ambiguous growth is hidden until v6 migration"
++            "legacy ambiguous growth is hidden until v7 migration"
+         );
+         drop(legacy);
+         rebuild_atomic(&db, &dir, &ScanOptions::default()).unwrap();
+         let upgraded = Store::open_ro(&db).unwrap();
+         assert_eq!(
+             upgraded.get_meta("schema_version").unwrap().as_deref(),
+-            Some("6")
++            Some("7")
+         );
+         let history: i64 = upgraded
+             .conn
+diff --git a/src/store.rs b/src/store.rs
+index 0780565..7a1582c 100644
+--- a/src/store.rs
++++ b/src/store.rs
+@@ -112,7 +112,7 @@ impl<'a> PathResolver<'a> {
+     }
+ }
+ 
+-pub const SCHEMA_VERSION: i64 = 6;
++pub const SCHEMA_VERSION: i64 = 7;
+ 
+ /// Width of a growth history bucket, in seconds (5 minutes).
+ pub const GROWTH_BUCKET_SECS: i64 = 300;
+@@ -149,8 +149,8 @@ pub fn indexed_inode_path(
+     anyhow::bail!("indexed ancestor chain exceeds depth limit")
+ }
+ 
+-/// Steady-state schema (v6). Inode metadata and path/directory-entry records are
+-/// SEPARATE: `inodes` holds one row per (dev,inode) with allocated blocks and (for
++/// Compatibility schema for v7. Inode metadata and path/directory-entry records
++/// are SEPARATE: `inodes` holds one row per (dev,inode) with allocated blocks and (for
+ /// directories) recursive totals; `dirents` holds one row per name/path and points
+ /// at an inode. A hardlinked file therefore has ONE `inodes` row and SEVERAL
+ /// `dirents` rows — every valid path is represented, and the inode's blocks are
+@@ -226,10 +226,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS names_fts USING fts5(
+ );
+ "#;
+ 
+-/// Path-instance graph tables for v7 staging. The live schema remains v6 until
+-/// scanning, event updates, queries, and atomic publication all use this model.
++/// Persisted path-instance graph tables for v7. Event updates and queries still
++/// use the v6 compatibility projection until their migration stages complete.
+ pub const PATH_GRAPH_TABLES_SQL: &str = r#"
+-CREATE TABLE paths (
++CREATE TABLE IF NOT EXISTS paths (
+     path_id INTEGER PRIMARY KEY,
+     parent_path_id INTEGER NOT NULL,
+     name BLOB NOT NULL,
+@@ -246,7 +246,7 @@ CREATE TABLE paths (
+     CHECK (cycle IN (0,1)),
+     UNIQUE(parent_path_id, name)
+ );
+-CREATE TABLE dir_totals (
++CREATE TABLE IF NOT EXISTS dir_totals (
+     path_id INTEGER PRIMARY KEY REFERENCES paths(path_id) ON DELETE CASCADE,
+     visible_bytes INTEGER NOT NULL,
+     visible_entries INTEGER NOT NULL,
+@@ -256,12 +256,12 @@ CREATE TABLE dir_totals (
+ "#;
+ 
+ pub const PATH_GRAPH_INDEXES_SQL: &str = r#"
+-CREATE UNIQUE INDEX paths_single_root ON paths(parent_path_id)
++CREATE UNIQUE INDEX IF NOT EXISTS paths_single_root ON paths(parent_path_id)
+     WHERE parent_path_id = -1;
+-CREATE INDEX paths_target ON paths(dev_id,inode,birth_ns);
+-CREATE INDEX paths_parent ON paths(parent_path_id);
+-CREATE INDEX paths_prime ON paths(dev_id,inode,birth_ns,prime);
+-CREATE UNIQUE INDEX paths_one_prime ON paths(dev_id,inode,birth_ns) WHERE prime=1;
++CREATE INDEX IF NOT EXISTS paths_target ON paths(dev_id,inode,birth_ns);
++CREATE INDEX IF NOT EXISTS paths_parent ON paths(parent_path_id);
++CREATE INDEX IF NOT EXISTS paths_prime ON paths(dev_id,inode,birth_ns,prime);
++CREATE UNIQUE INDEX IF NOT EXISTS paths_one_prime ON paths(dev_id,inode,birth_ns) WHERE prime=1;
+ "#;
+ 
+ /// Resolve one v7 path graph row to its exact byte-preserving absolute path.
+@@ -376,8 +376,8 @@ CREATE INDEX IF NOT EXISTS idx_growth_inode_bucket_delta ON growth(dev_id,inode,
+ 
+ pub struct Store {
+     pub conn: Connection,
+-    /// Schema version validated on open; v4/v5 snapshots remain readable while
+-    /// an atomic v6 baseline is built.
++    /// Schema version validated on open; v4-v6 snapshots remain readable while
++    /// an atomic v7 baseline is built.
+     pub schema_version: i64,
+ }
+ 
+@@ -578,15 +578,19 @@ impl Store {
+     }
+ 
+     /// Open a known compatible schema read-only. Legacy snapshots remain
+-    /// navigable while the daemon builds its v6 baseline; ambiguous growth is
++    /// navigable while the daemon builds its v7 baseline; ambiguous growth is
+     /// suppressed by the connection-local `growth_current` view.
+     pub fn open_ro(path: &Path) -> Result<Self> {
+-        Self::open_ro_versioned(path, true)
++        Self::open_ro_versioned(path, true, true)
+     }
+ 
+-    /// Known v4/v5 sources can be read while an atomic v6 baseline is built.
++    /// Known v4-v6 sources can be read while an atomic v7 baseline is built.
+     pub fn open_rebuild_source(path: &Path) -> Result<Self> {
+-        Self::open_ro_versioned(path, true)
++        // A damaged v7 path graph must be rebuildable from its still-readable
++        // compatibility projection and growth history. Normal readers reject
++        // that graph below; this narrowly scoped source reader deliberately does
++        // not use it.
++        Self::open_ro_versioned(path, true, false)
+     }
+ 
+     /// Whether a main index or one of its SQLite sidecars exists, including an
+@@ -620,7 +624,7 @@ impl Store {
+         Ok(false)
+     }
+ 
+-    fn open_ro_versioned(path: &Path, allow_v4: bool) -> Result<Self> {
++    fn open_ro_versioned(path: &Path, allow_v4: bool, require_v7_path_graph: bool) -> Result<Self> {
+         if !Self::has_index_artifacts(path)? {
+             // If the FIRST scan is building the index right now, say so (with live
+             // progress) rather than "no index" — the user just needs to wait.
+@@ -659,9 +663,15 @@ impl Store {
+                 SCHEMA_VERSION
+             );
+         }
++        if require_v7_path_graph && ver == SCHEMA_VERSION && !v7_path_graph_schema_complete(&conn)?
++        {
++            anyhow::bail!(
++                "index schema v{SCHEMA_VERSION} has an incomplete path graph; rebuild it with `dux scan <root>` before querying"
++            );
++        }
+         // Legacy growth rows have no incarnation key and cannot be safely
+         // assigned to the inode currently occupying the same number. Expose an
+-        // empty source for those snapshots until their atomic v6 rebuild. On v6,
++        // empty source for those snapshots until their atomic v7 rebuild. On v6+,
+         // only known birth times matching the current inode incarnation surface.
+         if ver >= 6 {
+             conn.execute_batch(
+@@ -717,8 +727,15 @@ impl Store {
+                 SCHEMA_VERSION
+             );
+         }
++        if has_inodes && ver == SCHEMA_VERSION && !v7_path_graph_schema_complete(&self.conn)? {
++            anyhow::bail!(
++                "index schema v{SCHEMA_VERSION} has an incomplete path graph; refusing to recreate missing tables over existing data. Rebuild it with `dux scan <root>`; the existing index was left untouched."
++            );
++        }
+         self.conn.execute_batch(SCHEMA_SQL)?;
++        self.conn.execute_batch(PATH_GRAPH_TABLES_SQL)?;
+         self.conn.execute_batch(INDEXES_SQL)?;
++        self.conn.execute_batch(PATH_GRAPH_INDEXES_SQL)?;
+         self.conn.execute_batch(FTS_TRIGGERS_SQL)?;
+         self.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
+         Ok(())
+@@ -753,7 +770,11 @@ impl Store {
+             }
+             return Ok(true);
+         }
+-        Ok(read_schema_version(&conn)? != SCHEMA_VERSION)
++        let version = read_schema_version(&conn)?;
++        if version != SCHEMA_VERSION {
++            return Ok(true);
++        }
++        Ok(!v7_path_graph_schema_complete(&conn)?)
+     }
+ 
+     /// Create a fresh, empty index with ONLY the table + FTS vtable (no triggers,
+@@ -765,6 +786,7 @@ impl Store {
+         let conn = Connection::open(path).with_context(|| format!("create {}", path.display()))?;
+         Self::pragmas(&conn)?;
+         conn.execute_batch(SCHEMA_SQL)?;
++        conn.execute_batch(PATH_GRAPH_TABLES_SQL)?;
+         let s = Store {
+             conn,
+             schema_version: SCHEMA_VERSION,
+@@ -781,6 +803,7 @@ impl Store {
+             .execute_batch("INSERT INTO names_fts(names_fts) VALUES('rebuild');")?;
+         self.conn.execute_batch(FTS_TRIGGERS_SQL)?;
+         self.conn.execute_batch(INDEXES_SQL)?;
++        self.conn.execute_batch(PATH_GRAPH_INDEXES_SQL)?;
+         Ok(())
+     }
+ 
+@@ -862,6 +885,64 @@ fn sqlite_table_exists(conn: &Connection, name: &str) -> Result<bool> {
+     .context("checking SQLite table metadata")
+ }
+ 
++/// V7 is only safe to open as a current index when its persisted path-instance
++/// tables and lookup indexes exist. `CREATE TABLE IF NOT EXISTS` must not turn a
++/// missing graph into an apparently valid empty one during a normal RW open.
++fn v7_path_graph_schema_complete(conn: &Connection) -> Result<bool> {
++    const REQUIRED: &[(&str, &[&str])] = &[
++        (
++            "paths",
++            &[
++                "path_id",
++                "parent_path_id",
++                "name",
++                "dev_id",
++                "inode",
++                "birth_ns",
++                "kind",
++                "mount_id",
++                "prime",
++                "cycle",
++            ],
++        ),
++        (
++            "dir_totals",
++            &[
++                "path_id",
++                "visible_bytes",
++                "visible_entries",
++                "unique_bytes",
++                "unique_inodes",
++            ],
++        ),
++    ];
++    for (table, columns) in REQUIRED {
++        let mut statement = conn.prepare_cached("SELECT name FROM pragma_table_info(?1)")?;
++        let existing: std::collections::HashSet<String> = statement
++            .query_map([table], |row| row.get(0))?
++            .collect::<rusqlite::Result<_>>()?;
++        if !columns.iter().all(|column| existing.contains(*column)) {
++            return Ok(false);
++        }
++    }
++    let required_indexes = [
++        "paths_single_root",
++        "paths_target",
++        "paths_parent",
++        "paths_prime",
++        "paths_one_prime",
++    ];
++    let present_indexes: i64 = conn.query_row(
++        "SELECT COUNT(*) FROM sqlite_master
++         WHERE type='index' AND name IN (
++           'paths_single_root','paths_target','paths_parent','paths_prime','paths_one_prime'
++         )",
++        [],
++        |row| row.get(0),
++    )?;
++    Ok(present_indexes == required_indexes.len() as i64)
++}
++
+ fn read_schema_version(conn: &Connection) -> Result<i64> {
+     let value: Option<String> = conn
+         .query_row(
+@@ -1129,6 +1210,13 @@ mod tests {
+         std::env::temp_dir().join(format!("dux-store-{tag}-{}", std::process::id()))
+     }
+ 
++    fn error_text<T>(result: std::result::Result<T, anyhow::Error>) -> String {
++        match result {
++            Ok(_) => panic!("expected operation to fail"),
++            Err(error) => error.to_string(),
++        }
++    }
++
+     #[test]
+     fn path_of_display_unresolved_inode_does_not_panic() {
+         let db = tmp("path-of");
+@@ -1167,6 +1255,87 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn v7_missing_path_graph_is_rebuildable_but_never_recreated_as_empty() {
++        let db = tmp("v7-missing-path-graph");
++        for suffix in ["", "-wal", "-shm", "-journal"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++        {
++            let store = Store::create_fresh(&db).unwrap();
++            store.finalize_bulk().unwrap();
++            store
++                .conn
++                .execute_batch("DROP TABLE dir_totals; DROP TABLE paths;")
++                .unwrap();
++        }
++
++        assert!(Store::needs_rebuild(&db).unwrap());
++        let read_error = error_text(Store::open_ro(&db));
++        assert!(read_error.contains("incomplete path graph"), "{read_error}");
++        let write_error = error_text(Store::open_rw(&db));
++        assert!(
++            write_error.contains("refusing to recreate missing tables"),
++            "{write_error}"
++        );
++        let conn = Connection::open(&db).unwrap();
++        assert!(!sqlite_table_exists(&conn, "paths").unwrap());
++        drop(conn);
++
++        // Atomic rebuild may still read the old v6-compatible projection and
++        // growth history while deliberately ignoring the damaged v7 graph.
++        let source = Store::open_rebuild_source(&db).unwrap();
++        assert_eq!(source.schema_version, SCHEMA_VERSION);
++        drop(source);
++        for suffix in ["", "-wal", "-shm", "-journal"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++    }
++
++    #[test]
++    fn v7_path_graph_missing_required_column_or_index_requires_rebuild() {
++        let db = tmp("v7-incomplete-path-graph");
++        for suffix in ["", "-wal", "-shm", "-journal"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++        {
++            let store = Store::create_fresh(&db).unwrap();
++            store
++                .conn
++                .execute_batch(
++                    "DROP TABLE dir_totals;
++                 DROP TABLE paths;
++                 CREATE TABLE paths(path_id INTEGER PRIMARY KEY,parent_path_id INTEGER,name BLOB);
++                 CREATE TABLE dir_totals(path_id INTEGER PRIMARY KEY,visible_bytes INTEGER,
++                   visible_entries INTEGER,unique_bytes INTEGER,unique_inodes INTEGER);",
++                )
++                .unwrap();
++        }
++        assert!(Store::needs_rebuild(&db).unwrap());
++        assert!(error_text(Store::open_rw(&db)).contains("incomplete path graph"));
++        for suffix in ["", "-wal", "-shm", "-journal"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++
++        let db = tmp("v7-missing-path-index");
++        for suffix in ["", "-wal", "-shm", "-journal"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++        {
++            let store = Store::create_fresh(&db).unwrap();
++            store.finalize_bulk().unwrap();
++            store
++                .conn
++                .execute_batch("DROP INDEX paths_target;")
++                .unwrap();
++        }
++        assert!(Store::needs_rebuild(&db).unwrap());
++        assert!(error_text(Store::open_rw(&db)).contains("incomplete path graph"));
++        for suffix in ["", "-wal", "-shm", "-journal"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++    }
++
+     #[test]
+     fn schema_metadata_errors_are_not_rewritten_as_version_zero() {
+         let db = tmp("malformed-schema-version");
+@@ -1295,7 +1464,9 @@ mod tests {
+         for suffix in ["", "-wal", "-shm"] {
+             let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+         }
+-        drop(Store::create_fresh(&db).unwrap());
++        let store = Store::create_fresh(&db).unwrap();
++        store.finalize_bulk().unwrap();
++        drop(store);
+ 
+         let store = Store::open_rw(&db).unwrap();
+         for name in [
+diff --git a/src/watch.rs b/src/watch.rs
+index c6de571..e8d3295 100644
+--- a/src/watch.rs
++++ b/src/watch.rs
+@@ -94,10 +94,9 @@ const RECONCILE_BACKLOG_GRACE: Duration = Duration::from_secs(30);
+ 
+ /// Bound full-root retries when another overflow occurs during reconciliation.
+ const RECONCILE_RETRY_BACKOFF: Duration = Duration::from_secs(60);
+-/// A full reconciliation that fails accounting, coverage, or installation is
+-/// evidence of a continuing defect or outage, not a reason to scan forever.
+-/// Permit one automatic retry, then leave the index dirty and require an
+-/// explicit `dux scan` after the cause is addressed.
++const RECONCILIATION_RETRY_AFTER_META: &str = "reconciliation_retry_after_unix";
++/// Open the automatic-reconciliation circuit after one retry fails. Automatic
++/// requests pass the open circuit after its bounded attempt-count cooldown.
+ pub(crate) const MAX_AUTOMATIC_RECONCILIATION_RETRIES: u32 = 1;
+ 
+ fn reconciliation_retry_delay(failed_attempts: u32) -> Duration {
+@@ -109,6 +108,61 @@ fn reconciliation_retry_delay(failed_attempts: u32) -> Duration {
+     )
+ }
+ 
++fn bounded_retry_remaining_seconds(
++    retry_after: Option<&str>,
++    now: i64,
++    maximum: Duration,
++) -> (u64, bool) {
++    let maximum = maximum.as_secs();
++    match retry_after {
++        // Older releases persisted an attempt count but no deadline. Give that
++        // legacy state the base cooldown; applying the exponential maximum on
++        // upgrade could leave an already-stale index waiting for hours.
++        None => (RECONCILE_RETRY_BACKOFF.as_secs().min(maximum), false),
++        Some(value) => match value.parse::<i64>() {
++            Ok(deadline) => {
++                let remaining = deadline.saturating_sub(now).max(0) as u64;
++                (remaining.min(maximum), false)
++            }
++            Err(_) => (maximum, true),
++        },
++    }
++}
++
++fn persist_reconciliation_retry_deadline(store: &Store, failed_attempts: u32) -> Result<Instant> {
++    let delay = reconciliation_retry_delay(failed_attempts);
++    let delay_seconds = i64::try_from(delay.as_secs()).unwrap_or(i64::MAX);
++    let deadline = crate::util::now_secs().saturating_add(delay_seconds);
++    store.set_meta(RECONCILIATION_RETRY_AFTER_META, &deadline.to_string())?;
++    Ok(Instant::now() + delay)
++}
++
++fn restore_reconciliation_retry_deadline(
++    store: &Store,
++    failed_attempts: u32,
++    persist: bool,
++) -> Result<Instant> {
++    let now = crate::util::now_secs();
++    let maximum = reconciliation_retry_delay(failed_attempts);
++    let stored = store.get_meta(RECONCILIATION_RETRY_AFTER_META)?;
++    let (remaining, corrupt) = bounded_retry_remaining_seconds(stored.as_deref(), now, maximum);
++    let remaining = Duration::from_secs(remaining);
++    let remaining_seconds = i64::try_from(remaining.as_secs()).unwrap_or(i64::MAX);
++    let deadline = now.saturating_add(remaining_seconds);
++    // Normalize missing, malformed, or implausibly distant deadlines. This
++    // preserves the remaining cooldown across restarts while keeping corrupt
++    // metadata from creating an unbounded recovery delay.
++    if persist {
++        store.set_meta(RECONCILIATION_RETRY_AFTER_META, &deadline.to_string())?;
++    }
++    if corrupt {
++        tracing::error!(
++            "persisted reconciliation retry deadline is corrupt; applying maximum bounded backoff"
++        );
++    }
++    Ok(Instant::now() + remaining)
++}
++
+ fn automatic_reconciliation_circuit_open(failed_attempts: u32) -> bool {
+     failed_attempts > MAX_AUTOMATIC_RECONCILIATION_RETRIES
+ }
+@@ -119,16 +173,16 @@ fn parse_reconciliation_attempts(value: Option<&str>) -> (u32, bool) {
+         Some(value) => match value.parse::<u32>() {
+             Ok(attempts) => (attempts, false),
+             // A corrupt retry counter must not silently reset the circuit and
+-            // admit another expensive full-root scan. Keep the circuit open
+-            // until an operator explicitly requests reconciliation.
+-            Err(_) => (MAX_AUTOMATIC_RECONCILIATION_RETRIES.saturating_add(1), true),
++            // admit another immediate full-root scan. Keep it on maximum
++            // backoff while still allowing eventual automatic recovery.
++            Err(_) => (u32::MAX, true),
+         },
+     }
+ }
+ 
+ /// Expose the persisted automatic-reconciliation circuit state to status
+ /// callers. Missing metadata means this index predates the circuit; malformed
+-/// metadata must report paused because daemon startup treats it fail-closed.
++/// metadata reports the circuit open while automatic recovery uses max backoff.
+ pub(crate) fn reconciliation_retry_status(value: Option<&str>) -> (Option<u32>, Option<bool>) {
+     match value {
+         None => (None, None),
+@@ -146,6 +200,25 @@ pub(crate) fn reconciliation_retry_status(value: Option<&str>) -> (Option<u32>,
+     }
+ }
+ 
++pub(crate) fn reconciliation_retry_backoff_seconds(value: Option<&str>) -> Option<u64> {
++    value.map(|value| {
++        let (attempts, _) = parse_reconciliation_attempts(Some(value));
++        reconciliation_retry_delay(attempts).as_secs()
++    })
++}
++
++pub(crate) fn reconciliation_retry_remaining_seconds(
++    retry_after: Option<&str>,
++    now: i64,
++) -> Option<u64> {
++    retry_after.and_then(|value| {
++        value
++            .parse::<i64>()
++            .ok()
++            .map(|deadline| deadline.saturating_sub(now).max(0) as u64)
++    })
++}
++
+ fn backlog_exceeded(pending: usize, deferred: usize, target_refreshes: usize) -> bool {
+     pending
+         .saturating_add(deferred)
+@@ -184,6 +257,10 @@ fn automatic_reconciliation_request_allowed(
+     request_pending && !retry_paused && !scan_active && !accounting_check_active
+ }
+ 
++fn reconciliation_retry_circuit_blocks_request(paused: bool, cooldown_elapsed: bool) -> bool {
++    paused && !cooldown_elapsed
++}
++
+ fn watcher_poll_timeout(
+     active_flush_interval: Duration,
+     elapsed_since_flush: Duration,
+@@ -329,6 +406,14 @@ const MOVE_PAIR_GRACE: Duration = Duration::from_millis(500);
+ /// burst can't stall forever; the heartbeat is refreshed mid-sleep so a long
+ /// throttle never makes the daemon look dead.
+ const MAX_THROTTLE_SLEEP_SECS: f64 = 30.0;
++/// Use FIONREAD as a queue-pressure signal so CPU duty-cycle repayment cannot
++/// starve fanotify draining. Linux kernels may report metadata bytes only while
++/// queued records can carry additional variable-size information; treat this
++/// as an approximate watermark, never as an exact queue-depth metric.
++const DEFAULT_FANOTIFY_MAX_QUEUED_EVENTS: u64 = 16_384;
++const FANOTIFY_QUEUE_HIGH_WATERMARK_PERCENT: u64 = 75;
++const FANOTIFY_QUEUE_LOW_WATERMARK_PERCENT: u64 = 50;
++const FANOTIFY_FIONREAD: libc::c_ulong = 0x541B;
+ 
+ /// Request lower scheduling priority: IDLE I/O class and a low CPU nice. These
+ /// are best-effort hints; they reduce priority but do not eliminate contention.
+@@ -511,20 +596,29 @@ fn start_accounting_check(
+ }
+ 
+ /// CPU governor: targets an average duty cycle of `target` (a fraction of ONE
+-/// core) for the measured event-loop thread. `throttle()` is called once per loop
+-/// iteration; if measured CPU exceeds the budget for elapsed wall time, it sleeps
+-/// up to the configured throttle interval to pay down the excess. Under a storm
+-/// the daemon therefore does a bounded slice of work, then sleeps — bursts buffer
+-/// in the kernel's fanotify queue (our "message queue"), and if that ever
+-/// overflows the existing FAN_Q_OVERFLOW path marks the index dirty for a later
+-/// reconcile. This limits the measured event-loop thread's average CPU use across
+-/// governor intervals. It does not cap other threads or bound instantaneous
+-/// bursts; a finite kernel queue can overflow and mark the index dirty. Idle
+-/// iterations (poll blocked, ~no CPU) never sleep here.
++/// core) for the measured event-loop thread while the fanotify queue is below its
++/// high watermark. `throttle()` yields only while queue pressure is low; when the
++/// queue is high it bypasses the sleep until backlog falls below a hysteretic low
++/// watermark. This can exceed the event-thread target during backlog recovery,
++/// but the service's process-wide CPUQuota remains the hard ceiling. The queue is
++/// still finite and may overflow if sustained event production exceeds drain
++/// capacity; overflow keeps the index uncertain and triggers reconciliation.
+ struct CpuGovernor {
+     target: f64,
+     cpu_ref: f64,
+     wall_ref: Instant,
++    queue_high_watermark_bytes: u64,
++    queue_low_watermark_bytes: u64,
++    queue_pressure_override: bool,
++    queue_pressure_started: Option<Instant>,
++    queue_pressure_total: Duration,
++    queue_pressure_episodes: u64,
++    last_queue_bytes: Option<u64>,
++    throttle_sleep_total: Duration,
++    telemetry_logged_at: Instant,
++    telemetry_events_seen: u64,
++    telemetry_events_resolved: u64,
++    telemetry_initialized: bool,
+ }
+ 
+ #[derive(Clone, Copy)]
+@@ -562,15 +656,29 @@ fn publish_throttled_watch_status(db: &Path, snapshot: ThrottleWatchSnapshot, el
+ }
+ 
+ impl CpuGovernor {
+-    fn new(target_frac: f64) -> Self {
++    fn new(target_frac: f64, max_queued_events: u64) -> Self {
++        let (queue_high_watermark_bytes, queue_low_watermark_bytes) =
++            fanotify_queue_watermarks(max_queued_events);
+         Self {
+             target: target_frac.clamp(0.01, 1.0),
+             cpu_ref: thread_cpu_secs(),
+             wall_ref: Instant::now(),
+-        }
+-    }
+-
+-    fn throttle(&mut self, db: &Path, watch: Option<ThrottleWatchSnapshot>) {
++            queue_high_watermark_bytes,
++            queue_low_watermark_bytes,
++            queue_pressure_override: false,
++            queue_pressure_started: None,
++            queue_pressure_total: Duration::ZERO,
++            queue_pressure_episodes: 0,
++            last_queue_bytes: None,
++            throttle_sleep_total: Duration::ZERO,
++            telemetry_logged_at: Instant::now(),
++            telemetry_events_seen: 0,
++            telemetry_events_resolved: 0,
++            telemetry_initialized: false,
++        }
++    }
++
++    fn throttle(&mut self, fanotify_fd: RawFd, db: &Path, watch: Option<ThrottleWatchSnapshot>) {
+         let dcpu = (thread_cpu_secs() - self.cpu_ref).max(0.0);
+         let dwall = self.wall_ref.elapsed().as_secs_f64();
+         // Sleep the shortfall in small chunks so a SIGTERM/SIGHUP is handled
+@@ -587,8 +695,15 @@ impl CpuGovernor {
+         // becomes eligible in the main loop before this governor is reached,
+         // so only shutdown needs to interrupt the duty-cycle sleep.
+         while remaining > 0.0 && !SHUTDOWN.load(Ordering::SeqCst) {
++            self.update_queue_pressure(fanotify_fd);
++            if self.queue_pressure_override {
++                self.log_pressure_metrics_if_due(watch);
++                break;
++            }
+             let chunk = remaining.min(0.05);
++            let sleep_started = Instant::now();
+             std::thread::sleep(Duration::from_secs_f64(chunk));
++            self.throttle_sleep_total += sleep_started.elapsed();
+             remaining -= chunk;
+             if hb.elapsed() >= Duration::from_secs(2) {
+                 crate::util::write_heartbeat(db);
+@@ -597,10 +712,162 @@ impl CpuGovernor {
+                 }
+                 hb = Instant::now();
+             }
++            self.log_pressure_metrics_if_due(watch);
+         }
+         self.cpu_ref = thread_cpu_secs();
+         self.wall_ref = Instant::now();
+     }
++
++    fn update_queue_pressure(&mut self, fanotify_fd: RawFd) {
++        let queued_bytes = read_fanotify_queue_bytes(fanotify_fd);
++        self.last_queue_bytes = queued_bytes;
++        let readable = if queued_bytes.is_none() {
++            fanotify_queue_readable(fanotify_fd)
++        } else {
++            None
++        };
++        let pressure = fanotify_queue_pressure_override(
++            self.queue_pressure_override,
++            queued_bytes,
++            readable,
++            self.queue_high_watermark_bytes,
++            self.queue_low_watermark_bytes,
++        );
++        self.set_queue_pressure(pressure, Instant::now());
++    }
++
++    fn set_queue_pressure(&mut self, pressure: bool, now: Instant) {
++        if pressure == self.queue_pressure_override {
++            return;
++        }
++        self.queue_pressure_override = pressure;
++        if pressure {
++            self.queue_pressure_started = Some(now);
++            self.queue_pressure_episodes = self.queue_pressure_episodes.saturating_add(1);
++            tracing::info!(
++                queue_bytes = self.last_queue_bytes,
++                queue_pressure_episodes = self.queue_pressure_episodes,
++                high_watermark_bytes = self.queue_high_watermark_bytes,
++                low_watermark_bytes = self.queue_low_watermark_bytes,
++                "temporarily bypassing event-thread CPU sleep to drain fanotify backlog"
++            );
++        } else if let Some(started) = self.queue_pressure_started.take() {
++            let elapsed = now.saturating_duration_since(started);
++            self.queue_pressure_total += elapsed;
++            tracing::info!(
++                queue_bytes = self.last_queue_bytes,
++                queue_pressure_episode_ms = elapsed.as_millis(),
++                queue_pressure_total_ms = self.queue_pressure_total.as_millis(),
++                queue_pressure_episodes = self.queue_pressure_episodes,
++                "fanotify backlog fell below the low watermark"
++            );
++        }
++    }
++
++    fn log_pressure_metrics_if_due(&mut self, watch: Option<ThrottleWatchSnapshot>) {
++        if !self.telemetry_initialized {
++            if let Some(snapshot) = watch {
++                self.telemetry_events_seen = snapshot.events_seen;
++                self.telemetry_events_resolved = snapshot.events_resolved;
++            }
++            self.telemetry_logged_at = Instant::now();
++            self.telemetry_initialized = true;
++            return;
++        }
++        if self.telemetry_logged_at.elapsed() < Duration::from_secs(10) {
++            return;
++        }
++        let now = Instant::now();
++        let elapsed = now.saturating_duration_since(self.telemetry_logged_at);
++        let queue_pressure_total = self.queue_pressure_total
++            + self
++                .queue_pressure_started
++                .map(|started| now.saturating_duration_since(started))
++                .unwrap_or_default();
++        let (events_seen_per_sec, events_resolved_per_sec) = watch
++            .map(|snapshot| {
++                let seconds = elapsed.as_secs_f64().max(f64::EPSILON);
++                (
++                    snapshot
++                        .events_seen
++                        .saturating_sub(self.telemetry_events_seen) as f64
++                        / seconds,
++                    snapshot
++                        .events_resolved
++                        .saturating_sub(self.telemetry_events_resolved) as f64
++                        / seconds,
++                )
++            })
++            .unwrap_or((0.0, 0.0));
++        if let Some(snapshot) = watch {
++            self.telemetry_events_seen = snapshot.events_seen;
++            self.telemetry_events_resolved = snapshot.events_resolved;
++        }
++        tracing::info!(
++            queue_bytes = self.last_queue_bytes,
++            queue_pressure_active = self.queue_pressure_override,
++            queue_pressure_episodes = self.queue_pressure_episodes,
++            queue_pressure_total_ms = queue_pressure_total.as_millis(),
++            throttle_sleep_total_ms = self.throttle_sleep_total.as_millis(),
++            events_seen_per_sec,
++            events_resolved_per_sec,
++            "fanotify watcher pressure metrics"
++        );
++        self.telemetry_logged_at = now;
++    }
++}
++
++fn fanotify_queue_watermarks(max_queued_events: u64) -> (u64, u64) {
++    let event_slots = max_queued_events.max(1);
++    let minimum_record_bytes = FAN_EVENT_METADATA_LEN as u64;
++    let capacity_lower_bound = event_slots.saturating_mul(minimum_record_bytes);
++    let high = capacity_lower_bound.saturating_mul(FANOTIFY_QUEUE_HIGH_WATERMARK_PERCENT) / 100;
++    let low = capacity_lower_bound.saturating_mul(FANOTIFY_QUEUE_LOW_WATERMARK_PERCENT) / 100;
++    (
++        high.max(minimum_record_bytes),
++        low.max(minimum_record_bytes).min(high),
++    )
++}
++
++fn fanotify_queue_pressure_override(
++    currently_overridden: bool,
++    queued_bytes: Option<u64>,
++    queue_readable: Option<bool>,
++    high_watermark_bytes: u64,
++    low_watermark_bytes: u64,
++) -> bool {
++    match queued_bytes {
++        Some(bytes) if currently_overridden => bytes > low_watermark_bytes,
++        Some(bytes) => bytes >= high_watermark_bytes,
++        None => queue_readable.unwrap_or(true),
++    }
++}
++
++fn read_fanotify_queue_bytes(fanotify_fd: RawFd) -> Option<u64> {
++    let mut bytes: libc::c_int = 0;
++    let result = unsafe { libc::ioctl(fanotify_fd, FANOTIFY_FIONREAD, &mut bytes) };
++    (result == 0 && bytes >= 0).then_some(bytes as u64)
++}
++
++fn fanotify_queue_readable(fanotify_fd: RawFd) -> Option<bool> {
++    let mut descriptor = libc::pollfd {
++        fd: fanotify_fd,
++        events: libc::POLLIN,
++        revents: 0,
++    };
++    let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
++    if result < 0 {
++        return None;
++    }
++    Some(result > 0 && descriptor.revents != 0)
++}
++
++fn fanotify_max_queued_events() -> u64 {
++    std::fs::read_to_string("/proc/sys/fs/fanotify/max_queued_events")
++        .ok()
++        .and_then(|value| value.trim().parse::<u64>().ok())
++        .filter(|value| *value > 0)
++        .unwrap_or(DEFAULT_FANOTIFY_MAX_QUEUED_EVENTS)
+ }
+ 
+ /// How long to sleep to hold a `target` duty cycle, given the CPU and wall time
+@@ -667,6 +934,7 @@ struct InfoHeader {
+ const _: () = assert!(std::mem::size_of::<InfoHeader>() == 4);
+ 
+ #[repr(C)]
++#[derive(Clone, Copy)]
+ struct FileHandle {
+     handle_bytes: u32,
+     handle_type: i32,
+@@ -678,11 +946,208 @@ struct ResolvedEventRecord {
+     entry: Option<(PathBuf, std::ffi::OsString)>,
+     target_inode: Option<(i64, i64)>,
+     stale_target_fsid: Option<(i32, i32)>,
++    stale_parent: Option<StaleParentEntry>,
+     info_type_mask: u64,
+     info_record_count: usize,
+     info_records_complete: bool,
+ }
+ 
++/// A DFID_NAME record whose directory handle returned `ESTALE`. The name is
++/// retained so an indexed parent can still be refreshed by path.
++#[derive(Clone, Debug, PartialEq, Eq)]
++struct StaleParentEntry {
++    fsid: (i32, i32),
++    handle_type: i32,
++    handle: Vec<u8>,
++    name: std::ffi::OsString,
++}
++
++/// Outcome for an otherwise unresolved event whose parent directory handle is
++/// stale on a filesystem whose handles are known to round-trip.
++#[derive(Debug, PartialEq, Eq)]
++enum StaleParentOutcome {
++    /// The parent inode is still indexed: refresh `parent/name` from final disk
++    /// state. This is correct whether the directory was deleted, replaced, or
++    /// the stale handle was spurious, because the batched writer stats the path.
++    RefreshIndexedPath(PathBuf),
++    /// The stale parent inode has no indexed path. A freed directory that was
++    /// never committed cannot own indexed descendants; any indexed ancestor's
++    /// removal is reported by its own resolvable parent event.
++    ParentNotIndexed,
++}
++
++// `f_type` is signed on glibc and unsigned on musl; compare normalized u64
++// bit patterns, as `scan::fs_magic` does.
++const EXT4_SUPER_MAGIC: u64 = 0xEF53;
++// generic_encode_ino32_fh() layouts used by ext4 for fanotify FIDs.
++const FILEID_INO32_GEN: i32 = 1;
++const FILEID_INO32_GEN_PARENT: i32 = 2;
++
++/// Inode number encoded in an ext4 `FILEID_INO32_GEN[_PARENT]` handle. Other
++/// handle types (and other filesystems, which may reuse type numbers with a
++/// different layout) are rejected by the caller's filesystem check.
++#[cfg(test)]
++fn ino32_handle_inode(handle_type: i32, handle: &[u8]) -> Option<u32> {
++    ino32_handle_identity(handle_type, handle).map(|(ino, _)| ino)
++}
++
++fn ino32_handle_identity(handle_type: i32, handle: &[u8]) -> Option<(u32, u32)> {
++    if handle_type != FILEID_INO32_GEN && handle_type != FILEID_INO32_GEN_PARENT {
++        return None;
++    }
++    let ino = u32::from_ne_bytes(handle.get(0..4)?.try_into().ok()?);
++    let generation = u32::from_ne_bytes(handle.get(4..8)?.try_into().ok()?);
++    (ino != 0).then_some((ino, generation))
++}
++
++fn ext4_path_handle_identity(path: &Path) -> Option<(u32, u32)> {
++    use std::os::unix::ffi::OsStrExt;
++
++    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
++    let mut handle = FileHandle {
++        handle_bytes: MAX_HANDLE_SZ as u32,
++        handle_type: 0,
++        f_handle: [0; MAX_HANDLE_SZ],
++    };
++    let mut mount_id: libc::c_int = 0;
++    let result = unsafe {
++        libc::name_to_handle_at(
++            libc::AT_FDCWD,
++            path.as_ptr(),
++            (&mut handle as *mut FileHandle).cast::<libc::file_handle>(),
++            &mut mount_id,
++            0,
++        )
++    };
++    if result != 0 || handle.handle_bytes as usize > MAX_HANDLE_SZ {
++        return None;
++    }
++    ino32_handle_identity(
++        handle.handle_type,
++        &handle.f_handle[..handle.handle_bytes as usize],
++    )
++}
++
++fn ext4_path_matches_handle(path: &Path, dev: i64, ino: i64, generation: u32) -> bool {
++    let Ok(metadata) = std::fs::symlink_metadata(path) else {
++        return false;
++    };
++    metadata.is_dir()
++        && crate::util::indexed_identity(&metadata).ok() == Some((dev, ino))
++        && ext4_path_handle_identity(path) == Some((ino as u32, generation))
++}
++
++/// Only complete records carrying exactly one DFID_NAME and at most one FID
++/// qualify; anything else keeps the conservative lost-coverage behavior.
++fn stale_parent_event_shape_ok(
++    record: &ResolvedEventRecord,
++    handle_capable_fsids: &HashSet<(i32, i32)>,
++) -> bool {
++    let dfid = 1u64 << FAN_EVENT_INFO_TYPE_DFID_NAME;
++    let fid = 1u64 << FAN_EVENT_INFO_TYPE_FID;
++    let shape_ok = (record.info_type_mask == dfid && record.info_record_count == 1)
++        || (record.info_type_mask == dfid | fid && record.info_record_count == 2);
++    let name_safe = record.stale_parent.as_ref().is_some_and(|parent| {
++        parent.name != ".." && !parent.name.as_os_str().as_bytes().contains(&b'/')
++    });
++    record.entry.is_none()
++        && record.target_inode.is_none()
++        && record.info_records_complete
++        && shape_ok
++        && name_safe
++        && record
++            .stale_parent
++            .as_ref()
++            .is_some_and(|parent| handle_capable_fsids.contains(&parent.fsid))
++}
++
++/// Indexed (dev, inode) of a stale ext4 parent handle, or `None` when the
++/// mount is not ext4 or the handle layout is not the ext4 ino32 encoding.
++fn stale_ext4_parent_identity(
++    parent: &StaleParentEntry,
++    fsfds: &HashMap<(i32, i32), RawFd>,
++) -> Option<(i64, i64, u32)> {
++    let (ino, generation) = ino32_handle_identity(parent.handle_type, &parent.handle)?;
++    let mount_fd = *fsfds.get(&parent.fsid)?;
++    let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
++    if unsafe { libc::fstatfs(mount_fd, fs.as_mut_ptr()) } != 0 {
++        return None;
++    }
++    if unsafe { fs.assume_init() }.f_type as u64 != EXT4_SUPER_MAGIC {
++        return None;
++    }
++    let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
++    if unsafe { libc::fstat(mount_fd, st.as_mut_ptr()) } != 0 {
++        return None;
++    }
++    let dev = i64::try_from(unsafe { st.assume_init() }.st_dev).ok()?;
++    Some((dev, i64::from(ino), generation))
++}
++
++fn classify_stale_parent_event(
++    record: &ResolvedEventRecord,
++    handle_capable_fsids: &HashSet<(i32, i32)>,
++    fsfds: &HashMap<(i32, i32), RawFd>,
++    conn: &rusqlite::Connection,
++    parent_paths: &mut IndexedParentPathCache,
++) -> Result<Option<StaleParentOutcome>> {
++    if !stale_parent_event_shape_ok(record, handle_capable_fsids) {
++        return Ok(None);
++    }
++    let Some(parent) = record.stale_parent.as_ref() else {
++        return Ok(None);
++    };
++    let Some((dev, ino, generation)) = stale_ext4_parent_identity(parent, fsfds) else {
++        return Ok(None);
++    };
++    Ok(Some(match parent_paths.resolve(conn, dev, ino)? {
++        Some(dir) => {
++            match std::fs::symlink_metadata(&dir) {
++                Ok(_) if !ext4_path_matches_handle(&dir, dev, ino, generation) => {
++                    // An inode number can be reused. If the path now names
++                    // another generation, do not apply an old event to it.
++                    return Ok(None);
++                }
++                Ok(_) => {}
++                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
++                    // The indexed parent path is gone, so reconciling its old
++                    // child path is safe and removes stale rows if still present.
++                }
++                Err(_) => return Ok(None),
++            }
++            let full = if parent.name.is_empty() || parent.name == "." {
++                dir
++            } else {
++                dir.join(&parent.name)
++            };
++            StaleParentOutcome::RefreshIndexedPath(full)
++        }
++        None if stale_parent_has_index_footprint(conn, dev, ino)? => {
++            // A missing parent path is not enough to prove this event is
++            // irrelevant: a prior partial update can leave the inode or its
++            // child edges in the index without a resolvable parent path. Keep
++            // coverage uncertain so a reconciliation can remove/repair those
++            // rows instead of silently blessing an orphaned subtree.
++            return Ok(None);
++        }
++        None => StaleParentOutcome::ParentNotIndexed,
++    }))
++}
++
++fn stale_parent_has_index_footprint(
++    conn: &rusqlite::Connection,
++    dev: i64,
++    ino: i64,
++) -> Result<bool> {
++    Ok(conn.query_row(
++        "SELECT EXISTS(SELECT 1 FROM inodes WHERE dev_id=?1 AND inode=?2)
++             OR EXISTS(SELECT 1 FROM dirents WHERE dev_id=?1 AND inode=?2)
++             OR EXISTS(SELECT 1 FROM dirents WHERE parent_dev=?1 AND parent_inode=?2)",
++        params![dev, ino],
++        |row| row.get(0),
++    )?)
++}
++
+ fn event_identity_unresolved(record: &ResolvedEventRecord) -> bool {
+     record.entry.is_none() && record.target_inode.is_none()
+ }
+@@ -1021,6 +1486,15 @@ pub fn run_daemon(
+ 
+     let mut initial_mounts = mount_topology(&root_canon, one_file_system)?;
+     let mut last_mount_check = Instant::now();
++    let max_queued_events = fanotify_max_queued_events();
++    let (queue_high_watermark_bytes, queue_low_watermark_bytes) =
++        fanotify_queue_watermarks(max_queued_events);
++    tracing::info!(
++        max_queued_events,
++        queue_high_watermark_bytes,
++        queue_low_watermark_bytes,
++        "fanotify queue-pressure CPU throttle thresholds"
++    );
+     let fan_guard = RawFdGuard(init_fanotify().context(
+         "fanotify_init (need CAP_SYS_ADMIN and Linux 5.17+ or a vendor backport of FAN_REPORT_TARGET_FID)",
+     )?);
+@@ -1154,16 +1628,29 @@ pub fn run_daemon(
+         parse_reconciliation_attempts(store.get_meta("failed_reconciliation_attempts")?.as_deref());
+     let mut reconciliation_retry_paused = retry_state_corrupt
+         || automatic_reconciliation_circuit_open(failed_reconciliation_attempts);
++    let persisted_retry_deadline = store.get_meta(RECONCILIATION_RETRY_AFTER_META)?;
++    if failed_reconciliation_attempts > 0
++        || retry_state_corrupt
++        || persisted_retry_deadline.is_some()
++    {
++        // Restore the remaining wall-clock deadline, bounded to this attempt's
++        // maximum delay, then use a monotonic timer for the live wait.
++        rescan_retry_after = Some(restore_reconciliation_retry_deadline(
++            &store,
++            failed_reconciliation_attempts,
++            !read_only_source,
++        )?);
++    }
+     if retry_state_corrupt {
+         mark_index_dirty(
+             &store,
+-            "reconciliation retry state is corrupt; automatic scans paused pending operator review",
++            "reconciliation retry state is corrupt; automatic recovery uses maximum cooldown",
+         )?;
+         tracing::error!(
+-            "persisted reconciliation retry count is malformed; automatic reconciliation paused until an operator requests a scan"
++            "persisted reconciliation retry count is malformed; automatic recovery remains enabled with maximum cooldown"
+         );
+         crate::util::systemd_notify(
+-            "READY=1\nSTATUS=Reconciliation retry state is corrupt; automatic scans paused",
++            "READY=1\nSTATUS=Retry state corrupt; automatic recovery uses maximum cooldown",
+         );
+     }
+     let mut last_alert: HashMap<(i64, i64), i64> = HashMap::new();
+@@ -1176,10 +1663,9 @@ pub fn run_daemon(
+         std::collections::HashSet::new();
+     let mut indexed_parent_paths = IndexedParentPathCache::default();
+     // CPU governor — limits the measured event-loop thread's average CPU duty
+-    // cycle. It is not a process-wide cap and does not prevent short bursts.
+-    // Excess load buffers in the finite kernel fanotify queue; if that overflows,
+-    // the index is marked dirty and requires reconciliation.
+-    let mut gov = CpuGovernor::new(max_cpu_frac);
++    // cycle while queue pressure is low. Backlog suspends duty-cycle repayment;
++    // the service cgroup remains the process-wide resource ceiling.
++    let mut gov = CpuGovernor::new(max_cpu_frac, max_queued_events);
+     // Paths CREATEd since the last flush — lets a same-window delete cancel a
+     // transient file before it does any index work (see parse_events). Cleared
+     // whenever `pending` is cleared, so it only ever spans one flush window.
+@@ -1232,10 +1718,13 @@ pub fn run_daemon(
+     } else if reconcile_on_start {
+         tracing::error!(
+             failed_attempts = failed_reconciliation_attempts,
+-            "automatic reconciliation remains paused after repeated failures; run `dux scan` after addressing the cause"
++            "automatic reconciliation is cooling down after repeated failures; it will retry automatically"
+         );
++        // Keep the request pending while the persisted attempt count is in its
++        // cooldown. The request gate below admits it when the deadline elapses.
++        RESCAN.store(true, Ordering::SeqCst);
+         crate::util::systemd_notify(
+-            "READY=1\nSTATUS=Accounting recovery paused after repeated failures; operator action required",
++            "READY=1\nSTATUS=Accounting recovery cooling down; automatic retry scheduled",
+         );
+     }
+     crate::util::write_watch_status(db, 0, true, 0, 0, 0, 0, 0, 0, MAX_PENDING, index_uncertain);
+@@ -1260,53 +1749,55 @@ pub fn run_daemon(
+                     );
+                     last_integrity = Instant::now() - Duration::from_secs(300);
+                 }
+-                Ok(Some(true)) => match kind {
+-                    AccountingCheckKind::Periodic => tracing::debug!(
+-                        elapsed_ms = elapsed.as_millis(),
+-                        "periodic accounting verification passed"
+-                    ),
+-                    AccountingCheckKind::Reconciliation { safe_to_clear } => {
+-                        pending_reconciliation_check = None;
+-                        failed_reconciliation_attempts = 0;
+-                        reconciliation_retry_paused = false;
+-                        rescan_retry_after = None;
+-                        store.conn.execute(
+-                            "DELETE FROM meta WHERE key='failed_reconciliation_attempts'",
+-                            [],
+-                        )?;
+-                        let clean = safe_to_clear
+-                            && !coverage_incomplete
+-                            && !resolve_warned
+-                            && !lost_events
+-                            && !RESCAN.load(Ordering::SeqCst);
+-                        if clean {
+-                            let reason = store.get_meta("dirty_reason")?;
+-                            if reason.as_deref() == Some(RECONCILIATION_ACCOUNTING_PENDING) {
+-                                store.conn.execute(
++                Ok(Some(true)) => {
++                    failed_reconciliation_attempts = 0;
++                    reconciliation_retry_paused = false;
++                    rescan_retry_after = None;
++                    store.conn.execute(
++                        "DELETE FROM meta WHERE key IN ('failed_reconciliation_attempts', 'reconciliation_retry_after_unix')",
++                        [],
++                    )?;
++                    match kind {
++                        AccountingCheckKind::Periodic => tracing::debug!(
++                            elapsed_ms = elapsed.as_millis(),
++                            "periodic accounting verification passed"
++                        ),
++                        AccountingCheckKind::Reconciliation { safe_to_clear } => {
++                            pending_reconciliation_check = None;
++                            let clean = safe_to_clear
++                                && !coverage_incomplete
++                                && !resolve_warned
++                                && !lost_events
++                                && !RESCAN.load(Ordering::SeqCst);
++                            if clean {
++                                let reason = store.get_meta("dirty_reason")?;
++                                if reason.as_deref() == Some(RECONCILIATION_ACCOUNTING_PENDING) {
++                                    store.conn.execute(
+                                     "DELETE FROM meta WHERE key IN ('dirty_since','dirty_reason')",
+                                     [],
+                                 )?;
+-                                index_uncertain = false;
+-                                tracing::info!(
+-                                    elapsed_ms = elapsed.as_millis(),
+-                                    "reconciliation accounting verification passed"
+-                                );
++                                    index_uncertain = false;
++                                    tracing::info!(
++                                        elapsed_ms = elapsed.as_millis(),
++                                        "reconciliation accounting verification passed"
++                                    );
++                                } else {
++                                    index_uncertain = true;
++                                    tracing::warn!(
++                                        elapsed_ms = elapsed.as_millis(),
++                                        "reconciliation verified but another dirty reason remains"
++                                    );
++                                }
+                             } else {
+                                 index_uncertain = true;
+                                 tracing::warn!(
+-                                    elapsed_ms = elapsed.as_millis(),
+-                                    "reconciliation verified but another dirty reason remains"
+-                                );
+-                            }
+-                        } else {
+-                            index_uncertain = true;
+-                            tracing::warn!(
+                                 elapsed_ms = elapsed.as_millis(),
+                                 "reconciliation accounting passed, but coverage or events remain uncertain"
+                             );
++                            }
+                         }
+                     }
+-                },
++                }
+                 Ok(Some(false)) => {
+                     pending_reconciliation_check = None;
+                     index_uncertain = true;
+@@ -1321,7 +1812,11 @@ pub fn run_daemon(
+                     }
+                     if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                         reconciliation_retry_paused = true;
+-                        rescan_retry_after = None;
++                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                            &store,
++                            failed_reconciliation_attempts,
++                        )?);
++                        RESCAN.store(true, Ordering::SeqCst);
+                         store.set_meta(
+                             "dirty_reason",
+                             &format!(
+@@ -1341,10 +1836,11 @@ pub fn run_daemon(
+                             "dirty_reason",
+                             "directory accounting invariant failed; one bounded automatic reconciliation retry remains",
+                         )?;
+-                        rescan_retry_after = Some(
+-                            Instant::now()
+-                                + reconciliation_retry_delay(failed_reconciliation_attempts),
+-                        );
++                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                            &store,
++                            failed_reconciliation_attempts,
++                        )?);
++                        RESCAN.store(true, Ordering::SeqCst);
+                         tracing::error!(
+                             elapsed_ms = elapsed.as_millis(),
+                             failed_attempts = failed_reconciliation_attempts,
+@@ -1370,7 +1866,11 @@ pub fn run_daemon(
+                     }
+                     if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                         reconciliation_retry_paused = true;
+-                        rescan_retry_after = None;
++                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                            &store,
++                            failed_reconciliation_attempts,
++                        )?);
++                        RESCAN.store(true, Ordering::SeqCst);
+                         store.set_meta(
+                             "dirty_reason",
+                             &format!(
+@@ -1391,10 +1891,10 @@ pub fn run_daemon(
+                             "dirty_reason",
+                             "directory accounting verification could not complete",
+                         )?;
+-                        rescan_retry_after = Some(
+-                            Instant::now()
+-                                + reconciliation_retry_delay(failed_reconciliation_attempts),
+-                        );
++                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                            &store,
++                            failed_reconciliation_attempts,
++                        )?);
+                         tracing::warn!(
+                             elapsed_ms = elapsed.as_millis(),
+                             error = %e,
+@@ -1636,7 +2136,7 @@ pub fn run_daemon(
+             reconciliation_retry_paused = false;
+             rescan_retry_after = None;
+             store.conn.execute(
+-                "DELETE FROM meta WHERE key='failed_reconciliation_attempts'",
++                "DELETE FROM meta WHERE key IN ('failed_reconciliation_attempts', 'reconciliation_retry_after_unix')",
+                 [],
+             )?;
+             RESCAN.store(true, Ordering::SeqCst);
+@@ -1644,12 +2144,6 @@ pub fn run_daemon(
+                 "operator requested a full reconciliation; resetting the accounting retry circuit"
+             );
+         }
+-        if reconciliation_retry_paused && RESCAN.swap(false, Ordering::SeqCst) {
+-            tracing::debug!(
+-                failed_attempts = failed_reconciliation_attempts,
+-                "automatic reconciliation request suppressed by accounting retry circuit"
+-            );
+-        }
+         if scan_job.as_ref().is_some_and(|job| job.is_finished()) {
+             let outcome = scan_job
+                 .take()
+@@ -1685,7 +2179,10 @@ pub fn run_daemon(
+                         failed_reconciliation_attempts.saturating_add(1);
+                     if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                         reconciliation_retry_paused = true;
+-                        rescan_retry_after = None;
++                        rescan_retry_after = Some(
++                            Instant::now()
++                                + reconciliation_retry_delay(failed_reconciliation_attempts),
++                        );
+                         tracing::error!(
+                             failed_attempts = failed_reconciliation_attempts,
+                             error = %error,
+@@ -1757,7 +2254,11 @@ pub fn run_daemon(
+                             if automatic_reconciliation_circuit_open(failed_reconciliation_attempts)
+                             {
+                                 reconciliation_retry_paused = true;
+-                                rescan_retry_after = None;
++                                rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                                    &store,
++                                    failed_reconciliation_attempts,
++                                )?);
++                                RESCAN.store(true, Ordering::SeqCst);
+                                 store.set_meta(
+                                 "dirty_reason",
+                                 &format!(
+@@ -1776,12 +2277,10 @@ pub fn run_daemon(
+                                 "READY=1\nSTATUS=Reconciliation incomplete repeatedly; automatic scans paused",
+                             );
+                             } else {
+-                                rescan_retry_after = Some(
+-                                    Instant::now()
+-                                        + reconciliation_retry_delay(
+-                                            failed_reconciliation_attempts,
+-                                        ),
+-                                );
++                                rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                                    &store,
++                                    failed_reconciliation_attempts,
++                                )?);
+                                 RESCAN.store(true, Ordering::SeqCst);
+                                 tracing::warn!(
+                                 failed_attempts = failed_reconciliation_attempts,
+@@ -1810,7 +2309,10 @@ pub fn run_daemon(
+                     Err(e) if cancelled_for_pressure => {
+                         index_uncertain = true;
+                         RESCAN.store(true, Ordering::SeqCst);
+-                        rescan_retry_after = Some(Instant::now() + RECONCILE_RETRY_BACKOFF);
++                        rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                            &store,
++                            failed_reconciliation_attempts,
++                        )?);
+                         store.set_meta("dirty_since", &now_secs().to_string())?;
+                         store.set_meta(
+                             "dirty_reason",
+@@ -1835,7 +2337,11 @@ pub fn run_daemon(
+                         )?;
+                         if automatic_reconciliation_circuit_open(failed_reconciliation_attempts) {
+                             reconciliation_retry_paused = true;
+-                            rescan_retry_after = None;
++                            rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                                &store,
++                                failed_reconciliation_attempts,
++                            )?);
++                            RESCAN.store(true, Ordering::SeqCst);
+                             store.set_meta(
+                             "dirty_reason",
+                             &format!(
+@@ -1855,10 +2361,10 @@ pub fn run_daemon(
+                                 "dirty_reason",
+                                 &format!("rescan failed; one bounded retry remains: {e:#}"),
+                             )?;
+-                            rescan_retry_after = Some(
+-                                Instant::now()
+-                                    + reconciliation_retry_delay(failed_reconciliation_attempts),
+-                            );
++                            rescan_retry_after = Some(persist_reconciliation_retry_deadline(
++                                &store,
++                                failed_reconciliation_attempts,
++                            )?);
+                             RESCAN.store(true, Ordering::SeqCst);
+                             tracing::error!(
+                                 failed_attempts = failed_reconciliation_attempts,
+@@ -1919,6 +2425,12 @@ pub fn run_daemon(
+             && target_refreshes.is_empty();
+         let retry_backoff_elapsed =
+             rescan_retry_after.is_none_or(|retry_after| Instant::now() >= retry_after);
++        // Recompute after reaping completed workers: a failed scan may have
++        // opened the circuit and scheduled its cooldown earlier in this loop.
++        let retry_circuit_blocks_request = reconciliation_retry_circuit_blocks_request(
++            reconciliation_retry_paused,
++            retry_backoff_elapsed,
++        );
+         let reconciliation_ready = reconciliation_scan_ready(
+             rescan_requested,
+             queues_drained,
+@@ -1926,7 +2438,7 @@ pub fn run_daemon(
+             retry_backoff_elapsed,
+         );
+         if automatic_reconciliation_request_allowed(
+-            reconciliation_retry_paused,
++            retry_circuit_blocks_request,
+             scan_job.is_some(),
+             accounting_check.is_some(),
+             rescan_requested,
+@@ -2596,13 +3108,13 @@ pub fn run_daemon(
+             }
+             last_flush = Instant::now();
+         }
+-        // CPU GOVERNOR: hold the event-loop thread's duty cycle under its target.
+-        // If this iteration burned more CPU than its share of wall time allows,
+-        // sleep the difference — the event backlog waits in the kernel fanotify
+-        // queue. This limits average event-loop CPU over the governor interval; it
+-        // is not a process-wide cap or a bound on short bursts. Idle iterations
+-        // don't sleep here.
++        // CPU governor: repay event-thread CPU debt while fanotify queue pressure
++        // is low. When the queue crosses its high watermark, bypass sleep until
++        // it falls below the low watermark. This is a soft event-thread target;
++        // the service CPUQuota remains the process-wide cap. Idle iterations do
++        // not sleep here.
+         gov.throttle(
++            fan,
+             db,
+             Some(ThrottleWatchSnapshot {
+                 pending: pending
+@@ -3085,7 +3597,7 @@ fn parse_events_with_budget(
+     pending: &mut HashMap<PathBuf, Op>,
+     born: &mut std::collections::HashSet<PathBuf>,
+     target_refreshes: &mut std::collections::HashSet<(i64, i64)>,
+-    _indexed_parent_paths: &mut IndexedParentPathCache,
++    indexed_parent_paths: &mut IndexedParentPathCache,
+     store: &mut Store,
+     coalesce: bool,
+     lost_events: &mut bool,
+@@ -3165,6 +3677,42 @@ fn parse_events_with_budget(
+                     mask = format_args!("{:#x}", meta.mask),
+                     "ignored stale target-only FAN_ATTRIB for deleted object"
+                 );
++            } else if let Some(outcome) = match classify_stale_parent_event(
++                &resolved_record,
++                handle_capable_fsids,
++                fsfds,
++                &store.conn,
++                indexed_parent_paths,
++            ) {
++                Ok(outcome) => outcome,
++                Err(error) => {
++                    // Fall through to the conservative lost-coverage branch.
++                    tracing::warn!(%error, "could not classify stale-parent fanotify event");
++                    None
++                }
++            } {
++                match outcome {
++                    StaleParentOutcome::RefreshIndexedPath(full) => {
++                        if full.starts_with(root) && !crate::util::is_index_artifact(&full, db) {
++                            // Decide from final disk state at flush, exactly like
++                            // a merged CREATE|DELETE: never trust the event mask
++                            // for a directory whose identity could not be opened.
++                            tracing::debug!(
++                                path = %full.display(),
++                                mask = format_args!("{:#x}", meta.mask),
++                                "stale parent handle mapped to indexed path; reconciling"
++                            );
++                            born.remove(&full);
++                            pending.insert(full, Op::Reconcile);
++                        }
++                    }
++                    StaleParentOutcome::ParentNotIndexed => {
++                        tracing::debug!(
++                            mask = format_args!("{:#x}", meta.mask),
++                            "ignored event under freed, never-indexed parent directory"
++                        );
++                    }
++                }
+             } else if event_identity_unresolved(&resolved_record) {
+                 // Aggregate all-unresolved detection cannot catch one lost
+                 // notification in an otherwise healthy stream. A single event
+@@ -3320,8 +3868,12 @@ fn resolve_record(
+     // open_by_handle_at plus fstat on every such event. Keep target identity
+     // resolution only for target-only metadata events and deletes, where the
+     // named path may already be gone and surviving hardlinks still need refresh.
+-    let entry =
+-        entry_payload.and_then(|payload| resolve_handle(payload, fsfds, handle_capable_fsids));
++    let (entry, stale_parent) =
++        match entry_payload.map(|payload| resolve_handle(payload, fsfds, handle_capable_fsids)) {
++            Some(EntryResolution::Resolved(dir, name)) => (Some((dir, name)), None),
++            Some(EntryResolution::Stale(parent)) => (None, Some(parent)),
++            Some(EntryResolution::Unresolved) | None => (None, None),
++        };
+     let (target_inode, stale_target_fsid) = if needs_target_identity(mask, entry.is_some()) {
+         match target_payload
+             .map(|payload| resolve_handle_identity(payload, fsfds, handle_capable_fsids))
+@@ -3337,6 +3889,7 @@ fn resolve_record(
+         entry,
+         target_inode,
+         stale_target_fsid,
++        stale_parent,
+         info_type_mask,
+         info_record_count,
+         info_records_complete,
+@@ -3446,18 +3999,30 @@ fn enqueue_inode_refreshes(
+     Ok(())
+ }
+ 
++enum EntryResolution {
++    Resolved(PathBuf, std::ffi::OsString),
++    Stale(StaleParentEntry),
++    Unresolved,
++}
++
+ fn resolve_handle(
+     payload: &[u8],
+     fsfds: &HashMap<(i32, i32), RawFd>,
+     handle_capable_fsids: &mut HashSet<(i32, i32)>,
+-) -> Option<(PathBuf, std::ffi::OsString)> {
++) -> EntryResolution {
+     if payload.len() < 16 {
+-        return None;
++        return EntryResolution::Unresolved;
+     }
+     // payload: [fsid:8][handle_bytes:4][handle_type:4][f_handle:hb][name...]
+-    let hb = u32::from_ne_bytes(payload[8..12].try_into().ok()?) as usize;
++    let Some(hb) = payload[8..12]
++        .try_into()
++        .ok()
++        .map(|bytes| u32::from_ne_bytes(bytes) as usize)
++    else {
++        return EntryResolution::Unresolved;
++    };
+     if hb == 0 || hb > MAX_HANDLE_SZ || payload.len() < 16 + hb {
+-        return None;
++        return EntryResolution::Unresolved;
+     }
+ 
+     // name follows the handle, NUL-terminated
+@@ -3472,12 +4037,32 @@ fn resolve_handle(
+     use std::os::unix::ffi::OsStrExt;
+     let name = std::ffi::OsStr::from_bytes(&name_bytes[..name_end]).to_owned();
+ 
+-    let dfd = open_handle(payload, fsfds, handle_capable_fsids).ok()?;
++    let dfd = match open_handle(payload, fsfds, handle_capable_fsids) {
++        Ok(fd) => fd,
++        Err(HandleOpenError::Stale) => {
++            let (Some(fsid), Ok(handle_type)) = (
++                payload_fsid(payload),
++                payload[12..16].try_into().map(i32::from_ne_bytes),
++            ) else {
++                return EntryResolution::Unresolved;
++            };
++            return EntryResolution::Stale(StaleParentEntry {
++                fsid,
++                handle_type,
++                handle: payload[16..16 + hb].to_vec(),
++                name,
++            });
++        }
++        Err(HandleOpenError::Other) => return EntryResolution::Unresolved,
++    };
+     let dir = std::fs::read_link(format!("/proc/self/fd/{dfd}")).ok();
+     unsafe {
+         libc::close(dfd);
+     }
+-    dir.map(|d| (d, name))
++    match dir {
++        Some(dir) => EntryResolution::Resolved(dir, name),
++        None => EntryResolution::Unresolved,
++    }
+ }
+ 
+ enum TargetHandleResolution {
+@@ -5962,6 +6547,7 @@ mod tests {
+         std::fs::create_dir_all(&dir).unwrap();
+         let id = id_of(&dir);
+         let store = Store::create_fresh(&db).unwrap();
++        store.finalize_bulk().unwrap();
+         drop(store);
+ 
+         assert!(
+@@ -6573,6 +7159,7 @@ mod tests {
+             entry: None,
+             target_inode: None,
+             stale_target_fsid: Some(fsid),
++            stale_parent: None,
+             info_type_mask: 1u64 << FAN_EVENT_INFO_TYPE_FID,
+             info_record_count: 1,
+             info_records_complete: true,
+@@ -6620,6 +7207,7 @@ mod tests {
+             entry: Some((PathBuf::from("/watched"), "file".into())),
+             target_inode: None,
+             stale_target_fsid: Some(fsid),
++            stale_parent: None,
+             info_type_mask: 1u64 << FAN_EVENT_INFO_TYPE_FID,
+             info_record_count: 1,
+             info_records_complete: true,
+@@ -6640,6 +7228,367 @@ mod tests {
+         assert_eq!(classify_handle_open_error(None), HandleOpenError::Other);
+     }
+ 
++    #[test]
++    fn stale_parent_shape_and_ino32_handle_decoding() {
++        let mut handle = 41u32.to_ne_bytes().to_vec();
++        handle.extend_from_slice(&7u32.to_ne_bytes());
++        assert_eq!(
++            ino32_handle_identity(FILEID_INO32_GEN, &handle),
++            Some((41, 7))
++        );
++        assert_eq!(ino32_handle_inode(FILEID_INO32_GEN, &handle), Some(41));
++        assert_eq!(
++            ino32_handle_inode(FILEID_INO32_GEN_PARENT, &handle),
++            Some(41)
++        );
++        assert_eq!(ino32_handle_inode(0x81, &handle), None, "ino64 layout");
++        assert_eq!(ino32_handle_inode(FILEID_INO32_GEN, &handle[..4]), None);
++        let zero = [0u8; 8];
++        assert_eq!(ino32_handle_inode(FILEID_INO32_GEN, &zero), None);
++
++        let fsid = (5, 9);
++        let dfid = 1u64 << FAN_EVENT_INFO_TYPE_DFID_NAME;
++        let fid = 1u64 << FAN_EVENT_INFO_TYPE_FID;
++        let record = ResolvedEventRecord {
++            entry: None,
++            target_inode: None,
++            stale_target_fsid: None,
++            stale_parent: Some(StaleParentEntry {
++                fsid,
++                handle_type: FILEID_INO32_GEN,
++                handle,
++                name: "child".into(),
++            }),
++            info_type_mask: dfid,
++            info_record_count: 1,
++            info_records_complete: true,
++        };
++        let known = HashSet::from([fsid]);
++        assert!(stale_parent_event_shape_ok(&record, &known));
++        let with_fid = ResolvedEventRecord {
++            info_type_mask: dfid | fid,
++            info_record_count: 2,
++            ..record.clone()
++        };
++        assert!(stale_parent_event_shape_ok(&with_fid, &known));
++        for rejected in [
++            ResolvedEventRecord {
++                info_type_mask: fid,
++                ..record.clone()
++            },
++            ResolvedEventRecord {
++                info_record_count: 2,
++                ..record.clone()
++            },
++            ResolvedEventRecord {
++                info_records_complete: false,
++                ..record.clone()
++            },
++            ResolvedEventRecord {
++                target_inode: Some((1, 2)),
++                ..record.clone()
++            },
++            ResolvedEventRecord {
++                entry: Some((PathBuf::from("/watched"), "child".into())),
++                ..record.clone()
++            },
++            ResolvedEventRecord {
++                stale_parent: None,
++                ..record.clone()
++            },
++        ] {
++            assert!(!stale_parent_event_shape_ok(&rejected, &known));
++        }
++        for unsafe_name in ["..", "nested/name"] {
++            let mut rejected = record.clone();
++            rejected.stale_parent.as_mut().unwrap().name = unsafe_name.into();
++            assert!(
++                !stale_parent_event_shape_ok(&rejected, &known),
++                "accepted unsafe stale-parent event name {unsafe_name:?}"
++            );
++        }
++        assert!(
++            !stale_parent_event_shape_ok(&record, &HashSet::new()),
++            "an unprobed filesystem must keep lost-coverage semantics"
++        );
++    }
++
++    #[test]
++    fn stale_parent_footprint_detects_unresolvable_inode_and_child_edges() {
++        let conn = rusqlite::Connection::open_in_memory().unwrap();
++        conn.execute_batch(
++            "CREATE TABLE inodes(dev_id INTEGER NOT NULL,inode INTEGER NOT NULL);
++             CREATE TABLE dirents(parent_dev INTEGER NOT NULL,parent_inode INTEGER NOT NULL,
++                                 dev_id INTEGER NOT NULL,inode INTEGER NOT NULL);",
++        )
++        .unwrap();
++        assert!(!stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
++
++        // An inode row without a resolvable dirent path is already an index
++        // footprint and must prevent the stale-event ignore optimization.
++        conn.execute("INSERT INTO inodes VALUES(8,81)", []).unwrap();
++        assert!(stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
++
++        conn.execute("DELETE FROM inodes WHERE dev_id=8 AND inode=81", [])
++            .unwrap();
++        conn.execute("INSERT INTO dirents VALUES(8,81,8,82)", [])
++            .unwrap();
++        assert!(stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
++
++        conn.execute("DELETE FROM dirents", []).unwrap();
++        conn.execute("INSERT INTO dirents VALUES(8,80,8,81)", [])
++            .unwrap();
++        assert!(stale_parent_has_index_footprint(&conn, 8, 81).unwrap());
++    }
++
++    #[test]
++    #[ignore = "requires handle-capable ext4; run explicitly in the ext4 qualification profile"]
++    fn stale_parent_events_reconcile_indexed_paths_and_ignore_freed_unindexed_dirs() {
++        use std::os::unix::ffi::OsStrExt;
++
++        let root = tmp("stale-parent-root");
++        let db = tmp("stale-parent-db");
++        cleanup(&root, &db);
++        std::fs::create_dir_all(root.join("gone")).unwrap();
++        std::fs::write(root.join("gone/x"), b"indexed").unwrap();
++        std::fs::create_dir_all(root.join("kept")).unwrap();
++        let mount_fd = RawFdGuard(open_dir(&root).unwrap());
++        let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
++        assert_eq!(unsafe { libc::fstatfs(mount_fd.0, fs.as_mut_ptr()) }, 0);
++        let ext4_supported = unsafe { fs.assume_init() }.f_type as u64 == EXT4_SUPER_MAGIC
++            && probe_handle_capability(&root, mount_fd.0);
++        if !ext4_supported {
++            drop(mount_fd);
++            cleanup(&root, &db);
++            panic!("explicit stale-parent integration test requires handle-capable ext4 TMPDIR");
++        }
++        scan_into(&root, &db);
++        // Created after the scan, so never committed to the index.
++        std::fs::create_dir_all(root.join("transient")).unwrap();
++
++        let handle_of = |path: &Path| -> FileHandle {
++            let c = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
++            let mut handle = FileHandle {
++                handle_bytes: MAX_HANDLE_SZ as u32,
++                handle_type: 0,
++                f_handle: [0; MAX_HANDLE_SZ],
++            };
++            let mut mount_id = 0;
++            let rc = unsafe {
++                libc::name_to_handle_at(
++                    libc::AT_FDCWD,
++                    c.as_ptr(),
++                    (&mut handle as *mut FileHandle).cast::<libc::file_handle>(),
++                    &mut mount_id,
++                    0,
++                )
++            };
++            assert_eq!(rc, 0, "name_to_handle_at {}", path.display());
++            handle
++        };
++        let fsid = statfs_fsid(&root).unwrap();
++        let dfid_name_event = |mask: u64, handle: &FileHandle, name: &[u8]| -> Vec<u8> {
++            let hb = handle.handle_bytes as usize;
++            let mut payload = Vec::new();
++            payload.extend_from_slice(&fsid.0.to_ne_bytes());
++            payload.extend_from_slice(&fsid.1.to_ne_bytes());
++            payload.extend_from_slice(&handle.handle_bytes.to_ne_bytes());
++            payload.extend_from_slice(&handle.handle_type.to_ne_bytes());
++            payload.extend_from_slice(&handle.f_handle[..hb]);
++            payload.extend_from_slice(name);
++            payload.push(0);
++            while (4 + payload.len()) % 4 != 0 {
++                payload.push(0);
++            }
++            let info = InfoHeader {
++                info_type: FAN_EVENT_INFO_TYPE_DFID_NAME,
++                pad: 0,
++                len: (4 + payload.len()) as u16,
++            };
++            let metadata = FanotifyEventMetadata {
++                event_len: (FAN_EVENT_METADATA_LEN + 4 + payload.len()) as u32,
++                vers: FANOTIFY_METADATA_VERSION,
++                reserved: 0,
++                metadata_len: FAN_EVENT_METADATA_LEN as u16,
++                mask,
++                fd: -1,
++                pid: 123,
++            };
++            let mut event = vec![0u8; FAN_EVENT_METADATA_LEN + 4];
++            unsafe {
++                std::ptr::copy_nonoverlapping(
++                    (&metadata as *const FanotifyEventMetadata).cast::<u8>(),
++                    event.as_mut_ptr(),
++                    FAN_EVENT_METADATA_LEN,
++                );
++                std::ptr::copy_nonoverlapping(
++                    (&info as *const InfoHeader).cast::<u8>(),
++                    event.as_mut_ptr().add(FAN_EVENT_METADATA_LEN),
++                    4,
++                );
++            }
++            event.extend_from_slice(&payload);
++            event
++        };
++        let gone = handle_of(&root.join("gone"));
++        let transient = handle_of(&root.join("transient"));
++        let kept = handle_of(&root.join("kept"));
++        let kept_identity = ino32_handle_identity(
++            kept.handle_type,
++            &kept.f_handle[..kept.handle_bytes as usize],
++        )
++        .expect("ext4 directory handle includes inode generation");
++        let kept_path = root.join("kept");
++        let kept_stat = std::fs::symlink_metadata(&kept_path).unwrap();
++        let (kept_dev, kept_ino) = crate::util::indexed_identity(&kept_stat).unwrap();
++        assert!(ext4_path_matches_handle(
++            &kept_path,
++            kept_dev,
++            kept_ino,
++            kept_identity.1
++        ));
++        assert!(!ext4_path_matches_handle(
++            &kept_path,
++            kept_dev,
++            kept_ino,
++            kept_identity.1.wrapping_add(1)
++        ));
++        std::fs::remove_dir_all(root.join("gone")).unwrap();
++        std::fs::remove_dir(root.join("transient")).unwrap();
++        if ino32_handle_inode(
++            gone.handle_type,
++            &gone.f_handle[..gone.handle_bytes as usize],
++        )
++        .is_none()
++        {
++            drop(mount_fd);
++            cleanup(&root, &db);
++            panic!("explicit stale-parent integration test requires ext4 ino32 handles");
++        }
++
++        let fsfds = HashMap::from([(fsid, mount_fd.0)]);
++        let mut store = Store::open_rw(&db).unwrap();
++        let run = |events: &[Vec<u8>], capable: HashSet<(i32, i32)>, store: &mut Store| {
++            let buf: Vec<u8> = events.concat();
++            let mut capable = capable;
++            let mut pending = HashMap::new();
++            let mut born = HashSet::new();
++            let mut targets = HashSet::new();
++            let mut parent_paths = IndexedParentPathCache::default();
++            let mut lost = false;
++            parse_events(
++                &buf,
++                &fsfds,
++                &mut capable,
++                &root,
++                &db,
++                &mut pending,
++                &mut born,
++                &mut targets,
++                &mut parent_paths,
++                store,
++                true,
++                &mut lost,
++            );
++            (pending, lost)
++        };
++
++        // Indexed parent whose handle went stale: reconcile its child by path.
++        let (pending, lost) = run(
++            &[dfid_name_event(FAN_DELETE, &gone, b"x")],
++            HashSet::from([fsid]),
++            &mut store,
++        );
++        assert!(
++            !lost,
++            "an indexed stale parent is repaired by path, not lost"
++        );
++        assert_eq!(pending.get(&root.join("gone/x")), Some(&Op::Reconcile));
++
++        // A stale handle whose inode number aliases a live path but whose
++        // generation differs must not reconcile against that replacement.
++        let mut reused = kept;
++        let stale_generation = kept_identity.1.wrapping_add(1);
++        reused.f_handle[4..8].copy_from_slice(&stale_generation.to_ne_bytes());
++        let (pending, lost) = run(
++            &[dfid_name_event(FAN_DELETE, &reused, b"x")],
++            HashSet::from([fsid]),
++            &mut store,
++        );
++        assert!(
++            lost,
++            "inode reuse with a different generation must stay uncertain"
++        );
++        assert!(
++            pending.is_empty(),
++            "unsafe replacement path was queued: {pending:?}"
++        );
++
++        // An orphaned parent identity is different from a never-indexed
++        // temporary directory. Removing its path edge while leaving its inode
++        // and child rows simulates a partial index update; the stale event must
++        // keep coverage uncertain instead of taking the ignore branch.
++        let (gone_dev, gone_ino): (i64, i64) = store
++            .conn
++            .query_row(
++                "SELECT dev_id,inode FROM dirents WHERE name=?1 LIMIT 1",
++                [&b"gone"[..]],
++                |row| Ok((row.get(0)?, row.get(1)?)),
++            )
++            .unwrap();
++        store
++            .conn
++            .execute(
++                "DELETE FROM dirents WHERE dev_id=?1 AND inode=?2",
++                params![gone_dev, gone_ino],
++            )
++            .unwrap();
++        let (_, lost) = run(
++            &[dfid_name_event(FAN_DELETE, &gone, b"x")],
++            HashSet::from([fsid]),
++            &mut store,
++        );
++        assert!(
++            lost,
++            "an unresolvable parent with indexed rows must not be ignored"
++        );
++
++        // Freed directory that was never indexed: nothing indexed can be under it.
++        let (pending, lost) = run(
++            &[
++                dfid_name_event(FAN_CREATE, &transient, b"y"),
++                dfid_name_event(FAN_DELETE, &transient, b"y"),
++                dfid_name_event(FAN_CREATE | FAN_ONDIR, &transient, b"z"),
++            ],
++            HashSet::from([fsid]),
++            &mut store,
++        );
++        assert!(!lost);
++        assert!(pending.is_empty(), "unexpected pending: {pending:?}");
++
++        // A live parent still resolves normally and is unaffected.
++        let (pending, lost) = run(
++            &[dfid_name_event(FAN_CREATE, &kept, b"new")],
++            HashSet::from([fsid]),
++            &mut store,
++        );
++        assert!(!lost);
++        assert!(pending.contains_key(&root.join("kept/new")));
++
++        // Without a prior successful handle round trip on this filesystem the
++        // stale parent proves nothing, so coverage must stay uncertain.
++        let (_, lost) = run(
++            &[dfid_name_event(FAN_DELETE, &gone, b"x")],
++            HashSet::new(),
++            &mut store,
++        );
++        assert!(lost, "an unprobed filesystem keeps lost-coverage semantics");
++
++        drop(store);
++        drop(mount_fd);
++        cleanup(&root, &db);
++    }
++
+     #[test]
+     fn startup_handle_probe_prequalifies_stale_attrib_filter() {
+         use std::os::unix::ffi::OsStrExt;
+@@ -7298,6 +8247,41 @@ mod tests {
+         assert_eq!(reconciliation_retry_delay(2), Duration::from_secs(120));
+         assert!(!automatic_reconciliation_circuit_open(1));
+         assert!(automatic_reconciliation_circuit_open(2));
++        assert!(!reconciliation_retry_circuit_blocks_request(false, false));
++        assert!(reconciliation_retry_circuit_blocks_request(true, false));
++        assert!(!reconciliation_retry_circuit_blocks_request(true, true));
++        assert_eq!(
++            bounded_retry_remaining_seconds(Some("150"), 100, Duration::from_secs(120)),
++            (50, false)
++        );
++        assert_eq!(
++            bounded_retry_remaining_seconds(Some("90"), 100, Duration::from_secs(120)),
++            (0, false)
++        );
++        assert_eq!(
++            bounded_retry_remaining_seconds(Some("1000"), 100, Duration::from_secs(120)),
++            (120, false)
++        );
++        assert_eq!(
++            bounded_retry_remaining_seconds(Some("corrupt"), 100, Duration::from_secs(120)),
++            (120, true)
++        );
++        assert_eq!(
++            bounded_retry_remaining_seconds(None, 100, Duration::from_secs(120)),
++            (60, false)
++        );
++        assert_eq!(
++            reconciliation_retry_remaining_seconds(Some("150"), 100),
++            Some(50)
++        );
++        assert_eq!(
++            reconciliation_retry_remaining_seconds(Some("90"), 100),
++            Some(0)
++        );
++        assert_eq!(
++            reconciliation_retry_remaining_seconds(Some("corrupt"), 100),
++            None
++        );
+     }
+ 
+     #[test]
+@@ -7307,10 +8291,84 @@ mod tests {
+         for corrupt in ["", "-1", "not-a-number", "4294967296"] {
+             let (attempts, corrupt_state) = parse_reconciliation_attempts(Some(corrupt));
+             assert!(corrupt_state, "accepted malformed retry count {corrupt:?}");
++            assert_eq!(attempts, u32::MAX);
+             assert!(automatic_reconciliation_circuit_open(attempts));
++            assert_eq!(
++                reconciliation_retry_delay(attempts),
++                Duration::from_secs(30_720)
++            );
+         }
+     }
+ 
++    #[test]
++    fn persisted_reconciliation_retry_deadline_survives_restart_bounded() {
++        let dir = tmp("retry-deadline");
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(&dir).unwrap();
++        let db = dir.join("index.db");
++        let store = Store::open_rw(&db).unwrap();
++        let now = crate::util::now_secs();
++
++        // Legacy indexes may have failed-attempt metadata without a persisted
++        // deadline. Upgrade with only the short base delay, not the 8.5-hour
++        // maximum delay implied by a large historic attempt count.
++        let restored = restore_reconciliation_retry_deadline(&store, 2, true).unwrap();
++        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
++        assert!((45..=60).contains(&remaining));
++        let normalized = store
++            .get_meta(RECONCILIATION_RETRY_AFTER_META)
++            .unwrap()
++            .unwrap()
++            .parse::<i64>()
++            .unwrap();
++        assert!(normalized <= crate::util::now_secs() + 60);
++
++        store
++            .set_meta(RECONCILIATION_RETRY_AFTER_META, &(now + 50).to_string())
++            .unwrap();
++        let restored = restore_reconciliation_retry_deadline(&store, 2, true).unwrap();
++        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
++        assert!((48..=50).contains(&remaining));
++
++        store
++            .set_meta(RECONCILIATION_RETRY_AFTER_META, &(now + 10_000).to_string())
++            .unwrap();
++        let restored = restore_reconciliation_retry_deadline(&store, 2, true).unwrap();
++        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
++        assert!((118..=120).contains(&remaining));
++        let normalized = store
++            .get_meta(RECONCILIATION_RETRY_AFTER_META)
++            .unwrap()
++            .unwrap()
++            .parse::<i64>()
++            .unwrap();
++        assert!(normalized <= crate::util::now_secs() + 120);
++
++        store
++            .set_meta(RECONCILIATION_RETRY_AFTER_META, "invalid")
++            .unwrap();
++        let restored = restore_reconciliation_retry_deadline(&store, u32::MAX, true).unwrap();
++        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
++        assert!((30_718..=30_720).contains(&remaining));
++
++        store
++            .set_meta(RECONCILIATION_RETRY_AFTER_META, "legacy-read-only")
++            .unwrap();
++        let restored = restore_reconciliation_retry_deadline(&store, 2, false).unwrap();
++        let remaining = restored.saturating_duration_since(Instant::now()).as_secs();
++        assert!((118..=120).contains(&remaining));
++        assert_eq!(
++            store
++                .get_meta(RECONCILIATION_RETRY_AFTER_META)
++                .unwrap()
++                .as_deref(),
++            Some("legacy-read-only")
++        );
++
++        drop(store);
++        cleanup(&dir, &db);
++    }
++
+     #[test]
+     fn reconciliation_pressure_deferral_is_reported_once_per_episode() {
+         use crate::guard::Pressure;
+@@ -7413,6 +8471,82 @@ mod tests {
+         assert!(throttle_sleep_secs(0.01, 0.0, 0.05) > throttle_sleep_secs(0.01, 0.0, 0.25));
+     }
+ 
++    #[test]
++    fn fanotify_queue_watermarks_scale_with_configured_capacity() {
++        let (high, low) = fanotify_queue_watermarks(100);
++        assert_eq!(high, 100 * FAN_EVENT_METADATA_LEN as u64 * 75 / 100);
++        assert_eq!(low, 100 * FAN_EVENT_METADATA_LEN as u64 / 2);
++        assert!(fanotify_queue_watermarks(0).0 >= FAN_EVENT_METADATA_LEN as u64);
++    }
++
++    #[test]
++    fn fanotify_queue_pressure_uses_hysteresis_and_fails_safe() {
++        let (high, low) = fanotify_queue_watermarks(100);
++        assert!(!fanotify_queue_pressure_override(
++            false,
++            Some(high - 1),
++            None,
++            high,
++            low
++        ));
++        assert!(fanotify_queue_pressure_override(
++            false,
++            Some(high),
++            None,
++            high,
++            low
++        ));
++        assert!(fanotify_queue_pressure_override(
++            true,
++            Some(low + 1),
++            None,
++            high,
++            low
++        ));
++        assert!(!fanotify_queue_pressure_override(
++            true,
++            Some(low),
++            None,
++            high,
++            low
++        ));
++        assert!(fanotify_queue_pressure_override(
++            false,
++            None,
++            Some(true),
++            high,
++            low
++        ));
++        assert!(!fanotify_queue_pressure_override(
++            false,
++            None,
++            Some(false),
++            high,
++            low
++        ));
++        // Unknown queue state must prefer draining over sleeping.
++        assert!(fanotify_queue_pressure_override(
++            false, None, None, high, low
++        ));
++    }
++
++    #[test]
++    fn governor_counts_queue_pressure_episodes_and_duration() {
++        let mut governor = CpuGovernor::new(0.25, 100);
++        let started = Instant::now();
++        governor.last_queue_bytes = Some(governor.queue_high_watermark_bytes);
++        governor.set_queue_pressure(true, started);
++        governor.set_queue_pressure(true, started + Duration::from_secs(1));
++        assert_eq!(governor.queue_pressure_episodes, 1);
++        assert_eq!(governor.queue_pressure_total, Duration::ZERO);
++
++        governor.last_queue_bytes = Some(governor.queue_low_watermark_bytes);
++        governor.set_queue_pressure(false, started + Duration::from_millis(2_500));
++        assert_eq!(governor.queue_pressure_episodes, 1);
++        assert_eq!(governor.queue_pressure_total, Duration::from_millis(2_500));
++        assert!(governor.queue_pressure_started.is_none());
++    }
++
+     #[test]
+     fn throttled_watch_status_stays_available_without_claiming_empty_kernel_queue() {
+         let db = std::env::temp_dir().join(format!(
+@@ -7461,7 +8595,10 @@ mod tests {
+             now_secs()
+         ));
+         let status_path = crate::util::runtime_path(&db, "watch.status");
+-        let mut governor = CpuGovernor::new(0.10);
++        let mut pipe = [0; 2];
++        assert_eq!(unsafe { libc::pipe(pipe.as_mut_ptr()) }, 0);
++        let (read_fd, write_fd) = (pipe[0], pipe[1]);
++        let mut governor = CpuGovernor::new(0.10, 100);
+         let cpu_start = thread_cpu_secs();
+         let wall_start = Instant::now();
+         // Inject synthetic duty-cycle debt instead of busy-spinning. Under a
+@@ -7471,6 +8608,7 @@ mod tests {
+         governor.cpu_ref = cpu_start - 0.5;
+         governor.wall_ref = wall_start;
+         governor.throttle(
++            read_fd,
+             &db,
+             Some(ThrottleWatchSnapshot {
+                 pending: 4,
+@@ -7490,6 +8628,10 @@ mod tests {
+         RESCAN.store(old_rescan, Ordering::SeqCst);
+         SHUTDOWN.store(old_shutdown, Ordering::SeqCst);
+         let _ = std::fs::remove_file(status_path);
++        unsafe {
++            libc::close(read_fd);
++            libc::close(write_fd);
++        }
+ 
+         assert!(elapsed >= 2.0, "governor skipped wait: {elapsed:.3}s");
+         assert!(

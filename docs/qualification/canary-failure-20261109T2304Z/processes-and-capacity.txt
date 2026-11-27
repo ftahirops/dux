@@ -1,0 +1,15 @@
+2026-11-09T23:05:19+00:00
+3964219 bash -c date -u -Is; pgrep -af 'canary-monitor|canary-24h-5m' || true; systemctl show dux.service -p ActiveState -p MainPID -p NRestarts -p MemoryCurrent -p MemoryPeak; df -B1 /; cat /sys/fs/cgroup/system.slice/dux.service/memory.events
+MainPID=2561224
+NRestarts=0
+MemoryCurrent=823099392
+MemoryPeak=2148483072
+ActiveState=reloading
+Filesystem                          1B-blocks        Used  Available Use% Mounted on
+/dev/mapper/ubuntu--vg-ubuntu--lv 99012476928 87162920960 7269806080  93% /
+low 0
+high 1340
+max 0
+oom 0
+oom_kill 0
+oom_group_kill 0

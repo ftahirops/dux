@@ -1,0 +1,27 @@
+{
+  "vm": "192.168.5.106",
+  "kernel": "6.8.0-147-generic",
+  "candidate_binary_sha256": "952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287",
+  "stress_script_sha256": "07ab43b3471e354e0447c86821171443f9cec6c3f2d974fb77af8be4f9c05eb5",
+  "readiness_harness_sha256": "7355818f18537f99bf5c9e418b7bdb81ac1e4fb2578a007fabe6e538ace38dc5",
+  "report_sha256": "04763821d5a1a1e24b12bf73ca2a2255de0289816d850db6f527473887e2471e",
+  "systemd_limits": {
+    "private_mounts": true,
+    "cpu_quota_percent": 25,
+    "memory_max_bytes": 2147483648,
+    "io_weight": 10,
+    "nice": 10,
+    "runtime_max_seconds": 3600,
+    "timeout_stop_seconds": 20,
+    "kill_mode": "control-group"
+  },
+  "systemd_result": {
+    "active": false,
+    "sub_state": "dead",
+    "exit_status": 0,
+    "restarts": 0,
+    "cpu_time": "48.551s",
+    "memory_peak": "916.2M",
+    "memory_swap_peak": "0B"
+  }
+}

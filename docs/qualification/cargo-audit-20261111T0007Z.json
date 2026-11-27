@@ -1,0 +1,16 @@
+{
+  "observed_at_utc": "2026-11-11T00:07:58Z",
+  "command": "cargo audit -D warnings",
+  "exit_code": 0,
+  "cargo_audit_version": "0.22.2",
+  "locked_dependencies_scanned": 229,
+  "known_advisories": 0,
+  "warnings": 0,
+  "advisory_database": {
+    "commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
+    "commit_time": "2026-11-10T13:45:03Z",
+    "advisories_loaded": 1446
+  },
+  "cargo_lock_sha256": "fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3",
+  "scope_limit": "Dependency advisory scan only; this does not replace source-code, runtime, or package review."
+}

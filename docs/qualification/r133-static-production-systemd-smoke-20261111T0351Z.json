@@ -1,0 +1,25 @@
+{
+  "observed_at_utc": "2026-11-11T03:51:49Z",
+  "binary_version": "dux 0.6.3 (8d23515713d4) [production]",
+  "binary_sha256": "0f0cd38d4c107dcf14f2aea9ef06adcee01d31edee5c83606790fd1b936326f2",
+  "systemd_version": "255 (255.4-1ubuntu8.18)",
+  "unit_type": "notify",
+  "fixture": "private /dev/shm tree and SQLite database",
+  "observed_status_during_daemon_start": {
+    "active_state": "active",
+    "sub_state": "running",
+    "status_text": "Observing filesystem; collecting concurrent change hints"
+  },
+  "resource_limits": {
+    "cpu_quota_percent": 5,
+    "memory_max_bytes": 268435456,
+    "runtime_max_seconds": 20
+  },
+  "stop_result": "success",
+  "fixture_removed": true,
+  "installed_daemon_or_database_modified": false,
+  "limits": [
+    "Transient unit had no package-installed capability/syscall sandbox.",
+    "This is a bounded startup/state smoke, not the reconciliation pause A/B or the 15-suite fault matrix."
+  ]
+}

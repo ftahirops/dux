@@ -1,0 +1,41 @@
+{
+  "host": "vps1",
+  "observed_at_utc": "2026-11-11T03:31:34Z",
+  "installed_version": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "installed_binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
+  "embedded_source_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+  "service": {
+    "active_state": "active",
+    "sub_state": "running",
+    "restarts": 4,
+    "started_at_utc": "2026-11-07T17:30:51Z"
+  },
+  "index": {
+    "daemon_live": true,
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "fanotify queue overflow",
+    "paused": false,
+    "scan_in_progress": false,
+    "last_scan_utc": "2026-11-05T12:49:22Z",
+    "last_scan_age_seconds": 484932,
+    "behind_seconds": 295243.181,
+    "pending_updates": 460,
+    "kernel_overflow_notifications": 933,
+    "userspace_updates_dropped": 2518862,
+    "events_seen": 293470565,
+    "events_resolved": 170324834,
+    "updates_committed": 47961821,
+    "index_nodes": 1287209,
+    "index_bytes": 122282164224,
+    "index_bytes_on_disk": 3832741888,
+    "wal_bytes": 134217728
+  },
+  "root_disk": {
+    "total_bytes": 198092431360,
+    "used_bytes": 125488852992,
+    "available_bytes": 63772229632,
+    "use_percent": 67
+  },
+  "evidence": "Captured from local systemctl show, dux --version, dux status --json, sha256sum /usr/bin/dux, and df -B1 /."
+}

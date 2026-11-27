@@ -1,0 +1,2 @@
+2026-11-10T12:32:05+00:00 vps2 systemd[1]: Started dux-handle-uid-1794313924.service - /bin/sh -c "grep -E \"^(Uid|Gid|CapEff|CapPrm|CapBnd|CapInh|CapAmb):\" /proc/self/status; exec \"\$1\" \"\$2\" /var/tmp" sh /var/tmp/dux-open-by-handle-probe-candidate /var/tmp/dux-handle-uid.iUHlyk/private/secret.dat.
+2026-11-10T12:32:05+00:00 vps2 systemd[1]: dux-handle-uid-1794313924.service: Deactivated successfully.

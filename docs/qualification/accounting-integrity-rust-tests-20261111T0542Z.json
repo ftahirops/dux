@@ -1,0 +1,49 @@
+{
+  "observed_at_utc": "2026-11-11T05:42:24Z",
+  "workspace_commit": "f89e5d4129085ad112371fed0714be722c8608ea",
+  "commands": [
+    {
+      "command": "CARGO_BUILD_JOBS=1 nice -n 19 cargo test --locked --all-features --bin dux totals_consistent -- --test-threads=1",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 343,
+      "test_elapsed_seconds": 0.72,
+      "test": "store::tests::totals_consistent_rejects_dangling_dirent_references",
+      "corruption_cases": [
+        "dangling child inode",
+        "missing parent inode",
+        "file inode used as a directory parent"
+      ]
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=1 nice -n 19 cargo test --locked --all-features --bin dux rollup -- --test-threads=1",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 335,
+      "test_elapsed_seconds": 14.81,
+      "test_names": [
+        "scan::tests::incomplete_projection_skips_discarded_rollups_and_keeps_published_total",
+        "watch::tests::affected_rollup_reconciliation_repairs_stale_leaf_allocation",
+        "watch::tests::cross_directory_overwrite_moves_allocation_between_exact_rollups",
+        "watch::tests::cross_directory_rename_repairs_reciprocal_stale_rollups",
+        "watch::tests::deleting_directory_with_understated_rollup_subtracts_subtree_truth",
+        "watch::tests::deleting_live_sized_stale_build_tree_restores_exact_rollups",
+        "watch::tests::nested_build_artifact_churn_keeps_every_rollup_consistent",
+        "watch::tests::nested_rollup_verification_detects_drift_when_root_matches_inode_aggregate",
+        "watch::tests::rollup_overflow_falls_back_to_exact_final_graph"
+      ]
+    }
+  ],
+  "aggregate": {
+    "distinct_tests_passed": 10,
+    "failed": 0,
+    "ignored": 0
+  },
+  "limitations": [
+    "Focused Rust unit tests only; they do not exercise the live 1.8M-path database's 85-second accounting duration.",
+    "They do not replace full Rust/Python suites, branch coverage, privileged fault tests, or the guarded VM matrix.",
+    "No production service or database was modified."
+  ]
+}

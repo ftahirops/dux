@@ -1,0 +1,10 @@
+commit=b07fc635b6ce88054f62a558b14544bd219f85c7
+build command: cargo build --release --offline
+   Compiling dux v0.6.3 (/home/dux)
+    Finished `release` profile [optimized] target(s) in 1m 45s
+binary version:
+dux 0.6.3 (b07fc635b6ce) [production] source-sha256=63a2eb8dd1f7bec03f01b32b476aadadda5ea75bbfb3e8bc5b56d7acb0605393
+top_level_help_exit=0
+metrics_help_exit=0
+binary_size_bytes=5354616
+f23b4a07066f8ccd1a6ce470a2038e811db0e9cda35ba8cc4a570e967f7458f6  /dev/shm/dux-metrics-fix-target/release/dux

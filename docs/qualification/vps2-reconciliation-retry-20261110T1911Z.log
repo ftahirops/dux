@@ -1,0 +1,15 @@
+2026-11-10T18:53:55.215487Z  INFO dux::watch: selected reconciliation implementation use_in_place_observation=true baseline_ready=true read_only_source=false
+2026-11-10T18:53:55.216335Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+2026-11-10T18:58:27.422811Z  WARN dux::scan: discarded staged paths that vanished during inode-reuse races vanished_reuse_paths=72
+2026-11-10T18:58:27.423002Z  WARN dux::scan: refreshed staged file identities after inode-reuse races revalidated_reuse_paths=2
+2026-11-10T18:58:35.676378Z ERROR dux::scan: inode numbers were observed with different birth-time incarnations during the scan conflicting_inode_incarnations=1
+2026-11-10T18:59:21.987866Z  WARN dux::watch: reconciliation incomplete; one bounded automatic retry scheduled failed_attempts=1 scan_errors=1 coverage_incomplete=false resolve_warned=false lost_events=true retry_after_seconds=59
+2026-11-10T18:59:21.987897Z  INFO dux::watch: rescan complete: 1762546 files, 216189 dirs, 1978735 staged path instances (0 directory alias paths), visible 84091613184 bytes/1978735 entries, unique 83904303104 bytes/1975253 inodes, 77.97 GiB (1 coverage issues); replaying 0 pending paths vanished_reuse_paths=72 revalidated_reuse_paths=2 unresolved_reuse_paths=0
+2026-11-10T18:59:24.642448Z  WARN dux::watch: deferring full reconciliation until host pressure meets recovery admission criteria pressure=Elevated reason="system pressure" load1=5.99 host_cpus=6.0 psi_cpu_avg10=18.42 psi_memory_avg10=0.35 psi_io_avg10=0.94 available_memory_bytes=3411345408 available_disk_bytes=9998184448
+2026-11-10T19:00:21.988332Z  INFO dux::watch: selected reconciliation implementation use_in_place_observation=true baseline_ready=true read_only_source=false
+2026-11-10T19:00:21.988357Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+2026-11-10T19:04:42.965931Z  WARN dux::scan: discarded staged paths that vanished during inode-reuse races vanished_reuse_paths=120
+2026-11-10T19:04:42.968063Z  WARN dux::scan: refreshed staged file identities after inode-reuse races revalidated_reuse_paths=2
+2026-11-10T19:09:09.036417Z  INFO dux::watch: filesystem or fanotify hints changed during scan-first observation; next full observation is scheduled
+2026-11-10T19:09:09.036445Z  INFO dux::watch: rescan complete: 1762787 files, 216320 dirs, 1979107 staged path instances (0 directory alias paths), visible 83965325312 bytes/1979107 entries, unique 83778015232 bytes/1975625 inodes, 78.02 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=120 revalidated_reuse_paths=2 unresolved_reuse_paths=0
+2026-11-10T19:10:24.176680Z  INFO dux::watch: reconciliation accounting verification passed elapsed_ms=75082

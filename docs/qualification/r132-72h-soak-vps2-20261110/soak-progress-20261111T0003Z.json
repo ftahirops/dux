@@ -1,0 +1,52 @@
+{
+  "observed_at_utc": "2026-11-11T00:04:00Z",
+  "progress_file_mtime_utc": "2026-11-11T00:03:34.655Z",
+  "progress_file_sha256": "f77827d5c6872e838efeb34e160990c679badc25717a182a05e3b0723ccd6b4b",
+  "progress_file_size_bytes": 181178,
+  "status": "running",
+  "started_at_utc": "2026-11-10T09:04:50Z",
+  "elapsed_seconds": 53924.2,
+  "duration_target_seconds": 259200,
+  "completion_fraction": 0.20804089506172838,
+  "operations": 1199498,
+  "sample_count": 1196,
+  "operations_per_second_average": 22.244,
+  "sampled_exact_convergence_ms": {
+    "count": 1196,
+    "mean": 3577.33,
+    "median": 3012.5,
+    "p95_nearest_rank": 8264,
+    "max": 17393
+  },
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "controlled_crashes": 1,
+  "mutation_bursts": 14,
+  "held_reader_wal_reclaim_passes": 2,
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "systemd": {
+    "unit": "dux-readiness-1304925.service",
+    "active_state": "active",
+    "main_pid": 1304929,
+    "restarts": 0
+  },
+  "vps2_storage": {
+    "root_total_bytes": 99012476928,
+    "root_used_bytes": 84432281600,
+    "root_available_bytes": 10000445440,
+    "root_use_percent": 90,
+    "dev_shm_total_bytes": 3221225472,
+    "dev_shm_used_bytes": 1034989568,
+    "dev_shm_available_bytes": 2186235904,
+    "var_tmp_human": "2.4G",
+    "var_log_journal_human": "4.1G",
+    "kvm_device_present": false
+  },
+  "limitations": [
+    "Only the soak harness is running; the other 15 fault suites remain unrun.",
+    "One of five planned controlled crash/recovery checkpoints is complete.",
+    "Duration target is 72 hours; completion is about 20.8%.",
+    "Terminal exactness, history continuity, and SQLite integrity have not passed."
+  ]
+}

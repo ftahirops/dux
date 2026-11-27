@@ -1,0 +1,29 @@
+{
+  "attempt_started_at_utc": "2026-11-10T10:48:00Z",
+  "guest": "rocky9-lifecycle-ephemeral",
+  "image": "Rocky Linux 9.8 GenericCloud Base",
+  "vm_unit": "dux-qualification-vm-rocky9-lifecycle-ephemeral",
+  "runtime_pressure_guard_unit": "dux-qualification-pressure-guard-rocky9-lifecycle-ephemeral-1794307680534733100.service",
+  "admission": "passed three-sample startup guard",
+  "boot": "SSH became available; cloud-init completed; /etc/os-release confirmed Rocky Linux 9.8",
+  "stopped_at_utc": "2026-11-10T10:50:15Z",
+  "stop_reason": [
+    "active host Go test binary pid=1336753",
+    "active host go test pid=1336682"
+  ],
+  "pressure_at_stop": {
+    "load1": 1.78,
+    "cpu_psi_some_avg10_percent": 5.24,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 6.02,
+    "io_psi_full_avg10_percent": 5.77,
+    "memory_psi_some_avg10_percent": 0.0,
+    "memory_psi_full_avg10_percent": 0.0
+  },
+  "package_copy": "first SCP connection was refused after the pressure guard stopped the guest; no package or key reached the guest",
+  "rpm_lifecycle_started": false,
+  "production_service_modified": false,
+  "test_key_fingerprint": "AB4EC68DC9C78006DE8FD7FCF53D4B6A67C0657A",
+  "signed_test_rpm_sha256": "13eae34e5b4da5574bfa0a7b56161f64d2f36878743f5f8051c36335257b15fa",
+  "test_key_and_signing_workspace_removed": true
+}

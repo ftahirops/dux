@@ -1,0 +1,13 @@
+Running as unit: dux-readiness-479703.service; invocation ID: d3e73975dbe640b6ae21fef3ea2c3151
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PASS crash 1/1: random timing
+Evidence: /root/dux-readiness-0fc18fc/release108-scanfirst-smoke.json
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 6.374s
+CPU time consumed: 1.516s
+Memory peak: 256.0K
+Memory swap peak: 0B

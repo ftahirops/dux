@@ -1,0 +1,23 @@
+Running as unit: dux-readiness-539670.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+Evidence: /root/dux-readiness-6dacdf5/release110-cpu2.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2646, in <module>
+    main()
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2601, in main
+    worker(args)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 2426, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-6dacdf5/scripts/dux-readiness.py", line 1006, in cpu_event_burst_test
+    assert cpu_fraction <= 0.12, (
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: daemon event CPU used 0.147 CPUs for --max-cpu 10 under a 25% cgroup quota
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 24.300s
+CPU time consumed: 5.992s
+Memory peak: 115.0M
+Memory swap peak: 0B

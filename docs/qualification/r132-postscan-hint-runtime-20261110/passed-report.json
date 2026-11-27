@@ -1,0 +1,67 @@
+{
+  "started_at": "2026-11-10T06:54:03Z",
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "seed": 20261022,
+  "binary": "/dev/shm/dux-postscan-hint-run/dux-production",
+  "binary_sha256": "cb298771272323ee08fb72e2c93c6792c6e51305b29a84d0953dbec3f9844b85",
+  "fault_binary_sha256": "8933ada608c51fad63ccb01d5132d14a73834e80b5bddd9a172f54564c19c294",
+  "crash_rounds": 30,
+  "filesystem": "ext4 disposable loop image",
+  "workspace_parent": "/dev/shm/dux-postscan-hint-workspace",
+  "workspace_device": 26,
+  "workspace_filesystem_type": "tmpfs",
+  "workspace_free_bytes_at_start": 2995048448,
+  "harness_sha256": "2fd5cb894b1e0667fbef00df2ac6aa9aeaa3f8f73e8b025be002e305eb81fb67",
+  "seed_files": 256,
+  "filesystem_image_mib": 768,
+  "qualification_worker_limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "not_qualified_by_this_run": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "capability",
+    "churn",
+    "coverage",
+    "cpu",
+    "crash",
+    "disk",
+    "mount",
+    "oom",
+    "overflow",
+    "pressure",
+    "retry",
+    "root",
+    "soak",
+    "startup",
+    "wal"
+  ],
+  "suites": {
+    "postscan-hint": {
+      "status": "passed",
+      "evidence": {
+        "paused_during_accounting_check": true,
+        "post_observation_event_preserved_dirty_status": true,
+        "stale_accounting_check_did_not_clear_dirty": true,
+        "next_full_observation_indexed_new_path": true,
+        "final_exact_index": true
+      },
+      "elapsed_seconds": 5.235
+    }
+  },
+  "status": "passed",
+  "current_suite": null,
+  "last_checkpoint_at": "2026-11-10T06:54:09Z",
+  "current_suite_started_at": "2026-11-10T06:54:04Z",
+  "log_tail": "\u001b[2m2026-11-10T06:54:04.782146Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected startup index source \u001b[3mrebuilt\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse \u001b[3mschema_version\u001b[0m\u001b[2m=\u001b[0m7 \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-10T06:54:04.782229Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m resuming a pre-existing index this daemon didn't build \u2014 marking dirty; automatic background reconciliation will start\n\u001b[2m2026-11-10T06:54:04.782821Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m fanotify queue-pressure CPU throttle thresholds \u001b[3mmax_queued_events\u001b[0m\u001b[2m=\u001b[0m16384 \u001b[3mqueue_high_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m294912 \u001b[3mqueue_low_watermark_bytes\u001b[0m\u001b[2m=\u001b[0m196608 \u001b[3mreconcile_first\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-10T06:54:04.783250Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m filesystem FID handle round-trip probe succeeded \u001b[3mpath\u001b[0m\u001b[2m=\u001b[0m/dev/shm/dux-postscan-hint-workspace/dux-readiness-5811jex2/filesystem/tree \u001b[3mfsid\u001b[0m\u001b[2m=\u001b[0m(327446832, 200982690)\n\u001b[2m2026-11-10T06:54:04.783258Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m dux daemon watching /dev/shm/dux-postscan-hint-workspace/dux-readiness-5811jex2/filesystem/tree (1 filesystem(s), FID mode: create/delete/rename/modify, flush 100ms)\n\u001b[2m2026-11-10T06:54:04.783267Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m experimental reconciliation-first mode: fanotify events are hints only; complete full-root observations merge in place after the initial baseline \u001b[3mscan_interval_seconds\u001b[0m\u001b[2m=\u001b[0m900 \u001b[3min_place_full_root_reconciliation\u001b[0m\u001b[2m=\u001b[0mtrue\n\u001b[2m2026-11-10T06:54:04.783569Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-10T06:54:04.783573Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting full reconciliation with resolved directory hints \u001b[3mpriority_directory_count\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-11-10T06:54:04.783576Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-postscan-hint-workspace/dux-readiness-5811jex2/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-10T06:54:05.085528Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 259 files, 9 dirs, 268 staged path instances (0 directory alias paths), visible 1093632 bytes/268 entries, unique 1089536 bytes/267 inodes, 1.04 MiB (0 coverage issues); replaying 0 pending paths \u001b[3mvanished_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mrevalidated_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3munresolved_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-11-10T06:54:05.085796Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting post-reconciliation accounting verification\n\u001b[2m2026-11-10T06:54:06.775271Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m operator requested a full reconciliation; resetting the accounting retry circuit\n\u001b[2m2026-11-10T06:54:07.166362Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m accounting verification cancelled to service watcher backlog \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m2080\n\u001b[2m2026-11-10T06:54:07.166538Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m selected reconciliation implementation \u001b[3muse_in_place_observation\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mbaseline_ready\u001b[0m\u001b[2m=\u001b[0mtrue \u001b[3mread_only_source\u001b[0m\u001b[2m=\u001b[0mfalse\n\u001b[2m2026-11-10T06:54:07.166544Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting full reconciliation with resolved directory hints \u001b[3mpriority_directory_count\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-11-10T06:54:07.166547Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background reconciliation of /dev/shm/dux-postscan-hint-workspace/dux-readiness-5811jex2/filesystem/tree; event ingestion remains active\n\u001b[2m2026-11-10T06:54:07.471450Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m rescan complete: 260 files, 9 dirs, 269 staged path instances (0 directory alias paths), visible 1097728 bytes/269 entries, unique 1093632 bytes/268 inodes, 1.04 MiB (0 coverage issues); replaying 0 pending paths \u001b[3mvanished_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3mrevalidated_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0 \u001b[3munresolved_reuse_paths\u001b[0m\u001b[2m=\u001b[0m0\n\u001b[2m2026-11-10T06:54:07.471803Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting post-reconciliation accounting verification\n\u001b[2m2026-11-10T06:54:09.504531Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m reconciliation accounting verification passed \u001b[3melapsed_ms\u001b[0m\u001b[2m=\u001b[0m2032\n\u001b[2m2026-11-10T06:54:09.610178Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m starting background directory-accounting verification\n\u001b[2m2026-11-10T06:54:09.754784Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m dux daemon: received SIGTERM/SIGINT \u2014 drained + flushed, exiting\n",
+  "finished_at": "2026-11-10T06:54:09Z"
+}

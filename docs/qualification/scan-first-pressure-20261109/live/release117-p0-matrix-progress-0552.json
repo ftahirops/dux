@@ -1,0 +1,127 @@
+{
+  "started_at": "2026-11-09T04:49:07Z",
+  "kernel": "6.8.0-147-generic",
+  "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+  "seed": 20261022,
+  "binary": "/var/tmp/dux-readiness-release117/bin/dux",
+  "binary_sha256": "f8637b4a06df6bb5fa644c07047e3d0f543bc7b340ec411239b4cf5c8fc425e7",
+  "fault_binary_sha256": "5c3ec58720aaf4cc5a90b1f6ec435e19ac2b9ae9aafa5d43e412e29bfea8c086",
+  "crash_rounds": 8,
+  "filesystem": "ext4 disposable loop image",
+  "workspace_parent": "/dev/shm/dux-readiness-release117/workspaces",
+  "workspace_device": 26,
+  "workspace_filesystem_type": "tmpfs",
+  "workspace_free_bytes_at_start": 3116785664,
+  "harness_sha256": "0f1233367cd58635e1c8a2ba252345d512a43f478378a068c4a56f72df8a5d80",
+  "seed_files": 100000,
+  "filesystem_image_mib": 2048,
+  "qualification_worker_limits": {
+    "cpu_quota_percent": 25,
+    "memory_max_mib": 4096
+  },
+  "not_qualified_by_this_run": [
+    "power loss or media corruption",
+    "filesystems other than ext4 and other kernels",
+    "multi-day reader-held WAL endurance",
+    "100k/1m/10m performance budgets",
+    "package upgrade/rollback and musl",
+    "dependency and default-privilege release review",
+    "72-hour dedicated soak and 24-hour canary"
+  ],
+  "suites_not_run": [
+    "soak"
+  ],
+  "suites": {
+    "crash": {
+      "status": "passed",
+      "evidence": [
+        {
+          "round": 1,
+          "boundary": "scan.in_place_started",
+          "recovery_seconds": 209.786
+        },
+        {
+          "round": 2,
+          "boundary": "random",
+          "recovery_seconds": 139.692
+        },
+        {
+          "round": 3,
+          "boundary": "scan.in_place_projection_ready",
+          "recovery_seconds": 116.414
+        },
+        {
+          "round": 4,
+          "boundary": "random",
+          "recovery_seconds": 95.785
+        },
+        {
+          "round": 5,
+          "boundary": "scan.in_place_before_commit",
+          "recovery_seconds": 108.39
+        },
+        {
+          "round": 6,
+          "boundary": "random",
+          "recovery_seconds": 158.404
+        },
+        {
+          "round": 7,
+          "boundary": "scan.in_place_after_commit",
+          "recovery_seconds": 115.603
+        },
+        {
+          "round": 8,
+          "boundary": "random",
+          "recovery_seconds": 157.094
+        }
+      ],
+      "elapsed_seconds": 1865.661
+    },
+    "overflow": {
+      "status": "passed",
+      "evidence": {
+        "queue_capacity": 16384,
+        "created": 18432,
+        "recovery_seconds": 99.055,
+        "scan_first_overflow_recovery": {
+          "mode": "scan_first",
+          "overflow_observed": true,
+          "overflow_notifications_before": 0,
+          "overflow_notifications_after": 1,
+          "reconciliation_started": true,
+          "scan_completed_after_reconciliation": true,
+          "accounting_verified_after_reconciliation": true,
+          "scan_generation_advanced": true,
+          "exact_filesystem_match": true,
+          "clean_status_after_recovery": false,
+          "passed": true
+        }
+      },
+      "elapsed_seconds": 416.498
+    },
+    "cpu": {
+      "status": "passed",
+      "evidence": {
+        "event_count": 12000,
+        "event_production_seconds": 5.898,
+        "catch_up_seconds": 0.141,
+        "catch_up_basis": "fanotify_hint_drain",
+        "event_window_seconds": 0.141,
+        "exact_validation_seconds": 113.471,
+        "event_cpu_fraction": 0.014,
+        "daemon_max_cpu_percent": 10,
+        "outer_cgroup_cpu_quota_percent": 25
+      },
+      "elapsed_seconds": 1112.908
+    },
+    "churn": {
+      "status": "running",
+      "evidence": {}
+    }
+  },
+  "status": "running",
+  "current_suite": "churn",
+  "last_checkpoint_at": "2026-11-09T05:47:14Z",
+  "current_suite_started_at": "2026-11-09T05:47:14Z"
+}

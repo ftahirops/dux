@@ -1,0 +1,77 @@
+{
+  "host": "192.168.5.106",
+  "observed_at_utc": "2026-11-11T04:44:10Z",
+  "installed_release": "dux 0.6.3 (8b02799b)",
+  "service": {
+    "active_state": "active",
+    "sub_state": "running",
+    "historical_restarts": 0
+  },
+  "scan_first": true,
+  "observation": {
+    "started_at_utc": "2026-11-11T04:36:13Z",
+    "completed_at_utc": "2026-11-11T04:43:09Z",
+    "duration_seconds": 416,
+    "files": 1819084,
+    "directories": 219186,
+    "path_instances": 2038270,
+    "directory_alias_paths": 0,
+    "visible_bytes": 83030245376,
+    "unique_bytes": 82897534976,
+    "unique_inodes": 2034876,
+    "coverage_issues": 0,
+    "vanished_reuse_paths": 72,
+    "revalidated_reuse_paths": 0,
+    "unresolved_reuse_paths": 0
+  },
+  "status_at_2026-11-11T04:44:10Z": {
+    "daemon_live": true,
+    "scan_in_progress": false,
+    "dirty": true,
+    "dirty_reason": "reconciliation accounting verification pending",
+    "last_scan_age_seconds": 61,
+    "failed_reconciliation_attempts": 1,
+    "pending_updates": 0,
+    "events_dropped": 0,
+    "kernel_overflow_notifications": 0,
+    "events_seen": 2194460262,
+    "index_nodes": 2034876,
+    "index_bytes": 82897534976,
+    "index_bytes_on_disk": 879308800,
+    "wal_bytes": 60110832,
+    "behind_seconds": 24407.224,
+    "behind_seconds_applicable": false
+  },
+  "accounting_verification": {
+    "result": "passed",
+    "completed_at_utc": "2026-11-11T04:45:06Z",
+    "elapsed_ms": 116819
+  },
+  "status_at_2026-11-11T04:45:12Z": {
+    "active_state": "active",
+    "sub_state": "running",
+    "historical_restarts": 0,
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "last_scan_age_seconds": 123,
+    "failed_reconciliation_attempts": null,
+    "pending_updates": 0,
+    "events_dropped": 0,
+    "kernel_overflow_notifications": 0,
+    "events_seen": 2195111163,
+    "behind_seconds": 24469.334,
+    "behind_seconds_applicable": false
+  },
+  "disk_at_2026-11-11T04:42:47Z": {
+    "filesystem_bytes": 99012476928,
+    "used_bytes": 84880289792,
+    "available_bytes": 9552437248,
+    "use_percent": 90
+  },
+  "analysis": [
+    "The retry scan completed after about 6m56 with zero reported coverage issues; this is stronger than the prior attempt that ended with one inode-incarnation coverage issue.",
+    "The daemon logged that filesystem or fanotify hints changed during this scan, so it correctly kept the index dirty and scheduled another full observation. Post-reconciliation accounting completed successfully at 04:45:06 after 116.819 seconds; the 04:45:12 status remained dirty only because it was awaiting the next full observation.",
+    "The host reported no fanotify overflow or dropped updates during this sample. This single cycle does not establish a zero-overflow guarantee or exact path-level freshness.",
+    "Because this is scan-first mode, caught_up=false and behind_seconds are not applicable as backlog/freshness measures; last_scan_age_seconds is the relevant freshness value."
+  ]
+}

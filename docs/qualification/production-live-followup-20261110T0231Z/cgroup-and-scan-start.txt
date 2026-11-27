@@ -1,0 +1,15 @@
+2026-11-10T02:37:53Z
+CGROUP=/system.slice/dux.service
+usage_usec 20981963393
+user_usec 9819877584
+system_usec 11162085808
+core_sched.force_idle_usec 0
+nr_periods 400694
+nr_throttled 133871
+throttled_usec 14190189458
+nr_bursts 0
+burst_usec 0
+8:0 rbytes=127402254336 wbytes=92330827776 rios=21336637 wios=1772884 dbytes=0 dios=0
+252:0 rbytes=127399358464 wbytes=92330827776 rios=21336089 wios=1738755 dbytes=0 dios=0
+{'scan_in_progress': False, 'last_scan_age_seconds': 824, 'index_bytes_on_disk': 763412480, 'wal_bytes': 134217728, 'events_dropped': 0, 'kernel_overflow_notifications': 0} {'files_seen': None, 'directories_seen': None}
+/dev/mapper/ubuntu--vg-ubuntu--lv   93G   83G  5.7G  94% /

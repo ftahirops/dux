@@ -1,0 +1,59 @@
+{
+  "observed_at_utc": "2026-11-07T07:01:22.327849+00:00",
+  "status": {
+    "behind_seconds": 16354.637,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since_timestamp_seconds": 1794033816,
+    "events_dropped": 0,
+    "events_resolved": 8283401,
+    "events_seen": 12628457,
+    "index_bytes": 116336869376,
+    "index_bytes_on_disk": 2096934912,
+    "index_nodes": 1377776,
+    "kernel_overflow_notifications": 16,
+    "last_event_commit_timestamp_seconds": 1794034880,
+    "last_scan_age_seconds": 151920,
+    "last_scan_timestamp_seconds": 1793882962,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 33,
+    "root": "/",
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794018528,
+    "updates_committed": 2435514,
+    "userspace_updates_dropped": 0,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794034882,
+    "write_error": null
+  },
+  "meta": {
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since": "1794033816",
+    "failed_reconciliation_attempts": "2",
+    "schema_version": "6"
+  },
+  "pressure": {
+    "io": "some avg10=4.19 avg60=2.62 avg300=3.66 total=37998973123\nfull avg10=4.18 avg60=2.50 avg300=3.32 total=26013281540",
+    "cpu": "some avg10=0.23 avg60=2.09 avg300=10.17 total=170745663224\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+    "memory": "some avg10=0.00 avg60=0.00 avg300=0.03 total=25288779246\nfull avg10=0.00 avg60=0.00 avg300=0.03 total=22054431374"
+  },
+  "root_disk": {
+    "size_bytes": 198092431360,
+    "used_bytes": 118262898688,
+    "available_bytes": 70998183936,
+    "used_percent": "63%"
+  },
+  "unit": {
+    "MainPID": "988284",
+    "NRestarts": "1",
+    "ActiveState": "active"
+  }
+}

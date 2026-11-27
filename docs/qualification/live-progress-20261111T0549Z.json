@@ -1,0 +1,83 @@
+{
+  "observed_at_utc": "2026-11-11T05:49:33Z",
+  "observation_window_utc": {
+    "start": "2026-11-11T05:48:20Z",
+    "end": "2026-11-11T05:49:33Z"
+  },
+  "vps1_production": {
+    "status_observed_at_utc": "2026-11-11T05:48:50Z",
+    "service": {"active_state": "active", "sub_state": "running", "main_pid": 1073891, "historical_restarts": 4},
+    "dux_status": {
+      "dirty": true,
+      "dirty_reason": "fanotify queue overflow",
+      "caught_up": false,
+      "behind_seconds": 303479.054,
+      "last_scan_age_seconds": 493168,
+      "events_seen": 306496152,
+      "events_resolved": 176665202,
+      "pending_updates": 47,
+      "events_dropped": 2518862,
+      "kernel_overflow_notifications": 979,
+      "index_nodes": 1268287,
+      "index_bytes": 118341472256,
+      "index_bytes_on_disk": 3913146368,
+      "wal_bytes": 134217728,
+      "write_error": null
+    },
+    "root_filesystem": {"used_percent": 65, "available_human_readable": "63G"}
+  },
+  "vps2_scan_first": {
+    "status_observed_at_utc": "2026-11-11T05:48:45Z",
+    "service": {"active_state": "active", "sub_state": "running", "main_pid": 576850, "historical_restarts": 0},
+    "dux_status": {
+      "dirty": true,
+      "dirty_reason": "filesystem changes await the next full observation",
+      "scan_in_progress": false,
+      "last_scan_age_seconds": 416,
+      "last_scan_timestamp_seconds": 1794375709,
+      "events_dropped": 0,
+      "kernel_overflow_notifications": 0,
+      "pending_updates": 0,
+      "behind_seconds": 28280.999,
+      "behind_seconds_applicable": false,
+      "index_nodes": 2047434
+    },
+    "root_filesystem": {"size": "93 GiB", "used": "79 GiB", "available": "9.9 GiB", "used_percent": 89},
+    "dev_shm": {"available": "2.1 GiB"}
+  },
+  "r132_72h_soak": {
+    "progress_observed_at_utc": "2026-11-11T05:49:10Z",
+    "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "status": "running",
+    "elapsed_seconds": 74637.5,
+    "target_hours": 72,
+    "completion_percent": 28.80,
+    "operations": 1627575,
+    "mutation_bursts": 20,
+    "controlled_crash_recoveries": 1,
+    "held_reader_checks": 3,
+    "final_exactness": "pending",
+    "final_history_validation": "pending",
+    "sqlite_integrity": "pending"
+  },
+  "guarded_fault_matrix": {
+    "runner_process_confirmed_alive_at_2026-11-11T05:49:33Z": true,
+    "matrix_suites_started": 0,
+    "last_admission_wait_at_utc": "2026-11-11T05:49:33Z",
+    "last_admission_reasons": ["active Go build/test workloads", "load1 11.20 exceeded threshold 10"],
+    "guard_bypassed": false
+  },
+  "host_resources_at_2026-11-11T05:48:25Z": {
+    "load_average_1m_5m_15m": [13.90, 8.38, 9.37],
+    "cpu_psi_some_avg10_percent": 10.37,
+    "io_psi_some_avg10_percent": 7.53,
+    "root_used_percent": 65,
+    "root_available": "63G"
+  },
+  "interpretation": [
+    "VPS1 pending updates are low but it remains dirty with accumulated overflows and a multi-day-old full scan; low pending does not mean recovery or exactness.",
+    "VPS2 remains dirty between full observations. Its scan-first behind_seconds value is inapplicable; use last_scan_age_seconds.",
+    "The soak is progressing but final exactness, history, and SQLite integrity remain pending.",
+    "The fault matrix has not started because unrelated build/test workloads repeatedly reset admission."
+  ]
+}

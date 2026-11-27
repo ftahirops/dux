@@ -1,0 +1,17 @@
+{
+  "observed_at_utc": "2026-11-11T03:34:56Z",
+  "guest": "ubuntu24",
+  "profile": "qualification4",
+  "start_attempted": true,
+  "vm_started": false,
+  "matrix_suites_started": 0,
+  "decision": "blocked_before_vm_start",
+  "reasons": [
+    "Active unrelated Go compiler and test processes.",
+    "Active unrelated Node TypeScript compiler.",
+    "Host load1 24.67 exceeded admission limit 10.",
+    "CPU PSI some avg10 77.76% exceeded hard limit 55%."
+  ],
+  "r133_binary_pair_ready": true,
+  "guard_bypassed": false
+}

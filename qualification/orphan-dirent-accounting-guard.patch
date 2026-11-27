@@ -1,0 +1,76 @@
+--- a/src/store.rs
++++ b/src/store.rs
+@@ -273,6 +273,13 @@
+                    AND r.recursive_bytes=totals.bytes
+                    AND r.recursive_inodes=totals.items
+              ) AND NOT EXISTS (
++                 SELECT 1 FROM dirents de
++                 LEFT JOIN inodes child
++                   ON child.dev_id=de.dev_id AND child.inode=de.inode
++                 LEFT JOIN inodes parent
++                   ON parent.dev_id=de.parent_dev AND parent.inode=de.parent_inode
++                 WHERE child.inode IS NULL OR parent.kind IS NULL OR parent.kind!='d'
++             ) AND NOT EXISTS (
+                  SELECT 1 FROM inodes d
+                  LEFT JOIN child_totals c
+                    ON c.parent_dev=d.dev_id AND c.parent_inode=d.inode
+@@ -626,6 +633,59 @@
+         drop(store);
+         for suffix in ["", "-wal", "-shm"] {
+             let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++    }
++
++    #[test]
++    fn totals_consistent_rejects_dangling_dirent_references() {
++        let db = tmp("dangling-dirent");
++        for suffix in ["", "-wal", "-shm"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
++        }
++        let store = Store::create_fresh(&db).unwrap();
++        store.set_meta("root_dev", "1").unwrap();
++        store.set_meta("root_inode", "1").unwrap();
++        store.conn.execute(
++            "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns)
++             VALUES(1,1,'d',4096,4096,1,0,0,0)", [],
++        ).unwrap();
++        store.conn.execute(
++            "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
++             VALUES(1,1,X'6f727068616e',1,999,1)", [],
++        ).unwrap();
++        assert!(!store.totals_consistent().unwrap(), "dangling child inode must invalidate totals");
++        store.conn.execute("DELETE FROM dirents", []).unwrap();
++        store.conn.execute(
++            "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns)
++             VALUES(1,2,'f',0,0,1,0,0,0)", [],
++        ).unwrap();
++        store.conn.execute(
++            "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
++             VALUES(1,999,X'6f727068616e',1,2,1)", [],
++        ).unwrap();
++        assert!(!store.totals_consistent().unwrap(), "missing parent inode must invalidate totals");
++        store.conn.execute("DELETE FROM dirents", []).unwrap();
++        store.conn.execute("DELETE FROM inodes WHERE inode != 1", []).unwrap();
++        store.conn.execute("UPDATE inodes SET recursive_inodes=3", []).unwrap();
++        for inode in [2, 3] {
++            store.conn.execute(
++                "INSERT INTO inodes(dev_id,inode,kind,blocks,recursive_bytes,recursive_inodes,uid,mtime,birth_ns)
++                 VALUES(1,?1,'f',0,0,1,0,0,0)", [inode],
++            ).unwrap();
++            store.conn.execute(
++                "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
++                 VALUES(1,1,?1,1,?2,1)",
++                rusqlite::params![inode.to_string().into_bytes(), inode],
++            ).unwrap();
++        }
++        store.conn.execute(
++            "INSERT INTO dirents(parent_dev,parent_inode,name,dev_id,inode,prime)
++             VALUES(1,2,X'696e76616c6964',1,3,0)", [],
++        ).unwrap();
++        assert!(!store.totals_consistent().unwrap(), "file parent must invalidate directory entries");
++        drop(store);
++        for suffix in ["", "-wal", "-shm"] {
++            let _ = std::fs::remove_file(format!("{}{suffix}", db.display()));
+         }
+     }
+ }

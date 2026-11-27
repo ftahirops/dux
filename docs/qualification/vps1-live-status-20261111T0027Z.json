@@ -1,0 +1,59 @@
+{
+  "observed_at_utc": "2026-11-11T00:27:40Z",
+  "binary": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "service": {
+    "active_state": "active",
+    "main_pid": 1073891,
+    "historical_restarts": 4
+  },
+  "status": {
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "fanotify queue overflow",
+    "behind_seconds": 284208.701,
+    "kernel_overflow_notifications": 891,
+    "events_dropped": 2518862,
+    "pending_updates": 29,
+    "last_scan_age_seconds": 473898,
+    "scan_in_progress": false,
+    "index_nodes": 1289626,
+    "index_bytes_on_disk": 3734249472,
+    "index_bytes": 123001663488,
+    "wal_bytes": 134217728,
+    "write_error": null,
+    "events_seen": 281153806,
+    "events_resolved": 163618539,
+    "updates_committed": 46011512,
+    "userspace_updates_dropped": 2518862,
+    "last_event_commit_timestamp_seconds": 1794356859,
+    "watch_status_updated_at_seconds": 1794356860
+  },
+  "host_storage": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 126107889664,
+    "root_available_bytes": 63153192960,
+    "root_use_percent": 67,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3751624704,
+    "dev_shm_available_bytes": 9977589760,
+    "tmp_human": "13G",
+    "var_tmp_human": "675M",
+    "var_log_human": "1.7G",
+    "var_lib_dux_human": "3.7G",
+    "target_human": "3.6G",
+    "var_lib_dux_bytes": 3868839936,
+    "tmp_apparent_bytes": 16514666702,
+    "var_tmp_apparent_bytes": 694919083,
+    "target_apparent_bytes": 3786470777
+  },
+  "deltas_since_2026_11_11T0023Z": {
+    "pending_updates": -93923,
+    "events_seen": 56101,
+    "events_resolved": 31598,
+    "updates_committed": 108048,
+    "kernel_overflow_notifications": 0,
+    "events_dropped": 0,
+    "behind_seconds": 255
+  },
+  "interpretation": "The daemon is still dirty and not caught up. Pending updates drained substantially, with no new overflows or dropped updates in this interval; backlog drainage did not clear the historical dirty state."
+}

@@ -1,0 +1,7 @@
+Result=success
+NRestarts=0
+ActiveState=inactive
+{"automatic_reconciliation_paused":false,"behind_seconds":null,"caught_up":false,"daemon_live":false,"dirty":true,"dirty_reason":"shutdown could not prove event continuity","dirty_since_timestamp_seconds":1794030705,"events_dropped":null,"events_resolved":null,"events_seen":null,"failed_reconciliation_attempts":1,"index_bytes":552960,"index_bytes_on_disk":90112,"index_nodes":136,"kernel_overflow_notifications":null,"last_event_commit_timestamp_seconds":null,"last_scan_age_seconds":53,"last_scan_timestamp_seconds":1794030652,"max_automatic_reconciliation_retries":1,"max_pending_updates":null,"pause_reason":null,"paused":false,"paused_since_timestamp_seconds":null,"pending_updates":null,"reconciliation_retry_state_corrupt":false,"root":"/var/tmp/dux-r23-smoke-tree","scan_in_progress":false,"scan_progress":null,"status_version":1,"throttled_since_timestamp_seconds":1794030586,"updates_committed":null,"userspace_updates_dropped":null,"wal_bytes":0,"watch_status_available":false,"watch_status_updated_at_seconds":null,"write_error":null}
+sqlite_integrity ok
+schema 6
+entries 137

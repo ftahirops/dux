@@ -1,0 +1,96 @@
+{
+  "qualified_at_utc": "2026-11-07T05:58:00Z",
+  "package_source_commit": "0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5",
+  "deb_sha256": "41a50ea031d666c6d782d2c5432a7b1363e1271f757b39bfbf33c6ae055521e1",
+  "extracted_binary_sha256": "0ce0d2eba91f6325fad8c6e6e5d61380805d56c57bc774d2714567d1be5b417e",
+  "binary_version": "dux 0.6.3 (0b81fa8a6eb2) [production] source-sha256=39097a5f99562c99b64fe3347c27796ec511177f380018442a37f1d7bd1f02b3",
+  "systemd": "255.4-1ubuntu8.18",
+  "systemd_unit_hashes_match_packaging_source": {
+    "dux.service": "e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b",
+    "dux-tunnel.service": "54c02eaf154754ca088f6de1f7d6061197068642c35136e81c24ce69e259e458"
+  },
+  "systemd_analyze_verify": "passed for both extracted package unit files",
+  "runtime_test": "package-extracted binary in transient systemd units with packaged security/resource properties; disposable DB and ext4 loop fixture",
+  "tested_properties": {
+    "user": "root",
+    "group": "dux",
+    "umask": "0027",
+    "state_directory_mode": "0750",
+    "capability_bounding_and_ambient": [
+      "CAP_SYS_ADMIN",
+      "CAP_DAC_READ_SEARCH"
+    ],
+    "secure_bits": "noroot noroot-locked",
+    "no_new_privileges": true,
+    "system_call_filter": "packaged deny set including @module, @mount, @swap, @reboot, @clock, @obsolete, @raw-io, @debug, @cpu-emulation, bpf",
+    "restrict_address_families": [
+      "AF_UNIX"
+    ],
+    "watchdog_seconds": 45,
+    "cpu_quota_percent": 25,
+    "memory_high_mib": 384,
+    "memory_max_mib": 512,
+    "oom_policy": "stop",
+    "core_limit": 0,
+    "cpu_weight": 10,
+    "io_weight": 10,
+    "io_accounting": true,
+    "restart_policy": "always",
+    "test_restart_delay_seconds": 5,
+    "packaged_restart_delay_seconds": 30
+  },
+  "shared_ext4_subtree_probe": {
+    "result": "reconciliation correctly remained dirty; excluded as a clean runtime pass",
+    "reason": "a compound event on the shared root ext4 mount had an unresolved stale FID; its event PID was clickhouse-server and the daemon recorded lost_events=true",
+    "evidence_log": "shared-ext4-failure.log"
+  },
+  "isolated_ext4_runtime": {
+    "initial_baseline": "131 files, 5 directories; clean exact v6 index",
+    "live_mutations": "64 creates, 20 renames, 16 deletes, atomic replacement, hardlink creation",
+    "live_event_counters": {
+      "events_seen": 142,
+      "events_resolved": 125,
+      "updates_committed": 124,
+      "events_dropped": 0,
+      "kernel_overflow_notifications": 0,
+      "pending_updates": 0
+    },
+    "exact_after_live_mutations": {
+      "schema_version": 6,
+      "root_recursive_bytes": 1011712,
+      "root_recursive_inodes": 184,
+      "exact_check": "passed"
+    },
+    "manual_systemd_restart": "reconciled and returned to clean exact state",
+    "offline_mutations": "12 creates, 1 delete, 1 rename while stopped; fresh service activation reconciled exactly",
+    "systemd_kill_restart": {
+      "signal": "SIGKILL",
+      "offline_mutations_during_restart": 32,
+      "restart_policy": "always",
+      "systemd_nrestarts": 1,
+      "post_restart": "clean and caught up"
+    },
+    "final_exact_snapshot": {
+      "schema_version": 6,
+      "root_recursive_bytes": 1167360,
+      "root_recursive_inodes": 222,
+      "dirents": 223,
+      "exact_check": "passed",
+      "sqlite_integrity": "ok"
+    }
+  },
+  "cleanup": "test transient services stopped; ext4 loop unmounted; image, DB, extracted package, temporary group and test directories removed",
+  "limits": [
+    "DEB was extracted but not installed through dpkg",
+    "test used a transient unit mirroring packaged settings, not the installed package unit activation path",
+    "restart delay shortened for the bounded test",
+    "one Ubuntu 24.04 kernel/systemd/ext4 configuration only",
+    "does not qualify live production upgrade, RPM activation, or canary"
+  ],
+  "evidence_files": [
+    "final-verification.log",
+    "isolated-runtime.log",
+    "shared-ext4-failure.log",
+    "shared-ext4-final.json"
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "suite": "churn",
+  "status": "running",
+  "candidate_binary_sha256": "f8637b4a06df6bb5fa644c07047e3d0f543bc7b340ec411239b4cf5c8fc425e7",
+  "report_path": "/dev/shm/dux-readiness-release117/reports/p0-matrix.json",
+  "seed_files": 100000,
+  "operations": 20000,
+  "operations_per_batch": 2000,
+  "total_batches": 10,
+  "event_counters_at_start": {
+    "updated_at": 1794203386,
+    "status_mtime_ns": 1794203386590000000,
+    "pending": 0,
+    "drained": true,
+    "seen": 1416,
+    "resolved": 0,
+    "committed": 0,
+    "dropped": 0,
+    "uncertain": true,
+    "kernel_overflow_notifications": 0,
+    "scan_first": true
+  },
+  "completed_batches": [
+    {
+      "batch": 1,
+      "operations": 2000,
+      "seen": 8774,
+      "resolved": 0,
+      "committed": 0,
+      "growth_rows": 577,
+      "dropped": 0,
+      "uncertain": true,
+      "exact_convergence_ms": 151001,
+      "exact_paths_inodes_allocations_rollups": true
+    },
+    {
+      "batch": 2,
+      "operations": 4000,
+      "seen": 15346,
+      "resolved": 0,
+      "committed": 0,
+      "growth_rows": 577,
+      "dropped": 0,
+      "uncertain": true,
+      "exact_convergence_ms": 122186,
+      "exact_paths_inodes_allocations_rollups": true
+    },
+    {
+      "batch": 3,
+      "operations": 6000,
+      "seen": 20595,
+      "resolved": 0,
+      "committed": 0,
+      "growth_rows": 577,
+      "dropped": 0,
+      "uncertain": true,
+      "exact_convergence_ms": 106286,
+      "exact_paths_inodes_allocations_rollups": true
+    },
+    {
+      "batch": 4,
+      "operations": 8000,
+      "seen": 27041,
+      "resolved": 0,
+      "committed": 0,
+      "growth_rows": 577,
+      "dropped": 0,
+      "uncertain": true,
+      "exact_convergence_ms": 104508,
+      "exact_paths_inodes_allocations_rollups": true
+    },
+    {
+      "batch": 5,
+      "operations": 10000,
+      "seen": 32329,
+      "resolved": 0,
+      "committed": 0,
+      "growth_rows": 577,
+      "dropped": 0,
+      "uncertain": true,
+      "exact_convergence_ms": 97498,
+      "exact_paths_inodes_allocations_rollups": true
+    }
+  ],
+  "completed_operations": 10000,
+  "last_checkpoint_at": "2026-11-09T06:02:22Z",
+  "last_event_counters": {
+    "updated_at": 1794204142,
+    "status_mtime_ns": 1794204142186000000,
+    "pending": 0,
+    "drained": true,
+    "seen": 32329,
+    "resolved": 0,
+    "committed": 0,
+    "dropped": 0,
+    "uncertain": true,
+    "kernel_overflow_notifications": 0,
+    "scan_first": true
+  },
+  "last_history_check_passed": true,
+  "last_exact_check_passed": true
+}

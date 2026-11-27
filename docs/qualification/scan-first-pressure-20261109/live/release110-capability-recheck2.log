@@ -1,0 +1,14 @@
+Running as unit: dux-readiness-584091.service; invocation ID: f5c3caa51cee47fcb642bc28b0d0ee8a
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PASS unreadable subtree produces explicit incomplete-coverage state
+PASS capability failure, persistent uncertainty across rebuild, restored-capability recovery
+Evidence: /root/dux-readiness-6dacdf5/release110-capability-recheck2.json
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 4.800s
+CPU time consumed: 1.137s
+Memory peak: 256.0K
+Memory swap peak: 0B

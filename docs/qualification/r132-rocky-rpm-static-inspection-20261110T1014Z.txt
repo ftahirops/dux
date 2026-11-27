@@ -1,0 +1,78 @@
+## artifact SHA-256
+$ sha256sum target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm
+exit=0
+bb1adbd0b2bc5a36c30076bcfd3436e424dbd596aa07a26d78d952a24650af78  target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm
+
+## RPM signature and digest verification
+$ rpm --checksig -v target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm
+exit=0
+target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm:
+    Header SHA256 digest: OK
+    Header SHA1 digest: OK
+    Payload SHA256 digest: OK
+    MD5 digest: OK
+
+## RPM identity and signature fields
+$ rpm -qp --qf %{NAME} %{VERSION}-%{RELEASE} %{ARCH} %{SIGPGP:pgpsig} %{SIGGPG:pgpsig}\n target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm
+exit=0
+dux 0.6.3-132 x86_64 (none) (none)
+
+## RPM file list
+$ rpm -qpl target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm
+exit=0
+/usr/bin/dux
+/usr/lib/.build-id
+/usr/lib/.build-id/e7
+/usr/lib/.build-id/e7/3ee1c9c2c9f4c635b375423794852624ab37b6
+/usr/lib/dux/dux-backup-index.py
+/usr/lib/dux/secure-index-permissions.sh
+/usr/lib/systemd/system/dux-tunnel.service
+/usr/lib/systemd/system/dux.service
+/usr/share/doc/dux/README.md
+/var/lib/dux
+
+## RPM scriptlets
+$ rpm -qp --scripts target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm
+exit=0
+preinstall scriptlet (using /bin/sh):
+# The `dux` group gates read access to the index. Created in %pre so it exists
+# before %files ownership is applied and before the unit starts.
+if ! getent group dux >/dev/null 2>&1; then
+    groupadd -r dux >/dev/null
+fi
+exit 0
+postinstall scriptlet (using /bin/sh):
+mkdir -p /var/lib/dux
+/usr/lib/dux/secure-index-permissions.sh /var/lib/dux dux
+# Optional dux-tunnel.service is never enabled or configured by installation.
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    if [ "$1" = "1" ]; then
+        systemctl enable dux.service
+    fi
+    # --no-block so the first-start full scan runs in the BACKGROUND and does not
+    # block rpm/dnf for the whole scan. Progress is observable via `dux status`.
+    echo "dux: starting service — the initial scan of / runs in the BACKGROUND."
+    if [ "$1" = "1" ]; then
+        systemctl start --no-block dux.service
+    else
+        systemctl try-restart --no-block dux.service
+        systemctl try-restart --no-block dux-tunnel.service
+    fi
+    echo "dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)"
+fi
+echo "dux: the index is readable by root and the 'dux' group (it lists every"
+echo "dux: filename on /). Grant a user access with: usermod -aG dux <user>"
+exit 0
+preuninstall scriptlet (using /bin/sh):
+# $1 == 0 on final removal (not upgrade)
+if [ "$1" = "0" ] && [ -d /run/systemd/system ]; then
+    systemctl stop dux.service dux-tunnel.service || true
+    systemctl disable dux.service dux-tunnel.service || true
+fi
+exit 0
+postuninstall scriptlet (using /bin/sh):
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+exit 0

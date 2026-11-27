@@ -1,0 +1,39 @@
+{
+  "observed_at_utc": "2026-11-10T18:55:00Z",
+  "command": "cargo audit --json",
+  "audit": {
+    "database": {
+      "advisory-count": 1446,
+      "last-commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
+      "last-updated": "2026-11-10T14:45:03+01:00"
+    },
+    "lockfile": {
+      "dependency-count": 229
+    },
+    "settings": {
+      "target_arch": [],
+      "target_os": [],
+      "severity": null,
+      "ignore": [],
+      "informational_warnings": [
+        "unmaintained",
+        "unsound",
+        "notice"
+      ]
+    },
+    "vulnerabilities": {
+      "found": false,
+      "count": 0,
+      "list": []
+    },
+    "warnings": {}
+  },
+  "advisory_database_remote_check": {
+    "command": "git ls-remote https://github.com/RustSec/advisory-db.git refs/heads/main",
+    "remote_main_commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
+    "local_database_commit": "28d73fc95e5972af3403225a217def57dcaba3c4",
+    "local_commit_time": "2026-11-10T14:45:03+01:00",
+    "remote_and_local_heads_match": true
+  },
+  "interpretation": "No newer advisory database commit was available at observation time; local audit database head matched the public upstream main head."
+}

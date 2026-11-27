@@ -1,0 +1,44 @@
+{
+  "observed_at_utc": "2026-11-10T23:14:25+00:00",
+  "query": "journalctl -u dux.service -n 500 --no-pager -o short-iso-precise; filter open_by_handle_at failed errno=116 Stale file handle",
+  "sample_scope": "last 500 journal messages, not a fixed-duration or complete event-rate sample",
+  "matching_messages": 430,
+  "first_matching_timestamp": "2026-11-10T23:02:09.054554+00:00",
+  "last_matching_timestamp": "2026-11-10T23:14:23.779237+00:00",
+  "mask_counts": {
+    "0x20a": 25,
+    "0x48": 9,
+    "0xa": 5,
+    "0x4": 304,
+    "0x20e": 1,
+    "0x304": 2,
+    "0x40000200": 9,
+    "0x140": 2,
+    "0x308": 4,
+    "0x10a": 1,
+    "0x40000300": 26,
+    "0x40000100": 5,
+    "0x14e": 8,
+    "0x208": 4,
+    "0x8": 4,
+    "0x200": 7,
+    "0x14a": 9,
+    "0x10e": 1,
+    "0x4a": 1,
+    "0x40": 1,
+    "0x30a": 2
+  },
+  "sample_shapes": {
+    "mask_0x4": "FAN_ATTRIB; FID-only info_type_mask=0x2; 8-byte handle; fsid=(-751860846, 210811603)",
+    "other_masks": "include compound events (e.g. mask=0x20a, info_type_mask=0x6) and are outside stale_target_attrib_is_benign predicate"
+  },
+  "running_binary": "VPS1 installed 0.6.3 build e0cc915f8f37 (status snapshot at 23:08 UTC)",
+  "candidate_rule": "src/watch.rs stale_target_attrib_is_benign accepts only target-only FAN_ATTRIB (optional FAN_ONDIR), one complete FID record, no resolved entry, and a known handle-capable fsid",
+  "test_evidence": "watch::tests::stale_target_attrib_is_ignored_only_for_a_known_handle_capable_filesystem; unit test only, not live fanotify delivery",
+  "interpretation": "Production has repeated ESTALE unresolved fanotify events. The mask=0x4 subset structurally matches the candidate filter conditions as logged, but this does not prove those records are benign in every case, establish that old events caused historical overflows, or prove the candidate fixes live production. Compound/non-ATTRIB events remain unresolved by this narrow filter.",
+  "limitations": [
+    "Counts are journal messages among the latest 500, not all kernel events.",
+    "No exact candidate canary or direct before/after comparison was run.",
+    "No claim that unresolved ESTALE events are harmless without checking event target lifecycle and index effect."
+  ]
+}

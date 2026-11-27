@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-11-10T23:30:18Z",
+  "qualification_host": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 125188055040,
+    "root_available_bytes": 64073027584,
+    "root_use_percent": 67,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3752701952,
+    "dev_shm_available_bytes": 9976512512,
+    "dev_shm_use_percent": 28
+  },
+  "method": "read-only df -B1 / /dev/shm",
+  "interpretation": "Root usage declined during the preceding minutes; the cause was not attributed or inspected by deletion."
+}

@@ -1,0 +1,245 @@
+{
+  "accounting_duration_seconds": {
+    "max": 103.507,
+    "mean": 62.704,
+    "min": 49.103
+  },
+  "admission_deferrals": [
+    {
+      "at_utc": "2026-11-09T18:29:27.338197+00:00",
+      "message": "\u001b[2m2026-11-09T18:29:27.337769Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mdux::watch\u001b[0m\u001b[2m:\u001b[0m deferring full reconciliation until host pressure meets recovery admission criteria \u001b[3mpressure\u001b[0m\u001b[2m=\u001b[0mElevated \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0m\"system pressure\" \u001b[3mload1\u001b[0m\u001b[2m=\u001b[0m2.97 \u001b[3mhost_cpus\u001b[0m\u001b[2m=\u001b[0m6.0 \u001b[3mpsi_cpu_avg10\u001b[0m\u001b[2m=\u001b[0m13.98 \u001b[3mpsi_memory_avg10\u001b[0m\u001b[2m=\u001b[0m0.0 \u001b[3mpsi_io_avg10\u001b[0m\u001b[2m=\u001b[0m0.31 \u001b[3mavailable_memory_bytes\u001b[0m\u001b[2m=\u001b[0m3080613888 \u001b[3mavailable_disk_bytes\u001b[0m\u001b[2m=\u001b[0m6904938496"
+    }
+  ],
+  "canary_latest_sample": {
+    "accounting": {
+      "path_graph": {
+        "bad_parent_count": 0,
+        "bad_prime_groups": 0,
+        "missing_directory_totals": 0,
+        "passed": true,
+        "path_count": 1757751,
+        "root_count": 1,
+        "root_visible_entries_match": true,
+        "unexpected_directory_totals": 0
+      },
+      "quick_check": [
+        [
+          "ok"
+        ]
+      ],
+      "root_matches_inode_aggregate": true,
+      "schema_version": "7"
+    },
+    "binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+    "captured_at_utc": "2026-11-09T18:37:56.671073+00:00",
+    "collection_duration_seconds": 53.088,
+    "errors": [],
+    "max_observation_age_seconds": 1200,
+    "result": "passed",
+    "sample_number": 55,
+    "service": {
+      "ActiveState": "active",
+      "MainPID": "2561224",
+      "MemoryCurrent": "332468224",
+      "MemoryPeak": "2148278272",
+      "NRestarts": "0"
+    },
+    "service_binary_sha256": "b59d46b66e38d74da4ea4359137977e670ac9c9a05192b971131f8f0937d0d70",
+    "status_after": {
+      "caught_up": false,
+      "dirty": true,
+      "events_dropped": 0,
+      "kernel_overflow_notifications": 0,
+      "last_scan_age_seconds": 123,
+      "pending_updates": 0,
+      "scan_first": true,
+      "scan_in_progress": false,
+      "userspace_updates_dropped": 0
+    },
+    "unit_sha256": "e12d1f4a6da87f529f481c4de92f501566ab40b11040fde2054a8718a932a51b"
+  },
+  "captured_at_utc": "2026-11-09T18:38:15.692519+00:00",
+  "daemon_pid": "2561224",
+  "dux_status": {
+    "automatic_reconciliation_paused": false,
+    "behind_seconds": 16726.514,
+    "caught_up": false,
+    "daemon_live": true,
+    "dirty": true,
+    "dirty_reason": "filesystem changes await the next full observation",
+    "dirty_since_timestamp_seconds": 1794249421,
+    "events_dropped": 0,
+    "events_resolved": 0,
+    "events_seen": 204863854,
+    "failed_reconciliation_attempts": null,
+    "index_bytes": 86947717120,
+    "index_bytes_on_disk": 721977344,
+    "index_nodes": 1754269,
+    "kernel_overflow_notifications": 0,
+    "last_event_commit_timestamp_seconds": 0,
+    "last_scan_age_seconds": 139,
+    "last_scan_timestamp_seconds": 1794249353,
+    "max_automatic_reconciliation_retries": 1,
+    "max_pending_updates": 500000,
+    "pause_reason": null,
+    "paused": false,
+    "paused_since_timestamp_seconds": null,
+    "pending_updates": 0,
+    "reconciliation_retry_backoff_seconds": null,
+    "reconciliation_retry_due": false,
+    "reconciliation_retry_remaining_seconds": null,
+    "reconciliation_retry_state_corrupt": false,
+    "root": "/",
+    "scan_first": true,
+    "scan_in_progress": false,
+    "scan_progress": null,
+    "status_version": 1,
+    "throttled_since_timestamp_seconds": 1794232765,
+    "updates_committed": 0,
+    "userspace_updates_dropped": 0,
+    "wal_bytes": 134217728,
+    "watch_status_available": true,
+    "watch_status_updated_at_seconds": 1794249491,
+    "write_error": null
+  },
+  "host": "vps2-r121-canary",
+  "interpretation": "19 observations completed and passed accounting on 15-minute start cadence over this sample; latest canary monitor sample passed. This remains shorter than the 24-hour soak and does not prove exact per-path freshness under arbitrary concurrent mutation or qualify r123.",
+  "observations": [
+    {
+      "accounting_duration_seconds": 58.368,
+      "completed_at_utc": "2026-11-09T14:04:38.257868+00:00",
+      "scan_duration_seconds": 312.871,
+      "started_at_utc": "2026-11-09T13:59:25.386669+00:00"
+    },
+    {
+      "accounting_duration_seconds": 54.851,
+      "completed_at_utc": "2026-11-09T14:20:17.663381+00:00",
+      "scan_duration_seconds": 352.27,
+      "started_at_utc": "2026-11-09T14:14:25.393871+00:00"
+    },
+    {
+      "accounting_duration_seconds": 51.511,
+      "completed_at_utc": "2026-11-09T14:33:04.001117+00:00",
+      "scan_duration_seconds": 218.472,
+      "started_at_utc": "2026-11-09T14:29:25.529613+00:00"
+    },
+    {
+      "accounting_duration_seconds": 52.839,
+      "completed_at_utc": "2026-11-09T14:48:45.257149+00:00",
+      "scan_duration_seconds": 259.345,
+      "started_at_utc": "2026-11-09T14:44:25.912533+00:00"
+    },
+    {
+      "accounting_duration_seconds": 57.886,
+      "completed_at_utc": "2026-11-09T15:03:20.279474+00:00",
+      "scan_duration_seconds": 234.179,
+      "started_at_utc": "2026-11-09T14:59:26.100235+00:00"
+    },
+    {
+      "accounting_duration_seconds": 69.013,
+      "completed_at_utc": "2026-11-09T15:19:03.170716+00:00",
+      "scan_duration_seconds": 277.048,
+      "started_at_utc": "2026-11-09T15:14:26.122538+00:00"
+    },
+    {
+      "accounting_duration_seconds": 59.44,
+      "completed_at_utc": "2026-11-09T15:33:05.186394+00:00",
+      "scan_duration_seconds": 218.789,
+      "started_at_utc": "2026-11-09T15:29:26.397559+00:00"
+    },
+    {
+      "accounting_duration_seconds": 49.103,
+      "completed_at_utc": "2026-11-09T15:48:04.032094+00:00",
+      "scan_duration_seconds": 217.634,
+      "started_at_utc": "2026-11-09T15:44:26.398144+00:00"
+    },
+    {
+      "accounting_duration_seconds": 88.078,
+      "completed_at_utc": "2026-11-09T16:04:11.334378+00:00",
+      "scan_duration_seconds": 284.929,
+      "started_at_utc": "2026-11-09T15:59:26.404945+00:00"
+    },
+    {
+      "accounting_duration_seconds": 79.726,
+      "completed_at_utc": "2026-11-09T16:21:00.188719+00:00",
+      "scan_duration_seconds": 393.781,
+      "started_at_utc": "2026-11-09T16:14:26.407528+00:00"
+    },
+    {
+      "accounting_duration_seconds": 55.346,
+      "completed_at_utc": "2026-11-09T16:35:42.239905+00:00",
+      "scan_duration_seconds": 375.801,
+      "started_at_utc": "2026-11-09T16:29:26.438706+00:00"
+    },
+    {
+      "accounting_duration_seconds": 54.197,
+      "completed_at_utc": "2026-11-09T16:47:57.881765+00:00",
+      "scan_duration_seconds": 211.443,
+      "started_at_utc": "2026-11-09T16:44:26.438802+00:00"
+    },
+    {
+      "accounting_duration_seconds": 49.54,
+      "completed_at_utc": "2026-11-09T17:03:27.860653+00:00",
+      "scan_duration_seconds": 241.275,
+      "started_at_utc": "2026-11-09T16:59:26.585315+00:00"
+    },
+    {
+      "accounting_duration_seconds": 103.507,
+      "completed_at_utc": "2026-11-09T17:20:02.857534+00:00",
+      "scan_duration_seconds": 336.159,
+      "started_at_utc": "2026-11-09T17:14:26.698355+00:00"
+    },
+    {
+      "accounting_duration_seconds": 71.076,
+      "completed_at_utc": "2026-11-09T17:34:47.005891+00:00",
+      "scan_duration_seconds": 320.307,
+      "started_at_utc": "2026-11-09T17:29:26.698418+00:00"
+    },
+    {
+      "accounting_duration_seconds": 62.982,
+      "completed_at_utc": "2026-11-09T17:48:46.630426+00:00",
+      "scan_duration_seconds": 259.932,
+      "started_at_utc": "2026-11-09T17:44:26.698796+00:00"
+    },
+    {
+      "accounting_duration_seconds": 52.915,
+      "completed_at_utc": "2026-11-09T18:02:57.184804+00:00",
+      "scan_duration_seconds": 210.486,
+      "started_at_utc": "2026-11-09T17:59:26.698900+00:00"
+    },
+    {
+      "accounting_duration_seconds": 53.049,
+      "completed_at_utc": "2026-11-09T18:18:19.990485+00:00",
+      "scan_duration_seconds": 232.661,
+      "started_at_utc": "2026-11-09T18:14:27.329273+00:00"
+    },
+    {
+      "accounting_duration_seconds": 67.941,
+      "completed_at_utc": "2026-11-09T18:35:53.778046+00:00",
+      "scan_duration_seconds": 383.32,
+      "started_at_utc": "2026-11-09T18:29:30.458255+00:00"
+    }
+  ],
+  "scan_cycle_counts": {
+    "accounting_passes": 19,
+    "admission_deferrals": 1,
+    "completed": 19,
+    "starts": 19
+  },
+  "scan_duration_seconds": {
+    "max": 393.781,
+    "mean": 281.09,
+    "min": 210.486
+  },
+  "scan_start_interval_seconds": {
+    "max": 903.129,
+    "min": 900.0
+  },
+  "systemd": {
+    "ActiveState": "active",
+    "ExecMainStartTimestamp": "Mon 2026-11-09 13:59:25 UTC",
+    "MainPID": "2561224",
+    "NRestarts": "0"
+  },
+  "window_start_utc": "2026-11-09T13:59:00Z"
+}

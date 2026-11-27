@@ -1,0 +1,601 @@
+#!/usr/bin/env python3
+"""Fail-closed, read-only evidence collector for the 24-hour dux canary."""
+import argparse
+import datetime
+import hashlib
+import importlib.util
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sqlite3
+import subprocess
+import sys
+import time
+
+
+OBSERVER_PATH = Path(__file__).with_name("dux-live-observer.py")
+OBSERVER_SPEC = importlib.util.spec_from_file_location("dux_live_observer", OBSERVER_PATH)
+OBSERVER = importlib.util.module_from_spec(OBSERVER_SPEC)
+OBSERVER_SPEC.loader.exec_module(OBSERVER)
+EXPECTED_SCHEMA_VERSION = "7"
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def parse_properties(stdout):
+    result = {}
+    for line in stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            result[key] = value
+    return result
+
+
+def unit_properties(unit):
+    command = ["systemctl", "show", unit, "-p", "ActiveState", "-p", "NRestarts",
+               "-p", "ExecMainStatus", "-p", "MainPID", "-p", "MemoryCurrent",
+               "-p", "MemoryMax", "-p", "MemoryPeak", "-p", "CPUUsageNSec",
+               "-p", "CPUQuotaPerSecUSec", "-p", "ControlGroup", "-p", "FragmentPath",
+               "-p", "DropInPaths", "-p", "Restart", "-p", "WatchdogUSec"]
+    result = subprocess.run(command, text=True, capture_output=True, timeout=15)
+    if result.returncode:
+        raise RuntimeError(f"systemctl show failed: {result.stderr.strip()}")
+    return parse_properties(result.stdout)
+
+
+def memory_events(control_group):
+    path = cgroup_file(control_group, "memory.events")
+    fields = {}
+    for line in path.read_text().splitlines():
+        key, value = line.split(maxsplit=1)
+        fields[key] = int(value)
+    required = {"max", "oom", "oom_kill", "oom_group_kill"}
+    if not required.issubset(fields):
+        raise RuntimeError(f"memory.events lacks required counters: {sorted(required - fields.keys())}")
+    return fields
+
+
+def cgroup_file(control_group, filename):
+    if (not control_group.startswith("/") or ".." in Path(control_group).parts
+            or filename not in {"memory.events", "io.stat"}):
+        raise RuntimeError(f"invalid systemd cgroup file {control_group!r}/{filename!r}")
+    return Path("/sys/fs/cgroup") / control_group.lstrip("/") / filename
+
+
+def parse_io_stats(contents):
+    """Parse cgroup-v2 io.stat without summing stacked device counters."""
+    devices = {}
+    required = {"rbytes", "wbytes", "rios", "wios"}
+    for line in contents.splitlines():
+        fields = line.split()
+        if not fields or not re.fullmatch(r"[0-9]+:[0-9]+", fields[0]):
+            raise RuntimeError("malformed cgroup io.stat device row")
+        device = fields[0]
+        if device in devices:
+            raise RuntimeError(f"duplicate cgroup io.stat device {device}")
+        counters = {}
+        for field in fields[1:]:
+            key, separator, raw_value = field.partition("=")
+            if not separator or not key or key in counters:
+                raise RuntimeError(f"malformed cgroup io.stat counter {field!r}")
+            try:
+                value = int(raw_value)
+            except ValueError as error:
+                raise RuntimeError(f"invalid cgroup io.stat counter {field!r}") from error
+            if value < 0:
+                raise RuntimeError(f"negative cgroup io.stat counter {field!r}")
+            counters[key] = value
+        if not required.issubset(counters):
+            raise RuntimeError(
+                f"cgroup io.stat device {device} lacks required counters: "
+                f"{sorted(required - counters.keys())}"
+            )
+        devices[device] = counters
+    if not devices:
+        raise RuntimeError("cgroup io.stat has no device counters")
+    return devices
+
+
+def io_stats(control_group):
+    return parse_io_stats(cgroup_file(control_group, "io.stat").read_text())
+
+
+def machine_status(binary, db):
+    command = [str(binary), "--db", str(db), "--json", "status"]
+    result = subprocess.run(command, text=True, capture_output=True, timeout=30)
+    if result.returncode:
+        raise RuntimeError(f"candidate status exited {result.returncode}: {result.stderr[-1000:]}")
+    try:
+        status = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"candidate status did not return JSON: {error}") from error
+    if not isinstance(status, dict):
+        raise RuntimeError("candidate status JSON is not an object")
+    return status
+
+
+def running_binary_hash(pid):
+    if int(pid) <= 0:
+        raise RuntimeError(f"systemd reports invalid MainPID {pid!r}")
+    return sha256_file(Path(f"/proc/{int(pid)}/exe"))
+
+
+def history_state(db):
+    uri = f"file:{Path(db).resolve()}?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=10) as conn:
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("BEGIN")
+        count, maximum = conn.execute(
+            "SELECT COUNT(*),COALESCE(MAX(bucket),0) FROM growth").fetchone()
+        return {"rows": int(count), "max_bucket": int(maximum)}
+
+
+CRITICAL_JOURNAL_MARKERS = (
+    "directory accounting invariant failed",
+    "materialized index totals disagree with inode rows",
+    "fanotify queue overflow",
+    "inconsistent directory accounting",
+    "could not verify accounting",
+    "incomplete coverage",
+    "scan incomplete",
+    "rescan incomplete",
+    "scan failed",
+    "reconciliation failed",
+    "pending backlog exceeded",
+    "skip move-to (would cycle)",
+    "rescan failed",
+    "flush error",
+    "write error",
+    "panic",
+)
+
+
+def journal_state(unit, since):
+    result = subprocess.run(["journalctl", "-u", unit, "--since", since,
+                             "--no-pager", "-o", "short-iso-precise"],
+                            text=True, capture_output=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError(f"journalctl failed: {result.stderr.strip()}")
+    lines = result.stdout.splitlines()
+    relevant = []
+    for line in lines:
+        lower = line.lower()
+        if any(marker in lower for marker in CRITICAL_JOURNAL_MARKERS):
+            relevant.append(line)
+            continue
+        if "coverage issues" in lower:
+            count = re.search(r"(\d+)\s+coverage issues?", lower)
+            if count is None or int(count.group(1)) > 0:
+                relevant.append(line)
+    return {"since": since, "sha256": hashlib.sha256(result.stdout.encode()).hexdigest(),
+            "line_count": len(lines), "critical_event_count": len(relevant),
+            "critical_event_truncated": len(relevant) > 100,
+            "critical_events": relevant[:100]}
+
+
+DEFAULT_MAX_OBSERVATION_AGE_SECONDS = 20 * 60
+
+
+def healthy_pipeline(status, max_observation_age_seconds=DEFAULT_MAX_OBSERVATION_AGE_SECONDS):
+    """Validate freshness according to the daemon's declared consistency model.
+
+    Event-apply mode must be caught up. Scan-first mode deliberately remains
+    dirty when hints arrive, so its guarantee is a recent full observation and
+    verified accounting, not a drained event queue.
+    """
+    return pipeline_failure(status, max_observation_age_seconds) is None
+
+
+def pipeline_failure(status,
+                     max_observation_age_seconds=DEFAULT_MAX_OBSERVATION_AGE_SECONDS):
+    """Explain the first failed pipeline health condition for canary reports."""
+    if not isinstance(status, dict) or status.get("status_version") != 1:
+        return "status is not versioned"
+    if status.get("daemon_live") is not True:
+        return "daemon is not live"
+    if status.get("watch_status_available") is not True:
+        return "watch status is unavailable"
+    if status.get("paused") is not False:
+        reason = status.get("pause_reason")
+        return f"daemon is paused{f' ({reason})' if reason else ''}"
+    if status.get("write_error") is not None:
+        return "daemon reports a write error"
+    if status.get("scan_first") is True:
+        age = status.get("last_scan_age_seconds")
+        if (not isinstance(age, (int, float)) or isinstance(age, bool)
+                or not 0 <= age <= max_observation_age_seconds):
+            return ("last full observation is missing, invalid, or older than "
+                    f"{max_observation_age_seconds} seconds")
+        if (not isinstance(status.get("last_scan_timestamp_seconds"), int)
+                or status["last_scan_timestamp_seconds"] <= 0):
+            return "last full observation timestamp is missing or invalid"
+        return None
+    if (status.get("caught_up") is not True
+            or status.get("scan_in_progress") is not False
+            or status.get("dirty") is not False
+            or status.get("pending_updates") != 0
+            or status.get("events_dropped") != 0):
+        return "event pipeline is not caught up"
+    return None
+
+
+def observation_completed_during_sample(before, after, before_observed_at,
+                                        after_observed_at,
+                                        max_observation_age_seconds):
+    """Accept a stale pre-scan snapshot only if that scan completed by sample end.
+
+    A scan-first observation can take longer than the freshness budget. The
+    before snapshot may therefore refer to the prior scan even while a new scan
+    is near completion. Never waive freshness unless the post-snapshot is
+    independently healthy and proves a newer completed observation.
+    """
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    if before.get("scan_first") is not True or before.get("scan_in_progress") is not True:
+        return False
+    if after.get("scan_first") is not True or after.get("scan_in_progress") is not False:
+        return False
+    before_failure = pipeline_failure(before, max_observation_age_seconds)
+    if before_failure != (
+            "last full observation is missing, invalid, or older than "
+            f"{max_observation_age_seconds} seconds"):
+        return False
+    age = before.get("last_scan_age_seconds")
+    if (not isinstance(age, (int, float)) or isinstance(age, bool)
+            or not math.isfinite(age) or age <= max_observation_age_seconds):
+        return False
+    if pipeline_failure(after, max_observation_age_seconds) is not None:
+        return False
+    progress = before.get("scan_progress")
+    if not isinstance(progress, dict):
+        return False
+    started_at = progress.get("started_at_seconds")
+    previous_scan = before.get("last_scan_timestamp_seconds")
+    completed_scan = after.get("last_scan_timestamp_seconds")
+    if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
+           for value in (started_at, previous_scan, completed_scan)):
+        return False
+    if started_at <= previous_scan or completed_scan < started_at:
+        return False
+    try:
+        before_at = float(before_observed_at)
+        after_at = float(after_observed_at)
+    except (TypeError, ValueError):
+        return False
+    if (not math.isfinite(before_at) or not math.isfinite(after_at)
+            or after_at < before_at or started_at > before_at + 5):
+        return False
+    return completed_scan > previous_scan
+
+
+def journal_failures(journal, scan_first):
+    """Return critical journal evidence, allowing scan-first hint loss only.
+
+    In scan-first mode fanotify overflow invalidates freshness until the next
+    observation; it does not invalidate the filesystem snapshot as a source of
+    truth. The observation-age gate and independent accounting snapshot still
+    apply. Truncated or unclassified critical journal records fail closed.
+    """
+    if not isinstance(journal, dict):
+        return None
+    lines = journal.get("critical_events", [])
+    count = journal.get("critical_event_count", 0)
+    if not isinstance(count, int) or count < 0:
+        return ["invalid critical journal event count"]
+    if not scan_first:
+        if count and (not lines or journal.get("critical_event_truncated", False)
+                      or count > len(lines)):
+            return lines or ["unclassified critical journal events"]
+        return lines if count else []
+    if journal.get("critical_event_truncated", False) or count > len(lines):
+        return lines or ["unclassified critical journal events"]
+    return [line for line in lines if "fanotify queue overflow" not in line.lower()]
+
+
+def evaluate_sample(sample, expected_binary_sha256, expected_unit_sha256,
+                    previous_restarts=None, previous_history_bucket=None,
+                    previous_memory_events=None, now_timestamp=None,
+                    max_observation_age_seconds=DEFAULT_MAX_OBSERVATION_AGE_SECONDS):
+    """Return all fail-closed reasons for one captured canary sample."""
+    errors = []
+    for key in ("binary_sha256", "service_binary_sha256", "process_binary_sha256"):
+        if sample.get(key) != expected_binary_sha256:
+            errors.append(f"{key} differs from expected candidate")
+    if sample.get("unit_sha256") != expected_unit_sha256:
+        errors.append("unit_sha256 differs from expected candidate unit")
+    scan_first_status = any(
+        isinstance(sample.get(key), dict) and sample[key].get("scan_first") is True
+        for key in ("status_before", "status_after"))
+    scan_completed_during_sample = observation_completed_during_sample(
+        sample.get("status_before"), sample.get("status_after"),
+        sample.get("status_before_observed_at_seconds"),
+        sample.get("status_after_observed_at_seconds"),
+        max_observation_age_seconds)
+    for key in ("status_before", "status_after"):
+        status = sample.get(key)
+        failure = pipeline_failure(status, max_observation_age_seconds)
+        if (key == "status_before" and scan_completed_during_sample
+                and failure == (
+                    "last full observation is missing, invalid, or older than "
+                    f"{max_observation_age_seconds} seconds")):
+            failure = None
+        if failure is not None:
+            errors.append(f"{key}: {failure}")
+        else:
+            observed_at = sample.get(f"{key}_observed_at_seconds")
+            now = time.time() if now_timestamp is None else now_timestamp
+            if observed_at is not None:
+                try:
+                    now = float(observed_at)
+                except (TypeError, ValueError):
+                    errors.append(f"{key} observation timestamp is invalid")
+                    continue
+            updated = status.get("watch_status_updated_at_seconds")
+            try:
+                age = now - float(updated)
+                if not math.isfinite(age) or age > 120 or age < -5:
+                    errors.append(f"{key} watch heartbeat is stale or in the future")
+            except (TypeError, ValueError):
+                errors.append(f"{key} watch heartbeat timestamp is missing or invalid")
+    service_state = sample.get("service", {}).get("ActiveState")
+    scan_running = any(
+        isinstance(sample.get(key), dict)
+        and sample[key].get("scan_first") is True
+        and (sample[key].get("scan_in_progress") is True
+             or sample[key].get("dirty_reason") ==
+             "reconciliation accounting verification pending")
+        for key in ("status_before", "status_after"))
+    if service_state != "active" and not (service_state == "reloading" and scan_running):
+        errors.append("systemd service is not active or performing a scan-first observation")
+    try:
+        restarts = int(sample["service"]["NRestarts"])
+        main_pid = int(sample["service"]["MainPID"])
+        memory_current = int(sample["service"]["MemoryCurrent"])
+        memory_max = int(sample["service"]["MemoryMax"])
+        quota = sample["service"].get("CPUQuotaPerSecUSec", "")
+        if int(sample["service"]["ExecMainStatus"]) != 0:
+            errors.append("systemd ExecMainStatus is nonzero")
+        if main_pid <= 0:
+            errors.append("systemd MainPID is not positive")
+        if memory_current > memory_max:
+            errors.append("service MemoryCurrent exceeds MemoryMax")
+        if quota != "1s":
+            errors.append("service CPU quota differs from the qualified 100% limit")
+        if sample["service"].get("Restart") != "always":
+            errors.append("service restart policy differs from the qualified unit")
+        if sample["service"].get("WatchdogUSec") != "45s":
+            errors.append("service watchdog differs from the qualified unit")
+        if sample["service"].get("DropInPaths"):
+            errors.append("unexpected systemd drop-in overrides the qualified unit")
+        if previous_restarts is not None and restarts != previous_restarts:
+            errors.append("service restart count changed during canary")
+    except (KeyError, TypeError, ValueError):
+        errors.append("systemd service properties are incomplete or invalid")
+
+    block_io = sample.get("block_io")
+    required_io_counters = {"rbytes", "wbytes", "rios", "wios"}
+    if not isinstance(block_io, dict) or not block_io:
+        errors.append("cgroup per-device I/O counters are missing")
+    else:
+        for device, counters in block_io.items():
+            if (not re.fullmatch(r"[0-9]+:[0-9]+", str(device))
+                    or not isinstance(counters, dict)
+                    or not required_io_counters.issubset(counters)):
+                errors.append("cgroup per-device I/O counters are malformed")
+                break
+            if any(not isinstance(counters[key], int) or isinstance(counters[key], bool)
+                   or counters[key] < 0 for key in required_io_counters):
+                errors.append("cgroup per-device I/O counters are invalid")
+                break
+
+    if not isinstance(sample.get("accounting"), dict) or not OBSERVER.invariant_passed(sample["accounting"]):
+        errors.append("exact accounting snapshot failed")
+    elif sample["accounting"].get("schema_version") != EXPECTED_SCHEMA_VERSION:
+        actual = sample["accounting"].get("schema_version")
+        errors.append(
+            f"database schema {actual!r} differs from candidate schema {EXPECTED_SCHEMA_VERSION}"
+        )
+    history = sample.get("history")
+    if not isinstance(history, dict):
+        errors.append("growth history snapshot is missing")
+    elif previous_history_bucket is not None and history.get("max_bucket", -1) < previous_history_bucket:
+        errors.append("growth history maximum bucket moved backwards")
+    journal = sample.get("journal")
+    if not isinstance(journal, dict):
+        errors.append("journal sample is missing")
+    elif journal_failures(journal, scan_first_status):
+        errors.append("journal contains an accounting, overflow, scan, or write failure")
+    events = sample.get("memory_events")
+    if not isinstance(events, dict):
+        errors.append("cgroup memory.events counters are missing")
+    elif previous_memory_events is not None:
+        for key in ("max", "oom", "oom_kill", "oom_group_kill"):
+            if events.get(key, -1) > previous_memory_events.get(key, -1):
+                errors.append(f"cgroup memory.events {key} counter increased")
+    return errors
+
+
+def capture_sample(binary, service_binary, db, unit, journal_since):
+    status_before = machine_status(binary, db)
+    status_before_observed_at = time.time()
+    service = unit_properties(unit)
+    service_observed_at = time.time()
+    block_io = io_stats(service.get("ControlGroup", ""))
+    block_io_observed_at = time.time()
+    candidate_hash = sha256_file(binary)
+    service_hash = sha256_file(service_binary)
+    process_hash = running_binary_hash(service.get("MainPID", "0"))
+    fragment = service.get("FragmentPath", "")
+    if not fragment or not Path(fragment).is_file():
+        raise RuntimeError(f"systemd unit FragmentPath is unavailable: {fragment!r}")
+    unit_hash = sha256_file(fragment)
+    events = memory_events(service.get("ControlGroup", ""))
+
+    OBSERVER.DB = Path(db)
+    accounting = OBSERVER.snapshot()
+    history = history_state(db)
+    status_after = machine_status(binary, db)
+    status_after_observed_at = time.time()
+    journal = journal_state(unit, journal_since)
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return {"captured_at_utc": now, "binary_sha256": candidate_hash,
+            "service_binary_sha256": service_hash, "process_binary_sha256": process_hash,
+            "unit_path": fragment, "unit_sha256": unit_hash,
+            "service": service, "service_observed_at_seconds": service_observed_at,
+            "block_io": block_io, "block_io_observed_at_seconds": block_io_observed_at,
+            "memory_events": events, "status_before": status_before,
+            "status_before_observed_at_seconds": status_before_observed_at,
+            "accounting": accounting, "history": history, "journal": journal,
+            "status_after": status_after,
+            "status_after_observed_at_seconds": status_after_observed_at}
+
+
+def append_record(fd, record):
+    payload = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    offset = 0
+    while offset < len(payload):
+        offset += os.write(fd, payload[offset:])
+    os.fsync(fd)
+
+
+def minimum_sample_count(interval_seconds):
+    return (24 * 60 * 60 + interval_seconds - 1) // interval_seconds + 1
+
+
+def next_sample_delay(start_monotonic, completed_samples, interval_seconds,
+                      now_monotonic=None):
+    """Return time remaining until the fixed deadline after completed samples."""
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    deadline = start_monotonic + completed_samples * interval_seconds
+    return deadline - now
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", type=Path, default=Path("/usr/bin/dux"))
+    parser.add_argument("--service-binary", type=Path, default=Path("/usr/bin/dux"))
+    parser.add_argument("--db", type=Path, default=Path("/var/lib/dux/dux.db"))
+    parser.add_argument("--unit", default="dux.service")
+    parser.add_argument("--expected-binary-sha256", required=True)
+    parser.add_argument("--expected-unit-sha256", required=True)
+    parser.add_argument("--interval-seconds", type=int, default=3600,
+                        help="sample interval, 60..3600 seconds")
+    parser.add_argument("--max-observation-age-seconds", type=int,
+                        default=DEFAULT_MAX_OBSERVATION_AGE_SECONDS,
+                        help="maximum age of the last full scan in scan-first mode")
+    parser.add_argument("--output", type=Path, required=True,
+                        help="new root-readable evidence file; must not already exist")
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error("root is required to read the complete system index and process executable")
+    if not 60 <= args.interval_seconds <= 3600:
+        parser.error("interval must be 60..3600 seconds")
+    if not 900 <= args.max_observation_age_seconds <= 3600:
+        parser.error("maximum observation age must be 900..3600 seconds")
+    for name, expected in (("binary", args.expected_binary_sha256),
+                           ("unit", args.expected_unit_sha256)):
+        if len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected):
+            parser.error(f"expected {name} SHA-256 must be 64 lowercase hexadecimal characters")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    if args.output.resolve() == args.db.resolve() or args.db.resolve() in args.output.resolve().parents:
+        parser.error("evidence output must be outside the index database directory")
+    fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600)
+    os.fchmod(fd, 0o600)
+    start = time.monotonic()
+    end = start + 24 * 60 * 60
+    count = 0
+    previous_restarts = None
+    previous_history_bucket = None
+    previous_memory_events = None
+    previous_sample_at = (datetime.datetime.now(datetime.timezone.utc)
+                          - datetime.timedelta(minutes=1)).isoformat()
+    common = {"format_version": 1, "expected_binary_sha256": args.expected_binary_sha256,
+              "expected_unit_sha256": args.expected_unit_sha256, "unit": args.unit,
+              "db": str(args.db), "interval_seconds": args.interval_seconds,
+              "max_observation_age_seconds": args.max_observation_age_seconds,
+              "duration_seconds": 86400,
+              "monitor_sha256": sha256_file(__file__),
+              "observer_sha256": sha256_file(OBSERVER_PATH)}
+    try:
+        append_record(fd, {**common, "event": "canary_started",
+                           "started_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+        while True:
+            delay = next_sample_delay(start, count, args.interval_seconds)
+            if delay > 0:
+                time.sleep(delay)
+            sample_started = time.monotonic()
+            try:
+                sample = capture_sample(args.binary, args.service_binary, args.db, args.unit,
+                                        previous_sample_at)
+                sample["collection_duration_seconds"] = round(
+                    time.monotonic() - sample_started, 3)
+                errors = evaluate_sample(sample, args.expected_binary_sha256,
+                                         args.expected_unit_sha256, previous_restarts,
+                                         previous_history_bucket, previous_memory_events,
+                                         max_observation_age_seconds=args.max_observation_age_seconds)
+                restarts = int(sample["service"]["NRestarts"])
+                history_bucket = int(sample["history"]["max_bucket"])
+                events = sample["memory_events"]
+                append_record(fd, {**common, "event": "sample", "sample_number": count + 1,
+                                   "result": "passed" if not errors else "failed",
+                                   "errors": errors, **sample})
+                count += 1
+                if errors:
+                    append_record(fd, {**common, "event": "canary_failed",
+                                       "failed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                       "sample_number": count, "errors": errors})
+                    return 1
+                if previous_restarts is None:
+                    previous_restarts = restarts
+                previous_history_bucket = history_bucket
+                if previous_memory_events is None:
+                    previous_memory_events = events
+                previous_sample_at = sample["captured_at_utc"]
+            except Exception as error:
+                append_record(fd, {**common, "event": "canary_failed",
+                                   "failed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                   "sample_number": count + 1,
+                                   "errors": [f"sample collection failed: {type(error).__name__}: {error}"]})
+                return 1
+
+            elapsed = time.monotonic() - start
+            if elapsed >= 24 * 60 * 60:
+                minimum_samples = minimum_sample_count(args.interval_seconds)
+                if count < minimum_samples:
+                    errors = [f"only {count} samples recorded; need at least {minimum_samples} over 24 hours"]
+                    append_record(fd, {**common, "event": "canary_failed",
+                                       "failed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                       "sample_number": count, "errors": errors})
+                    print("FAIL 24-hour canary: insufficient hourly samples; see evidence", args.output, flush=True)
+                    return 1
+                append_record(fd, {**common, "event": "canary_completed",
+                                   "completed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                   "elapsed_seconds": elapsed, "samples_passed": count,
+                                   "minimum_samples": minimum_samples})
+                print(f"PASS 24-hour canary: {count} exact health/accounting samples; evidence {args.output}", flush=True)
+                return 0
+            delay = next_sample_delay(start, count, args.interval_seconds)
+            if delay < 0:
+                errors = [
+                    f"sample collection exceeded the {args.interval_seconds}-second cadence "
+                    f"({-delay:.3f} seconds late)"
+                ]
+                append_record(fd, {**common, "event": "canary_failed",
+                                   "failed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                   "sample_number": count, "errors": errors})
+                return 1
+            time.sleep(delay)
+    finally:
+        os.close(fd)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,11 @@
+{
+  "checked_at_utc": "2026-11-08T11:57Z",
+  "source": "VPS2 /var/lib/dux/dux.db opened read-only",
+  "check_context": "A new bounded retry began at 11:57:14; the SQLite read snapshot retained the last committed database while that scan was in progress.",
+  "quick_check": "ok",
+  "quick_check_seconds": 15.94,
+  "inode_rows": 1444711,
+  "non_integer_recursive_bytes": 0,
+  "dirty_reason_in_snapshot": "periodic filesystem observation in progress",
+  "interpretation": "Structural SQLite and storage-class checks passed; they do not establish a complete or current filesystem view."
+}

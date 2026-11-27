@@ -1,0 +1,27 @@
+{
+  "captured_at_utc": "2026-11-10T11:12:55Z",
+  "collection": "read-only dux status --json, df, and uptime",
+  "production_version": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "daemon_live": true,
+  "dirty": true,
+  "caught_up": false,
+  "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+  "behind_seconds": 236523.707,
+  "last_scan_timestamp_utc": "2026-11-05T12:49:22Z",
+  "last_scan_age_seconds": 426213,
+  "kernel_overflow_notifications": 742,
+  "events_dropped": 2518862,
+  "pending_updates": 3,
+  "index_nodes": 1291869,
+  "index_bytes_on_disk": 3436044288,
+  "wal_bytes": 134217728,
+  "scan_in_progress": false,
+  "write_error": null,
+  "root_disk": {
+    "size": "185G",
+    "used": "116G",
+    "available": "62G",
+    "use_percent": 66
+  },
+  "load_average": [4.34, 5.02, 7.24]
+}

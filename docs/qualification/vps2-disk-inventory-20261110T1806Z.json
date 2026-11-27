@@ -1,0 +1,46 @@
+{
+  "observed_at_utc": "2026-11-10T18:06:36Z",
+  "host": "192.168.5.106",
+  "root_filesystem": {
+    "size_bytes": 99012476928,
+    "used_bytes": 84007763968,
+    "available_bytes": 10424963072,
+    "use_percent": 89
+  },
+  "directory_inventory": {
+    "approximate_observation_window_utc": "2026-11-10T17:49Z/17:53Z",
+    "top_level_du_gib_rounded": {
+      "/var": 59,
+      "/root": 8,
+      "/usr": 6.2,
+      "/srv": 1.1,
+      "/home": 0.215
+    },
+    "selected_var_paths_gib_rounded": {
+      "/var/tmp": 5.3,
+      "/var/log": 4.5
+    },
+    "systemd_journal_disk_usage": "4.0G",
+    "selected_var_tmp_entries_gib_rounded": {
+      "/var/tmp/dux-cargo": 1.0,
+      "/var/tmp/dux-rustup": 0.84,
+      "/var/tmp/dux-readiness-release116": 0.59,
+      "/var/tmp/claude-dux": 0.38,
+      "/var/tmp/dux-candidate-0b81fa8": 0.37,
+      "/var/tmp/dux-perf-target-baseline": 0.24,
+      "/var/tmp/dux-production-build-0b81fa8": 0.24,
+      "/var/tmp/dux-musl-build-*": 0.47
+    },
+    "walk_limitations": "The full /var traversal was interrupted after I/O pressure rose; the listed top-level /var children are partial, not a complete breakdown."
+  },
+  "preserved_paths": [
+    "/var/tmp/dux-r132-soak-20261110 (active 72-hour soak input and binary)",
+    "/var/tmp/claude-dux (dirty source checkout; 14 modified files; patch preserved in this repository)",
+    "/var/log and systemd journal (operational logs; not treated as temporary data)"
+  ],
+  "other_test_host_limits": [
+    "KVM unavailable on this host (/dev/kvm absent), so it cannot host the disposable package VM.",
+    "Root disk has about 9.7 GiB available; avoid adding a second VM or large build until space is recovered."
+  ],
+  "cleanup": "No files were deleted in this inventory; several directories contain active or unreviewed test/source data."
+}

@@ -1,0 +1,5250 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.74.0"
+  },
+  "ReportID": "01a1bf6c-1daf-74e6-9f69-817dac2b7b32",
+  "CreatedAt": "2026-11-09T08:28:16.175322813Z",
+  "ArtifactID": "sha256:10bbdbb52f320e0569a53f3b4e0c1b775e617d8d0f5f594f7282e4ac20e5820f",
+  "ArtifactName": ".",
+  "ArtifactType": "repository",
+  "Metadata": {
+    "RepoURL": "https://github.com/ftahirops/dux.git",
+    "Branch": "hardening/stale-dfid-classification-review",
+    "Commit": "b14a35991273622ce9c89c46c1a194570e4090d7",
+    "CommitMsg": "Qualify scan-first recovery and harden retry cleanup",
+    "Author": "Farhan Tahir \u003cfarhan.003@gmail.com\u003e",
+    "Committer": "Farhan Tahir \u003cfarhan.003@gmail.com\u003e"
+  },
+  "Results": [
+    {
+      "Target": "Cargo.lock",
+      "Class": "lang-pkgs",
+      "Type": "cargo",
+      "Packages": [
+        {
+          "ID": "dux@0.6.3",
+          "Name": "dux",
+          "Identifier": {
+            "PURL": "pkg:cargo/dux@0.6.3",
+            "UID": "ccbd9908b365c01c"
+          },
+          "Version": "0.6.3",
+          "Relationship": "root",
+          "DependsOn": [
+            "anyhow@1.0.103",
+            "clap@4.6.1",
+            "crossbeam-channel@0.5.15",
+            "crossterm@0.29.0",
+            "humansize@2.1.3",
+            "jwalk@0.8.1",
+            "libc@0.2.186",
+            "nix@0.29.0",
+            "ratatui@0.30.2",
+            "rayon@1.12.0",
+            "rusqlite@0.41.1",
+            "serde_json@1.0.150",
+            "sha2@0.10.9",
+            "tracing-subscriber@0.3.23",
+            "tracing@0.1.44",
+            "unicode-width@0.2.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 465,
+              "EndLine": 485
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "anyhow@1.0.103",
+          "Name": "anyhow",
+          "Identifier": {
+            "PURL": "pkg:cargo/anyhow@1.0.103",
+            "UID": "99d7ac676978c252"
+          },
+          "Version": "1.0.103",
+          "Relationship": "direct",
+          "Locations": [
+            {
+              "StartLine": 70,
+              "EndLine": 74
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "clap@4.6.1",
+          "Name": "clap",
+          "Identifier": {
+            "PURL": "pkg:cargo/clap@4.6.1",
+            "UID": "f7656c6171b2518b"
+          },
+          "Version": "4.6.1",
+          "Relationship": "direct",
+          "DependsOn": [
+            "clap_builder@4.6.0",
+            "clap_derive@4.6.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 191,
+              "EndLine": 199
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-channel@0.5.15",
+          "Name": "crossbeam-channel",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-channel@0.5.15",
+            "UID": "a64343667690a5fb"
+          },
+          "Version": "0.5.15",
+          "Relationship": "direct",
+          "DependsOn": [
+            "crossbeam-utils@0.8.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 288,
+              "EndLine": 295
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossterm@0.29.0",
+          "Name": "crossterm",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossterm@0.29.0",
+            "UID": "5888156007817457"
+          },
+          "Version": "0.29.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "crossterm_winapi@0.9.1",
+            "derive_more@2.1.1",
+            "document-features@0.2.12",
+            "mio@1.2.1",
+            "parking_lot@0.12.5",
+            "rustix@1.1.5",
+            "signal-hook-mio@0.2.5",
+            "signal-hook@0.3.18",
+            "winapi@0.3.9"
+          ],
+          "Locations": [
+            {
+              "StartLine": 331,
+              "EndLine": 347
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "humansize@2.1.3",
+          "Name": "humansize",
+          "Identifier": {
+            "PURL": "pkg:cargo/humansize@2.1.3",
+            "UID": "1d735515ceb8f76c"
+          },
+          "Version": "2.1.3",
+          "Relationship": "direct",
+          "DependsOn": [
+            "libm@0.2.16"
+          ],
+          "Locations": [
+            {
+              "StartLine": 670,
+              "EndLine": 677
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "jwalk@0.8.1",
+          "Name": "jwalk",
+          "Identifier": {
+            "PURL": "pkg:cargo/jwalk@0.8.1",
+            "UID": "399c8e72da80c2f2"
+          },
+          "Version": "0.8.1",
+          "Relationship": "direct",
+          "DependsOn": [
+            "crossbeam@0.8.4",
+            "rayon@1.12.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 739,
+              "EndLine": 745
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "libc@0.2.186",
+          "Name": "libc",
+          "Identifier": {
+            "PURL": "pkg:cargo/libc@0.2.186",
+            "UID": "b7f0f4ef8e7b5d26"
+          },
+          "Version": "0.2.186",
+          "Relationship": "direct",
+          "Locations": [
+            {
+              "StartLine": 770,
+              "EndLine": 774
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "nix@0.29.0",
+          "Name": "nix",
+          "Identifier": {
+            "PURL": "pkg:cargo/nix@0.29.0",
+            "UID": "52fe6b92346f68ba"
+          },
+          "Version": "0.29.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "cfg-if@1.0.4",
+            "cfg_aliases@0.2.1",
+            "libc@0.2.186"
+          ],
+          "Locations": [
+            {
+              "StartLine": 896,
+              "EndLine": 906
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ratatui@0.30.2",
+          "Name": "ratatui",
+          "Identifier": {
+            "PURL": "pkg:cargo/ratatui@0.30.2",
+            "UID": "42afa5ec8e3ac160"
+          },
+          "Version": "0.30.2",
+          "Relationship": "direct",
+          "DependsOn": [
+            "instability@0.3.12",
+            "ratatui-core@0.1.2",
+            "ratatui-crossterm@0.1.2",
+            "ratatui-termina@0.1.0",
+            "ratatui-termwiz@0.1.2",
+            "ratatui-widgets@0.3.2",
+            "serde@1.0.228"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1226,
+              "EndLine": 1239
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rayon@1.12.0",
+          "Name": "rayon",
+          "Identifier": {
+            "PURL": "pkg:cargo/rayon@1.12.0",
+            "UID": "cb19d2561720d81e"
+          },
+          "Version": "1.12.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "either@1.16.0",
+            "rayon-core@1.13.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1316,
+              "EndLine": 1324
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rusqlite@0.41.1",
+          "Name": "rusqlite",
+          "Identifier": {
+            "PURL": "pkg:cargo/rusqlite@0.41.1",
+            "UID": "4e01335d1b716119"
+          },
+          "Version": "0.41.1",
+          "Relationship": "direct",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "fallible-iterator@0.3.0",
+            "fallible-streaming-iterator@0.1.9",
+            "hashlink@0.12.2",
+            "libsqlite3-sys@0.39.1",
+            "smallvec@1.15.2",
+            "sqlite-wasm-rs@0.6.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1383,
+              "EndLine": 1396
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "serde_json@1.0.150",
+          "Name": "serde_json",
+          "Identifier": {
+            "PURL": "pkg:cargo/serde_json@1.0.150",
+            "UID": "2dbf57fb79e6577e"
+          },
+          "Version": "1.0.150",
+          "Relationship": "direct",
+          "DependsOn": [
+            "itoa@1.0.18",
+            "memchr@2.8.2",
+            "serde@1.0.228",
+            "serde_core@1.0.228",
+            "zmij@1.0.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1474,
+              "EndLine": 1485
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "tracing@0.1.44",
+          "Name": "tracing",
+          "Identifier": {
+            "PURL": "pkg:cargo/tracing@0.1.44",
+            "UID": "8ea35fe0883aaad3"
+          },
+          "Version": "0.1.44",
+          "Relationship": "direct",
+          "DependsOn": [
+            "pin-project-lite@0.2.17",
+            "tracing-attributes@0.1.31",
+            "tracing-core@0.1.36"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1797,
+              "EndLine": 1806
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "tracing-subscriber@0.3.23",
+          "Name": "tracing-subscriber",
+          "Identifier": {
+            "PURL": "pkg:cargo/tracing-subscriber@0.3.23",
+            "UID": "2e867dfb1b9998c6"
+          },
+          "Version": "0.3.23",
+          "Relationship": "direct",
+          "DependsOn": [
+            "matchers@0.2.0",
+            "nu-ansi-term@0.50.3",
+            "once_cell@1.21.4",
+            "regex-automata@0.4.14",
+            "sharded-slab@0.1.7",
+            "smallvec@1.15.2",
+            "thread_local@1.1.9",
+            "tracing-core@0.1.36",
+            "tracing-log@0.2.0",
+            "tracing@0.1.44"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1840,
+              "EndLine": 1856
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "unicode-width@0.2.2",
+          "Name": "unicode-width",
+          "Identifier": {
+            "PURL": "pkg:cargo/unicode-width@0.2.2",
+            "UID": "741bf6b2e2bb9cb"
+          },
+          "Version": "0.2.2",
+          "Relationship": "direct",
+          "Locations": [
+            {
+              "StartLine": 1893,
+              "EndLine": 1897
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "aho-corasick@1.1.4",
+          "Name": "aho-corasick",
+          "Identifier": {
+            "PURL": "pkg:cargo/aho-corasick@1.1.4",
+            "UID": "852332c4933214e9"
+          },
+          "Version": "1.1.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "memchr@2.8.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 5,
+              "EndLine": 12
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "allocator-api2@0.2.21",
+          "Name": "allocator-api2",
+          "Identifier": {
+            "PURL": "pkg:cargo/allocator-api2@0.2.21",
+            "UID": "881b39b9ab827f03"
+          },
+          "Version": "0.2.21",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 14,
+              "EndLine": 18
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "anstream@1.0.0",
+          "Name": "anstream",
+          "Identifier": {
+            "PURL": "pkg:cargo/anstream@1.0.0",
+            "UID": "4d83093a20660c0d"
+          },
+          "Version": "1.0.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "anstyle-parse@1.0.0",
+            "anstyle-query@1.1.5",
+            "anstyle-wincon@3.0.11",
+            "anstyle@1.0.14",
+            "colorchoice@1.0.5",
+            "is_terminal_polyfill@1.70.2",
+            "utf8parse@0.2.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 20,
+              "EndLine": 33
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "anstyle@1.0.14",
+          "Name": "anstyle",
+          "Identifier": {
+            "PURL": "pkg:cargo/anstyle@1.0.14",
+            "UID": "3a1af7e5857f9081"
+          },
+          "Version": "1.0.14",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 35,
+              "EndLine": 39
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "anstyle-parse@1.0.0",
+          "Name": "anstyle-parse",
+          "Identifier": {
+            "PURL": "pkg:cargo/anstyle-parse@1.0.0",
+            "UID": "3f4e5dcb13809f14"
+          },
+          "Version": "1.0.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "utf8parse@0.2.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 41,
+              "EndLine": 48
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "anstyle-query@1.1.5",
+          "Name": "anstyle-query",
+          "Identifier": {
+            "PURL": "pkg:cargo/anstyle-query@1.1.5",
+            "UID": "7629ae847afd8ab9"
+          },
+          "Version": "1.1.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 50,
+              "EndLine": 57
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "anstyle-wincon@3.0.11",
+          "Name": "anstyle-wincon",
+          "Identifier": {
+            "PURL": "pkg:cargo/anstyle-wincon@3.0.11",
+            "UID": "73f409232c92bbfd"
+          },
+          "Version": "3.0.11",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "anstyle@1.0.14",
+            "once_cell_polyfill@1.70.2",
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 59,
+              "EndLine": 68
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "approx@0.5.1",
+          "Name": "approx",
+          "Identifier": {
+            "PURL": "pkg:cargo/approx@0.5.1",
+            "UID": "1513d913dcedb06c"
+          },
+          "Version": "0.5.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "num-traits@0.2.19"
+          ],
+          "Locations": [
+            {
+              "StartLine": 76,
+              "EndLine": 83
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "atomic@0.6.1",
+          "Name": "atomic",
+          "Identifier": {
+            "PURL": "pkg:cargo/atomic@0.6.1",
+            "UID": "d2c2eaf8317ea17a"
+          },
+          "Version": "0.6.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bytemuck@1.25.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 85,
+              "EndLine": 92
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "autocfg@1.5.1",
+          "Name": "autocfg",
+          "Identifier": {
+            "PURL": "pkg:cargo/autocfg@1.5.1",
+            "UID": "4cf17d965e1e8f7f"
+          },
+          "Version": "1.5.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 94,
+              "EndLine": 98
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "base64@0.22.1",
+          "Name": "base64",
+          "Identifier": {
+            "PURL": "pkg:cargo/base64@0.22.1",
+            "UID": "ec12886483437710"
+          },
+          "Version": "0.22.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 100,
+              "EndLine": 104
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "bit-set@0.5.3",
+          "Name": "bit-set",
+          "Identifier": {
+            "PURL": "pkg:cargo/bit-set@0.5.3",
+            "UID": "18059d945cd3b7e6"
+          },
+          "Version": "0.5.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bit-vec@0.6.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 106,
+              "EndLine": 113
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "bit-vec@0.6.3",
+          "Name": "bit-vec",
+          "Identifier": {
+            "PURL": "pkg:cargo/bit-vec@0.6.3",
+            "UID": "e9f3a7e56b5b6828"
+          },
+          "Version": "0.6.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 115,
+              "EndLine": 119
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "bitflags@1.3.2",
+          "Name": "bitflags",
+          "Identifier": {
+            "PURL": "pkg:cargo/bitflags@1.3.2",
+            "UID": "3a3b8b038a6f1c5f"
+          },
+          "Version": "1.3.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 121,
+              "EndLine": 125
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "bitflags@2.13.0",
+          "Name": "bitflags",
+          "Identifier": {
+            "PURL": "pkg:cargo/bitflags@2.13.0",
+            "UID": "d073a9a6efb2aef2"
+          },
+          "Version": "2.13.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 127,
+              "EndLine": 131
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "block-buffer@0.10.4",
+          "Name": "block-buffer",
+          "Identifier": {
+            "PURL": "pkg:cargo/block-buffer@0.10.4",
+            "UID": "bb59166d5469c977"
+          },
+          "Version": "0.10.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "generic-array@0.14.7"
+          ],
+          "Locations": [
+            {
+              "StartLine": 133,
+              "EndLine": 140
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "bumpalo@3.20.3",
+          "Name": "bumpalo",
+          "Identifier": {
+            "PURL": "pkg:cargo/bumpalo@3.20.3",
+            "UID": "68b1adf853e9f3c8"
+          },
+          "Version": "3.20.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 142,
+              "EndLine": 146
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "by_address@1.2.1",
+          "Name": "by_address",
+          "Identifier": {
+            "PURL": "pkg:cargo/by_address@1.2.1",
+            "UID": "7a69960ca75cb95e"
+          },
+          "Version": "1.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 148,
+              "EndLine": 152
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "bytemuck@1.25.2",
+          "Name": "bytemuck",
+          "Identifier": {
+            "PURL": "pkg:cargo/bytemuck@1.25.2",
+            "UID": "6991ee9b2ae52b16"
+          },
+          "Version": "1.25.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 154,
+              "EndLine": 158
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "castaway@0.2.4",
+          "Name": "castaway",
+          "Identifier": {
+            "PURL": "pkg:cargo/castaway@0.2.4",
+            "UID": "9dbf93519e97fe7d"
+          },
+          "Version": "0.2.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "rustversion@1.0.22"
+          ],
+          "Locations": [
+            {
+              "StartLine": 160,
+              "EndLine": 167
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "cc@1.2.65",
+          "Name": "cc",
+          "Identifier": {
+            "PURL": "pkg:cargo/cc@1.2.65",
+            "UID": "34f894fc441c0b09"
+          },
+          "Version": "1.2.65",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "find-msvc-tools@0.1.9",
+            "shlex@2.0.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 169,
+              "EndLine": 177
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "cfg-if@1.0.4",
+          "Name": "cfg-if",
+          "Identifier": {
+            "PURL": "pkg:cargo/cfg-if@1.0.4",
+            "UID": "851775ccc127b01f"
+          },
+          "Version": "1.0.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 179,
+              "EndLine": 183
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "cfg_aliases@0.2.1",
+          "Name": "cfg_aliases",
+          "Identifier": {
+            "PURL": "pkg:cargo/cfg_aliases@0.2.1",
+            "UID": "89093df04e374d52"
+          },
+          "Version": "0.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 185,
+              "EndLine": 189
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "clap_builder@4.6.0",
+          "Name": "clap_builder",
+          "Identifier": {
+            "PURL": "pkg:cargo/clap_builder@4.6.0",
+            "UID": "8868e8c204b41f37"
+          },
+          "Version": "4.6.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "anstream@1.0.0",
+            "anstyle@1.0.14",
+            "clap_lex@1.1.0",
+            "strsim@0.11.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 201,
+              "EndLine": 211
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "clap_derive@4.6.1",
+          "Name": "clap_derive",
+          "Identifier": {
+            "PURL": "pkg:cargo/clap_derive@4.6.1",
+            "UID": "90b1a377038301d4"
+          },
+          "Version": "4.6.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "heck@0.5.0",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 213,
+              "EndLine": 223
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "clap_lex@1.1.0",
+          "Name": "clap_lex",
+          "Identifier": {
+            "PURL": "pkg:cargo/clap_lex@1.1.0",
+            "UID": "321f116376049cc2"
+          },
+          "Version": "1.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 225,
+              "EndLine": 229
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "colorchoice@1.0.5",
+          "Name": "colorchoice",
+          "Identifier": {
+            "PURL": "pkg:cargo/colorchoice@1.0.5",
+            "UID": "d2a9a4d162db4282"
+          },
+          "Version": "1.0.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 231,
+              "EndLine": 235
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "compact_str@0.9.1",
+          "Name": "compact_str",
+          "Identifier": {
+            "PURL": "pkg:cargo/compact_str@0.9.1",
+            "UID": "752a856870285937"
+          },
+          "Version": "0.9.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "castaway@0.2.4",
+            "cfg-if@1.0.4",
+            "itoa@1.0.18",
+            "rustversion@1.0.22",
+            "ryu@1.0.23",
+            "static_assertions@1.1.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 237,
+              "EndLine": 249
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "convert_case@0.10.0",
+          "Name": "convert_case",
+          "Identifier": {
+            "PURL": "pkg:cargo/convert_case@0.10.0",
+            "UID": "1a101615c72225e2"
+          },
+          "Version": "0.10.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "unicode-segmentation@1.13.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 251,
+              "EndLine": 258
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "cpufeatures@0.2.17",
+          "Name": "cpufeatures",
+          "Identifier": {
+            "PURL": "pkg:cargo/cpufeatures@0.2.17",
+            "UID": "f5e4ec132320a39c"
+          },
+          "Version": "0.2.17",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186"
+          ],
+          "Locations": [
+            {
+              "StartLine": 260,
+              "EndLine": 267
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "critical-section@1.2.0",
+          "Name": "critical-section",
+          "Identifier": {
+            "PURL": "pkg:cargo/critical-section@1.2.0",
+            "UID": "4dcbaf90d94dc006"
+          },
+          "Version": "1.2.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 269,
+              "EndLine": 273
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam@0.8.4",
+          "Name": "crossbeam",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam@0.8.4",
+            "UID": "4e52fcabb2e1d56d"
+          },
+          "Version": "0.8.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "crossbeam-channel@0.5.15",
+            "crossbeam-deque@0.8.6",
+            "crossbeam-epoch@0.9.20",
+            "crossbeam-queue@0.3.12",
+            "crossbeam-utils@0.8.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 275,
+              "EndLine": 286
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-deque@0.8.6",
+          "Name": "crossbeam-deque",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-deque@0.8.6",
+            "UID": "83072a0d4689f6a"
+          },
+          "Version": "0.8.6",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "crossbeam-epoch@0.9.20",
+            "crossbeam-utils@0.8.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 297,
+              "EndLine": 305
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-epoch@0.9.20",
+          "Name": "crossbeam-epoch",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-epoch@0.9.20",
+            "UID": "a28a23ccc264a196"
+          },
+          "Version": "0.9.20",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "crossbeam-utils@0.8.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 307,
+              "EndLine": 314
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-queue@0.3.12",
+          "Name": "crossbeam-queue",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-queue@0.3.12",
+            "UID": "74c02f27e7992e5c"
+          },
+          "Version": "0.3.12",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "crossbeam-utils@0.8.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 316,
+              "EndLine": 323
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-utils@0.8.21",
+          "Name": "crossbeam-utils",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-utils@0.8.21",
+            "UID": "c0424e8d120d0dff"
+          },
+          "Version": "0.8.21",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 325,
+              "EndLine": 329
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossterm_winapi@0.9.1",
+          "Name": "crossterm_winapi",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossterm_winapi@0.9.1",
+            "UID": "99fbc0338c5314b9"
+          },
+          "Version": "0.9.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "winapi@0.3.9"
+          ],
+          "Locations": [
+            {
+              "StartLine": 349,
+              "EndLine": 356
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crypto-common@0.1.7",
+          "Name": "crypto-common",
+          "Identifier": {
+            "PURL": "pkg:cargo/crypto-common@0.1.7",
+            "UID": "953ae46d1cccfcbc"
+          },
+          "Version": "0.1.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "generic-array@0.14.7",
+            "typenum@1.20.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 358,
+              "EndLine": 366
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "csscolorparser@0.6.2",
+          "Name": "csscolorparser",
+          "Identifier": {
+            "PURL": "pkg:cargo/csscolorparser@0.6.2",
+            "UID": "d1bcbac82d036241"
+          },
+          "Version": "0.6.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "lab@0.11.0",
+            "phf@0.11.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 368,
+              "EndLine": 376
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "darling@0.23.0",
+          "Name": "darling",
+          "Identifier": {
+            "PURL": "pkg:cargo/darling@0.23.0",
+            "UID": "b2df87898d7b9a19"
+          },
+          "Version": "0.23.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "darling_core@0.23.0",
+            "darling_macro@0.23.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 378,
+              "EndLine": 386
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "darling_core@0.23.0",
+          "Name": "darling_core",
+          "Identifier": {
+            "PURL": "pkg:cargo/darling_core@0.23.0",
+            "UID": "5c4e032ceb084a4f"
+          },
+          "Version": "0.23.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "ident_case@1.0.1",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "strsim@0.11.1",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 388,
+              "EndLine": 399
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "darling_macro@0.23.0",
+          "Name": "darling_macro",
+          "Identifier": {
+            "PURL": "pkg:cargo/darling_macro@0.23.0",
+            "UID": "b76906897f0a6041"
+          },
+          "Version": "0.23.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "darling_core@0.23.0",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 401,
+              "EndLine": 410
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "deltae@0.3.2",
+          "Name": "deltae",
+          "Identifier": {
+            "PURL": "pkg:cargo/deltae@0.3.2",
+            "UID": "85da3a4cff9406d4"
+          },
+          "Version": "0.3.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 412,
+              "EndLine": 416
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "deranged@0.5.9",
+          "Name": "deranged",
+          "Identifier": {
+            "PURL": "pkg:cargo/deranged@0.5.9",
+            "UID": "697689dd2141d055"
+          },
+          "Version": "0.5.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 418,
+              "EndLine": 422
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "derive_more@2.1.1",
+          "Name": "derive_more",
+          "Identifier": {
+            "PURL": "pkg:cargo/derive_more@2.1.1",
+            "UID": "b73205a1e733e57f"
+          },
+          "Version": "2.1.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "derive_more-impl@2.1.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 424,
+              "EndLine": 431
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "derive_more-impl@2.1.1",
+          "Name": "derive_more-impl",
+          "Identifier": {
+            "PURL": "pkg:cargo/derive_more-impl@2.1.1",
+            "UID": "3ea6fdea176ab789"
+          },
+          "Version": "2.1.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "convert_case@0.10.0",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "rustc_version@0.4.1",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 433,
+              "EndLine": 444
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "digest@0.10.7",
+          "Name": "digest",
+          "Identifier": {
+            "PURL": "pkg:cargo/digest@0.10.7",
+            "UID": "4ecbb8d6fc6600f4"
+          },
+          "Version": "0.10.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "block-buffer@0.10.4",
+            "crypto-common@0.1.7"
+          ],
+          "Locations": [
+            {
+              "StartLine": 446,
+              "EndLine": 454
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "document-features@0.2.12",
+          "Name": "document-features",
+          "Identifier": {
+            "PURL": "pkg:cargo/document-features@0.2.12",
+            "UID": "4f9536f23686471d"
+          },
+          "Version": "0.2.12",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "litrs@1.0.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 456,
+              "EndLine": 463
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "either@1.16.0",
+          "Name": "either",
+          "Identifier": {
+            "PURL": "pkg:cargo/either@1.16.0",
+            "UID": "c61956a4287a7270"
+          },
+          "Version": "1.16.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 487,
+              "EndLine": 491
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "equivalent@1.0.2",
+          "Name": "equivalent",
+          "Identifier": {
+            "PURL": "pkg:cargo/equivalent@1.0.2",
+            "UID": "519fabc3b120d5e1"
+          },
+          "Version": "1.0.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 493,
+              "EndLine": 497
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "errno@0.3.14",
+          "Name": "errno",
+          "Identifier": {
+            "PURL": "pkg:cargo/errno@0.3.14",
+            "UID": "49bb33d10eb8ac04"
+          },
+          "Version": "0.3.14",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186",
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 499,
+              "EndLine": 507
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "euclid@0.22.14",
+          "Name": "euclid",
+          "Identifier": {
+            "PURL": "pkg:cargo/euclid@0.22.14",
+            "UID": "47b8deedce66cc8a"
+          },
+          "Version": "0.22.14",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "num-traits@0.2.19"
+          ],
+          "Locations": [
+            {
+              "StartLine": 509,
+              "EndLine": 516
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "fallible-iterator@0.3.0",
+          "Name": "fallible-iterator",
+          "Identifier": {
+            "PURL": "pkg:cargo/fallible-iterator@0.3.0",
+            "UID": "ca2cbcdf32c0b102"
+          },
+          "Version": "0.3.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 518,
+              "EndLine": 522
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "fallible-streaming-iterator@0.1.9",
+          "Name": "fallible-streaming-iterator",
+          "Identifier": {
+            "PURL": "pkg:cargo/fallible-streaming-iterator@0.1.9",
+            "UID": "c1b30cd0cd455645"
+          },
+          "Version": "0.1.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 524,
+              "EndLine": 528
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "fancy-regex@0.11.0",
+          "Name": "fancy-regex",
+          "Identifier": {
+            "PURL": "pkg:cargo/fancy-regex@0.11.0",
+            "UID": "b1e5683090b2c0a8"
+          },
+          "Version": "0.11.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bit-set@0.5.3",
+            "regex@1.13.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 530,
+              "EndLine": 538
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "filedescriptor@0.8.3",
+          "Name": "filedescriptor",
+          "Identifier": {
+            "PURL": "pkg:cargo/filedescriptor@0.8.3",
+            "UID": "5c29a7214f8de6dc"
+          },
+          "Version": "0.8.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186",
+            "thiserror@1.0.69",
+            "winapi@0.3.9"
+          ],
+          "Locations": [
+            {
+              "StartLine": 540,
+              "EndLine": 549
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "find-msvc-tools@0.1.9",
+          "Name": "find-msvc-tools",
+          "Identifier": {
+            "PURL": "pkg:cargo/find-msvc-tools@0.1.9",
+            "UID": "6b84290eeab2f931"
+          },
+          "Version": "0.1.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 551,
+              "EndLine": 555
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "finl_unicode@1.5.0",
+          "Name": "finl_unicode",
+          "Identifier": {
+            "PURL": "pkg:cargo/finl_unicode@1.5.0",
+            "UID": "7ce86420affa9c"
+          },
+          "Version": "1.5.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 557,
+              "EndLine": 561
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "fixedbitset@0.4.2",
+          "Name": "fixedbitset",
+          "Identifier": {
+            "PURL": "pkg:cargo/fixedbitset@0.4.2",
+            "UID": "23627f1d99e1ef18"
+          },
+          "Version": "0.4.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 563,
+              "EndLine": 567
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "fnv@1.0.7",
+          "Name": "fnv",
+          "Identifier": {
+            "PURL": "pkg:cargo/fnv@1.0.7",
+            "UID": "a07fcfe935f31ea4"
+          },
+          "Version": "1.0.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 569,
+              "EndLine": 573
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "foldhash@0.2.0",
+          "Name": "foldhash",
+          "Identifier": {
+            "PURL": "pkg:cargo/foldhash@0.2.0",
+            "UID": "2c69d488c964eda0"
+          },
+          "Version": "0.2.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 575,
+              "EndLine": 579
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "futures-core@0.3.34",
+          "Name": "futures-core",
+          "Identifier": {
+            "PURL": "pkg:cargo/futures-core@0.3.34",
+            "UID": "5c896863872ced83"
+          },
+          "Version": "0.3.34",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 581,
+              "EndLine": 585
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "futures-task@0.3.34",
+          "Name": "futures-task",
+          "Identifier": {
+            "PURL": "pkg:cargo/futures-task@0.3.34",
+            "UID": "85d3989af9c68172"
+          },
+          "Version": "0.3.34",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 587,
+              "EndLine": 591
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "futures-util@0.3.34",
+          "Name": "futures-util",
+          "Identifier": {
+            "PURL": "pkg:cargo/futures-util@0.3.34",
+            "UID": "b47580c46208f0fa"
+          },
+          "Version": "0.3.34",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "futures-core@0.3.34",
+            "futures-task@0.3.34",
+            "pin-project-lite@0.2.17",
+            "slab@0.4.12"
+          ],
+          "Locations": [
+            {
+              "StartLine": 593,
+              "EndLine": 603
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "generic-array@0.14.7",
+          "Name": "generic-array",
+          "Identifier": {
+            "PURL": "pkg:cargo/generic-array@0.14.7",
+            "UID": "54ee39ee336e042"
+          },
+          "Version": "0.14.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "typenum@1.20.1",
+            "version_check@0.9.5"
+          ],
+          "Locations": [
+            {
+              "StartLine": 605,
+              "EndLine": 613
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "getrandom@0.3.4",
+          "Name": "getrandom",
+          "Identifier": {
+            "PURL": "pkg:cargo/getrandom@0.3.4",
+            "UID": "7fb796a0d7e9d50"
+          },
+          "Version": "0.3.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4",
+            "libc@0.2.186",
+            "r-efi@5.3.0",
+            "wasip2@1.0.4+wasi-0.2.12"
+          ],
+          "Locations": [
+            {
+              "StartLine": 615,
+              "EndLine": 625
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "getrandom@0.4.3",
+          "Name": "getrandom",
+          "Identifier": {
+            "PURL": "pkg:cargo/getrandom@0.4.3",
+            "UID": "9d054f0dab1388"
+          },
+          "Version": "0.4.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4",
+            "libc@0.2.186",
+            "r-efi@6.0.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 627,
+              "EndLine": 636
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "hashbrown@0.17.1",
+          "Name": "hashbrown",
+          "Identifier": {
+            "PURL": "pkg:cargo/hashbrown@0.17.1",
+            "UID": "3e5fa3e66345ec30"
+          },
+          "Version": "0.17.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "allocator-api2@0.2.21",
+            "equivalent@1.0.2",
+            "foldhash@0.2.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 638,
+              "EndLine": 647
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "hashlink@0.12.2",
+          "Name": "hashlink",
+          "Identifier": {
+            "PURL": "pkg:cargo/hashlink@0.12.2",
+            "UID": "374fb103d57a735"
+          },
+          "Version": "0.12.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "hashbrown@0.17.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 649,
+              "EndLine": 656
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "heck@0.5.0",
+          "Name": "heck",
+          "Identifier": {
+            "PURL": "pkg:cargo/heck@0.5.0",
+            "UID": "9338baf017b099f7"
+          },
+          "Version": "0.5.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 658,
+              "EndLine": 662
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "hex@0.4.3",
+          "Name": "hex",
+          "Identifier": {
+            "PURL": "pkg:cargo/hex@0.4.3",
+            "UID": "90d800e87aab18b3"
+          },
+          "Version": "0.4.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 664,
+              "EndLine": 668
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ident_case@1.0.1",
+          "Name": "ident_case",
+          "Identifier": {
+            "PURL": "pkg:cargo/ident_case@1.0.1",
+            "UID": "4b9a9dd7baf89b1f"
+          },
+          "Version": "1.0.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 679,
+              "EndLine": 683
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "indoc@2.0.7",
+          "Name": "indoc",
+          "Identifier": {
+            "PURL": "pkg:cargo/indoc@2.0.7",
+            "UID": "fab9391c599e6180"
+          },
+          "Version": "2.0.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "rustversion@1.0.22"
+          ],
+          "Locations": [
+            {
+              "StartLine": 685,
+              "EndLine": 692
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "instability@0.3.12",
+          "Name": "instability",
+          "Identifier": {
+            "PURL": "pkg:cargo/instability@0.3.12",
+            "UID": "c7916572dc725104"
+          },
+          "Version": "0.3.12",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "darling@0.23.0",
+            "indoc@2.0.7",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 694,
+              "EndLine": 705
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "is_terminal_polyfill@1.70.2",
+          "Name": "is_terminal_polyfill",
+          "Identifier": {
+            "PURL": "pkg:cargo/is_terminal_polyfill@1.70.2",
+            "UID": "24ae47814d440027"
+          },
+          "Version": "1.70.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 707,
+              "EndLine": 711
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "itertools@0.14.0",
+          "Name": "itertools",
+          "Identifier": {
+            "PURL": "pkg:cargo/itertools@0.14.0",
+            "UID": "483f2d6036d2b734"
+          },
+          "Version": "0.14.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "either@1.16.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 713,
+              "EndLine": 720
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "itoa@1.0.18",
+          "Name": "itoa",
+          "Identifier": {
+            "PURL": "pkg:cargo/itoa@1.0.18",
+            "UID": "9f92a91eb635bc2"
+          },
+          "Version": "1.0.18",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 722,
+              "EndLine": 726
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "js-sys@0.3.106",
+          "Name": "js-sys",
+          "Identifier": {
+            "PURL": "pkg:cargo/js-sys@0.3.106",
+            "UID": "46aa8bc8cd6f7137"
+          },
+          "Version": "0.3.106",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4",
+            "futures-util@0.3.34",
+            "wasm-bindgen@0.2.129"
+          ],
+          "Locations": [
+            {
+              "StartLine": 728,
+              "EndLine": 737
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "kasuari@0.4.13",
+          "Name": "kasuari",
+          "Identifier": {
+            "PURL": "pkg:cargo/kasuari@0.4.13",
+            "UID": "37d5515de607244a"
+          },
+          "Version": "0.4.13",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "hashbrown@0.17.1",
+            "portable-atomic@1.15.0",
+            "thiserror@2.0.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 747,
+              "EndLine": 756
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "lab@0.11.0",
+          "Name": "lab",
+          "Identifier": {
+            "PURL": "pkg:cargo/lab@0.11.0",
+            "UID": "c822dc0d56a08720"
+          },
+          "Version": "0.11.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 758,
+              "EndLine": 762
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "lazy_static@1.5.0",
+          "Name": "lazy_static",
+          "Identifier": {
+            "PURL": "pkg:cargo/lazy_static@1.5.0",
+            "UID": "44079dbc15a4bbe0"
+          },
+          "Version": "1.5.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 764,
+              "EndLine": 768
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "libm@0.2.16",
+          "Name": "libm",
+          "Identifier": {
+            "PURL": "pkg:cargo/libm@0.2.16",
+            "UID": "955eddb833e8523e"
+          },
+          "Version": "0.2.16",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 776,
+              "EndLine": 780
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "libsqlite3-sys@0.39.1",
+          "Name": "libsqlite3-sys",
+          "Identifier": {
+            "PURL": "pkg:cargo/libsqlite3-sys@0.39.1",
+            "UID": "5f25025e6c4b53dc"
+          },
+          "Version": "0.39.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cc@1.2.65",
+            "pkg-config@0.3.33",
+            "vcpkg@0.2.15"
+          ],
+          "Locations": [
+            {
+              "StartLine": 782,
+              "EndLine": 791
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "line-clipping@0.3.8",
+          "Name": "line-clipping",
+          "Identifier": {
+            "PURL": "pkg:cargo/line-clipping@0.3.8",
+            "UID": "cab8f4b36f413700"
+          },
+          "Version": "0.3.8",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@2.13.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 793,
+              "EndLine": 800
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "linux-raw-sys@0.12.1",
+          "Name": "linux-raw-sys",
+          "Identifier": {
+            "PURL": "pkg:cargo/linux-raw-sys@0.12.1",
+            "UID": "77767863157869ba"
+          },
+          "Version": "0.12.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 802,
+              "EndLine": 806
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "litrs@1.0.1",
+          "Name": "litrs",
+          "Identifier": {
+            "PURL": "pkg:cargo/litrs@1.0.1",
+            "UID": "ced408108806ac05"
+          },
+          "Version": "1.0.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 808,
+              "EndLine": 812
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "lock_api@0.4.14",
+          "Name": "lock_api",
+          "Identifier": {
+            "PURL": "pkg:cargo/lock_api@0.4.14",
+            "UID": "62e485d33e96b9b4"
+          },
+          "Version": "0.4.14",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "scopeguard@1.2.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 814,
+              "EndLine": 821
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "log@0.4.33",
+          "Name": "log",
+          "Identifier": {
+            "PURL": "pkg:cargo/log@0.4.33",
+            "UID": "29b9a00df4297e69"
+          },
+          "Version": "0.4.33",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 823,
+              "EndLine": 827
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "lru@0.18.5",
+          "Name": "lru",
+          "Identifier": {
+            "PURL": "pkg:cargo/lru@0.18.5",
+            "UID": "906d81a1e1b69cae"
+          },
+          "Version": "0.18.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "hashbrown@0.17.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 829,
+              "EndLine": 836
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "mac_address@1.2.1",
+          "Name": "mac_address",
+          "Identifier": {
+            "PURL": "pkg:cargo/mac_address@1.2.1",
+            "UID": "a5f9036984b4b397"
+          },
+          "Version": "1.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "nix@0.31.3",
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 838,
+              "EndLine": 846
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "matchers@0.2.0",
+          "Name": "matchers",
+          "Identifier": {
+            "PURL": "pkg:cargo/matchers@0.2.0",
+            "UID": "aec67b063e7e8382"
+          },
+          "Version": "0.2.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "regex-automata@0.4.14"
+          ],
+          "Locations": [
+            {
+              "StartLine": 848,
+              "EndLine": 855
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "memchr@2.8.2",
+          "Name": "memchr",
+          "Identifier": {
+            "PURL": "pkg:cargo/memchr@2.8.2",
+            "UID": "24f406db2010cf28"
+          },
+          "Version": "2.8.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 857,
+              "EndLine": 861
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "memmem@0.1.1",
+          "Name": "memmem",
+          "Identifier": {
+            "PURL": "pkg:cargo/memmem@0.1.1",
+            "UID": "91b3386cf58eb572"
+          },
+          "Version": "0.1.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 863,
+              "EndLine": 867
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "memoffset@0.9.1",
+          "Name": "memoffset",
+          "Identifier": {
+            "PURL": "pkg:cargo/memoffset@0.9.1",
+            "UID": "c0571074ac539ec9"
+          },
+          "Version": "0.9.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "autocfg@1.5.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 869,
+              "EndLine": 876
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "minimal-lexical@0.2.1",
+          "Name": "minimal-lexical",
+          "Identifier": {
+            "PURL": "pkg:cargo/minimal-lexical@0.2.1",
+            "UID": "de5c57d92792160f"
+          },
+          "Version": "0.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 878,
+              "EndLine": 882
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "mio@1.2.1",
+          "Name": "mio",
+          "Identifier": {
+            "PURL": "pkg:cargo/mio@1.2.1",
+            "UID": "a33d114cc8230b37"
+          },
+          "Version": "1.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186",
+            "log@0.4.33",
+            "wasi@0.11.1+wasi-snapshot-preview1",
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 884,
+              "EndLine": 894
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "nix@0.31.3",
+          "Name": "nix",
+          "Identifier": {
+            "PURL": "pkg:cargo/nix@0.31.3",
+            "UID": "83b1634581ee2d5"
+          },
+          "Version": "0.31.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "cfg-if@1.0.4",
+            "cfg_aliases@0.2.1",
+            "libc@0.2.186",
+            "memoffset@0.9.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 908,
+              "EndLine": 919
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "nom@7.1.3",
+          "Name": "nom",
+          "Identifier": {
+            "PURL": "pkg:cargo/nom@7.1.3",
+            "UID": "be19524f2e5bd6c"
+          },
+          "Version": "7.1.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "memchr@2.8.2",
+            "minimal-lexical@0.2.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 921,
+              "EndLine": 929
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "nu-ansi-term@0.50.3",
+          "Name": "nu-ansi-term",
+          "Identifier": {
+            "PURL": "pkg:cargo/nu-ansi-term@0.50.3",
+            "UID": "3432deebfd76b59"
+          },
+          "Version": "0.50.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 931,
+              "EndLine": 938
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "num-conv@0.2.2",
+          "Name": "num-conv",
+          "Identifier": {
+            "PURL": "pkg:cargo/num-conv@0.2.2",
+            "UID": "869f941c6c30c8f8"
+          },
+          "Version": "0.2.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 940,
+              "EndLine": 944
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "num-derive@0.4.2",
+          "Name": "num-derive",
+          "Identifier": {
+            "PURL": "pkg:cargo/num-derive@0.4.2",
+            "UID": "e304a28c610dcbdd"
+          },
+          "Version": "0.4.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 946,
+              "EndLine": 955
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "num-traits@0.2.19",
+          "Name": "num-traits",
+          "Identifier": {
+            "PURL": "pkg:cargo/num-traits@0.2.19",
+            "UID": "2047fb33978596b6"
+          },
+          "Version": "0.2.19",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "autocfg@1.5.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 957,
+              "EndLine": 964
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "num_threads@0.1.8",
+          "Name": "num_threads",
+          "Identifier": {
+            "PURL": "pkg:cargo/num_threads@0.1.8",
+            "UID": "9efcfc5eddc7d17f"
+          },
+          "Version": "0.1.8",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186"
+          ],
+          "Locations": [
+            {
+              "StartLine": 966,
+              "EndLine": 973
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "once_cell@1.21.4",
+          "Name": "once_cell",
+          "Identifier": {
+            "PURL": "pkg:cargo/once_cell@1.21.4",
+            "UID": "64b4e953e7db68cd"
+          },
+          "Version": "1.21.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 975,
+              "EndLine": 979
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "once_cell_polyfill@1.70.2",
+          "Name": "once_cell_polyfill",
+          "Identifier": {
+            "PURL": "pkg:cargo/once_cell_polyfill@1.70.2",
+            "UID": "947497bf05ad6d2e"
+          },
+          "Version": "1.70.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 981,
+              "EndLine": 985
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ordered-float@4.6.0",
+          "Name": "ordered-float",
+          "Identifier": {
+            "PURL": "pkg:cargo/ordered-float@4.6.0",
+            "UID": "733a2fda0e67d278"
+          },
+          "Version": "4.6.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "num-traits@0.2.19"
+          ],
+          "Locations": [
+            {
+              "StartLine": 987,
+              "EndLine": 994
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "palette@0.7.7",
+          "Name": "palette",
+          "Identifier": {
+            "PURL": "pkg:cargo/palette@0.7.7",
+            "UID": "35100733817115a0"
+          },
+          "Version": "0.7.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "approx@0.5.1",
+            "libm@0.2.16",
+            "palette_derive@0.7.7",
+            "palette_math@0.7.7"
+          ],
+          "Locations": [
+            {
+              "StartLine": 996,
+              "EndLine": 1006
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "palette_derive@0.7.7",
+          "Name": "palette_derive",
+          "Identifier": {
+            "PURL": "pkg:cargo/palette_derive@0.7.7",
+            "UID": "7aa75bb6f392c257"
+          },
+          "Version": "0.7.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "by_address@1.2.1",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1008,
+              "EndLine": 1018
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "palette_math@0.7.7",
+          "Name": "palette_math",
+          "Identifier": {
+            "PURL": "pkg:cargo/palette_math@0.7.7",
+            "UID": "a0f0f5281fe5bb7e"
+          },
+          "Version": "0.7.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libm@0.2.16"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1020,
+              "EndLine": 1027
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "parking_lot@0.12.5",
+          "Name": "parking_lot",
+          "Identifier": {
+            "PURL": "pkg:cargo/parking_lot@0.12.5",
+            "UID": "49ec7292af8bdd21"
+          },
+          "Version": "0.12.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "lock_api@0.4.14",
+            "parking_lot_core@0.9.12"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1029,
+              "EndLine": 1037
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "parking_lot_core@0.9.12",
+          "Name": "parking_lot_core",
+          "Identifier": {
+            "PURL": "pkg:cargo/parking_lot_core@0.9.12",
+            "UID": "c944dc2996d5a810"
+          },
+          "Version": "0.9.12",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4",
+            "libc@0.2.186",
+            "redox_syscall@0.5.18",
+            "smallvec@1.15.2",
+            "windows-link@0.2.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1039,
+              "EndLine": 1050
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "pest@2.9.4",
+          "Name": "pest",
+          "Identifier": {
+            "PURL": "pkg:cargo/pest@2.9.4",
+            "UID": "c5712bc5e414e520"
+          },
+          "Version": "2.9.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "memchr@2.8.2",
+            "psm@0.1.24",
+            "stacker@0.1.25",
+            "ucd-trie@0.1.7"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1052,
+              "EndLine": 1062
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "pest_derive@2.9.4",
+          "Name": "pest_derive",
+          "Identifier": {
+            "PURL": "pkg:cargo/pest_derive@2.9.4",
+            "UID": "bb1cbe11465c101d"
+          },
+          "Version": "2.9.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "pest@2.9.4",
+            "pest_generator@2.9.4"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1064,
+              "EndLine": 1072
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "pest_generator@2.9.4",
+          "Name": "pest_generator",
+          "Identifier": {
+            "PURL": "pkg:cargo/pest_generator@2.9.4",
+            "UID": "d2c983710a0228b4"
+          },
+          "Version": "2.9.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "pest@2.9.4",
+            "pest_meta@2.9.4",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@3.0.9"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1074,
+              "EndLine": 1085
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "pest_meta@2.9.4",
+          "Name": "pest_meta",
+          "Identifier": {
+            "PURL": "pkg:cargo/pest_meta@2.9.4",
+            "UID": "c647d1e62ad08870"
+          },
+          "Version": "2.9.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "pest@2.9.4"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1087,
+              "EndLine": 1094
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "phf@0.11.3",
+          "Name": "phf",
+          "Identifier": {
+            "PURL": "pkg:cargo/phf@0.11.3",
+            "UID": "e1cf5c7faefeff9d"
+          },
+          "Version": "0.11.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "phf_macros@0.11.3",
+            "phf_shared@0.11.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1096,
+              "EndLine": 1104
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "phf_codegen@0.11.3",
+          "Name": "phf_codegen",
+          "Identifier": {
+            "PURL": "pkg:cargo/phf_codegen@0.11.3",
+            "UID": "21395a173da41cc4"
+          },
+          "Version": "0.11.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "phf_generator@0.11.3",
+            "phf_shared@0.11.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1106,
+              "EndLine": 1114
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "phf_generator@0.11.3",
+          "Name": "phf_generator",
+          "Identifier": {
+            "PURL": "pkg:cargo/phf_generator@0.11.3",
+            "UID": "4e0c526c35d4db2"
+          },
+          "Version": "0.11.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "phf_shared@0.11.3",
+            "rand@0.8.8"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1116,
+              "EndLine": 1124
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "phf_macros@0.11.3",
+          "Name": "phf_macros",
+          "Identifier": {
+            "PURL": "pkg:cargo/phf_macros@0.11.3",
+            "UID": "c9919775c017d63d"
+          },
+          "Version": "0.11.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "phf_generator@0.11.3",
+            "phf_shared@0.11.3",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1126,
+              "EndLine": 1137
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "phf_shared@0.11.3",
+          "Name": "phf_shared",
+          "Identifier": {
+            "PURL": "pkg:cargo/phf_shared@0.11.3",
+            "UID": "304215e286e07dc2"
+          },
+          "Version": "0.11.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "siphasher@1.0.4"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1139,
+              "EndLine": 1146
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "pin-project-lite@0.2.17",
+          "Name": "pin-project-lite",
+          "Identifier": {
+            "PURL": "pkg:cargo/pin-project-lite@0.2.17",
+            "UID": "9519960a5a2af8a5"
+          },
+          "Version": "0.2.17",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1148,
+              "EndLine": 1152
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "pkg-config@0.3.33",
+          "Name": "pkg-config",
+          "Identifier": {
+            "PURL": "pkg:cargo/pkg-config@0.3.33",
+            "UID": "505a8bfc1411a863"
+          },
+          "Version": "0.3.33",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1154,
+              "EndLine": 1158
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "portable-atomic@1.15.0",
+          "Name": "portable-atomic",
+          "Identifier": {
+            "PURL": "pkg:cargo/portable-atomic@1.15.0",
+            "UID": "dc58a564a688fdc2"
+          },
+          "Version": "1.15.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1160,
+              "EndLine": 1164
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "powerfmt@0.2.1",
+          "Name": "powerfmt",
+          "Identifier": {
+            "PURL": "pkg:cargo/powerfmt@0.2.1",
+            "UID": "4db5b0e283e9bbdb"
+          },
+          "Version": "0.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1166,
+              "EndLine": 1170
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "proc-macro2@1.0.106",
+          "Name": "proc-macro2",
+          "Identifier": {
+            "PURL": "pkg:cargo/proc-macro2@1.0.106",
+            "UID": "5eaf9602135963ab"
+          },
+          "Version": "1.0.106",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "unicode-ident@1.0.24"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1172,
+              "EndLine": 1179
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "psm@0.1.24",
+          "Name": "psm",
+          "Identifier": {
+            "PURL": "pkg:cargo/psm@0.1.24",
+            "UID": "d047c427dc60b90a"
+          },
+          "Version": "0.1.24",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cc@1.2.65"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1181,
+              "EndLine": 1188
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "quote@1.0.46",
+          "Name": "quote",
+          "Identifier": {
+            "PURL": "pkg:cargo/quote@1.0.46",
+            "UID": "612cb68a67e7eddc"
+          },
+          "Version": "1.0.46",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1190,
+              "EndLine": 1197
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "r-efi@5.3.0",
+          "Name": "r-efi",
+          "Identifier": {
+            "PURL": "pkg:cargo/r-efi@5.3.0",
+            "UID": "249ccb6e1b232055"
+          },
+          "Version": "5.3.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1199,
+              "EndLine": 1203
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "r-efi@6.0.0",
+          "Name": "r-efi",
+          "Identifier": {
+            "PURL": "pkg:cargo/r-efi@6.0.0",
+            "UID": "36f993c165e464a8"
+          },
+          "Version": "6.0.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1205,
+              "EndLine": 1209
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rand@0.8.8",
+          "Name": "rand",
+          "Identifier": {
+            "PURL": "pkg:cargo/rand@0.8.8",
+            "UID": "dd3df859a844c086"
+          },
+          "Version": "0.8.8",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "rand_core@0.6.4"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1211,
+              "EndLine": 1218
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rand_core@0.6.4",
+          "Name": "rand_core",
+          "Identifier": {
+            "PURL": "pkg:cargo/rand_core@0.6.4",
+            "UID": "aa044a65f12f2130"
+          },
+          "Version": "0.6.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1220,
+              "EndLine": 1224
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ratatui-core@0.1.2",
+          "Name": "ratatui-core",
+          "Identifier": {
+            "PURL": "pkg:cargo/ratatui-core@0.1.2",
+            "UID": "1a827debe7e6e7fa"
+          },
+          "Version": "0.1.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "compact_str@0.9.1",
+            "critical-section@1.2.0",
+            "hashbrown@0.17.1",
+            "itertools@0.14.0",
+            "kasuari@0.4.13",
+            "lru@0.18.5",
+            "palette@0.7.7",
+            "serde@1.0.228",
+            "strum@0.28.0",
+            "thiserror@2.0.21",
+            "unicode-segmentation@1.13.3",
+            "unicode-truncate@2.0.1",
+            "unicode-width@0.2.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1241,
+              "EndLine": 1261
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ratatui-crossterm@0.1.2",
+          "Name": "ratatui-crossterm",
+          "Identifier": {
+            "PURL": "pkg:cargo/ratatui-crossterm@0.1.2",
+            "UID": "3ad9d1a1ab4d2217"
+          },
+          "Version": "0.1.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4",
+            "crossterm@0.29.0",
+            "instability@0.3.12",
+            "ratatui-core@0.1.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1263,
+              "EndLine": 1273
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ratatui-termina@0.1.0",
+          "Name": "ratatui-termina",
+          "Identifier": {
+            "PURL": "pkg:cargo/ratatui-termina@0.1.0",
+            "UID": "7115d6b0568578e9"
+          },
+          "Version": "0.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "instability@0.3.12",
+            "ratatui-core@0.1.2",
+            "termina@0.3.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1275,
+              "EndLine": 1284
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ratatui-termwiz@0.1.2",
+          "Name": "ratatui-termwiz",
+          "Identifier": {
+            "PURL": "pkg:cargo/ratatui-termwiz@0.1.2",
+            "UID": "bdcf19534b46a021"
+          },
+          "Version": "0.1.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "ratatui-core@0.1.2",
+            "termwiz@0.23.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1286,
+              "EndLine": 1294
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ratatui-widgets@0.3.2",
+          "Name": "ratatui-widgets",
+          "Identifier": {
+            "PURL": "pkg:cargo/ratatui-widgets@0.3.2",
+            "UID": "e6342d0e45b45724"
+          },
+          "Version": "0.3.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "hashbrown@0.17.1",
+            "indoc@2.0.7",
+            "instability@0.3.12",
+            "itertools@0.14.0",
+            "line-clipping@0.3.8",
+            "ratatui-core@0.1.2",
+            "serde@1.0.228",
+            "strum@0.28.0",
+            "time@0.3.55",
+            "unicode-segmentation@1.13.3",
+            "unicode-width@0.2.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1296,
+              "EndLine": 1314
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rayon-core@1.13.0",
+          "Name": "rayon-core",
+          "Identifier": {
+            "PURL": "pkg:cargo/rayon-core@1.13.0",
+            "UID": "80776115dc356842"
+          },
+          "Version": "1.13.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "crossbeam-deque@0.8.6",
+            "crossbeam-utils@0.8.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1326,
+              "EndLine": 1334
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "redox_syscall@0.5.18",
+          "Name": "redox_syscall",
+          "Identifier": {
+            "PURL": "pkg:cargo/redox_syscall@0.5.18",
+            "UID": "a68ebfa9e2fdcd9a"
+          },
+          "Version": "0.5.18",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@2.13.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1336,
+              "EndLine": 1343
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "regex@1.13.0",
+          "Name": "regex",
+          "Identifier": {
+            "PURL": "pkg:cargo/regex@1.13.0",
+            "UID": "6bb9173fe7c3328a"
+          },
+          "Version": "1.13.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "aho-corasick@1.1.4",
+            "memchr@2.8.2",
+            "regex-automata@0.4.14",
+            "regex-syntax@0.8.11"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1345,
+              "EndLine": 1355
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "regex-automata@0.4.14",
+          "Name": "regex-automata",
+          "Identifier": {
+            "PURL": "pkg:cargo/regex-automata@0.4.14",
+            "UID": "c284206b7770abb1"
+          },
+          "Version": "0.4.14",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "aho-corasick@1.1.4",
+            "memchr@2.8.2",
+            "regex-syntax@0.8.11"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1357,
+              "EndLine": 1366
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "regex-syntax@0.8.11",
+          "Name": "regex-syntax",
+          "Identifier": {
+            "PURL": "pkg:cargo/regex-syntax@0.8.11",
+            "UID": "d3d02e55f26c9df3"
+          },
+          "Version": "0.8.11",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1368,
+              "EndLine": 1372
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rsqlite-vfs@0.2.0",
+          "Name": "rsqlite-vfs",
+          "Identifier": {
+            "PURL": "pkg:cargo/rsqlite-vfs@0.2.0",
+            "UID": "f4c9dd8375f2834c"
+          },
+          "Version": "0.2.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "thiserror@2.0.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1374,
+              "EndLine": 1381
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rustc_version@0.4.1",
+          "Name": "rustc_version",
+          "Identifier": {
+            "PURL": "pkg:cargo/rustc_version@0.4.1",
+            "UID": "ba179cb8e5633ad3"
+          },
+          "Version": "0.4.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "semver@1.0.28"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1398,
+              "EndLine": 1405
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rustix@1.1.5",
+          "Name": "rustix",
+          "Identifier": {
+            "PURL": "pkg:cargo/rustix@1.1.5",
+            "UID": "5f0090e09dbfd9c2"
+          },
+          "Version": "1.1.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "errno@0.3.14",
+            "libc@0.2.186",
+            "linux-raw-sys@0.12.1",
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1407,
+              "EndLine": 1418
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rustversion@1.0.22",
+          "Name": "rustversion",
+          "Identifier": {
+            "PURL": "pkg:cargo/rustversion@1.0.22",
+            "UID": "b89ce3b7a3ec9e53"
+          },
+          "Version": "1.0.22",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1420,
+              "EndLine": 1424
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ryu@1.0.23",
+          "Name": "ryu",
+          "Identifier": {
+            "PURL": "pkg:cargo/ryu@1.0.23",
+            "UID": "ba05dcfa43caea37"
+          },
+          "Version": "1.0.23",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1426,
+              "EndLine": 1430
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "scopeguard@1.2.0",
+          "Name": "scopeguard",
+          "Identifier": {
+            "PURL": "pkg:cargo/scopeguard@1.2.0",
+            "UID": "71eb9135c14f9a8"
+          },
+          "Version": "1.2.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1432,
+              "EndLine": 1436
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "semver@1.0.28",
+          "Name": "semver",
+          "Identifier": {
+            "PURL": "pkg:cargo/semver@1.0.28",
+            "UID": "21d091ac9032ca69"
+          },
+          "Version": "1.0.28",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1438,
+              "EndLine": 1442
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "serde@1.0.228",
+          "Name": "serde",
+          "Identifier": {
+            "PURL": "pkg:cargo/serde@1.0.228",
+            "UID": "83fffbd687794e24"
+          },
+          "Version": "1.0.228",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "serde_core@1.0.228",
+            "serde_derive@1.0.228"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1444,
+              "EndLine": 1452
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "serde_core@1.0.228",
+          "Name": "serde_core",
+          "Identifier": {
+            "PURL": "pkg:cargo/serde_core@1.0.228",
+            "UID": "933d480c672e1682"
+          },
+          "Version": "1.0.228",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "serde_derive@1.0.228"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1454,
+              "EndLine": 1461
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "serde_derive@1.0.228",
+          "Name": "serde_derive",
+          "Identifier": {
+            "PURL": "pkg:cargo/serde_derive@1.0.228",
+            "UID": "efa783b023dc2a94"
+          },
+          "Version": "1.0.228",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1463,
+              "EndLine": 1472
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "sha2@0.10.9",
+          "Name": "sha2",
+          "Identifier": {
+            "PURL": "pkg:cargo/sha2@0.10.9",
+            "UID": "b33639540268c64d"
+          },
+          "Version": "0.10.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4",
+            "cpufeatures@0.2.17",
+            "digest@0.10.7"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1487,
+              "EndLine": 1496
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "sharded-slab@0.1.7",
+          "Name": "sharded-slab",
+          "Identifier": {
+            "PURL": "pkg:cargo/sharded-slab@0.1.7",
+            "UID": "3ad41eb5c5340f6e"
+          },
+          "Version": "0.1.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "lazy_static@1.5.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1498,
+              "EndLine": 1505
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "shlex@2.0.1",
+          "Name": "shlex",
+          "Identifier": {
+            "PURL": "pkg:cargo/shlex@2.0.1",
+            "UID": "86e0656d6c3b94ae"
+          },
+          "Version": "2.0.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1507,
+              "EndLine": 1511
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "signal-hook@0.3.18",
+          "Name": "signal-hook",
+          "Identifier": {
+            "PURL": "pkg:cargo/signal-hook@0.3.18",
+            "UID": "c2ba126c20e5d921"
+          },
+          "Version": "0.3.18",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186",
+            "signal-hook-registry@1.4.8"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1513,
+              "EndLine": 1521
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "signal-hook-mio@0.2.5",
+          "Name": "signal-hook-mio",
+          "Identifier": {
+            "PURL": "pkg:cargo/signal-hook-mio@0.2.5",
+            "UID": "7d672945c2fb1fb3"
+          },
+          "Version": "0.2.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186",
+            "mio@1.2.1",
+            "signal-hook@0.3.18"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1523,
+              "EndLine": 1532
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "signal-hook-registry@1.4.8",
+          "Name": "signal-hook-registry",
+          "Identifier": {
+            "PURL": "pkg:cargo/signal-hook-registry@1.4.8",
+            "UID": "3790f7968f0f192f"
+          },
+          "Version": "1.4.8",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "errno@0.3.14",
+            "libc@0.2.186"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1534,
+              "EndLine": 1542
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "siphasher@1.0.4",
+          "Name": "siphasher",
+          "Identifier": {
+            "PURL": "pkg:cargo/siphasher@1.0.4",
+            "UID": "9715ce086fb3c3d7"
+          },
+          "Version": "1.0.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1544,
+              "EndLine": 1548
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "slab@0.4.12",
+          "Name": "slab",
+          "Identifier": {
+            "PURL": "pkg:cargo/slab@0.4.12",
+            "UID": "7728b1d6f6a304b3"
+          },
+          "Version": "0.4.12",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1550,
+              "EndLine": 1554
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "smallvec@1.15.2",
+          "Name": "smallvec",
+          "Identifier": {
+            "PURL": "pkg:cargo/smallvec@1.15.2",
+            "UID": "c98a554264bbe71a"
+          },
+          "Version": "1.15.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1556,
+              "EndLine": 1560
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "sqlite-wasm-rs@0.6.2",
+          "Name": "sqlite-wasm-rs",
+          "Identifier": {
+            "PURL": "pkg:cargo/sqlite-wasm-rs@0.6.2",
+            "UID": "b1572cfd470c51eb"
+          },
+          "Version": "0.6.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cc@1.2.65",
+            "rsqlite-vfs@0.2.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1562,
+              "EndLine": 1570
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "stacker@0.1.25",
+          "Name": "stacker",
+          "Identifier": {
+            "PURL": "pkg:cargo/stacker@0.1.25",
+            "UID": "82272b08448b899d"
+          },
+          "Version": "0.1.25",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cc@1.2.65",
+            "cfg-if@1.0.4",
+            "libc@0.2.186",
+            "psm@0.1.24",
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1572,
+              "EndLine": 1583
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "static_assertions@1.1.0",
+          "Name": "static_assertions",
+          "Identifier": {
+            "PURL": "pkg:cargo/static_assertions@1.1.0",
+            "UID": "e89896f2fee55e60"
+          },
+          "Version": "1.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1585,
+              "EndLine": 1589
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "strsim@0.11.1",
+          "Name": "strsim",
+          "Identifier": {
+            "PURL": "pkg:cargo/strsim@0.11.1",
+            "UID": "1c454919661b61f4"
+          },
+          "Version": "0.11.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1591,
+              "EndLine": 1595
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "strum@0.28.0",
+          "Name": "strum",
+          "Identifier": {
+            "PURL": "pkg:cargo/strum@0.28.0",
+            "UID": "5eceb72e46808226"
+          },
+          "Version": "0.28.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "strum_macros@0.28.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1597,
+              "EndLine": 1604
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "strum_macros@0.28.0",
+          "Name": "strum_macros",
+          "Identifier": {
+            "PURL": "pkg:cargo/strum_macros@0.28.0",
+            "UID": "77cf060818aa1fff"
+          },
+          "Version": "0.28.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "heck@0.5.0",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1606,
+              "EndLine": 1616
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "syn@1.0.109",
+          "Name": "syn",
+          "Identifier": {
+            "PURL": "pkg:cargo/syn@1.0.109",
+            "UID": "58f8a7378f2af745"
+          },
+          "Version": "1.0.109",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "unicode-ident@1.0.24"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1618,
+              "EndLine": 1627
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "syn@2.0.118",
+          "Name": "syn",
+          "Identifier": {
+            "PURL": "pkg:cargo/syn@2.0.118",
+            "UID": "99cc62f21eae1b51"
+          },
+          "Version": "2.0.118",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "unicode-ident@1.0.24"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1629,
+              "EndLine": 1638
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "syn@3.0.9",
+          "Name": "syn",
+          "Identifier": {
+            "PURL": "pkg:cargo/syn@3.0.9",
+            "UID": "5b3712712a5e85c3"
+          },
+          "Version": "3.0.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "unicode-ident@1.0.24"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1640,
+              "EndLine": 1649
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "termina@0.3.3",
+          "Name": "termina",
+          "Identifier": {
+            "PURL": "pkg:cargo/termina@0.3.3",
+            "UID": "c586a84427988e49"
+          },
+          "Version": "0.3.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@2.13.0",
+            "parking_lot@0.12.5",
+            "rustix@1.1.5",
+            "signal-hook@0.3.18",
+            "windows-sys@0.61.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1651,
+              "EndLine": 1662
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "terminfo@0.9.0",
+          "Name": "terminfo",
+          "Identifier": {
+            "PURL": "pkg:cargo/terminfo@0.9.0",
+            "UID": "5623eb79aeaef3d5"
+          },
+          "Version": "0.9.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "fnv@1.0.7",
+            "nom@7.1.3",
+            "phf@0.11.3",
+            "phf_codegen@0.11.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1664,
+              "EndLine": 1674
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "termios@0.3.3",
+          "Name": "termios",
+          "Identifier": {
+            "PURL": "pkg:cargo/termios@0.3.3",
+            "UID": "7622346198a79973"
+          },
+          "Version": "0.3.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.186"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1676,
+              "EndLine": 1683
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "termwiz@0.23.3",
+          "Name": "termwiz",
+          "Identifier": {
+            "PURL": "pkg:cargo/termwiz@0.23.3",
+            "UID": "60cf5733b9c04837"
+          },
+          "Version": "0.23.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "anyhow@1.0.103",
+            "base64@0.22.1",
+            "bitflags@2.13.0",
+            "fancy-regex@0.11.0",
+            "filedescriptor@0.8.3",
+            "finl_unicode@1.5.0",
+            "fixedbitset@0.4.2",
+            "hex@0.4.3",
+            "lazy_static@1.5.0",
+            "libc@0.2.186",
+            "log@0.4.33",
+            "memmem@0.1.1",
+            "nix@0.29.0",
+            "num-derive@0.4.2",
+            "num-traits@0.2.19",
+            "ordered-float@4.6.0",
+            "pest@2.9.4",
+            "pest_derive@2.9.4",
+            "phf@0.11.3",
+            "sha2@0.10.9",
+            "signal-hook@0.3.18",
+            "siphasher@1.0.4",
+            "terminfo@0.9.0",
+            "termios@0.3.3",
+            "thiserror@1.0.69",
+            "ucd-trie@0.1.7",
+            "unicode-segmentation@1.13.3",
+            "vtparse@0.6.2",
+            "wezterm-bidi@0.2.3",
+            "wezterm-blob-leases@0.1.1",
+            "wezterm-color-types@0.3.0",
+            "wezterm-dynamic@0.2.1",
+            "wezterm-input-types@0.1.0",
+            "winapi@0.3.9"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1685,
+              "EndLine": 1725
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "thiserror@1.0.69",
+          "Name": "thiserror",
+          "Identifier": {
+            "PURL": "pkg:cargo/thiserror@1.0.69",
+            "UID": "da72e8da2fc77f42"
+          },
+          "Version": "1.0.69",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "thiserror-impl@1.0.69"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1727,
+              "EndLine": 1734
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "thiserror@2.0.21",
+          "Name": "thiserror",
+          "Identifier": {
+            "PURL": "pkg:cargo/thiserror@2.0.21",
+            "UID": "55b7d93399a8fde9"
+          },
+          "Version": "2.0.21",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "thiserror-impl@2.0.21"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1736,
+              "EndLine": 1743
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "thiserror-impl@1.0.69",
+          "Name": "thiserror-impl",
+          "Identifier": {
+            "PURL": "pkg:cargo/thiserror-impl@1.0.69",
+            "UID": "609e3f522856a7fa"
+          },
+          "Version": "1.0.69",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1745,
+              "EndLine": 1754
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "thiserror-impl@2.0.21",
+          "Name": "thiserror-impl",
+          "Identifier": {
+            "PURL": "pkg:cargo/thiserror-impl@2.0.21",
+            "UID": "a644c3c431eb770f"
+          },
+          "Version": "2.0.21",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@3.0.9"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1756,
+              "EndLine": 1765
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "thread_local@1.1.9",
+          "Name": "thread_local",
+          "Identifier": {
+            "PURL": "pkg:cargo/thread_local@1.1.9",
+            "UID": "cc79d4dd510118b0"
+          },
+          "Version": "1.1.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1767,
+              "EndLine": 1774
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "time@0.3.55",
+          "Name": "time",
+          "Identifier": {
+            "PURL": "pkg:cargo/time@0.3.55",
+            "UID": "b44f1ff1d516e55b"
+          },
+          "Version": "0.3.55",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "deranged@0.5.9",
+            "libc@0.2.186",
+            "num-conv@0.2.2",
+            "num_threads@0.1.8",
+            "powerfmt@0.2.1",
+            "serde_core@1.0.228",
+            "time-core@0.1.9"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1776,
+              "EndLine": 1789
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "time-core@0.1.9",
+          "Name": "time-core",
+          "Identifier": {
+            "PURL": "pkg:cargo/time-core@0.1.9",
+            "UID": "7cd96339e1a8759f"
+          },
+          "Version": "0.1.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1791,
+              "EndLine": 1795
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "tracing-attributes@0.1.31",
+          "Name": "tracing-attributes",
+          "Identifier": {
+            "PURL": "pkg:cargo/tracing-attributes@0.1.31",
+            "UID": "f2bb93bff20ea200"
+          },
+          "Version": "0.1.31",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@2.0.118"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1808,
+              "EndLine": 1817
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "tracing-core@0.1.36",
+          "Name": "tracing-core",
+          "Identifier": {
+            "PURL": "pkg:cargo/tracing-core@0.1.36",
+            "UID": "18efa60118bf52d0"
+          },
+          "Version": "0.1.36",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "once_cell@1.21.4",
+            "valuable@0.1.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1819,
+              "EndLine": 1827
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "tracing-log@0.2.0",
+          "Name": "tracing-log",
+          "Identifier": {
+            "PURL": "pkg:cargo/tracing-log@0.2.0",
+            "UID": "4a0de95a5706e9df"
+          },
+          "Version": "0.2.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "log@0.4.33",
+            "once_cell@1.21.4",
+            "tracing-core@0.1.36"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1829,
+              "EndLine": 1838
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "typenum@1.20.1",
+          "Name": "typenum",
+          "Identifier": {
+            "PURL": "pkg:cargo/typenum@1.20.1",
+            "UID": "7e9ce7a33f7e7398"
+          },
+          "Version": "1.20.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1858,
+              "EndLine": 1862
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "ucd-trie@0.1.7",
+          "Name": "ucd-trie",
+          "Identifier": {
+            "PURL": "pkg:cargo/ucd-trie@0.1.7",
+            "UID": "4593ec25c3f12fd8"
+          },
+          "Version": "0.1.7",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1864,
+              "EndLine": 1868
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "unicode-ident@1.0.24",
+          "Name": "unicode-ident",
+          "Identifier": {
+            "PURL": "pkg:cargo/unicode-ident@1.0.24",
+            "UID": "8ba30d01b89f8091"
+          },
+          "Version": "1.0.24",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1870,
+              "EndLine": 1874
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "unicode-segmentation@1.13.3",
+          "Name": "unicode-segmentation",
+          "Identifier": {
+            "PURL": "pkg:cargo/unicode-segmentation@1.13.3",
+            "UID": "1fd52d10656f671d"
+          },
+          "Version": "1.13.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1876,
+              "EndLine": 1880
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "unicode-truncate@2.0.1",
+          "Name": "unicode-truncate",
+          "Identifier": {
+            "PURL": "pkg:cargo/unicode-truncate@2.0.1",
+            "UID": "3c6a96c6cd020b27"
+          },
+          "Version": "2.0.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "itertools@0.14.0",
+            "unicode-segmentation@1.13.3",
+            "unicode-width@0.2.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1882,
+              "EndLine": 1891
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "utf8parse@0.2.2",
+          "Name": "utf8parse",
+          "Identifier": {
+            "PURL": "pkg:cargo/utf8parse@0.2.2",
+            "UID": "8d84515388c38126"
+          },
+          "Version": "0.2.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1899,
+              "EndLine": 1903
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "uuid@1.28.0",
+          "Name": "uuid",
+          "Identifier": {
+            "PURL": "pkg:cargo/uuid@1.28.0",
+            "UID": "bc5dab183dedc2de"
+          },
+          "Version": "1.28.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "atomic@0.6.1",
+            "getrandom@0.4.3",
+            "js-sys@0.3.106",
+            "wasm-bindgen@0.2.129"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1905,
+              "EndLine": 1915
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "valuable@0.1.1",
+          "Name": "valuable",
+          "Identifier": {
+            "PURL": "pkg:cargo/valuable@0.1.1",
+            "UID": "1cdf5b96c4a27620"
+          },
+          "Version": "0.1.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1917,
+              "EndLine": 1921
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "vcpkg@0.2.15",
+          "Name": "vcpkg",
+          "Identifier": {
+            "PURL": "pkg:cargo/vcpkg@0.2.15",
+            "UID": "931bd26c6c3c4cb2"
+          },
+          "Version": "0.2.15",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1923,
+              "EndLine": 1927
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "version_check@0.9.5",
+          "Name": "version_check",
+          "Identifier": {
+            "PURL": "pkg:cargo/version_check@0.9.5",
+            "UID": "edc5e5d9a836b0d"
+          },
+          "Version": "0.9.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1929,
+              "EndLine": 1933
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "vtparse@0.6.2",
+          "Name": "vtparse",
+          "Identifier": {
+            "PURL": "pkg:cargo/vtparse@0.6.2",
+            "UID": "671509e59404fa54"
+          },
+          "Version": "0.6.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "utf8parse@0.2.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1935,
+              "EndLine": 1942
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wasi@0.11.1+wasi-snapshot-preview1",
+          "Name": "wasi",
+          "Identifier": {
+            "PURL": "pkg:cargo/wasi@0.11.1%2Bwasi-snapshot-preview1",
+            "UID": "f27261d9db980891"
+          },
+          "Version": "0.11.1+wasi-snapshot-preview1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1944,
+              "EndLine": 1948
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wasip2@1.0.4+wasi-0.2.12",
+          "Name": "wasip2",
+          "Identifier": {
+            "PURL": "pkg:cargo/wasip2@1.0.4%2Bwasi-0.2.12",
+            "UID": "8d968cd62301189a"
+          },
+          "Version": "1.0.4+wasi-0.2.12",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "wit-bindgen@0.57.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1950,
+              "EndLine": 1957
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wasm-bindgen@0.2.129",
+          "Name": "wasm-bindgen",
+          "Identifier": {
+            "PURL": "pkg:cargo/wasm-bindgen@0.2.129",
+            "UID": "19a14225744f363b"
+          },
+          "Version": "0.2.129",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.4",
+            "once_cell@1.21.4",
+            "rustversion@1.0.22",
+            "wasm-bindgen-macro@0.2.129",
+            "wasm-bindgen-shared@0.2.129"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1959,
+              "EndLine": 1970
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wasm-bindgen-macro@0.2.129",
+          "Name": "wasm-bindgen-macro",
+          "Identifier": {
+            "PURL": "pkg:cargo/wasm-bindgen-macro@0.2.129",
+            "UID": "ea34d713285fe82c"
+          },
+          "Version": "0.2.129",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "quote@1.0.46",
+            "wasm-bindgen-macro-support@0.2.129"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1972,
+              "EndLine": 1980
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wasm-bindgen-macro-support@0.2.129",
+          "Name": "wasm-bindgen-macro-support",
+          "Identifier": {
+            "PURL": "pkg:cargo/wasm-bindgen-macro-support@0.2.129",
+            "UID": "f3602bab4c725fe4"
+          },
+          "Version": "0.2.129",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bumpalo@3.20.3",
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@3.0.9",
+            "wasm-bindgen-shared@0.2.129"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1982,
+              "EndLine": 1993
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wasm-bindgen-shared@0.2.129",
+          "Name": "wasm-bindgen-shared",
+          "Identifier": {
+            "PURL": "pkg:cargo/wasm-bindgen-shared@0.2.129",
+            "UID": "5b8ae0c0ae8c150"
+          },
+          "Version": "0.2.129",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "unicode-ident@1.0.24"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1995,
+              "EndLine": 2002
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wezterm-bidi@0.2.3",
+          "Name": "wezterm-bidi",
+          "Identifier": {
+            "PURL": "pkg:cargo/wezterm-bidi@0.2.3",
+            "UID": "8e7a704fb47120f"
+          },
+          "Version": "0.2.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "log@0.4.33",
+            "wezterm-dynamic@0.2.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2004,
+              "EndLine": 2012
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wezterm-blob-leases@0.1.1",
+          "Name": "wezterm-blob-leases",
+          "Identifier": {
+            "PURL": "pkg:cargo/wezterm-blob-leases@0.1.1",
+            "UID": "c45fcbf25e07c5"
+          },
+          "Version": "0.1.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "getrandom@0.3.4",
+            "mac_address@1.2.1",
+            "sha2@0.10.9",
+            "thiserror@1.0.69",
+            "uuid@1.28.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2014,
+              "EndLine": 2025
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wezterm-color-types@0.3.0",
+          "Name": "wezterm-color-types",
+          "Identifier": {
+            "PURL": "pkg:cargo/wezterm-color-types@0.3.0",
+            "UID": "3f41dbfffc121369"
+          },
+          "Version": "0.3.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "csscolorparser@0.6.2",
+            "deltae@0.3.2",
+            "lazy_static@1.5.0",
+            "wezterm-dynamic@0.2.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2027,
+              "EndLine": 2037
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wezterm-dynamic@0.2.1",
+          "Name": "wezterm-dynamic",
+          "Identifier": {
+            "PURL": "pkg:cargo/wezterm-dynamic@0.2.1",
+            "UID": "4a0a7bd21416fd1"
+          },
+          "Version": "0.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "log@0.4.33",
+            "ordered-float@4.6.0",
+            "strsim@0.11.1",
+            "thiserror@1.0.69",
+            "wezterm-dynamic-derive@0.1.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2039,
+              "EndLine": 2050
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wezterm-dynamic-derive@0.1.1",
+          "Name": "wezterm-dynamic-derive",
+          "Identifier": {
+            "PURL": "pkg:cargo/wezterm-dynamic-derive@0.1.1",
+            "UID": "2465679903753bf6"
+          },
+          "Version": "0.1.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "proc-macro2@1.0.106",
+            "quote@1.0.46",
+            "syn@1.0.109"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2052,
+              "EndLine": 2061
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wezterm-input-types@0.1.0",
+          "Name": "wezterm-input-types",
+          "Identifier": {
+            "PURL": "pkg:cargo/wezterm-input-types@0.1.0",
+            "UID": "aac1fd42a7c49e5c"
+          },
+          "Version": "0.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "bitflags@1.3.2",
+            "euclid@0.22.14",
+            "lazy_static@1.5.0",
+            "serde@1.0.228",
+            "wezterm-dynamic@0.2.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2063,
+              "EndLine": 2074
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "winapi@0.3.9",
+          "Name": "winapi",
+          "Identifier": {
+            "PURL": "pkg:cargo/winapi@0.3.9",
+            "UID": "9a3c212fa8f3d61a"
+          },
+          "Version": "0.3.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "winapi-i686-pc-windows-gnu@0.4.0",
+            "winapi-x86_64-pc-windows-gnu@0.4.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2076,
+              "EndLine": 2084
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "winapi-i686-pc-windows-gnu@0.4.0",
+          "Name": "winapi-i686-pc-windows-gnu",
+          "Identifier": {
+            "PURL": "pkg:cargo/winapi-i686-pc-windows-gnu@0.4.0",
+            "UID": "f4c7b249c6f85823"
+          },
+          "Version": "0.4.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2086,
+              "EndLine": 2090
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "winapi-x86_64-pc-windows-gnu@0.4.0",
+          "Name": "winapi-x86_64-pc-windows-gnu",
+          "Identifier": {
+            "PURL": "pkg:cargo/winapi-x86_64-pc-windows-gnu@0.4.0",
+            "UID": "c4d12b88c7486e6b"
+          },
+          "Version": "0.4.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2092,
+              "EndLine": 2096
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "windows-link@0.2.1",
+          "Name": "windows-link",
+          "Identifier": {
+            "PURL": "pkg:cargo/windows-link@0.2.1",
+            "UID": "59d3a596beed4fff"
+          },
+          "Version": "0.2.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2098,
+              "EndLine": 2102
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "windows-sys@0.61.2",
+          "Name": "windows-sys",
+          "Identifier": {
+            "PURL": "pkg:cargo/windows-sys@0.61.2",
+            "UID": "f85ea462efdff73"
+          },
+          "Version": "0.61.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "windows-link@0.2.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2104,
+              "EndLine": 2111
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "wit-bindgen@0.57.1",
+          "Name": "wit-bindgen",
+          "Identifier": {
+            "PURL": "pkg:cargo/wit-bindgen@0.57.1",
+            "UID": "d8857f4e582a9590"
+          },
+          "Version": "0.57.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2113,
+              "EndLine": 2117
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "zmij@1.0.21",
+          "Name": "zmij",
+          "Identifier": {
+            "PURL": "pkg:cargo/zmij@1.0.21",
+            "UID": "b469ed70fee798b8"
+          },
+          "Version": "1.0.21",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2119,
+              "EndLine": 2123
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        }
+      ]
+    },
+    {
+      "Target": "vendor/jwalk/Cargo.lock",
+      "Class": "lang-pkgs",
+      "Type": "cargo",
+      "Packages": [
+        {
+          "ID": "jwalk@0.8.1",
+          "Name": "jwalk",
+          "Identifier": {
+            "PURL": "pkg:cargo/jwalk@0.8.1",
+            "UID": "f14a6e57dad6e137"
+          },
+          "Version": "0.8.1",
+          "Relationship": "root",
+          "DependsOn": [
+            "crossbeam@0.8.2",
+            "num_cpus@1.14.0",
+            "rayon@1.6.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 343,
+              "EndLine": 356
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam@0.8.2",
+          "Name": "crossbeam",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam@0.8.2",
+            "UID": "cc57276ac60d529a"
+          },
+          "Version": "0.8.2",
+          "Relationship": "direct",
+          "DependsOn": [
+            "cfg-if@1.0.0",
+            "crossbeam-channel@0.5.6",
+            "crossbeam-deque@0.8.2",
+            "crossbeam-epoch@0.9.13",
+            "crossbeam-queue@0.3.8",
+            "crossbeam-utils@0.8.14"
+          ],
+          "Locations": [
+            {
+              "StartLine": 154,
+              "EndLine": 166
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rayon@1.6.1",
+          "Name": "rayon",
+          "Identifier": {
+            "PURL": "pkg:cargo/rayon@1.6.1",
+            "UID": "ecedd0fb04e0dd27"
+          },
+          "Version": "1.6.1",
+          "Relationship": "direct",
+          "DependsOn": [
+            "either@1.8.0",
+            "rayon-core@1.10.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 477,
+              "EndLine": 485
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "autocfg@1.1.0",
+          "Name": "autocfg",
+          "Identifier": {
+            "PURL": "pkg:cargo/autocfg@1.1.0",
+            "UID": "c4d9a3a89180c72f"
+          },
+          "Version": "1.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 31,
+              "EndLine": 35
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "cfg-if@1.0.0",
+          "Name": "cfg-if",
+          "Identifier": {
+            "PURL": "pkg:cargo/cfg-if@1.0.0",
+            "UID": "5dd702b2601309a2"
+          },
+          "Version": "1.0.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 64,
+              "EndLine": 68
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-channel@0.5.6",
+          "Name": "crossbeam-channel",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-channel@0.5.6",
+            "UID": "b09c7d438d14f2ac"
+          },
+          "Version": "0.5.6",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.0",
+            "crossbeam-utils@0.8.14"
+          ],
+          "Locations": [
+            {
+              "StartLine": 168,
+              "EndLine": 176
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-deque@0.8.2",
+          "Name": "crossbeam-deque",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-deque@0.8.2",
+            "UID": "ccb54e0a2a31a72c"
+          },
+          "Version": "0.8.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.0",
+            "crossbeam-epoch@0.9.13",
+            "crossbeam-utils@0.8.14"
+          ],
+          "Locations": [
+            {
+              "StartLine": 178,
+              "EndLine": 187
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-epoch@0.9.13",
+          "Name": "crossbeam-epoch",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-epoch@0.9.13",
+            "UID": "649831a69e1fa4f0"
+          },
+          "Version": "0.9.13",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "autocfg@1.1.0",
+            "cfg-if@1.0.0",
+            "crossbeam-utils@0.8.14",
+            "memoffset@0.7.1",
+            "scopeguard@1.1.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 189,
+              "EndLine": 200
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-queue@0.3.8",
+          "Name": "crossbeam-queue",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-queue@0.3.8",
+            "UID": "abd1f07bd0a0f24c"
+          },
+          "Version": "0.3.8",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.0",
+            "crossbeam-utils@0.8.14"
+          ],
+          "Locations": [
+            {
+              "StartLine": 202,
+              "EndLine": 210
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "crossbeam-utils@0.8.14",
+          "Name": "crossbeam-utils",
+          "Identifier": {
+            "PURL": "pkg:cargo/crossbeam-utils@0.8.14",
+            "UID": "1bc61ba721ad5ac1"
+          },
+          "Version": "0.8.14",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cfg-if@1.0.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 212,
+              "EndLine": 219
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "either@1.8.0",
+          "Name": "either",
+          "Identifier": {
+            "PURL": "pkg:cargo/either@1.8.0",
+            "UID": "508b0c2e7b7bf8fc"
+          },
+          "Version": "1.8.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 221,
+              "EndLine": 225
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "hermit-abi@0.1.19",
+          "Name": "hermit-abi",
+          "Identifier": {
+            "PURL": "pkg:cargo/hermit-abi@0.1.19",
+            "UID": "def6f0e82f71b149"
+          },
+          "Version": "0.1.19",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "libc@0.2.138"
+          ],
+          "Locations": [
+            {
+              "StartLine": 273,
+              "EndLine": 280
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "libc@0.2.138",
+          "Name": "libc",
+          "Identifier": {
+            "PURL": "pkg:cargo/libc@0.2.138",
+            "UID": "2c11c5f1b3b35158"
+          },
+          "Version": "0.2.138",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 364,
+              "EndLine": 368
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "memoffset@0.7.1",
+          "Name": "memoffset",
+          "Identifier": {
+            "PURL": "pkg:cargo/memoffset@0.7.1",
+            "UID": "b7dc7665c508c0ea"
+          },
+          "Version": "0.7.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "autocfg@1.1.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 385,
+              "EndLine": 392
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "num_cpus@1.14.0",
+          "Name": "num_cpus",
+          "Identifier": {
+            "PURL": "pkg:cargo/num_cpus@1.14.0",
+            "UID": "5f67e816b5d23668"
+          },
+          "Version": "1.14.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "hermit-abi@0.1.19",
+            "libc@0.2.138"
+          ],
+          "Locations": [
+            {
+              "StartLine": 403,
+              "EndLine": 411
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "rayon-core@1.10.1",
+          "Name": "rayon-core",
+          "Identifier": {
+            "PURL": "pkg:cargo/rayon-core@1.10.1",
+            "UID": "5a466968bf099ee2"
+          },
+          "Version": "1.10.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "crossbeam-channel@0.5.6",
+            "crossbeam-deque@0.8.2",
+            "crossbeam-utils@0.8.14",
+            "num_cpus@1.14.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 487,
+              "EndLine": 497
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        },
+        {
+          "ID": "scopeguard@1.1.0",
+          "Name": "scopeguard",
+          "Identifier": {
+            "PURL": "pkg:cargo/scopeguard@1.1.0",
+            "UID": "b5eddac1fd638b5e"
+          },
+          "Version": "1.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 549,
+              "EndLine": 553
+            }
+          ],
+          "AnalyzedBy": "cargo"
+        }
+      ]
+    }
+  ]
+}

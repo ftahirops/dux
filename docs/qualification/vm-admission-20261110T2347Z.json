@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-11-10T23:47Z",
+  "decision": "blocked_no_vm_started",
+  "probe": "require_stable_host_admission(samples=3, interval_seconds=10)",
+  "result": "refused at sample 1/3",
+  "blockers": [
+    "Go compiler and Go test processes",
+    "Node Vitest process",
+    "host load1 16.02 exceeds 10",
+    "CPU PSI some avg10 45.55% requires load1<=10 and cpu PSI full avg10<=5%"
+  ],
+  "vm_started": false,
+  "dux_test_suite_started": false,
+  "evidence": "guard refusal captured directly; no bypass"
+}

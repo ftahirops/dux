@@ -1,0 +1,31 @@
+{
+  "observed_at_utc": "2026-11-10T22:44Z",
+  "qualification_host": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 128365744128,
+    "root_available_bytes": 60895338496,
+    "root_use_percent": 68,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3751624704,
+    "dev_shm_available_bytes": 9977589760,
+    "cpu_psi_some_avg10_percent": 22.90,
+    "cpu_psi_some_avg60_percent": 41.48,
+    "cpu_psi_some_avg300_percent": 41.64,
+    "io_psi_some_avg10_percent": 5.62,
+    "load_average_1m": 28.53,
+    "active_unrelated_go_test_workloads": true,
+    "qualification_vm_started": false
+  },
+  "vps2": {
+    "root_total_bytes": 99012476928,
+    "root_used_bytes": 83993325568,
+    "root_available_bytes": 10439401472,
+    "root_use_percent": 89,
+    "dev_shm_total_bytes": 3221225472,
+    "dev_shm_used_bytes": 1034543104,
+    "dev_shm_available_bytes": 2186682368,
+    "dux_soak_unit_active": true,
+    "dux_soak_unit_restarts": 0
+  },
+  "method": "read-only df -B1, /proc/pressure/cpu, /proc/pressure/io, /proc/loadavg, systemctl state"
+}

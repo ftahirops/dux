@@ -1,0 +1,20 @@
+(Reading database ... 138542 files and directories currently installed.)
+Removing dux (0.6.3-100) ...
+(Reading database ... 138534 files and directories currently installed.)
+Purging configuration files for dux (0.6.3-100) ...
+Selecting previously unselected package dux.
+(Reading database ... 138535 files and directories currently installed.)
+Preparing to unpack .../dux_0.6.3-100_amd64.deb ...
+Unpacking dux (0.6.3-100) ...
+Setting up dux (0.6.3-100) ...
+Created symlink /etc/systemd/system/multi-user.target.wants/dux.service → /usr/lib/systemd/system/dux.service.
+dux: starting service — the initial scan of / runs in the BACKGROUND.
+dux: watch scan progress with:  dux status   (or: journalctl -u dux -f)
+dux: the index is readable by root and the 'dux' group (it lists every
+dux: filename on /). Grant a user access with: usermod -aG dux <user>
+2026-11-08T11:09:07Z
+
+enabled
+activating
+dux 0.6.3 (720a0882b97a) [production] source-sha256=04597f761eb297aa4acf46aa7dd163133a97b6a8001fab781952c3534788bb4e
+cfdcb0f8e2923831b8109100f8806b5cb54345eefd555513242c74fb98d796dc  /usr/bin/dux

@@ -1,0 +1,24 @@
+{
+  "observed_at_utc": "2026-11-10T22:18:04Z",
+  "decision": "blocked_no_vm_started",
+  "load_average_1m": 10.04,
+  "cpu_psi_some_avg10_percent": 28.57,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "memory_psi_some_avg10_percent": 0.0,
+  "io_psi_some_avg10_percent": 1.15,
+  "active_host_workload_count": 7,
+  "active_host_workload_types": [
+    "Go compiler",
+    "Go vet worker",
+    "go test",
+    "go vet",
+    "shell test script"
+  ],
+  "blocker_categories": [
+    "active host build/test/install/analysis workload",
+    "host load1=10.04 exceeds 10"
+  ],
+  "blocker_count": 8,
+  "vm_started": false,
+  "fault_matrix_started": false
+}

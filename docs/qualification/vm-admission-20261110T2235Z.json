@@ -1,0 +1,33 @@
+{
+  "observed_at_utc": "2026-11-10T22:35:38Z",
+  "host": "qualification host",
+  "guest": "ubuntu24-lifecycle-ephemeral",
+  "vm_unit": "dux-qualification-vm-ubuntu24-lifecycle-ephemeral.service",
+  "initial_admission_passed": true,
+  "started_at_utc": "2026-11-10T22:34:55Z",
+  "stopped_at_utc": "2026-11-10T22:35:38Z",
+  "stop_reason": "pressure guard detected unrelated host build/test workloads",
+  "pressure": {
+    "active_host_workloads": [
+      "Go compiler pid=4157158",
+      "Go compiler pid=4157307",
+      "go test pid=4153918",
+      "go test pid=4156850"
+    ],
+    "load1": 7.11,
+    "cpu_psi_some_avg10_percent": 45.78,
+    "cpu_psi_full_avg10_percent": 0.0,
+    "io_psi_some_avg10_percent": 2.99,
+    "io_psi_full_avg10_percent": 2.39,
+    "memory_psi_some_avg10_percent": 0.0,
+    "memory_psi_full_avg10_percent": 0.0
+  },
+  "result": {
+    "vm_test_suite_started": false,
+    "fault_matrix_started": false,
+    "ephemeral_runtime_cleaned": true,
+    "vm_service_restarts": 0,
+    "classification": "guarded infrastructure admission stop; not a Dux test failure"
+  },
+  "evidence": "journalctl for dux-qualification-vm-ubuntu24-lifecycle-ephemeral.service and pressure guard at 2026-11-10 22:34-22:36 UTC"
+}

@@ -1,0 +1,25 @@
+{
+  "purpose": "unsigned disposable package lifecycle fixtures; not release artifacts",
+  "old_deb": {
+    "path": "target/readiness/r132-release-20261110/dux_0.6.3-132_amd64.deb",
+    "sha256": "d35236cb0b55cf80ea4750115d6269dea2203b5922942df4f1fec0e4a29d8def"
+  },
+  "new_deb": {
+    "path": "target/readiness/package-active-rollback-r136-20261110/dux_0.6.3-136_amd64.deb",
+    "sha256": "228062310508c5c272f53b8820fd93af7957e59bb248da4ea557476b9ac4002d"
+  },
+  "old_rpm": {
+    "path": "target/readiness/r132-release-20261110/dux-0.6.3-132.x86_64.rpm",
+    "sha256": "bb1adbd0b2bc5a36c30076bcfd3436e424dbd596aa07a26d78d952a24650af78"
+  },
+  "new_rpm": {
+    "path": "target/readiness/package-active-rollback-r136-20261110/dux-0.6.3-136.x86_64.rpm",
+    "sha256": "11cdd1dea6b4dbe7223de13a77b7967743d42b7db12ec88182d3e0d132548810"
+  },
+  "daemon_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "new_package_revision": "136",
+  "new_backup_restore_helper_sha256": "72e03af373f3800ad87161baab590952118dfa6f4671f479234cea9cdea9281f",
+  "old_rpm_state_directory_owner": "/var/lib/dux root:dux",
+  "new_rpm_state_directory_owner": "/var/lib/dux dux:dux",
+  "note": "Current package scripts and verified restore helper, exact r132 candidate binary; intended only for disposable active upgrade/rollback lifecycle qualification."
+}

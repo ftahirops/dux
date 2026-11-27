@@ -1,0 +1,26 @@
+{
+  "source_commit": "a62ac2d7e464d33f0fda6195d80bee6e98b6c0cb",
+  "checkout": "Git checkout created from the pushed commit bundle",
+  "command": "PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py' -q",
+  "result": "passed",
+  "tests_passed": 296,
+  "tests_failed": 0,
+  "tests_errored": 0,
+  "python_test_elapsed_seconds": 28.079,
+  "systemd_unit": "dux-python-suite-log-a62ac2d.service",
+  "systemd_limits": {
+    "private_mounts": true,
+    "cpu_quota_percent": 25,
+    "memory_max_bytes": 2147483648,
+    "runtime_max_seconds": 900
+  },
+  "systemd_result": {
+    "exit_status": 0,
+    "restarts": 0,
+    "runtime_seconds": 28.402,
+    "cpu_time_seconds": 6.398,
+    "memory_peak": "158.0M",
+    "memory_swap_peak": "0B"
+  },
+  "log_sha256": "2b904fc8919b0d32d536cef8e4e786410a0346aaed7d44fc0e2ddc5c4b9467c7"
+}

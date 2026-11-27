@@ -1,0 +1,11 @@
+UNPRIVILEGED_STATUS user=nobody uid=65534 gid=65534 CapEff=0000000000200004
+PASS: non-root UID with only CAP_SYS_ADMIN and CAP_DAC_READ_SEARCH initializes fanotify and resolves create/rename events
+[2m2026-11-10T02:50:16.527079Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m selected startup index source [3mrebuilt[0m[2m=[0mtrue [3mread_only_source[0m[2m=[0mfalse [3mschema_version[0m[2m=[0m7 [3mbaseline_ready[0m[2m=[0mfalse
+[2m2026-11-10T02:50:16.527128Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m initial baseline or schema upgrade will run after filesystem watches are active
+[2m2026-11-10T02:50:16.527687Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m fanotify queue-pressure CPU throttle thresholds [3mmax_queued_events[0m[2m=[0m16384 [3mqueue_high_watermark_bytes[0m[2m=[0m294912 [3mqueue_low_watermark_bytes[0m[2m=[0m196608 [3mreconcile_first[0m[2m=[0mfalse
+[2m2026-11-10T02:50:16.527735Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m dux daemon watching /dev/shm/dux-r126-unpriv.Ees5Go/mnt (1 filesystem(s), FID mode: create/delete/rename/modify, flush 25ms)
+[2m2026-11-10T02:50:16.528074Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m selected reconciliation implementation [3muse_in_place_observation[0m[2m=[0mfalse [3mbaseline_ready[0m[2m=[0mfalse [3mread_only_source[0m[2m=[0mfalse
+[2m2026-11-10T02:50:16.528081Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m starting background reconciliation of /dev/shm/dux-r126-unpriv.Ees5Go/mnt; event ingestion remains active
+[2m2026-11-10T02:50:16.731784Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m rescan complete: 0 files, 2 dirs, 2 staged path instances (0 directory alias paths), visible 20480 bytes/2 entries, unique 20480 bytes/2 inodes, 20 KiB (0 coverage issues); replaying 0 pending paths [3mvanished_reuse_paths[0m[2m=[0m0 [3mrevalidated_reuse_paths[0m[2m=[0m0 [3munresolved_reuse_paths[0m[2m=[0m0
+[2m2026-11-10T02:50:16.756593Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m reconciliation accounting verification passed [3melapsed_ms[0m[2m=[0m24
+[2m2026-11-10T02:50:18.688950Z[0m [32m INFO[0m [2mdux::watch[0m[2m:[0m dux daemon: received SIGTERM/SIGINT — drained + flushed, exiting

@@ -1,0 +1,20 @@
+{
+  "sampled_at": "2026-11-10T11:18:00Z",
+  "source_host": "192.168.5.106",
+  "source_progress_path": "/var/tmp/dux-r132-soak-20261110/evidence/soak-progress.json",
+  "unit": "dux-readiness-1304925.service",
+  "unit_state": "active/running",
+  "unit_restarts": 0,
+  "candidate_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+  "soak_status": "running",
+  "elapsed_seconds": 7990.8,
+  "operations": 188451,
+  "exact_check_samples": 187,
+  "mutation_bursts_passed": 2,
+  "held_reader_scenarios_completed": 0,
+  "controlled_crash_recovery_scenarios_completed": 0,
+  "final_exact_passed": false,
+  "final_history_passed": false,
+  "sqlite_integrity": null,
+  "qualification_decision": "incomplete; soak still running"
+}

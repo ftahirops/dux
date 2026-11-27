@@ -1,0 +1,15 @@
+rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+0b81fa8a6eb2b3e6890c9abc017eb0018d0445a5
+fb3c7f59022ec73a7b33320665dd4f9b15140ee5f9bd8ff055fcb3ea404d10e3  Cargo.lock
+952328eedd6ee73c344abddf0bb411b537786f030f3b0e5c282e8f83b2e1c287  /var/tmp/dux-musl-build-0b81fa8/x86_64-unknown-linux-musl/release/dux
+Running as unit: dux-clippy-evidence-0b81fa8.service
+   Compiling dux v0.6.3 (/var/tmp/dux-candidate-0b81fa8)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.06s
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 12.181s
+CPU time consumed: 3.059s
+Memory peak: 446.8M
+Memory swap peak: 0B

@@ -1,0 +1,68 @@
+{
+  "captured_at_utc": "2026-11-09T16:52Z (directory breakdown); exact df bytes captured 16:54:12Z",
+  "host": "VPS2 192.168.5.106, read-only inventory",
+  "filesystem": {
+    "captured_at_utc": "2026-11-09T16:54:12Z",
+    "size_bytes": 99012476928,
+    "used_bytes": 87088074752,
+    "available_bytes": 7344652288,
+    "reported_use_percent": 93,
+    "inodes_total": 6160384,
+    "inodes_used": 1734485,
+    "inode_use_percent": 29
+  },
+  "top_level_du_bytes": {
+    "/var": 65776914432,
+    "/root": 8502706176,
+    "/usr": 6594969600,
+    "/srv": 1103564800,
+    "/opt": 469389312,
+    "/home": 225181696,
+    "/tmp": 100581376,
+    "/.xtop": 57344
+  },
+  "var_breakdown_bytes": {
+    "/var/lib": 55477022720,
+    "/var/log": 4653146112,
+    "/var/tmp": 5590765568,
+    "/var/cache": 40542208,
+    "/var/spool": 23674880,
+    "/var/backups": 2887680
+  },
+  "var_lib_breakdown_bytes": {
+    "/var/lib/docker": 24330878976,
+    "/var/lib/containerd": 20338728960,
+    "/var/lib/dux": 846835712,
+    "/var/lib/apt": 214351872,
+    "/var/lib/crowdsec": 116731904
+  },
+  "journalctl_disk_usage": "3.9G",
+  "docker_system_df": {
+    "images": {
+      "total": 38,
+      "active": 22,
+      "size": "20.31GB",
+      "reclaimable": "6.402GB"
+    },
+    "containers": {
+      "total": 29,
+      "active": 20,
+      "size": "4.327GB",
+      "reclaimable": "1.955GB"
+    },
+    "volumes": {
+      "total": 12,
+      "active": 10,
+      "size": "19.67GB",
+      "reclaimable": "366.8MB"
+    },
+    "build_cache": {
+      "total": 1,
+      "active": 0,
+      "size": "3.846MB",
+      "reclaimable": "0B"
+    }
+  },
+  "decision": "No files or Docker objects removed; /var/tmp contains retained Dux qualification/build artifacts and Docker has active services/volumes. Size/reclaimability alone is insufficient authorization to delete them.",
+  "method": "nice -n 19 ionice -c 3 du -x --max-depth=1; docker system df; df -h; df -i; read-only"
+}

@@ -1,0 +1,16 @@
+Running as unit: dux-v7-pathgraph-20261107b.service
+
+running 4 tests
+test scan::tests::staged_v7_path_graph_preserves_aliases_and_cycle_rows ... ok
+test store::tests::path_graph_directory_totals_require_a_live_path_and_cascade_on_delete ... ok
+test store::tests::path_graph_preserves_two_paths_to_one_directory_inode ... ok
+test store::tests::path_graph_rejects_ancestor_cycles ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 264 filtered out; finished in 0.04s
+
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 39ms
+CPU time consumed: 10ms
+Memory peak: 1.5M
+Memory swap peak: 0B

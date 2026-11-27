@@ -1,0 +1,49 @@
+{
+  "observed_at_utc": "2026-11-11T00:35:32Z",
+  "binary": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "service": {
+    "active_state": "active",
+    "main_pid": 1073891,
+    "historical_restarts": 4
+  },
+  "status": {
+    "dirty": true,
+    "caught_up": false,
+    "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+    "behind_seconds": 284680.831,
+    "kernel_overflow_notifications": 892,
+    "events_dropped": 2518862,
+    "pending_updates": 12,
+    "last_scan_age_seconds": 474370,
+    "scan_in_progress": false,
+    "index_nodes": 1289538,
+    "index_bytes_on_disk": 3737456640,
+    "index_bytes": 123396354048,
+    "wal_bytes": 134217728,
+    "write_error": null,
+    "events_seen": 282350017,
+    "events_resolved": 164102158,
+    "updates_committed": 46242740,
+    "last_event_commit_timestamp_seconds": 1794357331,
+    "watch_status_updated_at_seconds": 1794357332
+  },
+  "host_storage": {
+    "root_total_bytes": 198092431360,
+    "root_used_bytes": 126107889664,
+    "root_available_bytes": 63153192960,
+    "root_use_percent": 67,
+    "dev_shm_total_bytes": 13729214464,
+    "dev_shm_used_bytes": 3751624704,
+    "dev_shm_available_bytes": 9977589760
+  },
+  "deltas_since_2026_11_11T0027Z": {
+    "kernel_overflow_notifications": 1,
+    "events_dropped": 0,
+    "pending_updates": -17,
+    "events_seen": 1196211,
+    "events_resolved": 483619,
+    "updates_committed": 231228,
+    "behind_seconds": 472.13
+  },
+  "interpretation": "The old event-apply daemon remains dirty and not caught up. One additional kernel overflow occurred; pending work drained to 12, but status now reports non-watched filesystem mount changes as the dirty reason. This does not establish that the mount change caused the overflow."
+}

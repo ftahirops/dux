@@ -1,0 +1,30 @@
+Running as unit: dux-readiness-469714.service
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+Evidence: /root/dux-readiness-0fc18fc/release108-readiness.json
+Traceback (most recent call last):
+  File "/root/dux-readiness-0fc18fc/scripts/dux-readiness.py", line 2563, in <module>
+    main()
+  File "/root/dux-readiness-0fc18fc/scripts/dux-readiness.py", line 2518, in main
+    worker(args)
+  File "/root/dux-readiness-0fc18fc/scripts/dux-readiness.py", line 2343, in worker
+    SUITES[name](case, args, evidence)
+  File "/root/dux-readiness-0fc18fc/scripts/dux-readiness.py", line 586, in crash_tests
+    daemon.exact()
+  File "/root/dux-readiness-0fc18fc/scripts/dux-readiness.py", line 364, in exact
+    meta, status = self.wait_pipeline(previous_generation, timeout)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/dux-readiness-0fc18fc/scripts/dux-readiness.py", line 360, in wait_pipeline
+    return self.wait(fresh_ready, "fresh post-mutation pipeline convergence", timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/dux-readiness-0fc18fc/scripts/dux-readiness.py", line 326, in wait
+    raise AssertionError(f"timeout waiting for {description}: {last}")
+AssertionError: timeout waiting for fresh post-mutation pipeline convergence: pipeline reports uncertain event state: {'updated_at': 1794185833, 'status_mtime_ns': 1794185833779000000, 'pending': 0, 'drained': True, 'seen': 12, 'resolved': 0, 'committed': 0, 'dropped': 0, 'uncertain': True, 'kernel_overflow_notifications': 0, 'scan_first': True}
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=1
+Service runtime: 1min 31.486s
+CPU time consumed: 1.615s
+Memory peak: 27.3M
+Memory swap peak: 0B

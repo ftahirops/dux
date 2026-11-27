@@ -1,0 +1,23 @@
+{
+  "guest": "ubuntu24-lifecycle-current",
+  "profile": "standard",
+  "cpu_quota_percent": 10,
+  "guest_ram_mib": 2048,
+  "ephemeral_tmpfs_overlay": true,
+  "started_at_utc": "2026-11-10T17:38:06Z",
+  "stopped_at_utc": "2026-11-10T17:39:01Z",
+  "elapsed_seconds": 55,
+  "stop_reason": "pressure watchdog detected an active host Go test workload",
+  "host_pressure_at_stop": {
+    "active_workloads": ["go test pid=2892210"],
+    "load1": 3.78,
+    "cpu_psi_some_avg10_percent": 42.55,
+    "io_psi_some_avg10_percent": 1.67,
+    "io_psi_full_avg10_percent": 0.65,
+    "memory_psi_full_avg10_percent": 0.0
+  },
+  "ssh_ready": false,
+  "first_ssh_attempt": "timed out during SSH banner exchange",
+  "package_commands_run": false,
+  "post_stop_state": "QEMU unit inactive; private tmpfs overlay/runtime removed"
+}

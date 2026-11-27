@@ -1,0 +1,27 @@
+{
+  "suite": "churn",
+  "status": "failed",
+  "candidate_binary_sha256": "b0755fb7324331da20bd0960150625f3e359c8dc35e2e120b3484bbca83e57e3",
+  "report_path": "/dev/shm/dux-readiness-release116/reports/p0-matrix.json",
+  "seed_files": 100000,
+  "operations": 20000,
+  "operations_per_batch": 2000,
+  "total_batches": 10,
+  "event_counters_at_start": {
+    "updated_at": 1794199386,
+    "status_mtime_ns": 1794199386093000000,
+    "pending": 0,
+    "drained": true,
+    "seen": 1413,
+    "resolved": 0,
+    "committed": 0,
+    "dropped": 0,
+    "uncertain": true,
+    "kernel_overflow_notifications": 0,
+    "scan_first": true
+  },
+  "completed_batches": [],
+  "completed_operations": 0,
+  "last_checkpoint_at": "2026-11-09T04:44:45Z",
+  "failure": "AssertionError({'updated_at': 1794199485, 'status_mtime_ns': 1794199485788000000, 'pending': 0, 'drained': True, 'seen': 8878, 'resolved': 0, 'committed': 0, 'dropped': 0, 'uncertain': True, 'kernel_overflow_notifications': 0, 'scan_first': True})"
+}

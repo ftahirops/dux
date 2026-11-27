@@ -1,0 +1,33 @@
+{
+  "recorded_at_utc": "2026-11-10T11:27:42Z",
+  "finding": "The soak harness slept a full interval after mutation execution, so observed mutation throughput was below the configured rate.",
+  "fix": "Use monotonic start deadlines; rebase after slow operations to prevent catch-up bursts; report requested and observed rates.",
+  "source_harness_sha256_after_fix": "eadc239b6c2d3824f2dfa5c486b0444a9950822d164d335a001011a5cfd689c3",
+  "focused_readiness_workflow_tests": {
+    "passed": 64,
+    "failed": 0,
+    "new_pacing_tests": 2
+  },
+  "python_byte_compilation": "passed",
+  "git_diff_check": "passed",
+  "current_soak": {
+    "host": "192.168.5.106",
+    "unit": "dux-readiness-1304925.service",
+    "unit_state": "active/running",
+    "restarts": 0,
+    "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "copied_harness_sha256": "653573dcf8a706f68b5db21d3f9d7277fd037494742951a7cefed1b9ba49f523",
+    "progress_file_mtime_utc": "2026-11-10T11:27:01.544Z",
+    "elapsed_seconds": 8531.1,
+    "operations_including_bursts": 201012,
+    "hourly_500_operation_bursts": 2,
+    "observed_rate_including_bursts_per_second": 23.562,
+    "observed_rate_excluding_bursts_per_second": 23.445,
+    "requested_rate_per_second": 25,
+    "exact_check_samples": 200,
+    "held_readers_completed": 0,
+    "controlled_crashes_completed": 0,
+    "final_exact_history_and_integrity_checks": "pending",
+    "qualification_note": "Do not claim this running process achieved the configured 25 operations/second. The harness fix only affects future runs."
+  }
+}

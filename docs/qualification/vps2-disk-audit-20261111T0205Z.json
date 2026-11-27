@@ -1,0 +1,54 @@
+{
+  "host": "192.168.5.106",
+  "observed_at_utc": "2026-11-11T02:05:57Z",
+  "filesystem": {
+    "mount": "/",
+    "total_bytes": 99012476928,
+    "used_bytes": 82702426112,
+    "available_bytes": 11730300928,
+    "use_percent": 88,
+    "dev_shm_available_bytes": 2185502720
+  },
+  "dux_storage": {
+    "var_lib_dux_bytes": 924567536,
+    "database_bytes": 864325632,
+    "wal_bytes": 60110832,
+    "indexed_unique_bytes": 83626618880,
+    "indexed_unique_inodes": 2001587
+  },
+  "largest_indexed_directories": [
+    {"path": "/var", "bytes": 62115647488},
+    {"path": "/var/lib", "bytes": 54635692032},
+    {"path": "/var/lib/docker", "bytes": 24842350592},
+    {"path": "/var/lib/docker/volumes", "bytes": 20468060160},
+    {"path": "/var/lib/docker/volumes/signoz-clickhouse", "bytes": 20062015488},
+    {"path": "/var/lib/containerd", "bytes": 17274834944},
+    {"path": "/var/lib/xgs", "bytes": 12081528832},
+    {"path": "/root", "bytes": 8503164928},
+    {"path": "/usr", "bytes": 6594969600},
+    {"path": "/var/log", "bytes": 4855439360},
+    {"path": "/var/log/journal", "bytes": 4337475584}
+  ],
+  "largest_files_and_transient_observations": [
+    {"path": "/swap.img", "bytes": 4294967296, "kind": "active swap file; not cleanup candidate without swap migration"},
+    {"path": "/var/lib/docker/containers/6e60bd62c17c1f9c2f336a0bd704605c8118237ffe34db8630039a5576d1dbc3/6e60bd62c17c1f9c2f336a0bd704605c8118237ffe34db8630039a5576d1dbc3-json.log", "bytes_at_020557": 3959779693, "container": "glitchtip-worker-1"},
+    {"path": "/var/lib/docker/volumes/signoz-clickhouse/_data/store/f90/f90d4ead-2a2d-4c9e-b477-6ebec68453be/202611_1266248_1297850_564/timestamp_ns.bin", "bytes": 2327896064},
+    {"path": "/var/lib/docker/volumes/signoz-clickhouse/_data/store/f90/f90d4ead-2a2d-4c9e-b477-6ebec68453be/202611_1266248_1297850_564/event_time_microseconds.bin", "bytes": 1665286144},
+    {"path": "/var/lib/docker/volumes/signoz-clickhouse/_data/store/f90/f90d4ead-2a2d-4c9e-b477-6ebec68453be/tmp_merge_202611_1297851_1317500_11/event_time_microseconds.bin", "bytes_at_020340": 1576153088, "observed_absent_at_020407": true},
+    {"path": "/var/lib/docker/containers/6e60bd62c17c1f9c2f336a0bd704605c8118237ffe34db8630039a5576d1dbc3/6e60bd62c17c1f9c2f336a0bd704605c8118237ffe34db8630039a5576d1dbc3-json.log", "bytes_at_020407": 3959735193, "bytes_at_020451": 3959753241, "bytes_at_020557": 3959779693}
+  ],
+  "docker_logging": {
+    "container": "glitchtip-worker-1",
+    "image": "glitchtip/glitchtip:latest",
+    "driver": "json-file",
+    "container_log_config": {},
+    "daemon_config_file": "/etc/docker/daemon.json",
+    "daemon_default_log_driver": null,
+    "daemon_default_log_options": null,
+    "rotation_limits_configured": false,
+    "interpretation": "No max-size or max-file limit was present in the inspected container or Docker daemon configuration. This is host-level log exposure, not Dux-owned storage."
+  },
+  "cleanup_performed": false,
+  "interpretation": "The active ClickHouse merge file was present in the indexed top-file sample at 02:03:40 and absent by 02:04:07, demonstrating transient database merge space. The 3.96 GB GlitchTip worker log is persistent, active container logging and should be rotated through service configuration rather than deleted as a temp file. The 20 GB ClickHouse volume, 17 GB containerd data, 12 GB XGS incident data, 8.5 GB /root qualification/rollback files, 4.3 GB journal, and 4 GB swap file are not safe blind-deletion targets.",
+  "evidence": "read-only dux top, docker inspect, daemon configuration parse, stat, df, and find observations; no broad du scan or deletion was performed"
+}

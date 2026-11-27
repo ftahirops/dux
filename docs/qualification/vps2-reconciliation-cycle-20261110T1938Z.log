@@ -1,0 +1,6 @@
+2026-11-10T19:30:21.988125Z  INFO dux::watch: selected reconciliation implementation use_in_place_observation=true baseline_ready=true read_only_source=false
+2026-11-10T19:30:21.988155Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+2026-11-10T19:35:15.361750Z  WARN dux::scan: discarded staged paths that vanished during inode-reuse races vanished_reuse_paths=48
+2026-11-10T19:37:32.333609Z  INFO dux::watch: filesystem or fanotify hints changed during scan-first observation; next full observation is scheduled
+2026-11-10T19:37:32.333808Z  INFO dux::watch: rescan complete: 1767681 files, 216926 dirs, 1984607 staged path instances (0 directory alias paths), visible 84059602944 bytes/1984607 entries, unique 83872292864 bytes/1981125 inodes, 78.11 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=48 revalidated_reuse_paths=0 unresolved_reuse_paths=0
+2026-11-10T19:38:38.344675Z  INFO dux::watch: reconciliation accounting verification passed elapsed_ms=65984

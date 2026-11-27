@@ -1,0 +1,21 @@
+Running as unit: dux-readiness-519459.service; invocation ID: 0115fda362694a299ec35a0dad8950b2
+PROGRESS fixture creation start: 256 baseline files
+PROGRESS seed start: 256 files
+PROGRESS seed complete; starting baseline scan of 256 files
+PROGRESS baseline scan complete
+PROGRESS crash boundaries selected for scan-first mode: ['scan.in_place_started', 'scan.in_place_projection_ready', 'scan.in_place_before_commit', 'scan.in_place_after_commit']
+PASS crash 1/8: scan.in_place_started
+PASS crash 2/8: random timing
+PASS crash 3/8: scan.in_place_projection_ready
+PASS crash 4/8: random timing
+PASS crash 5/8: scan.in_place_before_commit
+PASS crash 6/8: random timing
+PASS crash 7/8: scan.in_place_after_commit
+PASS crash 8/8: random timing
+Evidence: /root/dux-readiness-6dacdf5/release110-crash8.json
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 12.862s
+CPU time consumed: 2.969s
+Memory peak: 528.0K
+Memory swap peak: 0B

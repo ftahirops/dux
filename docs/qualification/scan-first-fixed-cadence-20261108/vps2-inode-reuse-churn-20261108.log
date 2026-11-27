@@ -1,0 +1,11 @@
+oracle_files=40000 oracle_dirs_including_root=41 indexed_paths=40041
+oracle_allocated_bytes=1490944 indexed_visible_bytes=1490944 indexed_visible_entries=40041
+independent filesystem/path/allocation oracle: PASS
+==> /root/dux-inode-reuse-validation/churn-scan-final.log <==
+scanned 40000 files, 41 dirs, 40041 staged path instances (0 directory alias paths), visible 1490944 bytes/40041 entries, unique 1490944 bytes/40041 inodes, 1.42 MiB in 2.1s (0 coverage issues)
+
+==> /root/dux-inode-reuse-validation/stable-scan-final.log <==
+scanned 40000 files, 41 dirs, 40041 staged path instances (0 directory alias paths), visible 1490944 bytes/40041 entries, unique 1490944 bytes/40041 inodes, 1.42 MiB in 2.1s (0 coverage issues)
+candidate_hash=3372527b008b5486c92256173f8938c592d953c3a8c778712178dca11a55990a  /root/dux-inode-reuse-validation/dux
+service=NRestarts=0
+ActiveState=active

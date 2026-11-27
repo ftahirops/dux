@@ -1,0 +1,35 @@
+{
+  "observed_at_utc": "2026-11-11T06:58:29Z",
+  "source_commit": "129ff59efea93ced6233c4161d9aa7040df16ce2",
+  "builds": {
+    "production": {
+      "command": "nice -n 19 ionice -c 3 env CARGO_BUILD_JOBS=1 cargo build --locked --offline --release",
+      "version": "dux 0.6.3 (129ff59efea9) [production] source-sha256=ef93700dbedb7fec4bc7274a8dd1a5709f1aad3204542ca03a0b2f00e671519e",
+      "sha256": "cf4a6ab044c3218aaa850bf7eeb6782a35fcfa9073ecd113487737a208d9d835"
+    },
+    "fault_injection": {
+      "command": "nice -n 19 ionice -c 3 env CARGO_BUILD_JOBS=1 cargo build --locked --offline --release --features fault-injection",
+      "version": "dux 0.6.3 (129ff59efea9) [fault-injection] source-sha256=ef93700dbedb7fec4bc7274a8dd1a5709f1aad3204542ca03a0b2f00e671519e",
+      "sha256": "6c85c869df07515a3f3026283537e15cf7ca865c5f35ac76c94f0f8f951769b0"
+    },
+    "embedded_source_digests_match": true
+  },
+  "staged_harness": {
+    "readiness_sha256": "331a5276a3784c3d57b6f6b061ba0e9dd21e94671728a419aca4eff7c1d06612",
+    "sandbox_sha256": "1a293b440d1b7cecbd9fe93c7851eb86366c975c8c4b124b05af710991fda80d",
+    "both_match_repository_sources": true
+  },
+  "artifact_preflight": {
+    "syntax_compile": "passed",
+    "checks": "current source commit, binary hashes and versions, equal embedded source digests, and both harness file hashes",
+    "errors": []
+  },
+  "matrix_driver": {
+    "unit": "dux-current-source-matrix-driver.service",
+    "state_at_observation": "active/running",
+    "suites_started": 0,
+    "latest_admission_state": "blocked by active Go build/test/vet workloads and excessive host load/CPU pressure",
+    "guard_bypassed": false
+  },
+  "qualification_status": "Build and artifact identity are verified; no VM suite has run yet."
+}

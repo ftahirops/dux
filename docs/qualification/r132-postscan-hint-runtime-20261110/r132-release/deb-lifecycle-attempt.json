@@ -1,0 +1,166 @@
+{
+  "status": "interrupted_by_host_pressure_guard",
+  "guest": "ubuntu24-lifecycle-ephemeral",
+  "package_kind": "deb",
+  "old_package": "dux_0.6.3-131_amd64.deb",
+  "new_package": "dux_0.6.3-132_amd64.deb",
+  "old_package_sha256": "b2eb86d27049565ae77a090420fddbd29dc8dd670a311ea56abf179900989e54",
+  "new_package_sha256": "d35236cb0b55cf80ea4750115d6269dea2203b5922942df4f1fec0e4a29d8def",
+  "progress_events": [
+    {
+      "event": "stage_started",
+      "stage": "legacy_baseline_preparation"
+    },
+    {
+      "event": "stage_started",
+      "expected_version": "0.6.3-131",
+      "package_reinstall_required": true,
+      "stage": "legacy_baseline_runtime"
+    },
+    {
+      "event": "stage_complete",
+      "stage": "legacy_baseline",
+      "status": "running",
+      "step": {
+        "evidence": {
+          "baseline_package_reinstalled": true,
+          "binary_sha256": "7bf807bc2003b7de7856a27fb580e8ca8cea901978816df0ef2a1d24645c9d41",
+          "daemon_caught_up": false,
+          "daemon_status": {
+            "automatic_reconciliation_paused": false,
+            "behind_seconds": 54.609,
+            "behind_seconds_applicable": false,
+            "caught_up": false,
+            "daemon_live": true,
+            "dirty": true,
+            "dirty_reason": "reconciliation accounting verification pending",
+            "dirty_since_timestamp_seconds": 1794296242,
+            "events_dropped": 0,
+            "events_resolved": 0,
+            "events_seen": 15,
+            "failed_reconciliation_attempts": null,
+            "index_bytes": 1821050368,
+            "index_bytes_on_disk": 29175808,
+            "index_nodes": 85935,
+            "kernel_overflow_notifications": 0,
+            "last_event_commit_timestamp_seconds": 0,
+            "last_scan_age_seconds": 1,
+            "last_scan_timestamp_seconds": 1794296242,
+            "max_automatic_reconciliation_retries": 1,
+            "max_pending_updates": 500000,
+            "pause_reason": null,
+            "paused": false,
+            "paused_since_timestamp_seconds": null,
+            "pending_updates": 0,
+            "reconciliation_retry_backoff_seconds": null,
+            "reconciliation_retry_due": false,
+            "reconciliation_retry_remaining_seconds": null,
+            "reconciliation_retry_state_corrupt": false,
+            "root": "/",
+            "scan_first": true,
+            "scan_in_progress": false,
+            "scan_progress": null,
+            "status_version": 1,
+            "throttled_since_timestamp_seconds": null,
+            "updates_committed": 0,
+            "userspace_updates_dropped": 0,
+            "wal_bytes": 16512,
+            "watch_status_available": true,
+            "watch_status_updated_at_seconds": 1794296242,
+            "write_error": null
+          },
+          "initial_binary_sha256": null,
+          "initial_version": null,
+          "package_payload_binary_sha256": "7bf807bc2003b7de7856a27fb580e8ca8cea901978816df0ef2a1d24645c9d41",
+          "service": {
+            "active": "inactive",
+            "enabled": "disabled",
+            "tunnel_active": "inactive",
+            "tunnel_enabled": "disabled"
+          },
+          "service_after_install": {
+            "active": "activating",
+            "enabled": "enabled",
+            "tunnel_active": "inactive",
+            "tunnel_enabled": "disabled"
+          },
+          "service_runtime_verified": {
+            "active": "active",
+            "enabled": "enabled",
+            "tunnel_active": "inactive",
+            "tunnel_enabled": "disabled"
+          },
+          "staged_version": "0.6.3-131"
+        },
+        "name": "legacy_baseline"
+      }
+    },
+    {
+      "event": "stage_started",
+      "stage": "upgrade",
+      "target_version": "0.6.3-132"
+    },
+    {
+      "event": "stage_complete",
+      "stage": "upgrade_preserves_disabled_services",
+      "status": "running",
+      "step": {
+        "evidence": {
+          "backup_helper_sha256": "38280d4cab948b3ea92aa1ab73547c64960a93a5ecab19ad4ffad1f70f7172da",
+          "binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+          "package_payload_binary_sha256": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+          "rollback_index_backup": {
+            "mode": "0o640",
+            "path": "/root/dux-r132-lifecycle-rollback.sqlite",
+            "quick_check": "ok",
+            "sha256": "37a9ce025c2ac5a57539dfad05995be244ac85f516a15d8a6641a7e9e1991fbe"
+          },
+          "service": {
+            "active": "inactive",
+            "enabled": "disabled",
+            "tunnel_active": "inactive",
+            "tunnel_enabled": "disabled"
+          },
+          "version": "0.6.3-132"
+        },
+        "name": "upgrade_preserves_disabled_services"
+      }
+    },
+    {
+      "event": "stage_started",
+      "stage": "rollback",
+      "target_version": "0.6.3-131"
+    }
+  ],
+  "host_guard_stop": {
+    "action": "stopped_disposable_vm",
+    "guest": "ubuntu24-lifecycle-ephemeral",
+    "pressure": {
+      "active_host_workloads": [
+        "Go compiler pid=635287",
+        "go test pid=635207"
+      ],
+      "cpu": {
+        "full": 0.0,
+        "some": 26.14
+      },
+      "io": {
+        "full": 0.92,
+        "some": 1.22
+      },
+      "load1": 3.12,
+      "memory": {
+        "full": 0.49,
+        "some": 0.5
+      },
+      "telemetry_errors": []
+    },
+    "reason": [
+      "active host build/test/install/analysis workload: Go compiler pid=635287",
+      "active host build/test/install/analysis workload: go test pid=635207"
+    ],
+    "time": "2026-11-10T07:37:48Z",
+    "vm_unit": "dux-qualification-vm-ubuntu24-lifecycle-ephemeral"
+  },
+  "note": "The disposable VM overlay and guest report were cleaned when the host pressure guard stopped QEMU. Host-streamed progress preserves completed stages; rollback, removal/purge, and clean install did not complete."
+}

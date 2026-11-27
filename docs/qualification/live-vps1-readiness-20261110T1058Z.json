@@ -1,0 +1,41 @@
+{
+  "captured_at_utc": "2026-11-10T10:58:27Z",
+  "collection": "read-only dux status --json, version, uptime, pressure, and df",
+  "production_version": "dux 0.6.3 (e0cc915f8f37) [production]",
+  "source_sha256": "b7c9a8dbe1f40ff0190ade339385211f27ebc94aa0972e1c8313309d5fb19882",
+  "binary_sha256": "e148692fe0bc42f809fa7fea41462feeda1acffb66b70e5affa03cdb5b0af060",
+  "daemon_live": true,
+  "dirty": true,
+  "caught_up": false,
+  "dirty_reason": "non-watched filesystem mounts changed; reconciling visible paths",
+  "behind_seconds": 235655.656,
+  "last_scan_timestamp_utc": "2026-11-05T12:49:22Z",
+  "last_scan_age_seconds": 425345,
+  "kernel_overflow_notifications": 742,
+  "events_dropped": 2518862,
+  "pending_updates": 313,
+  "index_nodes": 1313180,
+  "index_bytes": 125167124480,
+  "index_bytes_on_disk": 3436044288,
+  "wal_bytes": 134217728,
+  "scan_in_progress": false,
+  "write_error": null,
+  "host": {
+    "uptime_load_average": [3.97, 6.46, 8.94],
+    "pressure_psi_avg10_percent": {
+      "cpu_some": 1.94,
+      "cpu_full": 0.0,
+      "io_some": 0.75,
+      "io_full": 0.74,
+      "memory_some": 0.0,
+      "memory_full": 0.0
+    }
+  },
+  "root_disk": {
+    "size": "185G",
+    "used": "120G",
+    "available": "58G",
+    "use_percent": 68
+  },
+  "active_external_test_workload": "/home/xgenstack.com/backend: go test ./internal/service -run TestDatabaseBrowser"
+}

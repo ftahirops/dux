@@ -1,0 +1,60 @@
+{
+  "captured_at_utc": "2026-11-07T06:27:58Z",
+  "window": "journal from preceding 5 minutes",
+  "service": {
+    "MainPID": "988284",
+    "NRestarts": "1",
+    "ActiveState": "active"
+  },
+  "watch_status": {
+    "version": 4,
+    "updated_epoch": 1794032878,
+    "pid": 988284,
+    "pending": 36,
+    "kernel_queue_empty": 1,
+    "events_seen": 9343719,
+    "events_resolved": 6372098,
+    "updates_committed": 2092100,
+    "updates_dropped": 0,
+    "behind_ms": 14350505,
+    "max_pending": 500000,
+    "uncertain": 1,
+    "last_commit_epoch": 1794032877,
+    "kernel_overflow_notifications": 3,
+    "db": "/var/lib/dux/dux.db"
+  },
+  "index_meta": {
+    "dirty_reason": "fanotify queue overflow",
+    "dirty_since": "1794031420",
+    "failed_reconciliation_attempts": "2",
+    "schema_version": "6"
+  },
+  "journal_summary": {
+    "unresolved_fanotify_warnings": 218,
+    "parsed_event_shape_count": 213,
+    "event_shapes": {
+      "0x4|0x2|116|24|52": 164,
+      "0x20a|0x6|116|24|88": 8,
+      "0x10a|0x6|116|24|88": 12,
+      "0x40000300|0x6|116|24|88": 4,
+      "0xa|0x6|116|24|88": 7,
+      "0x200|0x6|116|24|92": 1,
+      "0x40000200|0x6|116|24|88": 3,
+      "0x200|0x6|116|24|88": 4,
+      "0xa|0x6|116|24|92": 1,
+      "0x40000300|0x6|116|24|84": 3,
+      "unparsed": 5,
+      "0x40000200|0x6|116|24|84": 3,
+      "0x48|0x6|116|24|108": 1,
+      "0x308|0x6|116|24|104": 1,
+      "0x10a|0x6|116|24|92": 1
+    },
+    "event_fsids": {
+      "-751860846, 210811603": 213
+    },
+    "candidate_target_only_stale_attrib_shape_count": 164,
+    "queue_overflow_lines": 0,
+    "rescan_complete_lines": 0
+  },
+  "mutations_performed": false
+}

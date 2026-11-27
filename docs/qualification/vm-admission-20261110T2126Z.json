@@ -1,0 +1,25 @@
+{
+  "observed_at_utc": "2026-11-10T21:26:50Z",
+  "load_average_1m": 6.66,
+  "cpu_psi_some_avg10_percent": 2.84,
+  "cpu_psi_full_avg10_percent": 0.0,
+  "io_psi_some_avg10_percent": 1.43,
+  "io_psi_full_avg10_percent": 0.97,
+  "memory_psi_some_avg10_percent": 0.0,
+  "active_host_workloads": [
+    "Go test binary pid=3854194",
+    "go test pid=3854007"
+  ],
+  "qualification_vm_started": false,
+  "fault_matrix_started": false,
+  "decision": "host_pressure_blockers rejected VM admission because unrelated Go test workloads remained active",
+  "fault_binary_build": {
+    "status": "stopped_before_completion",
+    "unit": "dux-r132-fault-build-20261110.service",
+    "cpu_quota_percent": 25,
+    "memory_limit_mib": 4096,
+    "reason": "Go compiler/tests appeared and host load/CPU PSI rose above admission limits",
+    "candidate_binary_sha256_verified": "998db222dcc0b86943b33b05bc0153c8729fc074617f95e164b7940da03f0d76",
+    "candidate_source_digest_reproduced": "5d427c2c72dc3fc963fdae8c72006a82390cd00c8bd0b7af9d4e75540cd405ff"
+  }
+}

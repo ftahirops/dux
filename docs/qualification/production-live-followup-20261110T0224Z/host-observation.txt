@@ -1,0 +1,18 @@
+2026-11-10T02:25:27Z
+NRestarts=0
+ActiveState=active
+SubState=running
+Filesystem                         Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-ubuntu--lv   93G   83G  5.8G  94% /
+-rw-r----- 1 root dux 729M Nov 10 02:25 /var/lib/dux/dux.db
+-rw-r----- 1 root dux 640K Nov 10 02:25 /var/lib/dux/dux.db-shm
+-rw-r----- 1 root dux 128M Nov 10 02:25 /var/lib/dux/dux.db-wal
+-rw-r----- 1 root dux    0 Nov  9 09:20 /var/lib/dux/dux.db.lock
+some avg10=7.12 avg60=10.59 avg300=22.13 total=58975556442
+Nov 10 02:16:41 vps2 dux[2561224]: 2026-11-10T02:16:41.922602Z  WARN dux::watch: deferring full reconciliation until host pressure meets recovery admission criteria pressure=Elevated reason="system pressure" load1=6.57 host_cpus=6.0 psi_cpu_avg10=18.52 psi_memory_avg10=0.0 psi_io_avg10=0.08 available_memory_bytes=3420061696 available_disk_bytes=6269894656
+Nov 10 02:16:46 vps2 dux[2561224]: 2026-11-10T02:16:46.448337Z  INFO dux::watch: selected reconciliation implementation use_in_place_observation=true baseline_ready=true read_only_source=false
+Nov 10 02:16:46 vps2 dux[2561224]: 2026-11-10T02:16:46.448374Z  INFO dux::watch: starting background reconciliation of /; event ingestion remains active
+Nov 10 02:20:33 vps2 dux[2561224]: 2026-11-10T02:20:33.572609Z  WARN dux::scan: discarded staged paths that vanished during inode-reuse races vanished_reuse_paths=88
+Nov 10 02:24:10 vps2 dux[2561224]: 2026-11-10T02:24:10.078301Z  INFO dux::watch: filesystem or fanotify hints changed during scan-first observation; next full observation is scheduled
+Nov 10 02:24:10 vps2 dux[2561224]: 2026-11-10T02:24:10.078620Z  INFO dux::watch: rescan complete: 1640606 files, 194545 dirs, 1835151 staged path instances (0 directory alias paths), visible 87728549888 bytes/1835151 entries, unique 87541239808 bytes/1831669 inodes, 81.53 GiB (0 coverage issues); replaying 0 pending paths vanished_reuse_paths=88 revalidated_reuse_paths=0 unresolved_reuse_paths=0
+Nov 10 02:25:25 vps2 dux[2561224]: 2026-11-10T02:25:25.213292Z  INFO dux::watch: reconciliation accounting verification passed elapsed_ms=75079
