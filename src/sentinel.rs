@@ -83,6 +83,8 @@ pub struct Settings {
     pub ease_after: Duration,
     /// History needed before a full-in-hours warning (critical needs 1 min).
     pub fill_warn_history: Duration,
+    /// History needed before a full-in-hours critical.
+    pub fill_crit_history: Duration,
     pub wall_min_gap: Duration,
     pub wall_max_per_hour: usize,
     pub max_alerts_per_hour: usize,
@@ -121,6 +123,7 @@ impl Default for Settings {
             worsen_min_gap: Duration::from_secs(300),
             ease_after: Duration::from_secs(120),
             fill_warn_history: Duration::from_secs(300),
+            fill_crit_history: Duration::from_secs(180),
             wall_min_gap: Duration::from_secs(1800),
             wall_max_per_hour: 4,
             max_alerts_per_hour: 30,
@@ -217,6 +220,7 @@ impl Settings {
         s.worsen_min_gap = dur("DUX_WORSEN_MIN_GAP", s.worsen_min_gap)?;
         s.ease_after = dur("DUX_EASE_AFTER", s.ease_after)?;
         s.fill_warn_history = dur("DUX_FILL_WARN_HISTORY", s.fill_warn_history)?;
+        s.fill_crit_history = dur("DUX_FILL_CRIT_HISTORY", s.fill_crit_history)?;
         s.wall_min_gap = dur("DUX_WALL_MIN_GAP", s.wall_min_gap)?;
         s.wall_max_per_hour = num("DUX_WALL_MAX_PER_HOUR", s.wall_max_per_hour as f64)? as usize;
         s.max_alerts_per_hour =
@@ -718,7 +722,10 @@ impl Sentinel {
                 };
                 let current = self.conds.get(&key).map(|c| c.level).unwrap_or(Level::Ok);
                 let enough_history = span >= self.settings.fill_warn_history.as_secs() as i64;
-                let lvl = if hours <= self.settings.fill_crit_hours {
+                let crit_history = span >= self.settings.fill_crit_history.as_secs() as i64;
+                let lvl = if hours <= self.settings.fill_crit_hours
+                    && (crit_history || current == Level::Critical)
+                {
                     Level::Critical
                 } else if (hours <= self.settings.fill_warn_hours
                     && (enough_history || current >= Level::Warning))
@@ -837,6 +844,16 @@ impl Sentinel {
     }
 }
 
+/// Network and FUSE filesystems: one remote disk is often mounted several
+/// times, and each mount gets its own device number.
+pub fn is_remote(fstype: &str) -> bool {
+    fstype.starts_with("fuse")
+        || matches!(
+            fstype,
+            "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "9p" | "ceph" | "glusterfs" | "sshfs"
+        )
+}
+
 pub fn hostname() -> String {
     std::fs::read_to_string("/proc/sys/kernel/hostname")
         .map(|s| s.trim().to_string())
@@ -933,8 +950,19 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
         }
         let mut alerts = Vec::new();
         let mut used: Vec<(String, u64)> = Vec::new();
+        let mut seen_remote: Vec<(u64, u64, u64, u64)> = Vec::new();
         for m in &mount_list {
             match statvfs(&m.path) {
+                Ok(u)
+                    if is_remote(&m.fstype) && {
+                        let sig = (u.total, u.used, u.inodes_total, u.inodes_used);
+                        let dup = seen_remote.contains(&sig);
+                        seen_remote.push(sig);
+                        dup
+                    } =>
+                {
+                    // Another mount of the same remote filesystem: report it once.
+                }
                 Ok(u) => {
                     if attrib::walkable(&m.fstype) {
                         used.push((m.path.clone(), u.used));
@@ -1247,10 +1275,18 @@ mod tests {
     fn fill_goes_critical_when_close() {
         let mut s = Sentinel::new(Settings::default(), "h".into());
         let m = mount("/");
-        // 100 GiB disk at 90%: 10 GiB free, growing 0.1 GiB per 2 s = 180 GiB/h -> minutes.
+        // 100 GiB disk at 70%: 30 GiB free, growing 0.1 GiB per 2 s = 180 GiB/h -> minutes.
         let mut out = Vec::new();
-        let mut used = 90.0;
+        let mut used = 70.0;
         for t in (0..=62).step_by(2) {
+            out.extend(sent(&mut s, &m, &usage(100, used), t));
+            used += 0.1;
+        }
+        assert!(
+            !out.iter().any(|(_, k)| k.starts_with("fill:")),
+            "one minute of history is not enough: {out:?}"
+        );
+        for t in (64..=184).step_by(2) {
             out.extend(sent(&mut s, &m, &usage(100, used), t));
             used += 0.1;
         }
@@ -1258,6 +1294,12 @@ mod tests {
             out.contains(&(Severity::Critical, "fill:/".into())),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn remote_fstypes() {
+        assert!(is_remote("fuse.sshfs") && is_remote("nfs4") && is_remote("cifs"));
+        assert!(!is_remote("ext4") && !is_remote("xfs") && !is_remote("tmpfs"));
     }
 
     #[test]

@@ -125,8 +125,8 @@ Load tests on throwaway filesystems:
 
 ```bash
 # Debian/Ubuntu (glibc 2.39+, e.g. Ubuntu 24.04, Debian 13)
-curl -LO https://github.com/ftahirops/dux/releases/download/v0.7.0/dux_0.7.0-1_amd64.deb
-sudo apt install ./dux_0.7.0-1_amd64.deb
+curl -LO https://github.com/ftahirops/dux/releases/download/v0.7.1/dux_0.7.1-1_amd64.deb
+sudo apt install ./dux_0.7.1-1_amd64.deb
 ```
 
 The package:
