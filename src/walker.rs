@@ -461,6 +461,28 @@ fn diff_rec(old: Option<&DirNode>, new: &DirNode, prefix: &str, min: u64, out: &
     }
 }
 
+/// Folders holding the most entries (files and directories), drilled down
+/// to the most specific folder: from each top-level folder, keep descending
+/// while one child holds at least half of the entries.
+pub fn most_entries(root: &DirNode, n: usize) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    for top in &root.children {
+        let mut node = top;
+        let mut path = join(&root.name, &top.name);
+        while let Some(c) = node.children.iter().max_by_key(|c| c.total_entries) {
+            if c.total_entries * 2 < node.total_entries {
+                break;
+            }
+            path = join(&path, &c.name);
+            node = c;
+        }
+        out.push((path, node.total_entries));
+    }
+    out.sort_by_key(|(_, e)| std::cmp::Reverse(*e));
+    out.truncate(n);
+    out
+}
+
 /// The `n` largest folders at a given depth below the root (depth 1 = children).
 pub fn largest_at_depth(root: &DirNode, depth: usize, n: usize) -> Vec<(String, u64)> {
     let mut acc = Vec::new();
@@ -579,6 +601,25 @@ mod tests {
                 .any(|c| c.path.ends_with("/var") || c.path.ends_with("var/log")),
             "parents explained by a child are not listed: {ch:?}"
         );
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn most_entries_drills_down_to_the_crowded_folder() {
+        let d = tmpdir("entries");
+        std::fs::create_dir_all(d.join("var/lib/app/sessions")).unwrap();
+        std::fs::create_dir_all(d.join("usr")).unwrap();
+        for i in 0..200 {
+            std::fs::write(d.join(format!("var/lib/app/sessions/s{i}")), b"x").unwrap();
+        }
+        for i in 0..20 {
+            std::fs::write(d.join(format!("usr/f{i}")), b"x").unwrap();
+        }
+        let t = walk(d.to_str().unwrap(), 2).unwrap();
+        let m = most_entries(&t.root, 2);
+        assert!(m[0].0.ends_with("var/lib/app/sessions"), "{m:?}");
+        assert!(m[0].1 >= 200);
+        assert!(m[1].0.ends_with("/usr"));
         std::fs::remove_dir_all(&d).unwrap();
     }
 

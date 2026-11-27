@@ -1,11 +1,13 @@
 mod attrib;
 mod classify;
+mod cleanup;
 mod containers;
 mod deleted;
 mod emit;
 mod fault;
 mod guard;
 mod notify;
+mod probes;
 mod query;
 mod scan;
 mod sentinel;
@@ -315,6 +317,24 @@ enum Cmd {
         /// How many folders to show
         #[arg(long, default_value_t = 15)]
         top: usize,
+    },
+    /// Safe, levelled cleanup. Shows the plan; changes nothing without --apply.
+    /// 1 = shrink the journal; 2 = + rotated logs, and big active logs when the
+    /// disk is at least 80% full; 3 = + package caches, old temp files, old core
+    /// dumps, Docker build cache.
+    Cleanup {
+        /// Cleanup level, 0-3
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(0..=3))]
+        level: u8,
+        /// Carry out the plan (default: preview only)
+        #[arg(long)]
+        apply: bool,
+        /// Journal size budget for level 1
+        #[arg(long, default_value = "1G")]
+        journal_max: String,
+        /// An active log counts as big from this size (level 2)
+        #[arg(long, default_value = "50M")]
+        big_log: String,
     },
     /// Send a test alert to every configured channel
     NotifyTest {
@@ -749,17 +769,7 @@ fn real_main() -> Result<()> {
                 println!("  none over 100 MiB");
             }
             println!("\nMost files (inodes)");
-            let mut by_entries: Vec<(String, u64)> = Vec::new();
-            for c in &tree.root.children {
-                for g in &c.children {
-                    by_entries.push((
-                        format!("{}/{}/{}", p.trim_end_matches('/'), c.name, g.name),
-                        g.total_entries,
-                    ));
-                }
-            }
-            by_entries.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-            for (f, n) in by_entries.into_iter().take(5) {
+            for (f, n) in walker::most_entries(&tree.root, 5) {
                 println!("{n:>12}  {f}");
             }
             let gap = fs.used.saturating_sub(tree.root.total_bytes);
@@ -801,11 +811,10 @@ fn real_main() -> Result<()> {
                     dir.display()
                 )
             })?;
-            let age = util::now_secs() - cur.started_at;
             println!(
-                "{mount}: {} in folders, as of {}",
+                "{mount}: {} in folders, as of {} ago",
                 human(cur.root.total_bytes as i64),
-                util::ago(age)
+                util::ago(cur.started_at)
             );
             for (f, b) in walker::largest_at_depth(&cur.root, 2, top) {
                 println!("{:>12}  {f}", human(b as i64));
@@ -813,8 +822,8 @@ fn real_main() -> Result<()> {
             if let Some(prev) = snapshot::load_path(&cur_path.with_extension("prev.snap"))? {
                 let changes = walker::diff(&prev.root, &cur.root, 16 << 20);
                 println!(
-                    "\nChanged since {} (previous snapshot)",
-                    util::ago(util::now_secs() - prev.started_at)
+                    "\nChanged since {} ago (previous snapshot)",
+                    util::ago(prev.started_at)
                 );
                 if changes.is_empty() {
                     println!("  nothing over 16 MiB");
@@ -827,6 +836,76 @@ fn real_main() -> Result<()> {
                         c.path
                     );
                 }
+            }
+        }
+        Some(Cmd::Cleanup {
+            level,
+            apply,
+            journal_max,
+            big_log,
+        }) => {
+            let before = sentinel::statvfs("/var/log").or_else(|_| sentinel::statvfs("/"))?;
+            let opts = cleanup::Options {
+                level,
+                journal_max: sentinel::parse_bytes(&journal_max)?,
+                big_log: sentinel::parse_bytes(&big_log)?,
+                used_pct: before.used_pct(),
+                ..cleanup::Options::default()
+            };
+            let items = cleanup::plan(&opts);
+            let total: u64 = items.iter().map(|i| i.frees).sum();
+            println!(
+                "level {level}: {} actions, about {} to free (disk {:.1}% full){}",
+                items.len(),
+                human(total as i64),
+                before.used_pct(),
+                if apply {
+                    ""
+                } else {
+                    "; preview only, add --apply to run"
+                }
+            );
+            for i in &items {
+                let how = match &i.action {
+                    cleanup::Action::Run { program, args } => {
+                        format!("{program} {}", args.join(" "))
+                    }
+                    cleanup::Action::Remove { path } => format!("remove {}", path.display()),
+                    cleanup::Action::TailAndTruncate { path, keep } => {
+                        format!(
+                            "keep last {} of {}, truncate",
+                            human(*keep as i64),
+                            path.display()
+                        )
+                    }
+                };
+                println!(
+                    "  L{} {:>10}  {}  [{how}]",
+                    i.level,
+                    human(i.frees as i64),
+                    i.what
+                );
+            }
+            if apply {
+                // SAFETY: geteuid has no preconditions.
+                anyhow::ensure!(unsafe { libc::geteuid() } == 0, "--apply needs root");
+                let (mut ok, mut failed) = (0, 0);
+                for i in &items {
+                    match cleanup::apply(i) {
+                        Ok(()) => ok += 1,
+                        Err(e) => {
+                            failed += 1;
+                            println!("  skipped: {}: {e:#}", i.what);
+                        }
+                    }
+                }
+                let after = sentinel::statvfs("/var/log").or_else(|_| sentinel::statvfs("/"))?;
+                println!(
+                    "done: {ok} applied, {failed} skipped; freed {} (now {:.1}% full). Audit log: {}",
+                    human(before.used.saturating_sub(after.used) as i64),
+                    after.used_pct(),
+                    cleanup::AUDIT_LOG
+                );
             }
         }
         Some(Cmd::NotifyTest { config, severity }) => {

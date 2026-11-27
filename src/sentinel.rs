@@ -96,6 +96,9 @@ pub struct Settings {
     pub walk_trigger_bytes: u64,
     pub walk_threads: usize,
     pub snapshot_dir: std::path::PathBuf,
+    /// Emergency cleanup level run automatically when the disk holding
+    /// /var/log goes critical. 0 = off (default).
+    pub auto_cleanup_level: u8,
 }
 
 impl Default for Settings {
@@ -128,6 +131,7 @@ impl Default for Settings {
             walk_trigger_bytes: 1 << 30,
             walk_threads: 2,
             snapshot_dir: std::path::PathBuf::from(crate::snapshot::DEFAULT_DIR),
+            auto_cleanup_level: 0,
         }
     }
 }
@@ -227,6 +231,7 @@ impl Settings {
                 parse_bytes(&v).with_context(|| format!("DUX_WALK_TRIGGER={v}"))?;
         }
         s.walk_threads = (num("DUX_WALK_THREADS", s.walk_threads as f64)? as usize).clamp(1, 16);
+        s.auto_cleanup_level = (num("DUX_AUTO_CLEANUP_LEVEL", 0.0)? as u8).min(3);
         if let Some(v) = get("DUX_SNAPSHOT_DIR") {
             s.snapshot_dir = std::path::PathBuf::from(v);
         }
@@ -600,6 +605,21 @@ impl Sentinel {
         }
     }
 
+    /// Run a health-probe finding through the same alert logic.
+    pub(crate) fn feed(
+        &mut self,
+        f: crate::probes::Finding,
+        doubles: bool,
+        now: i64,
+    ) -> Option<Alert> {
+        let worse = if doubles {
+            Worse::Doubles
+        } else {
+            Worse::Points(1.0)
+        };
+        self.judge(f.key, f.level, f.value, worse, f.title, f.body, now)
+    }
+
     /// Hysteresis: once at a level, stay there until the value drops below
     /// the threshold by `hysteresis_pct` points.
     fn pct_level(&self, key: &str, pct: f64, warn: f64, crit: f64) -> Level {
@@ -897,6 +917,9 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
     });
     let mut writers = Writers::default();
     let mut last_writers = 0i64;
+    let mut latency = crate::probes::Latency::default();
+    let disks = crate::probes::physical_disks();
+    let (mut last_probe, mut last_smart, mut last_cleanup) = (0i64, 0i64, 0i64);
     let mut sentinel = Sentinel::new(settings, host.clone());
     let mut last_mount_refresh = now_secs();
     crate::util::systemd_notify("READY=1\nSTATUS=watching free space and inodes");
@@ -924,6 +947,57 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
         if now - last_writers >= 10 {
             writers.sample(now);
             last_writers = now;
+        }
+        if now - last_probe >= 60 {
+            last_probe = now;
+            let mut findings = crate::probes::ext4_errors("/sys");
+            if let Ok(t) = std::fs::read_to_string("/proc/mdstat") {
+                findings.extend(crate::probes::mdstat(&t));
+            }
+            let mut doubling = Vec::new();
+            if let Ok(t) = std::fs::read_to_string("/proc/diskstats") {
+                doubling.extend(latency.sample(&t, 50.0, 250.0));
+            }
+            if let Ok(t) = std::fs::read_to_string("/proc/pressure/io") {
+                doubling.extend(crate::probes::psi("io", &t, 30.0, 60.0));
+            }
+            if let Ok(t) = std::fs::read_to_string("/proc/pressure/memory") {
+                doubling.extend(crate::probes::psi("memory", &t, 20.0, 50.0));
+            }
+            if now - last_smart >= 3600 {
+                last_smart = now;
+                findings.extend(crate::probes::smart(&disks));
+            }
+            for f in findings {
+                alerts.extend(sentinel.feed(f, false, now));
+            }
+            for f in doubling {
+                alerts.extend(sentinel.feed(f, true, now));
+            }
+        }
+        let level = sentinel.settings.auto_cleanup_level;
+        if level > 0 && now - last_cleanup >= 600 {
+            let log_mount = mount_list
+                .iter()
+                .filter(|m| "/var/log".starts_with(m.path.as_str()))
+                .max_by_key(|m| m.path.len())
+                .map(|m| m.path.clone());
+            let critical_here = log_mount.as_ref().is_some_and(|lm| {
+                alerts
+                    .iter()
+                    .any(|a| a.severity == Severity::Critical && a.key == format!("space:{lm}"))
+            });
+            if critical_here {
+                last_cleanup = now;
+                let cfg2 = cfg.clone();
+                let host2 = host.clone();
+                let target = sentinel.settings.crit_pct - 10.0;
+                let _ = std::thread::Builder::new()
+                    .name("dux-cleanup".into())
+                    .spawn(move || {
+                        emergency_cleanup(&cfg2, &host2, level, target);
+                    });
+            }
         }
         if let Some(s) = sched.as_mut() {
             for a in &alerts {
@@ -968,6 +1042,47 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
         }
         std::thread::sleep(sentinel.settings.interval);
     }
+}
+
+/// Run cleanup up to `level`, safest first, stopping once the disk holding
+/// /var/log is at or below `target_pct`; report what was done.
+fn emergency_cleanup(cfg: &NotifyConfig, host: &str, level: u8, target_pct: f64) {
+    let Ok(before) = statvfs("/var/log") else {
+        return;
+    };
+    let opts = crate::cleanup::Options {
+        level,
+        used_pct: before.used_pct(),
+        ..crate::cleanup::Options::default()
+    };
+    let mut done = Vec::new();
+    for item in crate::cleanup::plan(&opts) {
+        if statvfs("/var/log")
+            .map(|u| u.used_pct() <= target_pct)
+            .unwrap_or(true)
+        {
+            break;
+        }
+        match crate::cleanup::apply(&item) {
+            Ok(()) => done.push(format!("L{} {}", item.level, item.what)),
+            Err(e) => tracing::warn!("emergency cleanup skipped {}: {e:#}", item.what),
+        }
+    }
+    let after = statvfs("/var/log").unwrap_or(before);
+    let freed = before.used.saturating_sub(after.used);
+    let alert = Alert {
+        severity: Severity::Warning,
+        title: format!("dux freed {} automatically (level {level})", h(freed)),
+        body: format!(
+            "disk now {:.1}% full; {} actions:\n{}",
+            after.used_pct(),
+            done.len(),
+            done.iter().take(10).cloned().collect::<Vec<_>>().join("\n")
+        ),
+        key: "cleanup:/var/log".into(),
+        host: host.to_string(),
+    };
+    notify::send(cfg, &alert, false, now_secs());
 }
 
 #[cfg(test)]

@@ -74,3 +74,15 @@ DUX_SNAPSHOT_DIR=/var/lib/dux/sentinel
 DUX_WORSEN_MIN_GAP=5m
 DUX_EASE_AFTER=2m
 DUX_FILL_WARN_HISTORY=5m
+
+# ---- Health probes (every minute) ------------------------------------------
+# ext4 error counters, software RAID, disk latency (warn 50 ms, critical 250 ms),
+# I/O pressure (warn 30%, critical 60%), memory pressure (warn 20%, critical 50%),
+# and SMART hourly on physical disks when smartctl is installed.
+
+# ---- Emergency cleanup -------------------------------------------------------
+# When the disk holding /var/log goes critical, run `dux cleanup` up to this
+# level automatically, safest first, stopping 10 points below critical:
+#   0 off (default)   1 journal   2 + logs   3 + caches, temp, old core dumps
+# Preview any level first with: dux cleanup --level N
+DUX_AUTO_CLEANUP_LEVEL=0
