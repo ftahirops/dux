@@ -30,7 +30,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-mod views;
+pub(crate) mod views;
 
 const TABS: [&str; 8] = [
     "1 Browse",
@@ -355,7 +355,8 @@ impl App {
         } else {
             format!("Applying {} actions", items.len())
         };
-        self.v.job = Some(views::Job::start(title, items));
+        let root = self.data.docker.as_ref().map(|d| d.root_dir.clone());
+        self.v.job = Some(views::Job::start(title, items, root));
     }
 }
 
@@ -433,6 +434,10 @@ fn draw(f: &mut Frame, app: &mut App) {
             body,
         );
         draw_footer(f, app, chunks[2]);
+        draw_overlay(f, app, area);
+        if let Some(job) = &app.v.job {
+            views::draw_job(f, job, area);
+        }
         return;
     }
     match app.tab {
@@ -1422,6 +1427,9 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             } else {
                 app.message = "This fix has no single path to protect.".into();
             }
+        }
+        KeyCode::Enter if t == FIXES && app.loading => {
+            app.message = "Scanning; apply fixes when the scan finishes.".into();
         }
         KeyCode::Enter if t == FIXES => {
             let (n, bytes, risky) = app.picked_total();

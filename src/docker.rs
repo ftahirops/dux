@@ -160,13 +160,33 @@ pub struct Report {
 }
 
 impl Report {
-    /// Does this container mount this volume? (Docker shortens long names.)
-    pub fn mounts_volume(c: &Container, v: &Volume) -> bool {
-        c.mounts.iter().any(|m| {
-            m == &v.name
-                || m.strip_suffix('…')
-                    .is_some_and(|p| !p.is_empty() && v.name.starts_with(p))
-        })
+    /// The volume a mount names. Docker shortens long names with "…"; a
+    /// shortened name counts only when exactly one volume has that prefix,
+    /// so an ambiguous mount is never attributed to a guessed volume.
+    pub fn volume_for_mount(&self, m: &str) -> Option<usize> {
+        if let Some(i) = self.volumes.iter().position(|v| v.name == m) {
+            return Some(i);
+        }
+        let p = m.strip_suffix('…').filter(|p| !p.is_empty())?;
+        let mut hits = (0..self.volumes.len()).filter(|&i| self.volumes[i].name.starts_with(p));
+        let first = hits.next()?;
+        hits.next().is_none().then_some(first)
+    }
+
+    /// Does container `c` mount volume `v`?
+    pub fn mounts_volume(&self, c: &Container, v: usize) -> bool {
+        c.mounts.iter().any(|m| self.volume_for_mount(m) == Some(v))
+    }
+
+    /// For every image, the containers using it (one pass).
+    pub fn image_users(&self) -> Vec<Vec<usize>> {
+        let mut out = vec![Vec::new(); self.images.len()];
+        for (ci, c) in self.containers.iter().enumerate() {
+            if let Some(i) = self.image_of(c) {
+                out[i].push(ci);
+            }
+        }
+        out
     }
 
     pub fn image_of(&self, c: &Container) -> Option<usize> {
@@ -191,7 +211,7 @@ impl Report {
     /// Containers mounting volume `v`.
     pub fn users_of_volume(&self, v: usize) -> Vec<usize> {
         (0..self.containers.len())
-            .filter(|&c| Self::mounts_volume(&self.containers[c], &self.volumes[v]))
+            .filter(|&c| self.mounts_volume(&self.containers[c], v))
             .collect()
     }
 
@@ -567,6 +587,14 @@ mod tests {
             "image counted once"
         );
         assert_eq!(st[0].working_dir.as_deref(), Some("/opt/x"));
+        // A shortened mount that two volumes share is not attributed to either.
+        r.volumes.push(Volume {
+            name: "xgm_data_0123zzzz".into(),
+            ..Volume::default()
+        });
+        assert_eq!(r.volume_for_mount("xgm_data_0123…"), None);
+        assert!(r.users_of_volume(0).is_empty() && r.users_of_volume(1).is_empty());
+        assert_eq!(r.image_users()[0], vec![0, 1]);
     }
 
     #[test]

@@ -31,19 +31,20 @@ pub const DSUB: [&str; 7] = [
     "Storage",
 ];
 const D_OVERVIEW: usize = 0;
-const D_STACKS: usize = 1;
-const D_CONTAINERS: usize = 2;
-const D_IMAGES: usize = 3;
-const D_VOLUMES: usize = 4;
+pub(crate) const D_STACKS: usize = 1;
+pub(crate) const D_CONTAINERS: usize = 2;
+pub(crate) const D_IMAGES: usize = 3;
+pub(crate) const D_VOLUMES: usize = 4;
 const D_LOGS: usize = 5;
-const D_STORAGE: usize = 6;
+pub(crate) const D_STORAGE: usize = 6;
 
 #[derive(Default)]
 pub struct State {
     pub dsub: usize,
     dsel: [usize; 7],
-    /// An open Docker detail page: (sub-view, row).
-    pub ddetail: Option<(usize, usize)>,
+    /// An open Docker detail page: (sub-view, resource name). Keyed by name,
+    /// never by row, so a rescan that re-sorts the list cannot retarget it.
+    pub ddetail: Option<(usize, String)>,
     /// Expanded log groups and project groups (by key).
     log_open: BTreeSet<String>,
     proj_closed: BTreeSet<String>,
@@ -73,7 +74,7 @@ pub struct Job {
 }
 
 /// The filesystem an action frees space on, for measuring it.
-fn fs_of(item: &Item) -> String {
+fn fs_of(item: &Item, docker_root: Option<&str>) -> String {
     let p = match &item.action {
         Action::Remove { path }
         | Action::TailAndTruncate { path, .. }
@@ -85,7 +86,7 @@ fn fs_of(item: &Item) -> String {
                 .unwrap_or_else(|| "/".into())
         }
         Action::Run { program, .. } => std::path::PathBuf::from(match program.as_str() {
-            "docker" => "/var/lib/docker",
+            "docker" => docker_root.unwrap_or("/var/lib/docker"),
             "journalctl" => "/var/log/journal",
             "apt-get" | "apt" => "/var/cache/apt",
             _ => "/",
@@ -106,7 +107,8 @@ fn avail(fs: &str) -> u64 {
 }
 
 impl Job {
-    pub fn start(title: String, items: Vec<Item>) -> Job {
+    /// `docker_root` is Docker's data root, where Docker actions free space.
+    pub fn start(title: String, items: Vec<Item>, docker_root: Option<String>) -> Job {
         let (tx, rx) = channel();
         let work = items.clone();
         let t = title.clone();
@@ -115,7 +117,7 @@ impl Job {
             let (mut ok, mut failed, mut freed) = (0u64, 0u64, 0i64);
             for (i, item) in work.iter().enumerate() {
                 let _ = tx.send((i, Step::Running));
-                let fs = fs_of(item);
+                let fs = fs_of(item, docker_root.as_deref());
                 let before = avail(&fs);
                 let step = match crate::cleanup::apply(item) {
                     Ok(()) => {
@@ -170,6 +172,32 @@ impl Job {
         self.finished.is_some()
     }
 
+    /// JSON for the web dashboard's progress window.
+    pub fn to_json(&self) -> serde_json::Value {
+        let (ok, failed, freed) = self.counts();
+        let elapsed = self
+            .finished
+            .unwrap_or_else(Instant::now)
+            .duration_since(self.started)
+            .as_secs_f64();
+        let steps: Vec<serde_json::Value> = self
+            .items
+            .iter()
+            .zip(&self.steps)
+            .map(|(it, st)| {
+                let (state, freed, error) = match st {
+                    Step::Pending => ("pending", 0, None),
+                    Step::Running => ("running", 0, None),
+                    Step::Done(b) => ("done", (*b).max(0), None),
+                    Step::Failed(e) => ("failed", 0, Some(e.clone())),
+                };
+                serde_json::json!({"what": it.what, "expected": it.frees, "state": state, "freed": freed, "error": error})
+            })
+            .collect();
+        serde_json::json!({"title": self.title, "done": self.done(), "ok": ok, "failed": failed, "freed": freed,
+            "expected": self.items.iter().map(|i| i.frees).sum::<u64>(), "seconds": elapsed, "steps": steps})
+    }
+
     fn counts(&self) -> (usize, usize, i64) {
         let mut c = (0, 0, 0i64);
         for s in &self.steps {
@@ -188,14 +216,16 @@ impl Job {
 
 pub fn draw_job(f: &mut Frame, job: &Job, area: Rect) {
     let w = area.width.saturating_sub(8).min(120);
-    let h = area
-        .height
-        .saturating_sub(4)
-        .min(job.items.len() as u16 + 9)
+    let want = u16::try_from(job.items.len() + 9)
+        .unwrap_or(u16::MAX)
         .max(10);
+    let h = want
+        .min(area.height.saturating_sub(2))
+        .max(1)
+        .min(area.height);
     let r = Rect {
-        x: area.x + (area.width - w) / 2,
-        y: area.y + (area.height - h) / 2,
+        x: area.x + area.width.saturating_sub(w) / 2,
+        y: area.y + area.height.saturating_sub(h) / 2,
         width: w,
         height: h,
     };
@@ -556,13 +586,13 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
             );
         }
         D_IMAGES => {
+            let image_users = r.image_users();
             let rows: Vec<Row> = r
                 .images
                 .iter()
                 .enumerate()
                 .map(|(i, im)| {
-                    let users: Vec<String> = r
-                        .users_of_image(i)
+                    let users: Vec<String> = image_users[i]
                         .iter()
                         .map(|&c| r.containers[c].name.clone())
                         .collect();
@@ -935,10 +965,7 @@ fn draw_docker_detail(f: &mut Frame, r: &Report, sub: usize, i: usize, area: Rec
             lines.push(Line::from(""));
             lines.push(Line::from("mounts").style(Style::default().add_modifier(Modifier::BOLD)));
             for m in &c.mounts {
-                let vol = r
-                    .volumes
-                    .iter()
-                    .find(|v| Report::mounts_volume(c, v) && (v.name == *m || m.ends_with('…')));
+                let vol = r.volume_for_mount(m).map(|v| &r.volumes[v]);
                 lines.push(Line::from(match vol {
                     Some(v) => format!(
                         "  volume {}  {}  {}",
@@ -1058,7 +1085,7 @@ fn draw_docker_detail(f: &mut Frame, r: &Report, sub: usize, i: usize, area: Rec
     );
 }
 
-pub fn draw_docker(f: &mut Frame, app: &App, area: Rect, state: &mut TableState) {
+pub(super) fn draw_docker(f: &mut Frame, app: &App, area: Rect, state: &mut TableState) {
     let Some(r) = &app.data.docker else {
         f.render_widget(
             Paragraph::new("Docker is not available on this host.")
@@ -1075,8 +1102,17 @@ pub fn draw_docker(f: &mut Frame, app: &App, area: Rect, state: &mut TableState)
             .divider("│"),
         parts[0],
     );
-    if let Some((sub, i)) = app.v.ddetail {
-        draw_docker_detail(f, r, sub, i, parts[1]);
+    if let Some((sub, key)) = &app.v.ddetail {
+        match docker_index(r, *sub, key) {
+            Some(i) => draw_docker_detail(f, r, *sub, i, parts[1]),
+            None => f.render_widget(
+                Paragraph::new(format!(
+                    "{key} is no longer there (it changed in the last scan). Esc to go back."
+                ))
+                .block(Block::default().borders(Borders::ALL)),
+                parts[1],
+            ),
+        }
         return;
     }
     if app.v.dsub == D_OVERVIEW {
@@ -1086,8 +1122,36 @@ pub fn draw_docker(f: &mut Frame, app: &App, area: Rect, state: &mut TableState)
     }
 }
 
+/// The stable name of row `i` in a Docker sub-view.
+fn docker_key(r: &Report, sub: usize, i: usize) -> Option<String> {
+    match sub {
+        D_STACKS => r.stacks().get(i).map(|s| s.name.clone()),
+        D_CONTAINERS => r.containers.get(i).map(|c| c.name.clone()),
+        D_LOGS => log_containers(r)
+            .get(i)
+            .map(|&c| r.containers[c].name.clone()),
+        D_IMAGES => r.images.get(i).map(|x| x.name.clone()),
+        D_VOLUMES => r.volumes.get(i).map(|x| x.name.clone()),
+        _ => None,
+    }
+}
+
+/// The current row of the resource named `key` in a Docker sub-view.
+fn docker_index(r: &Report, sub: usize, key: &str) -> Option<usize> {
+    match sub {
+        D_STACKS => r.stacks().iter().position(|s| s.name == key),
+        D_CONTAINERS => r.containers.iter().position(|c| c.name == key),
+        D_LOGS => log_containers(r)
+            .iter()
+            .position(|&c| r.containers[c].name == key),
+        D_IMAGES => r.images.iter().position(|x| x.name == key),
+        D_VOLUMES => r.volumes.iter().position(|x| x.name == key),
+        _ => None,
+    }
+}
+
 /// The action for a key on the Docker views, if any.
-fn docker_action(
+pub(crate) fn docker_action(
     r: &Report,
     sub: usize,
     i: usize,
@@ -1129,6 +1193,7 @@ fn docker_action(
                     c.name, c.name
                 ));
             }
+            // Its writable layer may hold the only copy of data: RISKY.
             Ok(Some((
                 vec![docker_run(
                     format!(
@@ -1138,7 +1203,7 @@ fn docker_action(
                     &["rm", &c.id],
                     c.writable + c.log_bytes,
                 )],
-                false,
+                true,
             )))
         }
         (D_IMAGES, KeyCode::Char('x')) => {
@@ -1146,10 +1211,13 @@ fn docker_action(
             if im.containers > 0 || !r.users_of_image(i).is_empty() {
                 return Err(format!("{} is used by a container", im.name));
             }
-            let id = if im.id.is_empty() {
-                im.name.clone()
-            } else {
+            // A tag is removed by name (removing by ID fails when the image
+            // has several tags, and would remove all of them); only an
+            // untagged image is removed by its ID.
+            let id = if im.name.starts_with("<none>") && !im.id.is_empty() {
                 im.id.clone()
+            } else {
+                im.name.clone()
             };
             Ok(Some((
                 vec![docker_run(
@@ -1359,7 +1427,7 @@ fn log_rows(app: &App, groups: &[LogGroup]) -> Vec<LogRow> {
 }
 
 /// The last few lines of a text log, bounded and made printable.
-fn tail_lines(path: &str, n: usize) -> Vec<String> {
+pub(crate) fn tail_lines(path: &str, n: usize) -> Vec<String> {
     use std::io::{Read, Seek, SeekFrom};
     if crate::cleanup::is_binary_log(std::path::Path::new(path))
         || path.ends_with(".gz")
@@ -1383,7 +1451,7 @@ fn tail_lines(path: &str, n: usize) -> Vec<String> {
         .collect()
 }
 
-pub fn draw_logs(f: &mut Frame, app: &App, area: Rect, state: &mut TableState) {
+pub(super) fn draw_logs(f: &mut Frame, app: &App, area: Rect, state: &mut TableState) {
     let now = crate::util::now_secs();
     let groups = log_groups(app);
     let rows = log_rows(app, &groups);
@@ -1548,42 +1616,71 @@ pub fn draw_logs(f: &mut Frame, app: &App, area: Rect, state: &mut TableState) {
     );
 }
 
+/// Truncate an active text log, keeping its last 10 MiB aside.
+pub(crate) fn log_truncate_item(l: &LogFile) -> Result<Item, String> {
+    if l.protected || l.rotated || crate::cleanup::is_binary_log(std::path::Path::new(&l.path)) {
+        return Err("only active text logs can be truncated".into());
+    }
+    Ok(Item {
+        level: 2,
+        what: format!("truncate {} (keep its last 10 MiB aside)", l.path),
+        action: Action::TailAndTruncate {
+            path: l.path.clone().into(),
+            keep: 10 << 20,
+        },
+        frees: l.bytes.saturating_sub(10 << 20),
+    })
+}
+
+/// Remove the rotated, unprotected, unopened copies among `logs`.
+pub(crate) fn log_remove_items<'a>(
+    logs: impl Iterator<Item = &'a LogFile>,
+) -> Result<Vec<Item>, String> {
+    let items: Vec<Item> = logs
+        .filter(|l| l.rotated && !l.protected && l.writer.is_none())
+        .map(|l| Item {
+            level: 2,
+            what: format!("remove rotated log {}", l.path),
+            action: Action::Remove {
+                path: l.path.clone().into(),
+            },
+            frees: l.bytes,
+        })
+        .collect();
+    if items.is_empty() {
+        return Err("no removable rotated copies here".into());
+    }
+    Ok(items)
+}
+
+pub(crate) fn journal_item(journal: Option<u64>) -> Result<Item, String> {
+    match journal.filter(|j| *j > 1 << 30) {
+        Some(j) => Ok(Item {
+            level: 1,
+            what: format!(
+                "shrink the systemd journal from {} to 1 GiB",
+                human(j as i64)
+            ),
+            action: Action::Run {
+                program: "journalctl".into(),
+                args: vec!["--vacuum-size=1G".into()],
+            },
+            frees: j - (1 << 30),
+        }),
+        None => Err("the journal is under 1 GiB".into()),
+    }
+}
+
 fn log_action(app: &App, code: KeyCode) -> Result<Option<(Vec<Item>, bool)>, String> {
     let groups = log_groups(app);
     let rows = log_rows(app, &groups);
     let sel = rows.get(app.sel[LOGS]);
-    let remove = |l: &LogFile| Item {
-        level: 2,
-        what: format!("remove rotated log {}", l.path),
-        action: Action::Remove {
-            path: l.path.clone().into(),
-        },
-        frees: l.bytes,
-    };
     match code {
         KeyCode::Char('t') => {
             let Some(LogRow::File(_, li)) = sel else {
                 return Err("select a file (Enter opens a group)".into());
             };
-            let l = &app.data.logs[*li];
-            if l.protected
-                || l.rotated
-                || crate::cleanup::is_binary_log(std::path::Path::new(&l.path))
-            {
-                return Err("only active text logs can be truncated".into());
-            }
-            Ok(Some((
-                vec![Item {
-                    level: 2,
-                    what: format!("truncate {} (keep its last 10 MiB aside)", l.path),
-                    action: Action::TailAndTruncate {
-                        path: l.path.clone().into(),
-                        keep: 10 << 20,
-                    },
-                    frees: l.bytes.saturating_sub(10 << 20),
-                }],
-                false,
-            )))
+            Ok(Some((vec![log_truncate_item(&app.data.logs[*li])?], false)))
         }
         KeyCode::Char('r') => {
             let files: Vec<usize> = match sel {
@@ -1591,35 +1688,12 @@ fn log_action(app: &App, code: KeyCode) -> Result<Option<(Vec<Item>, bool)>, Str
                 Some(LogRow::File(_, li)) => vec![*li],
                 None => Vec::new(),
             };
-            let items: Vec<Item> = files
-                .iter()
-                .map(|&i| &app.data.logs[i])
-                .filter(|l| l.rotated && !l.protected && l.writer.is_none())
-                .map(remove)
-                .collect();
-            if items.is_empty() {
-                return Err("no removable rotated copies here".into());
-            }
-            Ok(Some((items, false)))
-        }
-        KeyCode::Char('v') => match app.data.journal_bytes.filter(|j| *j > 1 << 30) {
-            Some(j) => Ok(Some((
-                vec![Item {
-                    level: 1,
-                    what: format!(
-                        "shrink the systemd journal from {} to 1 GiB",
-                        human(j as i64)
-                    ),
-                    action: Action::Run {
-                        program: "journalctl".into(),
-                        args: vec!["--vacuum-size=1G".into()],
-                    },
-                    frees: j - (1 << 30),
-                }],
+            Ok(Some((
+                log_remove_items(files.iter().map(|&i| &app.data.logs[i]))?,
                 false,
-            ))),
-            None => Err("the journal is under 1 GiB".into()),
-        },
+            )))
+        }
+        KeyCode::Char('v') => Ok(Some((vec![journal_item(app.data.journal_bytes)?], false))),
         _ => Ok(None),
     }
 }
@@ -1627,7 +1701,7 @@ fn log_action(app: &App, code: KeyCode) -> Result<Option<(Vec<Item>, bool)>, Str
 // ------------------------------------------------------------- projects ----
 
 /// Where a project lives: /home/<user>, /var/www, /srv, /opt, /root...
-fn proj_location(path: &str) -> String {
+pub(crate) fn proj_location(path: &str) -> String {
     let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     match parts.as_slice() {
         ["home", u, ..] => format!("/home/{u}"),
@@ -1662,7 +1736,7 @@ fn proj_rows(app: &App) -> Vec<ProjRow> {
     out
 }
 
-pub fn draw_projects(f: &mut Frame, app: &App, area: Rect, state: &mut TableState) {
+pub(super) fn draw_projects(f: &mut Frame, app: &App, area: Rect, state: &mut TableState) {
     let now = crate::util::now_secs();
     let rows = proj_rows(app);
     let parts = Layout::vertical([Constraint::Min(6), Constraint::Length(9)]).split(area);
@@ -1800,15 +1874,15 @@ pub fn draw_projects(f: &mut Frame, app: &App, area: Rect, state: &mut TableStat
 
 // -------------------------------------------------------------- history ----
 
-struct HistoryRow {
-    t: i64,
-    ok: Option<bool>,
-    what: String,
-    bytes: i64,
-    note: String,
+pub(crate) struct HistoryRow {
+    pub t: i64,
+    pub ok: Option<bool>,
+    pub what: String,
+    pub bytes: i64,
+    pub note: String,
 }
 
-fn load_history() -> Vec<HistoryRow> {
+pub(crate) fn load_history() -> Vec<HistoryRow> {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut f) = std::fs::File::open(crate::cleanup::AUDIT_LOG) else {
         return Vec::new();
@@ -1848,7 +1922,7 @@ fn load_history() -> Vec<HistoryRow> {
     v
 }
 
-pub fn draw_history(f: &mut Frame, app: &mut App, area: Rect, state: &mut TableState) {
+pub(super) fn draw_history(f: &mut Frame, app: &mut App, area: Rect, state: &mut TableState) {
     if app.v.history_at.is_none_or(|t| t.elapsed().as_secs() >= 5) {
         app.v.history = load_history();
         app.v.history_at = Some(Instant::now());
@@ -1906,7 +1980,7 @@ pub fn draw_history(f: &mut Frame, app: &mut App, area: Rect, state: &mut TableS
 
 // ----------------------------------------------------------------- keys ----
 
-pub fn rows(app: &App) -> usize {
+pub(super) fn rows(app: &App) -> usize {
     match app.tab {
         DOCKER => app
             .data
@@ -1935,7 +2009,19 @@ fn confirm(app: &mut App, items: Vec<Item>, force_risky: bool) {
 }
 
 /// Keys for the organised views. Returns true when the key was handled.
-pub fn key(app: &mut App, code: KeyCode) -> bool {
+pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
+    // While a scan runs the view is hidden and its data is about to be
+    // replaced: no actions until it finishes.
+    if app.loading
+        && matches!(app.tab, DOCKER | LOGS | PROJECTS)
+        && matches!(
+            code,
+            KeyCode::Char('t' | 'x' | 'b' | 'r' | 'v') | KeyCode::Enter
+        )
+    {
+        app.message = "Scanning; actions are available when the scan finishes.".into();
+        return true;
+    }
     match app.tab {
         DOCKER => {
             let Some(r) = app.data.docker.clone() else {
@@ -1945,8 +2031,11 @@ pub fn key(app: &mut App, code: KeyCode) -> bool {
                 match code {
                     KeyCode::Esc | KeyCode::Backspace | KeyCode::Left => app.v.ddetail = None,
                     KeyCode::Char('t' | 'x' | 'b') => {
-                        let (sub, i) = app.v.ddetail.unwrap_or_default();
-                        run_or_say(app, docker_action(&r, sub, i, code));
+                        let (sub, key) = app.v.ddetail.clone().unwrap_or_default();
+                        match docker_index(&r, sub, &key) {
+                            Some(i) => run_or_say(app, docker_action(&r, sub, i, code)),
+                            None => app.message = format!("{key} is no longer there; nothing done"),
+                        }
                     }
                     _ => {}
                 }
@@ -1965,8 +2054,8 @@ pub fn key(app: &mut App, code: KeyCode) -> bool {
                     true
                 }
                 KeyCode::Enter if app.v.dsub != D_OVERVIEW && app.v.dsub != D_STORAGE => {
-                    if docker_rows(&r, app.v.dsub) > 0 {
-                        app.v.ddetail = Some((app.v.dsub, app.sel[DOCKER]));
+                    if let Some(k) = docker_key(&r, app.v.dsub, app.sel[DOCKER]) {
+                        app.v.ddetail = Some((app.v.dsub, k));
                     }
                     true
                 }
@@ -2055,6 +2144,94 @@ mod tests {
         }
     }
 
+    /// Runs real docker commands on throwaway `duxtest-*` resources. Only
+    /// on a test host: `cargo test -- --ignored docker_actions_live`.
+    #[test]
+    #[ignore]
+    fn docker_actions_live() {
+        let sh = |c: &str| {
+            let o = std::process::Command::new("sh")
+                .args(["-c", c])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        };
+        let base =
+            sh("docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -m1 -E 'alpine' ");
+        assert!(!base.is_empty(), "needs a local alpine-based image");
+        sh("docker rm -f duxtest-stopped duxtest-running duxtest-log >/dev/null 2>&1; docker volume rm duxtest-vol >/dev/null 2>&1; docker image rm duxtest-img:1 >/dev/null 2>&1");
+        sh(&format!(
+            "docker create --name duxtest-stopped {base} true >/dev/null"
+        ));
+        sh(&format!(
+            "docker run -d --name duxtest-running --entrypoint sleep {base} 300 >/dev/null"
+        ));
+        sh(&format!("docker run --name duxtest-log --entrypoint sh {base} -c 'head -c 24000000 /dev/urandom | base64' >/dev/null"));
+        sh(&format!("docker tag {base} duxtest-img:1"));
+        sh("docker volume create duxtest-vol >/dev/null");
+        let r = crate::docker::collect().unwrap();
+        let ci = |n: &str| r.containers.iter().position(|c| c.name == n).unwrap();
+        let run = |items: Vec<Item>| {
+            for i in &items {
+                crate::cleanup::apply(i).unwrap_or_else(|e| panic!("{}: {e:#}", i.what));
+            }
+        };
+        // Truncate a big container log.
+        let log = &r.containers[ci("duxtest-log")];
+        assert!(log.log_bytes > 10 << 20, "log {}", log.log_bytes);
+        let (items, risky) = docker_action(&r, D_CONTAINERS, ci("duxtest-log"), KeyCode::Char('t'))
+            .unwrap()
+            .unwrap();
+        assert!(!risky);
+        run(items);
+        assert_eq!(
+            std::fs::metadata(&log.log_path).unwrap().len(),
+            0,
+            "log truncated"
+        );
+        // A running container is refused; a stopped one is removed.
+        assert!(
+            docker_action(&r, D_CONTAINERS, ci("duxtest-running"), KeyCode::Char('x')).is_err()
+        );
+        let (items, _) = docker_action(&r, D_CONTAINERS, ci("duxtest-stopped"), KeyCode::Char('x'))
+            .unwrap()
+            .unwrap();
+        run(items);
+        assert!(
+            sh("docker ps -a --format '{{.Names}}' | grep -x duxtest-stopped || true").is_empty()
+        );
+        // The extra tag of a used image is removable; the base image is not.
+        let ii = |n: &str| r.images.iter().position(|i| i.name == n);
+        // Docker may count containers per image ID, so the extra tag can be
+        // refused as "in use" (conservative); if offered, only the tag goes.
+        if let Some(Ok(Some((items, _)))) =
+            ii("duxtest-img:1").map(|i| docker_action(&r, D_IMAGES, i, KeyCode::Char('x')))
+        {
+            run(items);
+            assert!(sh("docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -x duxtest-img:1 || true").is_empty());
+            assert!(!sh(&format!("docker image ls --format '{{{{.Repository}}}}:{{{{.Tag}}}}' | grep -x '{base}' || true")).is_empty(), "the base tag must survive");
+        }
+        if let Some(b) = ii(&base) {
+            assert!(
+                docker_action(&r, D_IMAGES, b, KeyCode::Char('x')).is_err(),
+                "image in use is refused"
+            );
+        }
+        // An unused volume is removable, and marked RISKY.
+        let vi = r
+            .volumes
+            .iter()
+            .position(|v| v.name == "duxtest-vol")
+            .unwrap();
+        let (items, risky) = docker_action(&r, D_VOLUMES, vi, KeyCode::Char('x'))
+            .unwrap()
+            .unwrap();
+        assert!(risky);
+        run(items);
+        assert!(sh("docker volume ls -q | grep -x duxtest-vol || true").is_empty());
+        sh("docker rm -f duxtest-running duxtest-log >/dev/null 2>&1; docker image rm duxtest-img:1 >/dev/null 2>&1");
+    }
+
     #[test]
     fn a_job_runs_each_step_measures_and_finishes() {
         let d = std::env::temp_dir().join(format!("dux-job-{}", std::process::id()));
@@ -2079,11 +2256,11 @@ mod tests {
             },
         ];
         assert_eq!(
-            fs_of(&items[0]),
+            fs_of(&items[0], None),
             d.to_string_lossy(),
             "measured on the folder"
         );
-        let mut j = Job::start("test".into(), items);
+        let mut j = Job::start("test".into(), items, None);
         for _ in 0..200 {
             j.poll();
             if j.done() {

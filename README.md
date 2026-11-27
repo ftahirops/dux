@@ -26,6 +26,38 @@ dux where /            # where the space is, and what grew since last time (inst
 
 ---
 
+## New in 0.8.4: the web dashboard matches the terminal UI
+
+`dux web` (read-only unless started with `--allow-actions`) now has the same
+organised views as `dux`:
+
+- **Docker**: Overview, Stacks, Containers, Images, Volumes, Logs and Storage.
+  Click a row for its details: a stack's source folder, compose files,
+  services, images and volumes; a container's id, command, ports, networks,
+  mounts (resolved to volumes) and log file; which containers use an image or
+  mount a volume. Buttons truncate logs, remove a stopped container or an
+  unused image or volume, and prune the build cache.
+- **Logs** grouped by what they belong to, with the last lines of the selected
+  log and truncate / remove-rotated / journal-vacuum buttons.
+- **Projects** grouped by place, with details and build-output folders.
+- **History** of every action.
+- Every action, and Apply on the Fixes page, runs in the background with a
+  live progress window: each step done or failed, and the space measured as
+  freed.
+
+The dashboard picks an action's target by name in the current scan, never by
+list position, and serves the last lines only of logs dux itself listed.
+
+Safety fixes from a review of 0.8.3:
+- Removing a stopped container is RISKY (its writable layer may hold the only
+  copy of data) and needs the typed confirmation, in both UIs.
+- An open Docker detail page is tied to the resource's name; after a rescan it
+  can never act on a different container.
+- No actions while a scan is running (the confirmation was hidden then).
+- A shortened volume name that matches two volumes is not attributed to either.
+- Removing an image removes its tag, not every tag of the same image.
+- Space freed by Docker actions is measured on Docker's real data root.
+
 ## New in 0.8.3: organised Docker, Logs and Projects views, live cleanup progress
 
 - **Docker (key 4) has its own views**, switched with `←` `→`:

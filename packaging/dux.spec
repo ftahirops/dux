@@ -1,5 +1,5 @@
 Name:           dux
-Version:        0.8.3
+Version:        0.8.4
 Release:        17%{?dist}
 Summary:        Persistent realtime disk usage + file search (du/ncdu/locate, indexed & live)
 
