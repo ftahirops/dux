@@ -108,16 +108,25 @@ impl Report {
     /// Usage per compose project: (images, writable, logs, volumes).
     pub fn by_project(&self) -> BTreeMap<String, [u64; 4]> {
         let mut m: BTreeMap<String, [u64; 4]> = BTreeMap::new();
+        // An image's unique size counts once per project, however many
+        // containers (replicas) run from it.
+        let mut counted: std::collections::HashSet<(String, String)> = Default::default();
         for c in &self.containers {
             let p = c
                 .project
                 .clone()
                 .unwrap_or_else(|| "(no compose project)".into());
-            let e = m.entry(p).or_default();
+            let e = m.entry(p.clone()).or_default();
             e[1] += c.writable;
             e[2] += c.log_bytes;
-            if let Some(img) = self.images.iter().find(|i| i.name == c.image) {
-                e[0] += img.unique;
+            let img = self
+                .images
+                .iter()
+                .find(|i| i.name == c.image || i.name == format!("{}:latest", c.image));
+            if let Some(img) = img {
+                if counted.insert((p, img.name.clone())) {
+                    e[0] += img.unique;
+                }
             }
         }
         for v in &self.volumes {

@@ -42,6 +42,10 @@ pub fn deleted_open() -> Result<Vec<DeletedOpen>> {
             if !s.ends_with(" (deleted)") {
                 continue;
             }
+            // memfd, POSIX shared memory and SysV segments live in RAM, not on disk.
+            if s.starts_with("/memfd:") || s.starts_with("/dev/shm/") || s.starts_with("/SYSV") {
+                continue;
+            }
             // stat the fd to get real size + inode (link target is gone)
             let meta = match fs::metadata(fd.path()) {
                 Ok(m) => m,

@@ -57,7 +57,12 @@ enum Sort {
 
 #[derive(Clone, Debug)]
 struct Entry {
+    /// Display name (lossy for names that are not UTF-8).
     name: String,
+    /// The exact path on disk: every action uses this, never the display name.
+    path: std::path::PathBuf,
+    dev: u64,
+    ino: u64,
     is_dir: bool,
     bytes: u64,
     items: u64,
@@ -72,13 +77,22 @@ enum Mark {
     Never,
 }
 
-#[derive(PartialEq, Debug)]
+/// Each confirmation holds exactly what it will act on, captured when it
+/// opened, so a scan finishing (which re-sorts lists) cannot change it.
+#[derive(Debug)]
 enum Overlay {
     None,
-    ApplyFixes,
-    ApplyProject,
-    Delete,
-    Info,
+    ApplyFixes {
+        items: Vec<Item>,
+        bytes: u64,
+        risky: bool,
+    },
+    ApplyProject {
+        items: Vec<Item>,
+        bytes: u64,
+    },
+    Delete(Entry),
+    Info(Entry),
 }
 
 struct App {
@@ -104,14 +118,6 @@ struct App {
     protected: Vec<String>,
     overlay: Overlay,
     message: String,
-}
-
-fn join(dir: &str, name: &str) -> String {
-    if dir == "/" {
-        format!("/{name}")
-    } else {
-        format!("{}/{name}", dir.trim_end_matches('/'))
-    }
 }
 
 impl App {
@@ -175,6 +181,11 @@ impl App {
         self.data = g;
         self.loading = false;
         self.rx = None;
+        // The project list was replaced: marks made on the old one are void.
+        if self.project_open.take().is_some() {
+            self.project_marks.clear();
+            self.message = "Scan finished; reopen the project to mark folders.".into();
+        }
         // Follow the item the user moved to; an untouched cursor stays on top.
         let keep = (self.sel[BROWSE] > 0)
             .then(|| self.selected_entry().map(|e| e.name.clone()))
@@ -200,15 +211,20 @@ impl App {
         if let Ok(rd) = std::fs::read_dir(&self.cwd) {
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
-                let Ok(m) = e.path().symlink_metadata() else {
+                let path = e.path();
+                let Ok(m) = path.symlink_metadata() else {
                     continue;
                 };
+                let (dev, ino) = (m.dev(), m.ino());
                 if m.is_dir() {
                     let child = node
                         .as_ref()
                         .and_then(|n| n.children.iter().find(|c| c.name == name));
                     v.push(Entry {
                         name,
+                        path,
+                        dev,
+                        ino,
                         is_dir: true,
                         bytes: child.map_or(0, |c| c.total_bytes),
                         items: child.map_or(0, |c| c.total_entries),
@@ -218,6 +234,9 @@ impl App {
                 } else {
                     v.push(Entry {
                         name,
+                        path,
+                        dev,
+                        ino,
                         is_dir: false,
                         bytes: m.blocks() * 512,
                         items: 1,
@@ -295,13 +314,22 @@ impl App {
         self.project_sel = 0;
     }
 
-    fn never_touch(&mut self, path: &str) {
+    /// Returns true only when the path is really on the saved list.
+    fn never_touch(&mut self, path: &str) -> bool {
         match crate::protect::add(path) {
-            Ok(_) => {
+            Ok(added) => {
                 self.protected = crate::protect::load();
-                self.message = format!("{path} is now on the never-touch list");
+                self.message = if added {
+                    format!("{path} is now on the never-touch list")
+                } else {
+                    format!("{path} was already on the never-touch list")
+                };
+                true
             }
-            Err(e) => self.message = format!("Could not save never-touch: {e:#} (run as root)"),
+            Err(e) => {
+                self.message = format!("NOT protected: {e:#} (run as root)");
+                false
+            }
         }
     }
 
@@ -319,17 +347,23 @@ impl App {
             return;
         }
         let (mut ok, mut failed, mut freed) = (0, 0, 0u64);
+        let mut first_error = String::new();
         for item in &items {
             match crate::cleanup::apply(item) {
                 Ok(()) => {
                     ok += 1;
                     freed += item.frees;
                 }
-                Err(_) => failed += 1,
+                Err(e) => {
+                    failed += 1;
+                    if first_error.is_empty() {
+                        first_error = format!(" First: {}: {e:#}.", item.what);
+                    }
+                }
             }
         }
         self.message = format!(
-            "Done: {ok} applied, about {} freed, {failed} skipped. Rescanning...",
+            "Done: {ok} applied, about {} freed, {failed} skipped.{first_error} Full log: /var/log/dux/actions.log. Rescanning...",
             human(freed as i64)
         );
         self.reload();
@@ -442,7 +476,7 @@ fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
         .entries
         .iter()
         .map(|e| {
-            let path = join(&app.cwd, &e.name);
+            let path = e.path.to_string_lossy();
             let never = crate::protect::covered(&app.protected, &path);
             let size = if e.is_dir && e.bytes == 0 && app.loading {
                 "…".to_string()
@@ -1208,13 +1242,23 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn popup(f: &mut Frame, area: Rect, title: &str, text: String, height: u16) {
-    let w = area.width.min(90);
+/// A centred box tall enough for its wrapped text, so the key to press is
+/// never cut off by a long path.
+fn popup(f: &mut Frame, area: Rect, title: &str, text: String) {
+    let w = area.width.min(100);
+    let inner = usize::from(w.saturating_sub(2)).max(1);
+    let lines: usize = text
+        .lines()
+        .map(|l| l.chars().count().div_ceil(inner).max(1))
+        .sum();
+    let height = u16::try_from(lines + 2)
+        .unwrap_or(u16::MAX)
+        .min(area.height);
     let r = Rect {
         x: area.x + (area.width - w) / 2,
-        y: area.y + area.height / 3,
+        y: area.y + area.height.saturating_sub(height) / 3,
         width: w,
-        height: height.min(area.height),
+        height,
     };
     f.render_widget(Clear, r);
     f.render_widget(
@@ -1228,159 +1272,132 @@ fn popup(f: &mut Frame, area: Rect, title: &str, text: String, height: u16) {
 }
 
 fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
-    match app.overlay {
+    match &app.overlay {
         Overlay::None => {}
-        Overlay::ApplyFixes => {
-            let (n, b, risky) = app.picked_total();
-            let t = if risky {
-                format!("Apply {n} fixes, freeing about {}?\n\nThe selection includes RISKY items that can lose data.\nPress D to apply, Esc to cancel.", human(b as i64))
+        Overlay::ApplyFixes {
+            items,
+            bytes,
+            risky,
+        } => {
+            let list: String = items
+                .iter()
+                .take(8)
+                .map(|x| format!("\n  - {}", x.what))
+                .collect();
+            let more = if items.len() > 8 {
+                format!("\n  ... and {} more", items.len() - 8)
             } else {
-                format!(
-                    "Apply {n} fixes, freeing about {}?\n\nPress y to apply, Esc to cancel.",
-                    human(b as i64)
-                )
+                String::new()
             };
-            popup(f, area, "Confirm", t, 7);
+            let t = if *risky {
+                format!("Apply {} fixes, freeing about {}?{list}{more}\n\nThe selection includes RISKY items that can lose data.\nPress D to apply, Esc to cancel.", items.len(), human(*bytes as i64))
+            } else {
+                format!("Apply {} fixes, freeing about {}?{list}{more}\n\nPress y to apply, Esc to cancel.", items.len(), human(*bytes as i64))
+            };
+            popup(f, area, "Confirm", t);
         }
-        Overlay::ApplyProject => {
-            let b: u64 = app
-                .project_open
-                .and_then(|i| app.data.projects.get(i))
-                .map(|p| {
-                    p.artifact_dirs
-                        .iter()
-                        .zip(&app.project_marks)
-                        .filter(|(_, m)| **m == Mark::Remove)
-                        .map(|((_, b), _)| *b)
-                        .sum()
-                })
-                .unwrap_or(0);
-            popup(f, area, "Confirm", format!("Remove the folders marked REMOVE, freeing about {}?\nThey are rebuilt by the project's own tools (npm install, cargo build...).\n\nPress y to remove, Esc to cancel.", human(b as i64)), 7);
+        Overlay::ApplyProject { items, bytes } => {
+            let list: String = items.iter().map(|x| format!("\n  - {}", x.what)).collect();
+            popup(f, area, "Confirm", format!("Remove these folders, freeing about {}?{list}\nThey are rebuilt by the project's own tools (npm install, cargo build...).\n\nPress y to remove, Esc to cancel.", human(*bytes as i64)));
         }
-        Overlay::Delete => {
-            if let Some(e) = app.selected_entry() {
-                let path = join(&app.cwd, &e.name);
-                popup(
-                    f,
-                    area,
-                    "Delete",
-                    format!(
-                        "RISKY: permanently delete {}{}?\nSize {}{}. This cannot be undone.\n\nPress D to delete, Esc to cancel.",
-                        path,
-                        if e.is_dir { "/ and everything in it" } else { "" },
-                        human(e.bytes as i64),
-                        if e.is_dir { format!(", {} items", e.items) } else { String::new() }
-                    ),
-                    7,
-                );
-            }
+        Overlay::Delete(e) => {
+            popup(
+                f,
+                area,
+                "Delete",
+                format!(
+                    "RISKY: permanently delete {}{}?\nSize {}{}. This cannot be undone.\n\nPress D to delete, Esc to cancel.",
+                    crate::insight::clean_text(&e.path.to_string_lossy(), 400),
+                    if e.is_dir { "/ and everything in it" } else { "" },
+                    human(e.bytes as i64),
+                    if e.is_dir { format!(", {} items", e.items) } else { String::new() }
+                ),
+            );
         }
-        Overlay::Info => {
-            if let Some(e) = app.selected_entry() {
-                let path = join(&app.cwd, &e.name);
-                let users = crate::insight::users();
-                let culprit = crate::attrib::culprit_for(&path)
-                    .map(|c| format!("{}: {}", c.label, c.fix))
-                    .unwrap_or_else(|| "-".into());
-                let safety = if crate::protect::covered(&app.protected, &path) {
-                    "on the never-touch list"
-                } else if crate::cleanup::system_path(&path) {
-                    "system or top-level path: dux will not delete it"
-                } else {
-                    "you can delete it with d (RISKY)"
-                };
-                popup(
-                    f,
-                    area,
-                    "Info",
-                    format!(
-                        "{path}\ntype      {}\nsize      {}\nitems     {}\nchanged   {} ago\nowner     {}\nknown as  {culprit}\ndelete    {safety}\n\nany key to close",
-                        if e.is_dir { "folder" } else { "file" },
-                        human(e.bytes as i64),
-                        e.items,
-                        crate::insight::age_text(e.mtime, crate::util::now_secs()),
-                        users.get(&e.uid).cloned().unwrap_or_else(|| e.uid.to_string())
-                    ),
-                    13,
-                );
-            }
+        Overlay::Info(e) => {
+            let path = e.path.to_string_lossy();
+            let users = crate::insight::users();
+            let culprit = crate::attrib::culprit_for(&path)
+                .map(|c| format!("{}: {}", c.label, c.fix))
+                .unwrap_or_else(|| "-".into());
+            let safety = if crate::protect::is_protected(&e.path) {
+                "on (or containing a path on) the never-touch list"
+            } else if crate::cleanup::system_path(&path) {
+                "system or top-level path: dux will not delete it"
+            } else {
+                "you can delete it with d (RISKY)"
+            };
+            popup(
+                f,
+                area,
+                "Info",
+                format!(
+                    "{}\ntype      {}\nsize      {}\nitems     {}\nchanged   {} ago\nowner     {}\nknown as  {culprit}\ndelete    {safety}\n\nany key to close",
+                    crate::insight::clean_text(&path, 400),
+                    if e.is_dir { "folder" } else { "file" },
+                    human(e.bytes as i64),
+                    e.items,
+                    crate::insight::age_text(e.mtime, crate::util::now_secs()),
+                    users.get(&e.uid).cloned().unwrap_or_else(|| e.uid.to_string())
+                ),
+            );
         }
     }
 }
 
 /// Keys while an overlay is open. Returns true if the key was consumed.
 fn overlay_key(app: &mut App, code: KeyCode) -> bool {
-    match app.overlay {
+    match std::mem::replace(&mut app.overlay, Overlay::None) {
         Overlay::None => return false,
-        Overlay::Info => app.overlay = Overlay::None,
-        Overlay::ApplyFixes => {
-            let (_, _, risky) = app.picked_total();
+        Overlay::Info(_) => {}
+        Overlay::ApplyFixes { items, risky, .. } => {
             let go = (code == KeyCode::Char('D') && risky)
                 || (matches!(code, KeyCode::Char('y') | KeyCode::Char('Y')) && !risky);
-            app.overlay = Overlay::None;
             if go {
-                let items: Vec<Item> = app
-                    .data
-                    .fixes
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| app.picked[*i])
-                    .filter_map(|(_, x)| x.item.clone())
-                    .collect();
                 app.apply_items(items);
             } else {
                 app.message = "Nothing applied.".into();
             }
         }
-        Overlay::ApplyProject => {
-            app.overlay = Overlay::None;
+        Overlay::ApplyProject { items, .. } => {
             if matches!(code, KeyCode::Char('y') | KeyCode::Char('Y')) {
-                let items: Vec<Item> = app
-                    .project_open
-                    .and_then(|i| app.data.projects.get(i))
-                    .map(|p| {
-                        p.artifact_dirs
-                            .iter()
-                            .zip(&app.project_marks)
-                            .filter(|(_, m)| **m == Mark::Remove)
-                            .map(|((d, b), _)| Item {
-                                level: 4,
-                                what: format!("remove {d}"),
-                                action: Action::RemoveTree { path: d.into() },
-                                frees: *b,
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
                 app.project_open = None;
                 app.apply_items(items);
             } else {
                 app.message = "Nothing removed.".into();
             }
         }
-        Overlay::Delete => {
-            app.overlay = Overlay::None;
+        Overlay::Delete(e) => {
             if code != KeyCode::Char('D') {
                 app.message = "Nothing deleted.".into();
                 return true;
             }
-            let Some(e) = app.selected_entry().cloned() else {
+            // Still the same file or folder that was shown?
+            let same = e
+                .path
+                .symlink_metadata()
+                .is_ok_and(|m| m.dev() == e.dev && m.ino() == e.ino);
+            if !same {
+                app.message = format!(
+                    "{} changed since the prompt opened; nothing deleted.",
+                    e.path.display()
+                );
                 return true;
-            };
-            let path = join(&app.cwd, &e.name);
+            }
             if app.is_root() {
                 let item = Item {
                     level: 4,
-                    what: format!("delete {path}"),
+                    what: format!("delete {}", e.path.display()),
                     action: Action::RemoveUserPath {
-                        path: path.clone().into(),
+                        path: e.path.clone(),
                     },
                     frees: e.bytes,
                 };
                 match crate::cleanup::apply(&item) {
                     Ok(()) => {
-                        app.message = format!("Deleted {path} ({})", human(e.bytes as i64));
-                        app.entries.retain(|x| x.name != e.name);
+                        app.message =
+                            format!("Deleted {} ({})", e.path.display(), human(e.bytes as i64));
+                        app.entries.retain(|x| x.path != e.path);
                     }
                     Err(err) => app.message = format!("Not deleted: {err:#}"),
                 }
@@ -1413,8 +1430,9 @@ fn project_key(app: &mut App, code: KeyCode) -> bool {
                 .and_then(|p| p.artifact_dirs.get(app.project_sel))
                 .map(|(d, _)| d.clone());
             if let Some(d) = dir {
-                app.never_touch(&d);
-                set(app, Mark::Never);
+                if app.never_touch(&d) {
+                    set(app, Mark::Never);
+                }
             }
         }
         KeyCode::Char('a') => app
@@ -1423,10 +1441,28 @@ fn project_key(app: &mut App, code: KeyCode) -> bool {
             .filter(|m| **m != Mark::Never)
             .for_each(|m| *m = Mark::Remove),
         KeyCode::Enter => {
-            if app.project_marks.contains(&Mark::Remove) {
-                app.overlay = Overlay::ApplyProject;
-            } else {
+            let items: Vec<Item> = app
+                .project_open
+                .and_then(|i| app.data.projects.get(i))
+                .map(|p| {
+                    p.artifact_dirs
+                        .iter()
+                        .zip(&app.project_marks)
+                        .filter(|(_, m)| **m == Mark::Remove)
+                        .map(|((d, b), _)| Item {
+                            level: 4,
+                            what: format!("remove {d}"),
+                            action: Action::RemoveTree { path: d.into() },
+                            frees: *b,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if items.is_empty() {
                 app.message = "Mark folders with r first.".into();
+            } else {
+                let bytes = items.iter().map(|i| i.frees).sum();
+                app.overlay = Overlay::ApplyProject { items, bytes };
             }
         }
         KeyCode::Char('q') => return true,
@@ -1467,7 +1503,7 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         }
         KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if t == BROWSE => {
             if let Some(e) = app.selected_entry().filter(|e| e.is_dir).cloned() {
-                app.cwd = join(&app.cwd, &e.name);
+                app.cwd = e.path.to_string_lossy().into_owned();
                 app.sel[BROWSE] = 0;
                 app.list_dir();
             }
@@ -1496,26 +1532,37 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             };
             app.sort_entries();
         }
-        KeyCode::Char('i') if t == BROWSE && app.selected_entry().is_some() => {
-            app.overlay = Overlay::Info
+        KeyCode::Char('i') if t == BROWSE => {
+            if let Some(e) = app.selected_entry().cloned() {
+                app.overlay = Overlay::Info(e);
+            }
         }
         KeyCode::Char('d') if t == BROWSE => {
-            if let Some(e) = app.selected_entry() {
-                let path = join(&app.cwd, &e.name);
-                if crate::protect::covered(&app.protected, &path) {
-                    app.message = format!("{path} is on the never-touch list");
+            if let Some(e) = app.selected_entry().cloned() {
+                let path = e.path.to_string_lossy().into_owned();
+                if crate::protect::is_protected(&e.path) {
+                    app.message =
+                        format!("{path} is on (or contains a path on) the never-touch list");
                 } else if crate::cleanup::system_path(&path) {
                     app.message =
                         format!("{path} is a system or top-level path; dux will not delete it");
                 } else {
-                    app.overlay = Overlay::Delete;
+                    app.overlay = Overlay::Delete(e);
                 }
             }
         }
         KeyCode::Char('N') if t == BROWSE => {
-            if let Some(e) = app.selected_entry() {
-                let path = join(&app.cwd, &e.name);
-                app.never_touch(&path);
+            if let Some(e) = app.selected_entry().cloned() {
+                match e.path.to_str() {
+                    Some(p) => {
+                        app.never_touch(p);
+                    }
+                    None => {
+                        app.message =
+                            "This name is not valid UTF-8; the never-touch list cannot store it."
+                                .into()
+                    }
+                }
             }
         }
         KeyCode::Enter | KeyCode::Right if t == PROJECTS => {
@@ -1542,18 +1589,32 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         KeyCode::Char('n') if t == FIXES => {
             let i = app.sel[FIXES];
             if let Some(p) = app.data.fixes.get(i).and_then(crate::fix::target_path) {
-                app.never_touch(&p);
-                app.data.fixes.remove(i);
-                app.picked.remove(i);
+                if app.never_touch(&p) {
+                    app.data.fixes.remove(i);
+                    app.picked.remove(i);
+                }
             } else {
                 app.message = "This fix has no single path to protect.".into();
             }
         }
         KeyCode::Enter if t == FIXES => {
-            if app.picked_total().0 == 0 {
+            let (n, bytes, risky) = app.picked_total();
+            if n == 0 {
                 app.message = "Pick fixes first: Space, s (safe) or a (all).".into();
             } else {
-                app.overlay = Overlay::ApplyFixes;
+                let items: Vec<Item> = app
+                    .data
+                    .fixes
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| app.picked.get(*i).copied().unwrap_or(false))
+                    .filter_map(|(_, x)| x.item.clone())
+                    .collect();
+                app.overlay = Overlay::ApplyFixes {
+                    items,
+                    bytes,
+                    risky,
+                };
             }
         }
         _ => {}
@@ -1650,10 +1711,10 @@ mod tests {
             "back to the folder we came from"
         );
         key(&mut app, KeyCode::Char('i'), KeyModifiers::NONE);
-        assert_eq!(app.overlay, Overlay::Info);
+        assert!(matches!(app.overlay, Overlay::Info(_)));
         term.draw(|f| draw(f, &mut app)).unwrap();
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(app.overlay, Overlay::None);
+        assert!(matches!(app.overlay, Overlay::None));
         app.tab = PROJECTS;
         assert_eq!(app.data.projects.len(), 1);
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
@@ -1662,7 +1723,7 @@ mod tests {
         assert_eq!(app.project_marks[0], Mark::Remove);
         term.draw(|f| draw(f, &mut app)).unwrap();
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-        assert_eq!(app.overlay, Overlay::ApplyProject);
+        assert!(matches!(app.overlay, Overlay::ApplyProject { .. }));
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
         assert_eq!(app.message, "Nothing removed.");
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
@@ -1671,7 +1732,7 @@ mod tests {
         key(&mut app, KeyCode::Char('a'), KeyModifiers::NONE);
         assert!(app.picked_total().0 >= 2);
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-        assert_eq!(app.overlay, Overlay::ApplyFixes);
+        assert!(matches!(app.overlay, Overlay::ApplyFixes { .. }));
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
         assert_eq!(app.message, "Nothing applied.");
         app.tab = BROWSE;
@@ -1683,12 +1744,47 @@ mod tests {
             .position(|e| e.name == "etc")
             .unwrap_or(0);
         key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
-        assert_eq!(
-            app.overlay,
-            Overlay::None,
+        assert!(
+            matches!(app.overlay, Overlay::None),
             "no delete prompt for a top-level folder"
         );
         assert!(key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_delete_prompt_stays_bound_to_what_it_showed() {
+        let d = std::env::temp_dir().join(format!("dux-ui-bind-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("sub")).unwrap();
+        std::fs::write(d.join("sub/small.txt"), b"x").unwrap();
+        std::fs::create_dir_all(d.join("sub/bigdir")).unwrap();
+        std::fs::write(d.join("sub/bigdir/data"), vec![1u8; 1 << 20]).unwrap();
+        let sub = d.join("sub").to_string_lossy().into_owned();
+        let mut app = App::new(&sub);
+        app.loading = false;
+        app.list_dir();
+        app.sel[BROWSE] = app
+            .entries
+            .iter()
+            .position(|e| e.name == "small.txt")
+            .unwrap();
+        key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+        assert!(matches!(&app.overlay, Overlay::Delete(e) if e.name == "small.txt"));
+        // A scan finishing re-sorts the list under the open prompt.
+        app.entries.reverse();
+        assert!(matches!(&app.overlay, Overlay::Delete(e) if e.name == "small.txt"));
+        // Replaced on disk since the prompt opened: nothing is deleted.
+        std::fs::remove_file(d.join("sub/small.txt")).unwrap();
+        std::fs::write(d.join("sub/other"), b"y").unwrap();
+        std::fs::write(d.join("sub/small.txt"), b"new").unwrap();
+        key(&mut app, KeyCode::Char('D'), KeyModifiers::NONE);
+        assert!(
+            app.message.contains("changed since the prompt opened"),
+            "{}",
+            app.message
+        );
+        assert!(d.join("sub/small.txt").exists() && d.join("sub/bigdir/data").exists());
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

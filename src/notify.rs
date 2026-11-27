@@ -537,18 +537,37 @@ fn run_wall(c: &NotifyConfig, text: &str) -> Result<()> {
 fn send_email(c: &NotifyConfig, a: &Alert, now: i64) -> Result<()> {
     // The message itself is not secret; write it to a private temp file so
     // curl's stdin stays free for the config that carries the password.
+    // create_new (O_EXCL) never follows a planted symlink; the nanosecond
+    // suffix and retries stop another user from blocking mail by creating the
+    // file name in advance.
     let dir = std::env::temp_dir();
-    let path = dir.join(format!("dux-mail-{}-{}.eml", std::process::id(), now));
-    {
+    let (path, mut f) = {
         use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)
-            .with_context(|| format!("creating {}", path.display()))?;
-        f.write_all(email_message(c, a, now).as_bytes())?;
-    }
+        let mut attempt = 0;
+        loop {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos());
+            let path = dir.join(format!(
+                "dux-mail-{}-{now}-{nanos}-{attempt}.eml",
+                std::process::id()
+            ));
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+            {
+                Ok(f) => break (path, f),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 8 => {
+                    attempt += 1;
+                }
+                Err(e) => return Err(e).with_context(|| format!("creating {}", path.display())),
+            }
+        }
+    };
+    f.write_all(email_message(c, a, now).as_bytes())?;
+    drop(f);
     let result = run_curl(c, &email_curl_config(c, &path));
     let _ = std::fs::remove_file(&path);
     result

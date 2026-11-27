@@ -59,7 +59,18 @@ pub fn mdstat(text: &str) -> Vec<Finding> {
             let tail = &line[i..];
             if tail.contains('U') || tail.contains('_') {
                 let missing = tail.matches('_').count();
-                let rebuilding = text.contains("recovery") || text.contains("resync");
+                // Only this array's own block (until the next "mdN :" line).
+                let block: String = text
+                    .lines()
+                    .skip_while(|l| !l.starts_with(&format!("{md} :")))
+                    .skip(1)
+                    .take_while(|l| {
+                        !l.split_once(" : ")
+                            .is_some_and(|(n, _)| n.starts_with("md"))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let rebuilding = block.contains("recovery") || block.contains("resync");
                 out.push(Finding {
                     key: format!("raid:{md}"),
                     level: if missing > 0 {
@@ -197,6 +208,12 @@ pub fn smart(devices: &[String]) -> Vec<Finding> {
             continue;
         }
         let failed = text.contains("FAILED") || text.contains("FAILING_NOW");
+        // No health verdict at all (smartctl could not open or read the disk):
+        // say nothing rather than report a disk as healthy.
+        let passed = text.contains("PASSED") || text.contains("SMART Health Status: OK");
+        if !failed && !passed {
+            continue;
+        }
         let realloc = attr(&text, "Reallocated_Sector_Ct").unwrap_or(0)
             + attr(&text, "Current_Pending_Sector").unwrap_or(0);
         let wear = text

@@ -214,6 +214,10 @@ fn dir_bytes(dir: &Path) -> u64 {
 
 /// logrotate config path covering `log`, if any (simple glob match on the
 /// path lines of /etc/logrotate.conf and /etc/logrotate.d/*).
+///
+/// `logrotate -f CONFIG` rotates every log the config lists, so a config
+/// that also lists a protected log (auth.log, secure, audit...) is never
+/// returned: the caller then falls back to keeping the tail of this one log.
 fn logrotate_config_for(root: &Path, log: &Path) -> Option<PathBuf> {
     let mut files = vec![root.join("etc/logrotate.conf")];
     if let Ok(rd) = std::fs::read_dir(root.join("etc/logrotate.d")) {
@@ -225,16 +229,20 @@ fn logrotate_config_for(root: &Path, log: &Path) -> Option<PathBuf> {
         let Ok(text) = std::fs::read_to_string(&f) else {
             continue;
         };
-        for line in text.lines() {
-            let line = line.trim();
-            if !line.starts_with('/') {
-                continue;
-            }
-            for pat in line.trim_end_matches('{').split_whitespace() {
-                if glob_match(pat.trim_matches('"'), &target) {
-                    return Some(f);
-                }
-            }
+        let patterns: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with('/'))
+            .flat_map(|l| l.trim_end_matches('{').split_whitespace())
+            .map(|p| p.trim_matches('"'))
+            .collect();
+        if patterns.iter().any(|p| glob_match(p, &target)) {
+            let lists_protected = patterns.iter().any(|p| {
+                Path::new(p)
+                    .file_name()
+                    .is_some_and(|n| is_protected(Path::new(n)))
+            });
+            return (!lists_protected).then_some(f);
         }
     }
     None
@@ -357,6 +365,7 @@ pub fn plan(o: &Options) -> Vec<Item> {
                 .filter(|(p, _)| p.to_string_lossy().ends_with("-json.log"))
                 .map(|(p, m)| (p, m, true)),
         );
+        let mut forced: HashSet<PathBuf> = HashSet::new();
         for (p, m, is_docker) in candidates {
             let bytes = m.blocks() * 512;
             if bytes < o.big_log {
@@ -365,6 +374,12 @@ pub fn plan(o: &Options) -> Vec<Item> {
             let conf = (!is_docker)
                 .then(|| logrotate_config_for(&o.root, &p))
                 .flatten();
+            // One forced rotation per config, however many of its logs are big.
+            if let Some(c) = &conf {
+                if !forced.insert(c.clone()) {
+                    continue;
+                }
+            }
             let item = match conf {
                 Some(c) => Item {
                     level: 2,
@@ -449,7 +464,9 @@ pub fn plan(o: &Options) -> Vec<Item> {
             .collect();
         dumps.sort_by_key(|(_, m)| std::cmp::Reverse(m.mtime()));
         for (p, m) in dumps.into_iter().skip(o.core_keep) {
-            if (now - m.mtime()) as u64 >= o.core_min_age_days * 86_400 {
+            // A future mtime (clock skew, restored backup) is age 0, not "very old".
+            let age = u64::try_from(now - m.mtime()).unwrap_or(0);
+            if age >= o.core_min_age_days * 86_400 {
                 items.push(Item {
                     level: 3,
                     what: "old crash or core dump".into(),
@@ -493,22 +510,36 @@ fn audit(entry: serde_json::Value) {
     }
 }
 
+/// The never-touch check for one action, on every path it writes. Fails
+/// closed when the list cannot be read.
+pub fn allowed(item: &Item) -> Result<()> {
+    let targets: Vec<PathBuf> = match &item.action {
+        Action::Remove { path } | Action::RemoveTree { path } | Action::RemoveUserPath { path } => {
+            vec![path.clone()]
+        }
+        Action::TailAndTruncate { path, .. } => vec![path.clone(), tail_path(path)],
+        Action::Run { program, args } => match crate::protect::command_scope(program, args) {
+            Some(dirs) => dirs,
+            None => {
+                // A command whose reach dux does not know may only run when
+                // nothing is protected.
+                anyhow::ensure!(
+                    crate::protect::policy_from(Path::new(crate::protect::FILE))?.is_empty(),
+                    "{program} has no known scope and a never-touch list is in effect; skipped"
+                );
+                Vec::new()
+            }
+        },
+    };
+    for p in &targets {
+        crate::protect::check(p)?;
+    }
+    Ok(())
+}
+
 /// Apply one action. Re-checks safety at run time, not only when planning.
 pub fn apply(item: &Item) -> Result<()> {
-    let target = match &item.action {
-        Action::Remove { path }
-        | Action::TailAndTruncate { path, .. }
-        | Action::RemoveTree { path }
-        | Action::RemoveUserPath { path } => Some(path.clone()),
-        Action::Run { .. } => None,
-    };
-    if let Some(p) = &target {
-        anyhow::ensure!(
-            !crate::protect::is_protected(p),
-            "{} is on the never-touch list",
-            p.display()
-        );
-    }
+    allowed(item)?;
     anyhow::ensure!(
         !Path::new(KILL_SWITCH).exists(),
         "actions disabled by {KILL_SWITCH}"
@@ -599,28 +630,71 @@ pub fn system_path(p: &str) -> bool {
 /// Delete a file or folder the user chose. Refuses system paths, top-level
 /// folders, symlinked folders, folders with a mount inside, and open files.
 pub fn remove_user_path(path: &Path) -> Result<()> {
-    let p = path.to_string_lossy().into_owned();
-    anyhow::ensure!(
-        !system_path(&p),
-        "{p} is a system or top-level path; dux will not delete it"
-    );
-    let m = std::fs::symlink_metadata(path)?;
+    // Judge and delete the real location: the parent resolved by the kernel
+    // plus the final name (never followed, so a symlink is removed as a link).
+    let real = real_location(path)?;
+    for p in [
+        path.to_string_lossy().into_owned(),
+        real.to_string_lossy().into_owned(),
+    ] {
+        anyhow::ensure!(
+            !system_path(&crate::protect::normalize(&p)),
+            "{p} is a system or top-level path; dux will not delete it"
+        );
+    }
+    let p = real.to_string_lossy().into_owned();
+    let m = std::fs::symlink_metadata(&real)?;
     if m.is_dir() {
-        let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
-        let inside = mounts
-            .lines()
-            .filter_map(|l| l.split(' ').nth(4))
-            .map(crate::sentinel::unescape_mount)
-            .any(|mp| mp == p || mp.starts_with(&format!("{p}/")));
-        anyhow::ensure!(!inside, "{p} has a filesystem mounted inside it");
-        std::fs::remove_dir_all(path).with_context(|| format!("removing {p}"))
+        anyhow::ensure!(
+            !has_mount_inside(&p)?,
+            "{p} has a filesystem mounted inside it"
+        );
+        std::fs::remove_dir_all(&real).with_context(|| format!("removing {p}"))
     } else {
         anyhow::ensure!(
             !open_files().contains(&(m.dev(), m.ino())),
             "{p} is open by a running process"
         );
-        std::fs::remove_file(path).with_context(|| format!("removing {p}"))
+        std::fs::remove_file(&real).with_context(|| format!("removing {p}"))
     }
+}
+
+/// The real path of `path`: its parent canonicalized, plus the final name.
+fn real_location(path: &Path) -> Result<PathBuf> {
+    let name = path
+        .file_name()
+        .with_context(|| format!("{} has no final name", path.display()))?;
+    anyhow::ensure!(
+        name != ".." && name != ".",
+        "{} must name an entry, not . or ..",
+        path.display()
+    );
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("/"),
+    };
+    let dir =
+        std::fs::canonicalize(parent).with_context(|| format!("resolving {}", parent.display()))?;
+    Ok(dir.join(name))
+}
+
+/// Is a filesystem mounted at or under `p`? Errors when the mount table
+/// cannot be read: without it, dux cannot know, so it must not delete.
+fn has_mount_inside(p: &str) -> Result<bool> {
+    let mounts = std::fs::read_to_string("/proc/self/mountinfo")
+        .context("cannot read /proc/self/mountinfo; refusing a recursive delete")?;
+    Ok(mounts
+        .lines()
+        .filter_map(|l| l.split(' ').nth(4))
+        .map(crate::sentinel::unescape_mount)
+        .any(|mp| mp == p || mp.starts_with(&format!("{p}/"))))
+}
+
+/// Where tail_and_truncate keeps the end of a log.
+fn tail_path(log: &Path) -> PathBuf {
+    let mut s = log.as_os_str().to_owned();
+    s.push(".dux-tail");
+    PathBuf::from(s)
 }
 
 /// Remove a build-output folder. Refuses anything that is not a real folder
@@ -639,19 +713,18 @@ pub fn remove_tree(path: &Path) -> Result<()> {
         "{} is not a known build-output folder",
         path.display()
     );
-    let p = path.to_string_lossy().into_owned();
-    let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
-    let inside = mounts
-        .lines()
-        .filter_map(|l| l.split(' ').nth(4))
-        .map(crate::sentinel::unescape_mount)
-        .any(|mp| mp == p || mp.starts_with(&format!("{p}/")));
+    let real = real_location(path)?;
+    let p = real.to_string_lossy().into_owned();
     anyhow::ensure!(
-        !inside,
+        !system_path(&p),
+        "{p} is a system or top-level path; dux will not delete it"
+    );
+    anyhow::ensure!(
+        !has_mount_inside(&p)?,
         "{} has a filesystem mounted inside it",
         path.display()
     );
-    std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))
+    std::fs::remove_dir_all(&real).with_context(|| format!("removing {p}"))
 }
 
 /// Keep the last `keep` bytes in `<path>.dux-tail` and truncate the log in
@@ -669,10 +742,35 @@ pub fn tail_and_truncate(path: &Path, keep: u64) -> Result<()> {
     f.seek(SeekFrom::Start(start))?;
     let mut tail = Vec::with_capacity((len - start) as usize);
     f.read_to_end(&mut tail)?;
-    let tail_path = PathBuf::from(format!("{}.dux-tail", path.display()));
-    let mut t = std::fs::File::create(&tail_path)?;
-    t.write_all(&tail)?;
-    t.sync_all()?;
+    // The copy gets the log's own owner and mode (logs are often 0640
+    // root:adm), and is never written through a planted symlink.
+    let tail_path = tail_path(path);
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        match std::fs::symlink_metadata(&tail_path) {
+            Ok(old) => anyhow::ensure!(
+                old.is_file(),
+                "{} exists and is not a regular file",
+                tail_path.display()
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        let mut t = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&tail_path)
+            .with_context(|| format!("creating {}", tail_path.display()))?;
+        // If the owner cannot be copied (not root), the copy stays private (0600).
+        if std::os::unix::fs::fchown(&t, Some(m.uid()), Some(m.gid())).is_ok() {
+            t.set_permissions(std::fs::Permissions::from_mode(m.mode() & 0o7777 & !0o111))?;
+        }
+        t.write_all(&tail)?;
+        t.sync_all()?;
+    }
     f.set_len(0)?;
     Ok(())
 }

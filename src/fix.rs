@@ -147,7 +147,7 @@ pub fn assess(item: Item) -> Suggestion {
                 ("docker", a) if a.starts_with("image prune -a") => (Safety::Caution, "Removes images no container uses, older than 30 days.", "docker pull downloads them again (needs registry access)."),
                 ("docker", a) if a.starts_with("container prune") => (Safety::Caution, "Removes stopped containers older than 7 days and files written inside them.", "Recreate with docker run / compose up; their internal files are gone."),
                 ("docker", a) if a.starts_with("volume rm") => (Safety::Risky, "Deletes a Docker volume no container uses. It may hold a database or uploads.", "Only from your own backup."),
-                ("logrotate", _) => (Safety::Safe, "Runs the log's own rotation now so the app reopens a fresh file.", "Nothing is deleted by this step."),
+                ("logrotate", _) => (Safety::Caution, "Forces the logrotate rotation of this log's config now: every log in that config is rotated and archives beyond its `rotate N` are deleted. Configs that also list security logs are never forced.", "Rotated copies stay as .1/.gz files until their normal expiry."),
                 _ => (Safety::Caution, "Runs a cleanup command.", "Depends on the command."),
             }
         }
@@ -254,12 +254,35 @@ pub fn target_path(s: &Suggestion) -> Option<String> {
     }
 }
 
-/// Drop suggestions on the never-touch list; returns how many were dropped.
+fn blocked(x: &Suggestion) -> bool {
+    x.item
+        .as_ref()
+        .is_some_and(|i| crate::cleanup::allowed(i).is_err())
+}
+
+/// Drop suggestions the never-touch list forbids (same rules as apply time:
+/// real locations, parents of listed paths, command scopes; an unreadable
+/// list blocks everything). Returns how many were dropped.
 pub fn drop_protected(s: &mut Vec<Suggestion>) -> usize {
-    let list = crate::protect::load();
     let before = s.len();
-    s.retain(|x| target_path(x).is_none_or(|p| !crate::protect::covered(&list, &p)));
+    s.retain(|x| !blocked(x));
     before - s.len()
+}
+
+/// Keep forbidden suggestions in the list but make them unselectable, so
+/// the numbers a user saw in a preview still name the same fixes.
+fn mark_protected(s: &mut [Suggestion]) -> usize {
+    let mut n = 0;
+    for x in s.iter_mut().filter(|x| blocked(x)) {
+        x.item = None;
+        x.title = format!("[never touch] {}", x.title);
+        x.manual = Some(format!(
+            "on (or containing a path on) the never-touch list {}; dux will not do this",
+            crate::protect::FILE
+        ));
+        n += 1;
+    }
+    n
 }
 
 /// Print the numbered fix list, then apply what the user picks.
@@ -270,16 +293,20 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
         println!("\nFixes: nothing to suggest for {title}.");
         return Ok(0);
     }
-    let skipped = drop_protected(&mut s);
+    s.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
+    let skipped = mark_protected(&mut s);
     if skipped > 0 {
         println!(
-            "\n({skipped} suggestions skipped: on the never-touch list {})",
+            "\n({skipped} suggestions are on the never-touch list {} and cannot be picked)",
             crate::protect::FILE
         );
     }
-    s.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
+    if skipped == s.len() {
+        println!("\nFixes: every suggestion for {title} is on the never-touch list.");
+        return Ok(0);
+    }
     let mut t = [0u64; 3];
-    for x in &s {
+    for x in s.iter().filter(|x| !x.title.starts_with("[never touch]")) {
         t[x.safety as usize] += x.frees;
     }
     println!(

@@ -318,6 +318,11 @@ pub(crate) fn unescape_mount(s: &str) -> String {
 
 /// Real filesystems from /proc/self/mountinfo, one entry per device (the
 /// shortest mount path wins, so bind mounts are not reported twice).
+/// `path` is `dir` or inside it (a path-boundary prefix test).
+fn under(path: &str, dir: &str) -> bool {
+    path == dir || path.starts_with(&format!("{dir}/"))
+}
+
 pub fn parse_mountinfo(text: &str) -> Vec<Mount> {
     let mut by_dev: HashMap<String, Mount> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
@@ -334,9 +339,7 @@ pub fn parse_mountinfo(text: &str) -> Vec<Mount> {
         let path = unescape_mount(lf[4]);
         let fstype = rf[0].to_string();
         let device = unescape_mount(rf[1]);
-        if SKIP_FSTYPES.contains(&fstype.as_str())
-            || path.starts_with("/proc")
-            || path.starts_with("/sys")
+        if SKIP_FSTYPES.contains(&fstype.as_str()) || under(&path, "/proc") || under(&path, "/sys")
         {
             continue;
         }
@@ -1044,10 +1047,11 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
             }
         }
         let level = sentinel.settings.auto_cleanup_level;
-        if level > 0 && now - last_cleanup >= 600 {
+        // Automatic cleanup deletes files: never in a dry run.
+        if level > 0 && !cfg.dry_run && now - last_cleanup >= 600 {
             let log_mount = mount_list
                 .iter()
-                .filter(|m| "/var/log".starts_with(m.path.as_str()))
+                .filter(|m| m.path == "/" || under("/var/log", &m.path))
                 .max_by_key(|m| m.path.len())
                 .map(|m| m.path.clone());
             let critical_here = log_mount.as_ref().is_some_and(|lm| {
@@ -1060,11 +1064,16 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
                 let cfg2 = cfg.clone();
                 let host2 = host.clone();
                 let target = sentinel.settings.crit_pct - 10.0;
-                let _ = std::thread::Builder::new()
-                    .name("dux-cleanup".into())
-                    .spawn(move || {
-                        emergency_cleanup(&cfg2, &host2, level, target);
-                    });
+                if once {
+                    // --once exits right after this pass: finish the cleanup first.
+                    emergency_cleanup(&cfg2, &host2, level, target);
+                } else {
+                    let _ = std::thread::Builder::new()
+                        .name("dux-cleanup".into())
+                        .spawn(move || {
+                            emergency_cleanup(&cfg2, &host2, level, target);
+                        });
+                }
             }
         }
         if let Some(s) = sched.as_mut() {
@@ -1349,6 +1358,14 @@ mod tests {
     fn remote_fstypes() {
         assert!(is_remote("fuse.sshfs") && is_remote("nfs4") && is_remote("cifs"));
         assert!(!is_remote("ext4") && !is_remote("xfs") && !is_remote("tmpfs"));
+    }
+
+    #[test]
+    fn mount_skips_use_path_boundaries() {
+        assert!(under("/proc", "/proc") && under("/proc/fs/nfsd", "/proc"));
+        assert!(!under("/processing", "/proc"));
+        assert!(!under("/sysbackup", "/sys"));
+        assert!(under("/var/log", "/var") && !under("/var/log", "/var/l"));
     }
 
     #[test]

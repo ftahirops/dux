@@ -202,6 +202,13 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
             size as u64,
         ));
     }
+    // The same action can come from two planners (e.g. the Docker build-cache
+    // prune from both the cleanup plan and the Docker plan): keep one.
+    let mut seen = std::collections::HashSet::new();
+    fixes.retain(|f| match &f.item {
+        Some(i) => seen.insert(format!("{:?}", i.action)),
+        None => true,
+    });
     crate::fix::drop_protected(&mut fixes);
     fixes.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
     g.fixes = fixes;

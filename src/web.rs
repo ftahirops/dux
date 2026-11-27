@@ -28,12 +28,48 @@ pub struct Server {
     progress: Arc<AtomicU64>,
 }
 
-pub fn random_token() -> String {
+/// A fresh 128-bit token. Fails instead of returning a guessable one when
+/// /dev/urandom cannot be read.
+pub fn random_token() -> anyhow::Result<String> {
     let mut b = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut b);
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut b))
+        .map_err(|e| anyhow::anyhow!("cannot read /dev/urandom for the access token: {e}"))?;
+    anyhow::ensure!(b.iter().any(|x| *x != 0), "/dev/urandom returned zeros");
+    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// A stable identity for a fix: the same fix keeps its key across regathers,
+/// a different fix never shares it, so a stale page cannot apply the wrong one.
+pub fn fix_key(x: &crate::fix::Suggestion) -> String {
+    let text = format!("{}|{:?}", x.title, x.item.as_ref().map(|i| &i.action));
+    // FNV-1a, 64-bit.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
     }
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    format!("{h:016x}")
+}
+
+/// Percent-decode a query value (UTF-8; invalid sequences are kept as-is).
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if b[i] == b'+' { b' ' } else { b[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Constant-time comparison so the token cannot be guessed byte by byte.
@@ -64,15 +100,27 @@ impl Server {
         }
         let me = self.clone();
         std::thread::spawn(move || {
+            // Clears `walking` however this thread ends, even on a panic.
+            struct Done<'a>(&'a AtomicBool);
+            impl Drop for Done<'_> {
+                fn drop(&mut self) {
+                    self.0.store(false, Ordering::SeqCst);
+                }
+            }
+            let _done = Done(&me.walking);
             me.progress.store(0, Ordering::Relaxed);
             let g = gather::gather(&me.root, 2, Some(me.progress.clone()));
-            *me.state.lock().unwrap() = Some(Arc::new(g));
-            me.walking.store(false, Ordering::SeqCst);
+            *me.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(g));
         });
     }
 
     fn snapshot(&self) -> Option<Arc<Gathered>> {
-        self.state.lock().unwrap().clone()
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -121,7 +169,7 @@ pub fn state_json(
         .fixes
         .iter()
         .enumerate()
-        .map(|(i, x)| json!({"id": i, "safety": x.safety.label(), "title": x.title, "why": x.why, "undo": x.undo, "frees": x.frees, "applicable": x.item.is_some(), "manual": x.manual}))
+        .map(|(i, x)| json!({"id": i, "key": fix_key(x), "safety": x.safety.label(), "title": x.title, "why": x.why, "undo": x.undo, "frees": x.frees, "applicable": x.item.is_some(), "manual": x.manual}))
         .collect();
     json!({
         "ready": true, "walking": walking, "progress": progress, "allow_actions": allow_actions, "at": g.at,
@@ -131,13 +179,14 @@ pub fn state_json(
     })
 }
 
-/// Apply picked fixes by id. RISKY ones need `confirm == "delete"`.
-pub fn apply_ids(g: &Gathered, ids: &[usize], confirm: Option<&str>) -> Value {
+/// Apply picked fixes by key. RISKY ones need `confirm == "delete"`. A key
+/// that is no longer in the current list is refused, never re-matched.
+pub fn apply_keys(g: &Gathered, keys: &[String], confirm: Option<&str>) -> Value {
     let mut results = Vec::new();
     let risky_ok = confirm == Some("delete");
-    for &i in ids {
-        let Some(x) = g.fixes.get(i) else {
-            results.push(json!({"id": i, "ok": false, "error": "no such fix"}));
+    for k in keys {
+        let Some((i, x)) = g.fixes.iter().enumerate().find(|(_, x)| fix_key(x) == *k) else {
+            results.push(json!({"key": k, "ok": false, "error": "this fix is no longer offered; reload the page"}));
             continue;
         };
         let Some(item) = &x.item else {
@@ -280,15 +329,23 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
             );
         }
         ("GET", "/api/tree") => {
-            let p = query_param(&req.query, "path")
-                .unwrap_or_default()
-                .replace("%2F", "/")
-                .replace("%20", " ");
+            let p = percent_decode(&query_param(&req.query, "path").unwrap_or_default());
             let g = srv.snapshot();
             let kids: Vec<Value> = g
                 .as_ref()
                 .and_then(|g| g.tree.as_ref())
-                .and_then(|t| t.root.find(p.trim_start_matches(t.root_path.trim_end_matches('/'))))
+                .and_then(|t| {
+                    // Strip the walk root once, at a path boundary.
+                    let root = t.root_path.trim_end_matches('/');
+                    let rel = if root.is_empty() {
+                        Some(p.as_str())
+                    } else if p == root {
+                        Some("")
+                    } else {
+                        p.strip_prefix(root).filter(|r| r.starts_with('/'))
+                    }?;
+                    t.root.find(rel)
+                })
                 .map(|n| {
                     let mut v: Vec<&crate::walker::DirNode> = n.children.iter().collect();
                     v.sort_by_key(|c| std::cmp::Reverse(c.total_bytes));
@@ -312,11 +369,11 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
                 return;
             }
             let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
-            let ids: Vec<usize> = v["ids"]
+            let keys: Vec<String> = v["keys"]
                 .as_array()
                 .map(|a| {
                     a.iter()
-                        .filter_map(|x| x.as_u64().map(|n| n as usize))
+                        .filter_map(|x| x.as_str().map(str::to_string))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -329,7 +386,7 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
                 );
                 return;
             };
-            let out = apply_ids(&g, &ids, v["confirm"].as_str());
+            let out = apply_keys(&g, &keys, v["confirm"].as_str());
             srv.regather();
             api_json(&mut s, out);
         }
@@ -422,7 +479,8 @@ v.appendChild(table(['','rating','frees','fix','what it does','undo'],S.fixes.ma
 async function apply(){const ids=[...picked];if(!ids.length)return;let b=0,risky=false;S.fixes.forEach(f=>{if(picked.has(f.id)){b+=f.frees;risky=risky||f.safety==='RISKY'}});
 let confirmWord=null;if(risky){confirmWord=prompt('Your selection includes RISKY items that can lose data. Type delete to include them:');if(confirmWord!=='delete'){alert('Nothing applied.');return}}
 else if(!confirm('Apply '+ids.length+' fixes, freeing about '+H(b)+'?'))return;
-const r=await api('/api/apply',{method:'POST',body:JSON.stringify({ids,confirm:confirmWord})});
+const keys=S.fixes.filter(f=>picked.has(f.id)).map(f=>f.key);
+const r=await api('/api/apply',{method:'POST',body:JSON.stringify({keys,confirm:confirmWord})});
 alert(r.error?r.error:r.results.map(x=>(x.ok?'done  ':'skipped  ')+(x.title||x.id)+(x.error?' ('+x.error+')':'')).join('\n'));picked.clear();setTimeout(load,1500)}
 document.getElementById('refresh').onclick=async()=>{await api('/api/refresh',{method:'POST'});load()};
 load();
@@ -438,8 +496,13 @@ mod tests {
         assert!(same("abc", "abc"));
         assert!(!same("abc", "abd"));
         assert!(!same("abc", "ab"));
-        assert_eq!(random_token().len(), 32);
-        assert_ne!(random_token(), random_token());
+        assert_eq!(random_token().unwrap().len(), 32);
+        assert_ne!(random_token().unwrap(), random_token().unwrap());
+        assert_eq!(
+            percent_decode("%2Fsrv%2Fcaf%C3%A9%20x+y%26"),
+            "/srv/café x y&"
+        );
+        assert_eq!(percent_decode("100%"), "100%");
     }
 
     #[test]
@@ -464,7 +527,14 @@ mod tests {
             ],
             ..Gathered::default()
         };
-        let r = apply_ids(&g, &[0, 1, 7], None);
+        let keys: Vec<String> = g
+            .fixes
+            .iter()
+            .map(fix_key)
+            .chain(["0000000000000000".to_string()])
+            .collect();
+        assert_ne!(keys[0], keys[1], "different fixes, different keys");
+        let r = apply_keys(&g, &keys, None);
         let res = r["results"].as_array().unwrap();
         assert_eq!(res.len(), 3);
         assert!(res.iter().all(|x| x["ok"] == false));

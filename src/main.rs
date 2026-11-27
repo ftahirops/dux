@@ -1577,7 +1577,10 @@ fn real_main() -> Result<()> {
             allow_actions,
             refresh,
         }) => {
-            let token = token.unwrap_or_else(web::random_token);
+            let token = match token {
+                Some(t) => t,
+                None => web::random_token()?,
+            };
             let loopback = listen.starts_with("127.")
                 || listen.starts_with("localhost")
                 || listen.starts_with("[::1]");
@@ -1996,28 +1999,58 @@ fn real_main() -> Result<()> {
         Some(Cmd::Tui { path }) => {
             ui::run(&path.to_string_lossy())?;
         }
-        Some(Cmd::NeverTouch { op, path }) => match (op.as_str(), path) {
-            ("add", Some(p)) => {
-                let p = std::path::absolute(&p)?;
-                protect::add(&p.to_string_lossy())?;
-                println!("dux will never touch {}", p.display());
-            }
-            ("remove", Some(p)) => {
-                let p = std::path::absolute(&p)?;
-                protect::remove(&p.to_string_lossy())?;
-                println!("removed {} from the never-touch list", p.display());
-            }
-            ("list", _) => {
-                let l = protect::load();
-                if l.is_empty() {
-                    println!("never-touch list ({}) is empty", protect::FILE);
+        Some(Cmd::NeverTouch { op, path }) => {
+            // The list stores text: refuse a name that is not valid UTF-8
+            // rather than protect a different, lossily converted path.
+            let text = |p: &std::path::Path| -> Result<String> {
+                let abs = std::path::absolute(p)?;
+                abs.to_str().map(str::to_string).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{} is not valid UTF-8; the never-touch list cannot store it",
+                        abs.display()
+                    )
+                })
+            };
+            match (op.as_str(), path) {
+                ("add", Some(p)) => {
+                    let p = text(&p)?;
+                    if protect::add(&p)? {
+                        println!("dux will never touch {}", protect::normalize(&p));
+                    } else {
+                        println!(
+                            "{} was already on the never-touch list",
+                            protect::normalize(&p)
+                        );
+                    }
                 }
-                for p in l {
-                    println!("{p}");
+                ("remove", Some(p)) => {
+                    let p = text(&p)?;
+                    if protect::remove(&p)? {
+                        println!(
+                            "removed {} from the never-touch list",
+                            protect::normalize(&p)
+                        );
+                    } else {
+                        anyhow::bail!(
+                            "{} is not on the never-touch list; nothing changed",
+                            protect::normalize(&p)
+                        );
+                    }
+                }
+                ("list", _) => {
+                    let l = protect::policy_from(std::path::Path::new(protect::FILE))?;
+                    if l.is_empty() {
+                        println!("never-touch list ({}) is empty", protect::FILE);
+                    }
+                    for p in l {
+                        println!("{p}");
+                    }
+                }
+                _ => {
+                    anyhow::bail!("usage: dux never-touch add|remove PATH, or dux never-touch list")
                 }
             }
-            _ => anyhow::bail!("usage: dux never-touch add|remove PATH, or dux never-touch list"),
-        },
+        }
         Some(Cmd::Status) => {
             // On a fresh box the FIRST scan hasn't produced dux.db yet, so open_ro
             // would hard-fail with a cryptic error. Instead: if a scan is running,

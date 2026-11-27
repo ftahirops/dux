@@ -429,7 +429,11 @@ pub fn projects(tree: &Tree) -> Vec<Project> {
             rec(c, &p, root, out);
         }
     }
-    let root = tree.root_path.trim_end_matches('/');
+    // `dux pp .` walks "."; judge depth and exclusions on the absolute path.
+    let abs = std::path::absolute(&tree.root_path)
+        .map(|p| crate::protect::normalize(&p.to_string_lossy()))
+        .unwrap_or_else(|_| tree.root_path.clone());
+    let root = abs.trim_end_matches('/');
     let root = if root.is_empty() { "/" } else { root };
     rec(&tree.root, root, root, &mut out);
     out.sort_by_key(|p| std::cmp::Reverse(p.total));
@@ -473,9 +477,46 @@ fn toml_value(text: &str, section: &str, key: &str) -> Option<String> {
 }
 
 /// Read the project's name, description, git branch and remote from disk.
+/// Read a small regular file without blocking: FIFOs, devices and other
+/// special files are skipped, and at most `max` bytes are read.
+pub fn read_small(path: &std::path::Path, max: u64) -> Option<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(path)
+        .ok()?;
+    let m = f.metadata().ok()?;
+    if !m.is_file() || m.len() > max {
+        return None;
+    }
+    let mut out = String::new();
+    f.take(max).read_to_string(&mut out).ok()?;
+    Some(out)
+}
+
+/// Join git-config backslash-newline continuations into logical lines.
+fn git_config_lines(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for line in text.lines() {
+        if let Some(head) = line.strip_suffix('\\') {
+            cur.push_str(head);
+            continue;
+        }
+        cur.push_str(line);
+        out.push(std::mem::take(&mut cur));
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
 pub fn fill_details(p: &mut Project) {
     let dir = std::path::Path::new(&p.path);
-    let read = |f: &str| std::fs::read_to_string(dir.join(f)).ok();
+    let read = |f: &str| read_small(&dir.join(f), 1 << 20);
     if let Some(t) = read("package.json") {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
             p.name = v["name"].as_str().unwrap_or("").to_string();
@@ -527,7 +568,7 @@ pub fn fill_details(p: &mut Project) {
     }
     if let Some(cfg) = read(".git/config") {
         let mut in_origin = false;
-        for line in cfg.lines() {
+        for line in git_config_lines(&cfg) {
             let l = line.trim();
             if l.starts_with('[') {
                 in_origin = l == "[remote \"origin\"]";
@@ -536,7 +577,7 @@ pub fn fill_details(p: &mut Project) {
                     .strip_prefix("url")
                     .and_then(|r| r.trim_start().strip_prefix('='))
                 {
-                    p.remote = Some(redact_url(u.trim()));
+                    p.remote = Some(redact_url(u.trim().trim_matches('"')));
                 }
             }
         }
@@ -714,6 +755,46 @@ mod tests {
         assert_eq!(names, vec!["app.log", "app.log.1"]);
         assert!(!r.logs[0].rotated && r.logs[1].rotated);
         assert_eq!(r.total(Some(LogKind::App)), r.total(None));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn continued_git_config_lines_still_lose_credentials() {
+        let cfg = "[remote \"origin\"]\n    url = https://user:secret\\\n@github.com/o/r.git\n";
+        let lines = git_config_lines(cfg);
+        let url = lines
+            .iter()
+            .find_map(|l| {
+                l.trim()
+                    .strip_prefix("url")
+                    .and_then(|r| r.trim_start().strip_prefix('='))
+            })
+            .unwrap();
+        let r = redact_url(url.trim());
+        assert!(!r.contains("secret"), "{r}");
+        assert!(r.contains("github.com/o/r.git"), "{r}");
+    }
+
+    #[test]
+    fn special_manifest_files_are_skipped_without_blocking() {
+        let d = std::env::temp_dir().join(format!("dux-fifo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let fifo = d.join("package.json");
+        let c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
+        // SAFETY: c is a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o644) }, 0);
+        assert!(
+            read_small(&fifo, 1 << 20).is_none(),
+            "a FIFO must not block or be read"
+        );
+        std::fs::write(d.join("big.json"), vec![b' '; 2 << 20]).unwrap();
+        assert!(read_small(&d.join("big.json"), 1 << 20).is_none());
+        std::fs::write(d.join("ok.json"), b"{}").unwrap();
+        assert_eq!(
+            read_small(&d.join("ok.json"), 1 << 20).as_deref(),
+            Some("{}")
+        );
         std::fs::remove_dir_all(&d).unwrap();
     }
 

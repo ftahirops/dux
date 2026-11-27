@@ -433,7 +433,7 @@ impl WalkScheduler {
         self.running = Some(mount.clone());
         let tx = self.tx.clone();
         let threads = self.threads;
-        let _ = std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .name("dux-walk".into())
             .spawn(move || {
                 // Lowest CPU and I/O priority for the walk thread only.
@@ -442,13 +442,22 @@ impl WalkScheduler {
                     libc::setpriority(libc::PRIO_PROCESS, 0, 19);
                     libc::syscall(libc::SYS_ioprio_set, 1, 0, 3 << 13);
                 }
-                let tree = walker::walk(&mount, threads);
+                // Always report back, even if the walk panics, so the
+                // scheduler is never left waiting for a walk that died.
+                let tree = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    walker::walk(&mount, threads)
+                }))
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("the walk thread panicked")));
                 let _ = tx.send(WalkDone {
                     mount,
                     reason,
                     tree,
                 });
             });
+        if let Err(e) = spawned {
+            tracing::warn!("cannot start a walk thread: {e}");
+            self.running = None;
+        }
     }
 
     /// Collect a finished walk, if any: returns (mount, reason, tree, changes vs previous).
@@ -477,9 +486,17 @@ impl WalkScheduler {
             let due = now - self.last_snapshot.get(&done.mount).copied().unwrap_or(0)
                 >= self.snapshot_every_secs;
             if due {
-                // Keep the previous snapshot as .prev for `dux where`.
+                // Keep the previous snapshot as .prev for `dux where`. Link,
+                // not rename: if saving the new one fails (a full disk), the
+                // current snapshot is still there.
                 let cur = crate::snapshot::file_for(dir, &done.mount);
-                let _ = std::fs::rename(&cur, cur.with_extension("prev.snap"));
+                let prev = cur.with_extension("prev.snap");
+                if cur.exists() {
+                    let _ = std::fs::remove_file(&prev);
+                    if let Err(e) = std::fs::hard_link(&cur, &prev) {
+                        tracing::warn!("keeping the previous snapshot failed: {e}");
+                    }
+                }
                 match crate::snapshot::save(dir, &tree) {
                     Ok((p, n)) => {
                         tracing::info!(path = %p.display(), bytes = n, "saved folder snapshot");

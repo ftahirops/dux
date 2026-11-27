@@ -182,7 +182,9 @@ pub fn parse_diskstats(text: &str) -> Vec<(String, u64, u64)> {
                 || n.starts_with("hd")
                 || n.starts_with("xvd"))
                 && n.chars().last().is_some_and(|c| c.is_ascii_digit())
-                || (n.starts_with("nvme") && n.contains('p'));
+                || (n.starts_with("nvme") && n.contains('p'))
+                // mmcblk0p1 partitions and mmcblk0boot0/rpmb areas.
+                || (n.starts_with("mmcblk") && (n.contains('p') || n.contains("boot")));
             if part
                 || n.starts_with("loop")
                 || n.starts_with("ram")
@@ -284,6 +286,10 @@ impl Sampler {
         let first_round = self.at.is_none();
         let mut files: HashMap<(u64, u64), FileIo> = HashMap::new();
         let mut sizes = self.sizes.clone();
+        // Files seen open this round; other size baselines are dropped, so a
+        // file seen again later starts fresh instead of reporting all the
+        // growth since then as one second of growth.
+        let mut seen_sizes: std::collections::HashSet<(u64, u64)> = Default::default();
         for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
             let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) else {
                 continue;
@@ -354,6 +360,7 @@ impl Sampler {
                 };
                 let key = (m.dev(), m.ino());
                 sizes.insert(key, m.len());
+                seen_sizes.insert(key);
                 fds.insert((pid, fdn), (pos, m.ino()));
                 let entry = files.entry(key).or_insert_with(|| FileIo {
                     path: path.clone(),
@@ -432,6 +439,7 @@ impl Sampler {
         fds.retain(|(pid, _), _| procs.contains_key(pid));
         self.procs = procs;
         self.fds = fds;
+        sizes.retain(|k, _| seen_sizes.contains(k));
         self.sizes = sizes;
         self.at = Some(now);
         live
