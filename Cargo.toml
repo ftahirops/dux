@@ -2,7 +2,7 @@
 name = "dux"
 version = "0.7.0"
 edition = "2021"
-description = "Persistent realtime disk usage + file search. du/ncdu/locate/find, but indexed and live."
+description = "Disk-full alerts with folder attribution, fast disk walks and safe cleanup for Linux servers."
 license = "MIT"
 
 [features]

@@ -58,6 +58,43 @@ over 100 GB a day to disk. 0.7 replaces that design:
 - **Optional emergency mode:** when the disk holding `/var/log` goes critical,
   run cleanup automatically up to a level you choose (off by default).
 
+### Who it helps, and what it resolves
+
+| Role | What dux 0.7 gives you | Core problem it resolves |
+|---|---|---|
+| **SRE / on-call** | disk-full, inode and time-to-full alerts in about 1 s; a follow-up naming the folder, the writing service and the fix; `dux doctor` in about 15 s; `wall`, ntfy, Slack, email, webhook | "Disk is 96% full at 2 a.m., where and why?" is answered by the alert itself, before anyone logs in |
+| **Platform / DevOps** | Docker, containerd, journal, package-cache and core-dump culprits with safe fixes; cgroup writer attribution; levelled cleanup with preview and audit log; optional emergency cleanup | runaway container logs, build caches and journals filling hosts; cleanup that is safe enough to automate |
+| **Developers and CI** | `dux walk` sizes a whole filesystem in seconds without an index; `dux where` shows what grew between runs; inode-heavy folders drilled down to the exact directory | build agents running out of space or inodes from `target/`, `node_modules`, caches and test artefacts |
+| **Security** | read-only alerts with no per-file database to protect; growth and mass-delete visibility through walk diffs; deleted-but-open file detection; filesystem error and read-only remount alerts; secrets never placed on command lines | noticing abnormal growth or deletion, hidden space held by deleted files, and failing or tampered filesystems |
+| **IT / small teams** | one `.deb`, one config file, ntfy on a phone, no database to manage, about 0.1 GB of writes per day | knowing a server is filling up without running a monitoring stack |
+
+### A base for file-based checks
+
+Every walk already visits every file and folder once, at about 2 µs per entry,
+and diffs the result against the previous walk. That makes the walker a cheap
+base for checks that need to look at all files.
+
+**Available now:**
+- largest folders and files;
+- growth and shrinkage per folder between walks, with mass deletes visible in the diff;
+- folders with the most files;
+- the newest change time per folder;
+- known-culprit sizes;
+- the gap between used space and files found, which points at deleted-but-open files.
+
+**Can be added on the same walk at near-zero cost** (planned, not built yet):
+- new or changed set-uid and set-gid binaries;
+- world-writable files in system paths;
+- files owned by deleted users;
+- executables in `/tmp` and `/dev/shm`;
+- secret-like file names (`*.pem`, `id_rsa*`, `.env`) outside their usual places;
+- large files that appeared since the last walk;
+- backup folders whose newest file is too old;
+- sudden spikes in renamed or rewritten files.
+
+Each would be a rule evaluated while the walk reads metadata it already has.
+No extra pass over the disk and no per-file database are needed.
+
 ### Measured results
 
 Measured on a 6 vCPU / 5.8 GB VM with 3.27 million files (46.7 GB), against

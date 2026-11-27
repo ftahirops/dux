@@ -25,8 +25,8 @@ use std::path::PathBuf;
 use store::Store;
 use util::{ago, human};
 
-/// dux — persistent, realtime disk usage + file search.
-/// du/ncdu/locate/find, but indexed and live. Companion to xtop.
+/// dux — disk-full alerts that say which folder grew, who is writing and
+/// the safe fix. Start with `dux sentinel`, `dux doctor /` and `dux where /`.
 #[derive(Parser)]
 #[command(name = "dux", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("DUX_BUILD_REVISION"), ") [", env!("DUX_BUILD_KIND"), "] source-sha256=", env!("DUX_BUILD_SOURCE_SHA256")), about, long_about = None)]
 struct Cli {
@@ -214,7 +214,7 @@ enum Cmd {
     },
     /// Index status
     Status,
-    /// Run the realtime watch daemon (for systemd)
+    /// Legacy 0.6 per-file index daemon (not installed by the 0.7 package)
     Daemon {
         /// Filesystem root to watch
         #[arg(default_value = "/")]

@@ -1,5 +1,5 @@
 [Unit]
-Description=dux realtime disk-usage + file-search index
+Description=dux legacy per-file index daemon (0.6; replaced by dux-sentinel)
 Documentation=https://github.com/ftahirops/dux/blob/main/README.md
 After=local-fs.target
 # Keep recovery attempts enabled without rapid restart loops on older systemd.
