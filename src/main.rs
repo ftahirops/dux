@@ -333,6 +333,21 @@ fn real_main() -> Result<()> {
     let matches = cli_command().get_matches();
     let cli = Cli::from_arg_matches(&matches)?;
     let json = cli.json;
+    // Commands that walk the disk show live progress on a terminal.
+    if matches!(
+        cli.cmd,
+        Some(
+            Cmd::Doctor { .. }
+                | Cmd::Biggest { .. }
+                | Cmd::Logs { .. }
+                | Cmd::Pp { .. }
+                | Cmd::Fix { .. }
+                | Cmd::Docker { .. }
+                | Cmd::Auto { .. }
+        )
+    ) {
+        walker::show_progress();
+    }
 
     match cli.cmd {
         Some(Cmd::Sentinel {
@@ -366,73 +381,120 @@ fn real_main() -> Result<()> {
             writers.sample(util::now_secs());
             let deleted = deleted::deleted_open().unwrap_or_default();
             let held: i64 = deleted.iter().map(|d| d.size).sum();
+            let c = util::Colors::detect();
             let st = &tree.stats;
+            let pct = fs.used_pct();
+            let level = if pct >= 95.0 {
+                c.red
+            } else if pct >= 85.0 {
+                c.yellow
+            } else {
+                c.green
+            };
+            let bar = |frac: f64, w: usize| {
+                let n = (frac.clamp(0.0, 1.0) * w as f64).round() as usize;
+                format!("{}{}", "█".repeat(n), "░".repeat(w - n))
+            };
             println!(
-                "{p}: {} used of {} ({:.1}%), {} free; inodes {}",
+                "\n {}{p}{}  {level}{}{}  {level}{}{pct:.1}%{}   {} used of {} · {}{} free{}",
+                c.bold,
+                c.reset,
+                bar(pct / 100.0, 24),
+                c.reset,
+                c.bold,
+                c.reset,
                 human(fs.used as i64),
                 human(fs.total as i64),
-                fs.used_pct(),
+                c.bold,
                 human(fs.avail as i64),
-                fs.inode_pct()
-                    .map(|x| format!("{x:.1}% used"))
-                    .unwrap_or_else(|| "n/a".into())
+                c.reset
             );
             println!(
-                "walked {} entries in {:.2}s ({:.0}/s); files found: {}",
-                st.entries,
-                st.seconds,
-                st.entries_per_second(),
-                human(tree.root.total_bytes as i64)
+                "{}  scanned {} entries in {:.0} s{}",
+                c.dim, st.entries, st.seconds, c.reset
             );
-            println!("\nLargest folders");
-            for (f, b) in walker::largest_at_depth(&tree.root, 2, 12) {
-                println!("{:>12}  {f}", human(b as i64));
-            }
-            println!("\nKnown culprits");
-            let mut any = false;
-            for (c, cpath, b) in attrib::catalog_sizes(&tree) {
-                if b >= 100 << 20 {
-                    any = true;
-                    println!("{:>12}  {cpath}  {}: {}", human(b as i64), c.label, c.fix);
+            let head = |t: &str| println!("\n {}{}{t}{}", c.bold, c.cyan, c.reset);
+            // Inodes only when they are a problem.
+            if let Some(ip) = fs.inode_pct().filter(|x| *x >= 85.0) {
+                head(&format!(
+                    "INODES {ip:.0}% USED: new files fail when they run out"
+                ));
+                for (f, n) in walker::most_entries(&tree.root, 5) {
+                    println!("   {n:>11}  {f}");
                 }
             }
-            if !any {
-                println!("  none over 100 MiB");
+            head("BIGGEST FOLDERS");
+            let top = walker::largest_at_depth(&tree.root, 2, 5);
+            let maxb = top.first().map(|(_, b)| *b).unwrap_or(1).max(1);
+            for (f, b) in &top {
+                println!(
+                    "   {:>11}  {}{}{}  {f}",
+                    human(*b as i64),
+                    c.blue,
+                    bar(*b as f64 / maxb as f64, 12),
+                    c.reset
+                );
             }
-            println!("\nMost files (inodes)");
-            for (f, n) in walker::most_entries(&tree.root, 5) {
-                println!("{n:>12}  {f}");
+            let mut cul: Vec<_> = attrib::catalog_sizes(&tree)
+                .into_iter()
+                .filter(|(_, _, b)| *b >= 100 << 20)
+                .collect();
+            cul.sort_by_key(|(_, _, b)| std::cmp::Reverse(*b));
+            if !cul.is_empty() {
+                head("KNOWN SPACE USERS");
+                for (k, cpath, b) in cul.iter().take(10) {
+                    println!(
+                        "   {:>11}  {}{}{}  {}{cpath}{}",
+                        human(*b as i64),
+                        c.bold,
+                        k.label,
+                        c.reset,
+                        c.dim,
+                        c.reset
+                    );
+                    println!("   {:>11}  {}→ {}{}", "", c.green, k.fix, c.reset);
+                }
+                if cul.len() > 10 {
+                    println!(
+                        "   {}… {} more (dux where {p}){}",
+                        c.dim,
+                        cul.len() - 10,
+                        c.reset
+                    );
+                }
+            }
+            // Deleted-but-open files only when there are some.
+            if held >= 1 << 20 {
+                head(&format!(
+                    "DELETED BUT STILL OPEN: {} in {} files",
+                    human(held),
+                    deleted.len()
+                ));
+                for d in deleted.iter().take(3) {
+                    println!(
+                        "   {:>11}  pid {} {}  {}{}{}",
+                        human(d.size),
+                        d.pid,
+                        d.process,
+                        c.dim,
+                        d.path,
+                        c.reset
+                    );
+                }
+                println!(
+                    "   {}→ the space returns when those processes close them (dux leaks){}",
+                    c.green, c.reset
+                );
             }
             let gap = fs.used.saturating_sub(tree.root.total_bytes);
-            println!(
-                "\nDeleted but still open: {} in {} files",
-                human(held),
-                deleted.len()
-            );
-            for d in deleted.iter().take(5) {
-                println!(
-                    "{:>12}  pid {} {}  {}",
-                    human(d.size),
-                    d.pid,
-                    d.process,
-                    d.path
-                );
-            }
             if gap >= (1u64 << 30) {
-                println!(
-                    "  note: {} more is used than all files add up to",
-                    human(gap as i64)
-                );
+                println!("\n {}note:{} {} more is used than all files add up to (deleted-but-open files, or another mount hides files)", c.yellow, c.reset, human(gap as i64));
             }
             let w = writers.summary(5);
-            println!(
-                "\nWriting now: {}",
-                if w.is_empty() {
-                    "nothing significant".to_string()
-                } else {
-                    w
-                }
-            );
+            if !w.is_empty() {
+                head("WRITING NOW");
+                println!("   {w}");
+            }
             let opts = cleanup::Options {
                 level: 3,
                 used_pct: fs.used_pct(),

@@ -341,6 +341,36 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     Some(days * 86_400 + h * 3600 + mi * 60 + se - off)
 }
 
+/// Terminal colours, off when stdout is not a terminal or NO_COLOR is set.
+pub struct Colors {
+    pub bold: &'static str,
+    pub dim: &'static str,
+    pub red: &'static str,
+    pub yellow: &'static str,
+    pub green: &'static str,
+    pub blue: &'static str,
+    pub cyan: &'static str,
+    pub reset: &'static str,
+}
+
+impl Colors {
+    pub fn detect() -> Colors {
+        use std::io::IsTerminal;
+        let on = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+        let p = |s: &'static str| if on { s } else { "" };
+        Colors {
+            bold: p("\x1b[1m"),
+            dim: p("\x1b[2m"),
+            red: p("\x1b[31m"),
+            yellow: p("\x1b[33m"),
+            green: p("\x1b[32m"),
+            blue: p("\x1b[34m"),
+            cyan: p("\x1b[36m"),
+            reset: p("\x1b[0m"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod rfc_tests {
     #[test]

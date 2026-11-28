@@ -339,6 +339,170 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
     g
 }
 
+// ------------------------------------------------------------ result cache
+
+/// The last scan's results, so `dux` opens with every view filled at once
+/// (owner decision: instant start). Read-only until the fresh scan: cached
+/// fixes carry no action.
+fn cache_path() -> std::path::PathBuf {
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        return std::path::PathBuf::from("/var/lib/dux/ui-cache.json");
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    std::path::Path::new(&home).join(".cache/dux/ui-cache.json")
+}
+
+fn leak(s: &str) -> &'static str {
+    // A handful of short labels (kinds, categories) per load.
+    Box::leak(s.to_string().into_boxed_str())
+}
+
+pub fn save_cache(root: &str, g: &Gathered) {
+    use serde_json::json;
+    let v = json!({
+        "root": root, "at": g.at, "journal_bytes": g.journal_bytes,
+        "logs": g.logs.iter().map(|l| json!([l.path, l.bytes, l.mtime, l.kind.label(), l.rotated, l.protected, l.writer, l.service, l.container])).collect::<Vec<_>>(),
+        "projects": g.projects.iter().map(|p| json!({"path": p.path, "kinds": p.kinds, "total": p.total, "artifacts": p.artifacts, "dirs": p.artifact_dirs, "git": p.git, "last": p.last_activity, "name": p.name, "desc": p.description, "branch": p.branch, "remote": p.remote})).collect::<Vec<_>>(),
+        "apps": g.apps,
+        "services": g.services.iter().map(|s| json!([s.name, s.folders, s.logs, s.total])).collect::<Vec<_>>(),
+        "fixes": g.fixes.iter().map(|x| json!([x.safety.label(), x.title, x.why, x.undo, x.frees, x.manual, fix::group(x)])).collect::<Vec<_>>(),
+        "biggest": g.biggest.iter().map(|f| json!([f.path, f.bytes, f.apparent, f.mtime, f.uid])).collect::<Vec<_>>(),
+    });
+    let p = cache_path();
+    if let Some(d) = p.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let tmp = p.with_extension("json.new");
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = std::fs::remove_file(&tmp);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+    {
+        if f.write_all(v.to_string().as_bytes()).is_ok() {
+            let _ = std::fs::rename(&tmp, &p);
+        }
+    }
+}
+
+/// The cached results for `root`, if any (at most 7 days old).
+pub fn load_cache(root: &str) -> Option<Gathered> {
+    let t = std::fs::read_to_string(cache_path()).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&t).ok()?;
+    if v["root"].as_str() != Some(root) {
+        return None;
+    }
+    let at = v["at"].as_i64()?;
+    if crate::util::now_secs() - at > 7 * 86_400 {
+        return None;
+    }
+    let s = |x: &serde_json::Value| x.as_str().unwrap_or("").to_string();
+    let os = |x: &serde_json::Value| x.as_str().map(str::to_string);
+    let u = |x: &serde_json::Value| x.as_u64().unwrap_or(0);
+    let mut g = Gathered {
+        at,
+        journal_bytes: v["journal_bytes"].as_u64(),
+        ..Gathered::default()
+    };
+    for l in v["logs"].as_array()? {
+        g.logs.push(LogFile {
+            path: s(&l[0]),
+            bytes: u(&l[1]),
+            mtime: l[2].as_i64().unwrap_or(0),
+            kind: match l[3].as_str() {
+                Some("docker") => insight::LogKind::Docker,
+                Some("system") => insight::LogKind::System,
+                _ => insight::LogKind::App,
+            },
+            rotated: l[4].as_bool().unwrap_or(false),
+            protected: l[5].as_bool().unwrap_or(true),
+            per_min: None,
+            writer: os(&l[6]),
+            service: os(&l[7]),
+            container: os(&l[8]),
+        });
+    }
+    for p in v["projects"].as_array()? {
+        g.projects.push(Project {
+            path: s(&p["path"]),
+            kinds: p["kinds"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|k| k.as_str())
+                .map(leak)
+                .collect(),
+            total: u(&p["total"]),
+            artifacts: u(&p["artifacts"]),
+            artifact_dirs: p["dirs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|d| (s(&d[0]), u(&d[1])))
+                .collect(),
+            git: u(&p["git"]),
+            last_activity: p["last"].as_i64().unwrap_or(0),
+            name: s(&p["name"]),
+            description: s(&p["desc"]),
+            branch: os(&p["branch"]),
+            remote: os(&p["remote"]),
+        });
+    }
+    for a in v["apps"].as_array().into_iter().flatten() {
+        g.apps
+            .push((s(&a[0]), s(&a[1]), u(&a[2]), a[3].as_i64().unwrap_or(0)));
+    }
+    for x in v["services"].as_array().into_iter().flatten() {
+        g.services.push(ServiceUse {
+            name: s(&x[0]),
+            folders: x[1]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|f| (s(&f[0]), u(&f[1])))
+                .collect(),
+            logs: u(&x[2]),
+            total: u(&x[3]),
+        });
+    }
+    for x in v["fixes"].as_array().into_iter().flatten() {
+        let safety = match x[0].as_str() {
+            Some("SAFE") => Safety::Safe,
+            Some("CAUTION") => Safety::Caution,
+            _ => Safety::Risky,
+        };
+        // No action: a cached suggestion is shown, never applied.
+        g.fixes.push(
+            fix::suggestion(
+                safety,
+                s(&x[1]),
+                x[2].as_str().unwrap_or(""),
+                x[3].as_str().unwrap_or(""),
+                u(&x[4]),
+                None,
+                os(&x[5]),
+            )
+            .with_category(leak(x[6].as_str().unwrap_or("Other"))),
+        );
+    }
+    for f in v["biggest"].as_array().into_iter().flatten() {
+        g.biggest.push(FoundFile {
+            path: s(&f[0]),
+            bytes: u(&f[1]),
+            apparent: u(&f[2]),
+            mtime: f[3].as_i64().unwrap_or(0),
+            uid: f[4].as_u64().unwrap_or(0) as u32,
+            dev: 0,
+            ino: 0,
+        });
+    }
+    Some(g)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -115,6 +115,7 @@ impl Server {
             let _done = Done(&me.walking);
             me.progress.store(0, Ordering::Relaxed);
             let g = gather::gather(&me.root, 2, Some(me.progress.clone()));
+            gather::save_cache(&me.root, &g);
             *me.state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(g));

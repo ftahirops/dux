@@ -2129,12 +2129,12 @@ pub(super) fn draw_history(f: &mut Frame, app: &mut App, area: Rect, state: &mut
             [
                 Constraint::Length(10),
                 Constraint::Length(7),
-                Constraint::Length(11),
-                Constraint::Percentage(55),
+                Constraint::Length(22),
+                Constraint::Percentage(50),
                 Constraint::Min(10),
             ],
         )
-        .header(hdr(&["when", "result", "space", "action", "note"]))
+        .header(hdr(&["when", "result", "freed", "action", "note"]))
         .block(Block::default().borders(Borders::ALL).title(format!(
             " History: every action dux took ({}) · batches freed {} measured on disk ",
             crate::cleanup::AUDIT_LOG,

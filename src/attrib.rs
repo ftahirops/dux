@@ -58,8 +58,8 @@ pub const CATALOG: &[Culprit] = &[
     },
     Culprit {
         path: "/var/lib/containerd",
-        label: "containerd images and snapshots",
-        fix: "crictl rmi --prune",
+        label: "container images and layers (Docker's containerd store)",
+        fix: "docker image prune -a --filter until=720h; docker container prune; docker builder prune (Kubernetes: crictl rmi --prune). Never delete files here by hand",
     },
     Culprit {
         path: "/var/cache/apt",

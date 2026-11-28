@@ -299,6 +299,7 @@ fn walk_dir(ctx: &Ctx, fd: libc::c_int, path: &[u8], name: String, self_blocks: 
     let mut subdirs: Vec<(CString, u64)> = Vec::new();
     for (ename, d_type) in entries {
         ctx.entries.fetch_add(1, Ordering::Relaxed);
+        WALKED.fetch_add(1, Ordering::Relaxed);
         if let Some(p) = &ctx.opts.progress {
             p.fetch_add(1, Ordering::Relaxed);
         }
@@ -461,9 +462,73 @@ pub fn walk(root: &str, threads: usize) -> Result<Tree> {
     walk_with(root, threads, WalkOptions::default()).map(|(t, _)| t)
 }
 
+// ----------------------------------------------------- progress on a terminal
+
+/// Entries walked by every walk of this process, and walks running now:
+/// the CLI shows a live progress line from these, so a scan never looks stuck.
+pub static WALKED: AtomicU64 = AtomicU64::new(0);
+static ACTIVE: AtomicU64 = AtomicU64::new(0);
+static SPIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LINE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Show "scanning · N entries · T s" on stderr while any walk runs
+/// (only when stderr is a terminal). Called once by report commands.
+pub fn show_progress() {
+    use std::io::{IsTerminal, Write};
+    if !std::io::stderr().is_terminal() || SPIN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let spin = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let (mut i, mut since) = (0usize, None::<Instant>);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let _g = LINE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if ACTIVE.load(Ordering::SeqCst) == 0 {
+                since = None;
+                continue;
+            }
+            let t0 = *since.get_or_insert_with(Instant::now);
+            let _ = write!(
+                std::io::stderr(),
+                "\r\x1b[2K {} scanning · {} entries · {:.0} s",
+                spin[i % spin.len()],
+                WALKED.load(Ordering::Relaxed),
+                t0.elapsed().as_secs_f64()
+            );
+            let _ = std::io::stderr().flush();
+            i += 1;
+        }
+    });
+}
+
+struct WalkGuard;
+impl WalkGuard {
+    fn new() -> WalkGuard {
+        ACTIVE.fetch_add(1, Ordering::SeqCst);
+        WalkGuard
+    }
+}
+impl Drop for WalkGuard {
+    fn drop(&mut self) {
+        use std::io::Write;
+        let _g = LINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if ACTIVE.fetch_sub(1, Ordering::SeqCst) == 1 && SPIN.load(Ordering::SeqCst) {
+            // Clear the line before the command prints its report.
+            let _ = write!(std::io::stderr(), "\r\x1b[2K");
+            let _ = std::io::stderr().flush();
+        }
+    }
+}
+
 /// Walk and also collect the files `opts.filter` selects.
 #[allow(clippy::unnecessary_cast)]
 pub fn walk_with(root: &str, threads: usize, opts: WalkOptions) -> Result<(Tree, Vec<FoundFile>)> {
+    let _walking = WalkGuard::new();
     let started_at = crate::util::now_secs();
     let t = Instant::now();
     let croot = CString::new(root).context("path contains NUL")?;

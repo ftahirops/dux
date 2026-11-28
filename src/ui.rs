@@ -165,6 +165,8 @@ struct App {
     /// The data shown is the sentinel's snapshot from this time, until the
     /// fresh walk finishes.
     snapshot_at: Option<i64>,
+    /// Views show the cached results of the scan made at this time.
+    cached_at: Option<i64>,
     /// Rows that fit on one page of the current list (set while drawing).
     page: std::cell::Cell<usize>,
     /// Where the top bar, list and key bar were drawn, for mouse clicks.
@@ -203,6 +205,7 @@ impl App {
             samples: 0,
             rx_docker: None,
             snapshot_at: None,
+            cached_at: None,
             page: std::cell::Cell::new(20),
             areas: std::cell::Cell::new(Default::default()),
         }
@@ -221,6 +224,17 @@ impl App {
         self.data.disks = gather::disks();
         // Instant start: the sentinel's last snapshot of this disk shows
         // folder sizes at once, until the fresh walk replaces it.
+        // Every view from the last scan at once (read-only until fresh).
+        if self.data.tree.is_none() && self.data.logs.is_empty() && self.data.fixes.is_empty() {
+            if let Some(c) = gather::load_cache(&self.root) {
+                self.cached_at = Some(c.at);
+                self.picked = vec![false; c.fixes.len()];
+                self.data = Gathered {
+                    disks: std::mem::take(&mut self.data.disks),
+                    ..c
+                };
+            }
+        }
         if self.data.tree.is_none() {
             if let Ok(Some(t)) = crate::snapshot::load(
                 std::path::Path::new(crate::snapshot::DEFAULT_DIR),
@@ -264,7 +278,9 @@ impl App {
             self.changes = crate::walker::diff(&prev.root, &t.root, 16 << 20);
             self.changes_at = Some(prev.started_at);
         }
+        gather::save_cache(&self.root, &g);
         self.data = g;
+        self.cached_at = None;
         self.loading = false;
         self.snapshot_at = None;
         self.rx = None;
@@ -537,12 +553,17 @@ fn draw(f: &mut Frame, app: &mut App) {
     let mut state = TableState::default();
     state.select(Some(sel));
     *state.offset_mut() = sel - sel % page;
-    let needs_walk = matches!(app.tab, LOGS | PROJECTS | FIXES | SERVICES)
+    // With cached results every view shows at once; only a first-ever
+    // start waits for the scan.
+    let needs_walk = (matches!(app.tab, LOGS | PROJECTS | FIXES | SERVICES)
+        && app.cached_at.is_none()
+        && app.data.fixes.is_empty()
+        && app.data.logs.is_empty())
         || (app.tab == DOCKER && app.data.docker.is_none());
     if app.loading && needs_walk {
         f.render_widget(
             Paragraph::new(format!(
-                "Scanning {} ... {} entries so far.\nDisk usage and Activity work already.",
+                "Scanning {} ... {} entries so far. This view needs the fresh scan.\nDisk usage, Activity, Docker and History work already.",
                 app.root,
                 app.progress.load(Ordering::Relaxed)
             ))
@@ -648,10 +669,11 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     }
     if app.loading {
         let from = app
-            .snapshot_at
+            .cached_at
+            .or(app.snapshot_at)
             .map(|t| {
                 format!(
-                    "showing the snapshot from {} ago; ",
+                    "showing results from {} ago (read-only); ",
                     crate::insight::age_text(t, crate::util::now_secs())
                 )
             })
