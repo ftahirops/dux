@@ -2163,10 +2163,17 @@ fn confirm(app: &mut App, items: Vec<Item>, force_risky: bool) {
             .iter()
             .any(|i| crate::fix::assess(i.clone()).safety == Safety::Risky);
     let bytes = items.iter().map(|i| i.frees).sum();
+    let cautions: Vec<String> = items
+        .iter()
+        .map(|i| crate::fix::assess(i.clone()))
+        .filter(|s| s.safety == Safety::Risky)
+        .map(|s| format!("{}: {} Undo: {}", s.title, s.why, s.undo))
+        .collect();
     app.overlay = Overlay::ApplyFixes {
         items,
         bytes,
         risky,
+        cautions,
     };
 }
 

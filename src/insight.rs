@@ -290,6 +290,7 @@ pub fn conditional_artifact(name: &str, parent_markers: u16, parent: &str) -> bo
     use crate::walker::{MARK_DOTNET, MARK_GO, MARK_PHP};
     match name {
         "bin" | "obj" => parent_markers & MARK_DOTNET != 0,
+        ".pulumi" => parent_markers & crate::walker::MARK_PULUMI != 0,
         "deps" => parent_markers & crate::walker::MARK_ELIXIR != 0,
         "CMakeFiles" => parent_markers & crate::walker::MARK_CMAKE != 0,
         n if n.starts_with("cmake-build-") => parent_markers & crate::walker::MARK_CMAKE != 0,
@@ -464,7 +465,13 @@ fn activity(n: &DirNode) -> i64 {
 fn collect_artifacts(n: &DirNode, path: &str, depth: usize, out: &mut Vec<(String, u64)>) {
     for c in &n.children {
         let p = format!("{path}/{}", c.name);
-        if ARTIFACTS.contains(&c.name.as_str()) || conditional_artifact(&c.name, n.markers, path) {
+        // .pulumi may hold the only copy of a stack's state: offered apart,
+        // as RISKY with its warning (catalog::pulumi_suggestions), never as
+        // plain build output.
+        if c.name != ".pulumi"
+            && (ARTIFACTS.contains(&c.name.as_str())
+                || conditional_artifact(&c.name, n.markers, path))
+        {
             out.push((p, c.total_bytes));
         } else if c.name != ".git" && depth < 6 {
             collect_artifacts(c, &p, depth + 1, out);

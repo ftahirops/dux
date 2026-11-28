@@ -284,6 +284,14 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
             .into_iter()
             .map(|i| fix::assess(i).with_category(crate::catalog::PROJECTS)),
     );
+    let idle10: Vec<insight::Project> = idle
+        .iter()
+        .filter(|p| g.at - p.last_activity >= 10 * 86_400)
+        .cloned()
+        .collect();
+    if let Some(t) = &g.tree {
+        fixes.extend(crate::catalog::pulumi_suggestions(t, &idle10));
+    }
     // The catalog: leftovers, old backups, web app caches, tool caches, CI
     // folders, server items (spec A6.19-A6.23).
     fixes.extend(crate::catalog::file_suggestions(

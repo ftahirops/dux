@@ -1,7 +1,18 @@
 #!/bin/sh
 set -e
 case "$1" in
-    remove|deconfigure)
+    remove)
+        cat >&2 <<'WARN'
+dux: removing dux keeps your settings in /etc/dux and history in /var/lib/dux.
+dux: `apt purge dux` would DELETE them: /etc/dux/dux.toml and notify.conf (alert
+dux: channels, tokens, thresholds), /etc/dux/never-touch, /var/lib/dux.
+dux: Back up first with: cp -a /etc/dux /root/dux-config-backup
+WARN
+        if [ -d /run/systemd/system ]; then
+            systemctl disable --now dux-sentinel.service >/dev/null 2>&1 || true
+        fi
+        ;;
+    deconfigure)
         if [ -d /run/systemd/system ]; then
             systemctl disable --now dux-sentinel.service >/dev/null 2>&1 || true
         fi

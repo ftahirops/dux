@@ -1019,6 +1019,35 @@ fn old_kernels() -> Vec<Suggestion> {
     out
 }
 
+// ---------------------------------------------------------------- pulumi
+
+pub const PULUMI_WARNING: &str = "This folder can be the ONLY copy of your Pulumi stack state. If the stack uses the local backend (`pulumi login file://...`), deleting it makes Pulumi forget every cloud resource it created: they keep running and costing money, and Pulumi can no longer update or destroy them. Before deleting, run `pulumi whoami -v` in the project: delete only if the backend URL is Pulumi Cloud, s3://, gs:// or azblob://, never file://. Ask whoever owns this project first.";
+
+/// `.pulumi` folders of idle projects: RISKY, typed confirmation, with the
+/// full warning (owner decision 2026-11-28).
+pub fn pulumi_suggestions(tree: &Tree, projects: &[crate::insight::Project]) -> Vec<Suggestion> {
+    let root = tree.root_path.trim_end_matches('/');
+    let mut out = Vec::new();
+    for p in projects.iter().filter(|p| p.kinds.contains(&"pulumi")) {
+        let dir = format!("{}/.pulumi", p.path);
+        let rel = dir
+            .strip_prefix(root)
+            .unwrap_or(&dir)
+            .trim_start_matches('/');
+        if let Some(n) = tree.root.find(rel).filter(|n| n.total_bytes >= 1 << 20) {
+            out.push(remove_dir(
+                PROJECTS,
+                Safety::Risky,
+                &dir,
+                n.total_bytes,
+                PULUMI_WARNING,
+                "None if this was the only copy of the state: restore it from your own backup.",
+            ));
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------- docker volumes
 
 /// A6.24: anonymous volumes unused for 30+ days are offered; named unused
@@ -1222,6 +1251,29 @@ mod tests {
             f("/srv/share/db-2026-09.sql", -400, 1000),
         ];
         assert!(file_suggestions(&found, now, &[]).is_empty());
+    }
+
+    #[test]
+    fn pulumi_state_is_risky_with_its_warning_never_build_output() {
+        let d = std::env::temp_dir().join(format!("dux-pul-{}", std::process::id()));
+        let p = d.join("infra");
+        std::fs::create_dir_all(p.join(".pulumi/stacks")).unwrap();
+        std::fs::write(p.join("Pulumi.yaml"), b"name: x").unwrap();
+        std::fs::write(p.join(".pulumi/stacks/dev.json"), vec![1u8; 2 << 20]).unwrap();
+        let t = crate::walker::walk(d.to_str().unwrap(), 1).unwrap();
+        let projects = crate::insight::projects(&t);
+        assert!(
+            projects[0]
+                .artifact_dirs
+                .iter()
+                .all(|(x, _)| !x.ends_with(".pulumi")),
+            "never plain build output"
+        );
+        let s = pulumi_suggestions(&t, &projects);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].safety, Safety::Risky);
+        assert!(s[0].why.contains("ONLY copy") && s[0].why.contains("pulumi whoami -v"));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

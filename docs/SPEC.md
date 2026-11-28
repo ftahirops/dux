@@ -57,7 +57,7 @@ Problems dux must solve:
 | PKG-3 MUST | One static Linux binary per architecture: runs on any Linux, any libc, any age (the support floor) [decided] |
 | PKG-4 MUST | x86_64 and arm64 for every package and binary |
 | PKG-5 MUST | One-line install script that detects distro and architecture and installs the right package, with checksum verification |
-| PKG-6 MUST | Install, upgrade (from every earlier public release), downgrade, remove and purge work; purge leaves nothing in /etc/dux or /var/lib/dux |
+| PKG-6 MUST | Install, upgrade (from every earlier public release), downgrade, remove and purge work; purge leaves nothing in /etc/dux or /var/lib/dux | (owner 2026-11-28: `rpm -e` removes everything like `apt purge`; both print, before removing, exactly what is deleted and how to back it up)
 | PKG-7 MUST | Packages have no hard dependency beyond the base system; curl is recommended (for network alerts) |
 | PKG-8 SHOULD | Signed checksums for every release asset |
 
@@ -190,7 +190,7 @@ General rules are in section 6. Every report supports `--json`.
 | ID | Requirement |
 | --- | --- |
 | NFR-1 MUST | Walk 20 million files in under 90 s using under 128 MB memory |
-| NFR-2 MUST | Sentinel idle CPU under 0.2 % of one core; memory under 200 MB |
+| NFR-2 MUST | Sentinel idle CPU under 0.2 % of one core; memory under 200 MB | (owner 2026-11-28: on filesystems with tens of millions of files the walk may use more; accepted)
 | NFR-3 MUST | Filesystems: ext4, xfs, btrfs (incl. subvolumes), vfat, tmpfs, overlayfs, NFS, bind mounts; sizes equal `du` |
 | NFR-4 MUST | No hang on a dead network mount (any command) |
 | NFR-5 MUST | Background work at lowest CPU and I/O priority |
@@ -323,6 +323,8 @@ containers, emit, classify, fault) is **deleted** [decided, done].
 | A6.23 | Server level | SAFE: apt/dnf cache, journal over 1 GiB, old snap revisions, crash/core dumps, Docker build cache, rotated logs. CAUTION: old kernels (running + one fallback kept), /tmp > 10 d and /var/tmp > 30 d (never sockets or open files), CI runner work dirs (GitLab, GitHub Actions, Jenkins) idle 7+ days; each through its own tool |
 | A6.24 | Docker volumes | one group row; only anonymous volumes unused for 30+ days are offered (RISKY, typed); named volumes are information only |
 | A6.25 | Layout | categories folded with totals; Enter opens a category; items under 10 MiB are counted but not listed one by one |
+| A6.26 | `.pulumi` folders | offered only in idle Pulumi projects, RISKY with typed confirmation, showing the full warning that the folder may be the only copy of the stack state and how to check (`pulumi whoami -v`, never delete with a file:// backend) |
+| A6.27 | RISKY confirmations | the confirmation shows each RISKY item's full warning and undo before the typed answer, in the UI and in `dux fix` |
 
 ### A7. Logs
 | ID | Feature | Was | Decision |

@@ -413,9 +413,11 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
             interactive,
             "RISKY items need an interactive `delete` confirmation; leave them out of --select"
         );
-        println!("\nRISKY items picked; these can lose data:");
+        println!("\nRISKY items picked; these can lose data that cannot be recovered:");
         for &i in &risky {
             println!("  {}. {}", i + 1, s[i].title);
+            println!("     !! {}", s[i].why);
+            println!("     Undo: {}", s[i].undo);
         }
         if read_line("Type delete to include them: ") != "delete" {
             picked.retain(|&i| s[i].safety != Safety::Risky);

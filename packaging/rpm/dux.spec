@@ -55,8 +55,20 @@ if [ -d /run/systemd/system ]; then
 fi
 
 %preun
-if [ "$1" -eq 0 ] && [ -d /run/systemd/system ]; then
-    systemctl disable --now dux-sentinel.service >/dev/null 2>&1 || :
+if [ "$1" -eq 0 ]; then
+    # RPM has no purge: erasing removes everything (owner decision); say so.
+    cat >&2 <<'WARN'
+dux: WARNING: removing dux this way also DELETES everything dux created:
+dux:   /etc/dux/dux.toml and notify.conf (your alert channels, tokens, thresholds)
+dux:   /etc/dux/never-touch (the folders you protected)
+dux:   /var/lib/dux (folder history and snapshots) and the automatic-cleanup drop-in
+dux: The audit log /var/log/dux/actions.log is kept.
+dux: To keep your settings, copy /etc/dux somewhere safe BEFORE removing,
+dux: e.g. cp -a /etc/dux /root/dux-config-backup
+WARN
+    if [ -d /run/systemd/system ]; then
+        systemctl disable --now dux-sentinel.service >/dev/null 2>&1 || :
+    fi
 fi
 
 %postun

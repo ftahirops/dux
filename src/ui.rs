@@ -114,6 +114,8 @@ enum Overlay {
         items: Vec<Item>,
         bytes: u64,
         risky: bool,
+        /// The full warning of each RISKY item, shown before D is accepted.
+        cautions: Vec<String>,
     },
     ApplyProject {
         items: Vec<Item>,
@@ -1514,6 +1516,7 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
             items,
             bytes,
             risky,
+            cautions,
         } => {
             let list: String = items
                 .iter()
@@ -1525,8 +1528,9 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 String::new()
             };
+            let warn: String = cautions.iter().map(|c| format!("\n\n!! {c}")).collect();
             let t = if *risky {
-                format!("Apply {} fixes, freeing about {}?{list}{more}\n\nThe selection includes RISKY items that can lose data.\nPress D to apply, Esc to cancel.", items.len(), human(*bytes as i64))
+                format!("Apply {} fixes, freeing about {}?{list}{more}\n\nRISKY: these can lose data that cannot be recovered.{warn}\n\nRead the warnings above. Press D to apply, Esc to cancel.", items.len(), human(*bytes as i64))
             } else {
                 format!("Apply {} fixes, freeing about {}?{list}{more}\n\nPress y to apply, Esc to cancel.", items.len(), human(*bytes as i64))
             };
@@ -1958,10 +1962,21 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
                     })
                     .filter_map(|(_, x)| x.item.clone())
                     .collect();
+                let cautions: Vec<String> = app
+                    .data
+                    .fixes
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, x)| {
+                        app.picked.get(*i).copied().unwrap_or(false) && x.safety == Safety::Risky
+                    })
+                    .map(|(_, x)| format!("{}: {} Undo: {}", x.title, x.why, x.undo))
+                    .collect();
                 app.overlay = Overlay::ApplyFixes {
                     items,
                     bytes,
                     risky,
+                    cautions,
                 };
             }
         }
@@ -2388,6 +2403,7 @@ mod tests {
                         ],
                         bytes: 1,
                         risky: true,
+                        cautions: vec!["c".repeat(800)],
                     },
                 };
                 term.draw(|f| draw(f, &mut app)).unwrap();

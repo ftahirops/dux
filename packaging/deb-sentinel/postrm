@@ -2,6 +2,7 @@
 set -e
 case "$1" in
     purge)
+        echo "dux: purge: deleting /etc/dux (settings, tokens, never-touch list) and /var/lib/dux (history). /var/log/dux/actions.log is kept." >&2
         rm -rf /var/lib/dux/sentinel
         rm -f /etc/dux/dux.toml /etc/dux/dux.toml.dux-new /etc/dux/notify.conf /etc/dux/never-touch /etc/dux/never-touch.lock /etc/dux/web.env /etc/dux/disable-actions
         rmdir /etc/dux 2>/dev/null || true
