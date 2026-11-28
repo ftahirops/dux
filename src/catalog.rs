@@ -257,7 +257,9 @@ fn age_ok(mtime: i64, now: i64, days: i64) -> bool {
 pub fn file_suggestions(found: &[FoundFile], now: i64, web_roots: &[String]) -> Vec<Suggestion> {
     let open = crate::cleanup::open_now();
     let mut out = Vec::new();
-    let mut series: HashMap<(FileRule, String), Vec<&FoundFile>> = HashMap::new();
+    // A series is one owner's files: another user cannot make someone's
+    // backup look old by planting a "newer" one beside it.
+    let mut series: HashMap<(FileRule, String, u32), Vec<&FoundFile>> = HashMap::new();
     for f in found {
         let (dir, name) = f.path.rsplit_once('/').unwrap_or(("", &f.path));
         let Some(rule) = file_rule(dir.as_bytes(), name.as_bytes()) else {
@@ -291,16 +293,17 @@ pub fn file_suggestions(found: &[FoundFile], now: i64, web_roots: &[String]) -> 
                     "-",
                     f.bytes,
                     None,
-                    Some(format!("mv {} /root/  # or delete it if a newer backup exists", f.path)),
+                    Some(format!("mv {} /root/  # or delete it if a newer backup exists", shell_quote(&f.path))),
                 ).with_category(BACKUPS));
             }
-            FileRule::Backup | FileRule::CmsBackup | FileRule::Dump => {
-                series.entry((rule, series_key(&f.path))).or_default().push(f);
+            // A future time (clock skew, or set on purpose) proves nothing.
+            FileRule::Backup | FileRule::CmsBackup | FileRule::Dump if f.mtime <= now => {
+                series.entry((rule, series_key(&f.path), f.uid)).or_default().push(f);
             }
             _ => {}
         }
     }
-    for ((rule, _), mut files) in series {
+    for ((rule, _, _), mut files) in series {
         // The newest of a series is never offered; older ones after 30 days.
         files.sort_by_key(|f| std::cmp::Reverse(f.mtime));
         for f in files
@@ -380,16 +383,35 @@ pub fn known_dir(path: &Path) -> bool {
     cms_cache_dir(&p) || tool_dir(&p).is_some() || old_browser_dir(&parent, &name) || ci_dir(path)
 }
 
+/// A web app's cache folder, only next to that app's own marker files.
 fn cms_cache_dir(p: &str) -> bool {
-    p.ends_with("/wp-content/cache")
-        || p.ends_with("/wp-content/upgrade")
-        || p.ends_with("/storage/framework/cache/data")
-        || p.ends_with("/storage/framework/views")
-        || (p.ends_with("/var/page_cache") || p.ends_with("/var/view_preprocessed"))
-        || (p.ends_with("/var/cache") && !p.starts_with("/var/"))
-        || (p.contains("/sites/")
-            && p.contains("/files/")
-            && (p.ends_with("/css") || p.ends_with("/js") || p.ends_with("/php")))
+    let has = |root: &str, marker: &str| Path::new(root).join(marker).exists();
+    for (tail, marker) in [
+        ("/wp-content/cache", "wp-config.php"),
+        ("/wp-content/upgrade", "wp-config.php"),
+        ("/storage/framework/cache/data", "artisan"),
+        ("/storage/framework/views", "artisan"),
+        ("/var/page_cache", "bin/magento"),
+        ("/var/view_preprocessed", "bin/magento"),
+    ] {
+        if let Some(root) = p.strip_suffix(tail) {
+            return !root.is_empty() && has(root, marker);
+        }
+    }
+    if let Some(root) = p.strip_suffix("/var/cache") {
+        return !root.is_empty() && (has(root, "bin/console") || has(root, "bin/magento"));
+    }
+    // Drupal: <root>/sites/<site>/files/{css,js,php}, <root>/core present.
+    let parts: Vec<&str> = p.rsplitn(5, '/').collect();
+    if let [leaf, "files", _site, "sites", root] = parts.as_slice() {
+        return matches!(*leaf, "css" | "js" | "php") && !root.is_empty() && has(root, "core");
+    }
+    false
+}
+
+/// Single-quote for a shell, so a copied hint cannot run anything else.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// Tool caches removed as folders (no reliable command of their own).
@@ -1014,7 +1036,8 @@ pub fn volume_suggestions(r: &crate::docker::Report, now: i64) -> Vec<Suggestion
             named.1 += v.size;
             continue;
         }
-        if v.created > 0 && now - v.created < 30 * DAY {
+        // An unknown age is not "old": such a volume is not offered.
+        if v.created == 0 || now - v.created < 30 * DAY {
             continue;
         }
         let mut s = crate::fix::delete_volume(&v.name, v.size);
@@ -1147,6 +1170,58 @@ mod tests {
             web.item.is_none(),
             "a dump in a web root is flagged, never deleted"
         );
+    }
+
+    #[test]
+    fn cms_caches_need_their_app_and_hints_are_quoted() {
+        let d = std::env::temp_dir().join(format!("dux-cms-{}", std::process::id()));
+        let wp = d.join("site");
+        std::fs::create_dir_all(wp.join("wp-content/cache")).unwrap();
+        let c = wp.join("wp-content/cache").to_string_lossy().into_owned();
+        assert!(!cms_cache_dir(&c), "no wp-config.php: not WordPress");
+        std::fs::write(wp.join("wp-config.php"), b"").unwrap();
+        assert!(cms_cache_dir(&c));
+        assert!(
+            !cms_cache_dir(&format!("{}/any/var/cache", d.display())),
+            "no Symfony/Magento marker"
+        );
+        std::fs::create_dir_all(d.join("dr/core")).unwrap();
+        assert!(cms_cache_dir(&format!(
+            "{}/dr/sites/default/files/css",
+            d.display()
+        )));
+        assert!(!cms_cache_dir(&format!(
+            "{}/x/sites/default/files/css",
+            d.display()
+        )));
+        std::fs::remove_dir_all(&d).unwrap();
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn a_series_is_one_owners_files() {
+        let now = 1_000 * DAY;
+        let f = |p: &str, age: i64, uid: u32| FoundFile {
+            path: p.into(),
+            bytes: 5 << 20,
+            apparent: 5 << 20,
+            mtime: now - age * DAY,
+            uid,
+            dev: 0,
+            ino: age as u64 + uid as u64,
+        };
+        // Someone else plants a "newer" dump beside a user's only dump.
+        let found = vec![
+            f("/srv/share/db-2026-01.sql", 90, 1000),
+            f("/srv/share/db-2026-09.sql", 1, 1001),
+        ];
+        assert!(file_suggestions(&found, now, &[]).is_empty());
+        // A future time never makes another file look old.
+        let found = vec![
+            f("/srv/share/db-2026-01.sql", 90, 1000),
+            f("/srv/share/db-2026-09.sql", -400, 1000),
+        ];
+        assert!(file_suggestions(&found, now, &[]).is_empty());
     }
 
     #[test]
