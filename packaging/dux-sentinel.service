@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/dux sentinel --config /etc/dux/notify.conf
+ExecStart=/usr/bin/dux sentinel --config /etc/dux/dux.toml
 Restart=always
 RestartSec=5
 WatchdogSec=60

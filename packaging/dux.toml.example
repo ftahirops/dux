@@ -1,0 +1,115 @@
+# dux configuration. Every setting is shown at its default, commented out.
+# Changes apply within a few seconds; no restart needed. A mistake is
+# reported in the system log with its line, and dux keeps the last good
+# settings. The old /etc/dux/notify.conf is still read; this file wins.
+# Keep this file private if it holds tokens or passwords: chmod 600.
+
+[alerts]
+# ntfy topic URL, e.g. https://ntfy.sh/my-servers
+#ntfy_url = ""
+# ntfy access token (optional)
+#ntfy_token = ""
+# Slack incoming-webhook URL
+#slack_webhook = ""
+# Generic webhook: dux POSTs the alert as JSON
+#webhook_url = ""
+# Bearer token sent to the webhook (optional)
+#webhook_token = ""
+# Mail server, e.g. smtps://smtp.example.com:465 (TLS required)
+#smtp_url = ""
+# Mail server user
+#smtp_user = ""
+# Mail server password
+#smtp_pass = ""
+# Sender address
+#mail_from = ""
+# Recipients
+#mail_to = []
+# Lowest severity sent to ntfy, Slack and the webhook: info, warning or critical
+#min_push = "warning"
+# Lowest severity sent by email
+#min_email = "warning"
+# Seconds to wait for each channel
+#timeout = 10
+# Alerts per hour at most; more are summarised
+#max_per_hour = 30
+
+[disk]
+# Warning when a disk is this full
+#warn_pct = 85
+# Critical when a disk is this full
+#crit_pct = 95
+# Warning when this share of inodes is used
+#inode_warn_pct = 85
+# Critical when this share of inodes is used
+#inode_crit_pct = 95
+# A level clears only this many points below it
+#hysteresis_pct = 3
+# Check each healthy disk this often
+#check_every = "60s"
+# Check a disk past its warning level this often
+#check_every_when_warning = "5s"
+# Only watch these mount points (empty = all real filesystems)
+#mounts = []
+# Remind about a warning this often (0 = never)
+#repeat_warning = "0"
+# Remind about a critical disk this often (0 = never)
+#repeat_critical = "0"
+# Alert again when this many points worse
+#worse_by_pct = 5
+# ...but at most this often
+#worse_min_gap = "1h"
+# A lower level must hold this long before it is reported
+#ease_after = "2m"
+
+[growth]
+# Alert when a disk is projected to fill
+#fill_alerts = false
+# Warning when full within this many hours
+#fill_warn_hours = 24
+# Critical when full within this many hours
+#fill_crit_hours = 2
+# History needed before a fill warning
+#fill_warn_history = "5m"
+# History needed before a fill critical
+#fill_crit_history = "3m"
+# Alert on a sudden burst of writes
+#burst_alerts = false
+# A burst is this much written...
+#burst_size = "5G"
+# ...within this time
+#burst_window = "10m"
+
+[broadcast]
+# Broadcast critical alerts to every logged-in terminal (wall)
+#enabled = false
+# Only for a disk at least this full
+#at_pct = 97
+# At most once per disk this often
+#min_gap = "30m"
+# At most this many broadcasts per hour
+#max_per_hour = 4
+
+[attribution]
+# Walk a growing or full disk to find which folders grew
+#enabled = true
+# Baseline walk of each disk this often
+#every = "1h"
+# Never walk one disk more often than this
+#min_gap = "10m"
+# Walk when a disk grew this much since the last walk
+#trigger = "1G"
+# Walker threads (1-16)
+#threads = 2
+# Where folder snapshots and history are kept
+#snapshot_dir = "/var/lib/dux/sentinel"
+
+[cleanup]
+# Automatic cleanup on a critical disk: 0 = off, 1 = journal, 2 = + logs, 3 = + caches
+#auto_level = 0
+
+[programs]
+# curl used for HTTP and mail
+#curl = "curl"
+# wall used for broadcasts
+#wall = "wall"

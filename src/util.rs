@@ -184,6 +184,10 @@ pub fn fd_mount(fd: libc::c_int) -> Option<(u64, u64)> {
 /// Parse durations like "1h", "30m", "24h", "7d", "90s" into seconds.
 pub fn parse_duration(s: &str) -> Result<i64> {
     let s = s.trim();
+    // Zero needs no unit ("0" = never, for repeat settings).
+    if s == "0" {
+        return Ok(0);
+    }
     let (num, unit) = s.split_at(
         s.find(|c: char| c.is_alphabetic())
             .context("duration needs a unit, e.g. 1h, 30m, 7d")?,

@@ -13,9 +13,9 @@ rm -rf "$OUT"
 install -Dm755 "$BIN" "$OUT/usr/bin/dux"
 strip --strip-unneeded "$OUT/usr/bin/dux" 2>/dev/null || true
 install -Dm644 packaging/dux-sentinel.service "$OUT/lib/systemd/system/dux-sentinel.service"
-install -Dm644 packaging/notify.conf.example "$OUT/usr/share/doc/dux/notify.conf.example"
+install -Dm644 packaging/dux.toml.example "$OUT/usr/share/doc/dux/dux.toml.example"
 # Outside /usr/share/doc: minimal systems (Ubuntu images) do not install docs.
-install -Dm644 packaging/notify.conf.example "$OUT/usr/share/dux/notify.conf.example"
+install -Dm644 packaging/dux.toml.example "$OUT/usr/share/dux/dux.toml.example"
 install -Dm644 README.md "$OUT/usr/share/doc/dux/README.md"
 install -Dm644 LICENSE "$OUT/usr/share/doc/dux/copyright"
 install -d "$OUT/DEBIAN"

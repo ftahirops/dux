@@ -1,5 +1,6 @@
 mod attrib;
 mod cleanup;
+mod config;
 mod deleted;
 mod docker;
 mod fix;
@@ -12,6 +13,7 @@ mod protect;
 #[cfg(test)]
 mod qa;
 mod sentinel;
+mod setup;
 mod snapshot;
 mod ui;
 mod util;
@@ -61,7 +63,7 @@ enum Cmd {
     /// alerts: system log, ntfy, Slack, webhook, email, and wall for critical
     /// ones. Exact and cheap: one statvfs call per mount, no scanning.
     Sentinel {
-        /// KEY=VALUE settings file with channels and thresholds
+        /// Config file (dux.toml; an old notify.conf beside it is read too)
         #[arg(long, default_value = notify::DEFAULT_CONFIG)]
         config: PathBuf,
         /// Check once: print a df-style summary, alert on thresholds, exit
@@ -255,11 +257,22 @@ enum Cmd {
         #[arg(value_parser = ["on", "off", "status"], default_value = "status")]
         state: String,
     },
+    /// Guided setup: alerts (with a test), thresholds, never-touch, cleanup
+    ///
+    /// Writes /etc/dux/dux.toml (mode 600). Re-run any time: every answer
+    /// defaults to the current value. Without a terminal, edit the file.
+    Setup {
+        #[arg(long, default_value = config::DEFAULT_FILE)]
+        config: PathBuf,
+        /// Print the documented example config (every setting) and exit
+        #[arg(long)]
+        print_example: bool,
+    },
     /// Send a test alert to every configured channel
     ///
     /// Send a test alert to every configured channel
     NotifyTest {
-        /// KEY=VALUE settings file with channels
+        /// Config file (dux.toml; an old notify.conf beside it is read too)
         #[arg(long, default_value = notify::DEFAULT_CONFIG)]
         config: PathBuf,
         /// info, warning or critical (critical also tests wall)
@@ -312,9 +325,8 @@ fn real_main() -> Result<()> {
             dry_run,
         }) => {
             init_alert_logging();
-            let mut cfg = notify::NotifyConfig::load(&config)?;
+            let (mut cfg, settings) = notify::NotifyConfig::load_checked(&config)?;
             cfg.dry_run = dry_run;
-            let settings = sentinel::Settings::from_config(&cfg)?;
             if once {
                 print!("{}", sentinel::snapshot_report(&settings)?);
             }
@@ -1316,6 +1328,16 @@ fn real_main() -> Result<()> {
                     util::display_path(&r.path)
                 );
             }
+        }
+        Some(Cmd::Setup {
+            config,
+            print_example,
+        }) => {
+            if print_example {
+                print!("{}", config::example());
+                return Ok(());
+            }
+            setup::run_terminal(&config)?;
         }
         Some(Cmd::Actions { state }) => {
             let brake = std::path::Path::new(cleanup::KILL_SWITCH);

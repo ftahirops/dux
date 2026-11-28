@@ -1086,8 +1086,60 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
     let mut sentinel = Sentinel::new(settings, host.clone());
     let mut last_mount_refresh = now_secs();
     crate::util::systemd_notify("READY=1\nSTATUS=watching free space and inodes");
+    // Live reload (spec CFG-2, CFG-3): an edited config applies within one
+    // tick; a broken one is logged with its line and the last good one stays.
+    let mut cfg_now = cfg.clone();
+    let watch = cfg.loaded.files.clone();
+    let mut stamp = crate::config::stamp(&watch);
     loop {
         let now = now_secs();
+        if !once && !watch.is_empty() {
+            let st = crate::config::stamp(&watch);
+            if st != stamp {
+                stamp = st;
+                match NotifyConfig::load_checked(&cfg.loaded.path) {
+                    Ok((mut c, s)) => {
+                        c.dry_run = cfg.dry_run;
+                        let walk_changed = s.walk != sentinel.settings.walk
+                            || s.walk_every != sentinel.settings.walk_every
+                            || s.walk_min_gap != sentinel.settings.walk_min_gap
+                            || s.walk_trigger_bytes != sentinel.settings.walk_trigger_bytes
+                            || s.walk_threads != sentinel.settings.walk_threads
+                            || s.snapshot_dir != sentinel.settings.snapshot_dir;
+                        sentinel.settings = s;
+                        cfg_now = c;
+                        next_check.clear();
+                        last_mount_refresh = 0;
+                        if walk_changed {
+                            let st = &sentinel.settings;
+                            sched = (st.walk && !cfg_now.dry_run).then(|| {
+                                let mut w = WalkScheduler::new(
+                                    st.walk_every.as_secs() as i64,
+                                    st.walk_min_gap.as_secs() as i64,
+                                    st.walk_trigger_bytes,
+                                    st.walk_threads,
+                                    Some(st.snapshot_dir.clone()),
+                                );
+                                if let Ok(ms) = mounts(st) {
+                                    w.load_snapshots(&walk_mounts(&ms));
+                                }
+                                w
+                            });
+                        }
+                        tracing::info!(
+                            channels = ?cfg_now.channels(),
+                            "configuration reloaded"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "configuration not applied, keeping the last good one: {e:#}"
+                        );
+                    }
+                }
+            }
+        }
+        let cfg = &cfg_now;
         if now - last_mount_refresh >= 60 {
             if let Ok(ms) = mounts(&sentinel.settings) {
                 mount_list = ms;

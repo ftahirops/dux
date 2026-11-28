@@ -6,9 +6,9 @@
 //! curl as a config file on stdin, never as command-line arguments, so they do
 //! not show up in `ps` or `/proc/<pid>/cmdline`.
 //!
-//! Configuration is a `KEY=VALUE` file (default `/etc/dux/notify.conf`), the
-//! same format systemd's `EnvironmentFile=` reads. Environment variables with
-//! the same names override the file.
+//! Configuration comes from `/etc/dux/dux.toml` and the old KEY=VALUE
+//! `/etc/dux/notify.conf` (see `config.rs`). Environment variables with the
+//! `DUX_*` names override both.
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub const DEFAULT_CONFIG: &str = "/etc/dux/notify.conf";
+pub const DEFAULT_CONFIG: &str = crate::config::DEFAULT_FILE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -110,6 +110,8 @@ pub struct NotifyConfig {
     pub dry_run: bool,
     /// Every key read, for the sentinel's own settings.
     pub raw: HashMap<String, String>,
+    /// Where the keys came from (files, lines), for errors and reloads.
+    pub loaded: crate::config::Loaded,
 }
 
 impl Default for NotifyConfig {
@@ -133,6 +135,7 @@ impl Default for NotifyConfig {
             timeout_secs: 10,
             dry_run: false,
             raw: HashMap::new(),
+            loaded: Default::default(),
         }
     }
 }
@@ -178,17 +181,19 @@ fn truthy(v: &str) -> bool {
 impl NotifyConfig {
     /// Load the file (missing is fine) and apply environment overrides.
     pub fn load(path: &Path) -> Result<NotifyConfig> {
-        let mut raw = match std::fs::read_to_string(path) {
-            Ok(text) => parse_env_file(&text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
-            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
-        };
-        for (k, v) in std::env::vars() {
-            if k.starts_with("DUX_") {
-                raw.insert(k, v);
-            }
-        }
-        Ok(NotifyConfig::from_map(raw))
+        let l = crate::config::load(path)?;
+        let mut c = NotifyConfig::from_map(l.raw.clone());
+        c.loaded = l;
+        Ok(c)
+    }
+
+    /// Load and check everything the sentinel reads; errors name the
+    /// setting, file and line.
+    pub fn load_checked(path: &Path) -> Result<(NotifyConfig, crate::sentinel::Settings)> {
+        let c = NotifyConfig::load(path)?;
+        let s = crate::sentinel::Settings::from_config(&c)
+            .map_err(|e| anyhow::anyhow!(c.loaded.explain(&e)))?;
+        Ok((c, s))
     }
 
     pub fn from_map(raw: HashMap<String, String>) -> NotifyConfig {

@@ -3,9 +3,11 @@ set -e
 case "$1" in
     configure)
         install -d -m 0700 /etc/dux
-        if [ ! -e /etc/dux/notify.conf ]; then
-            install -m 0600 /usr/share/dux/notify.conf.example /etc/dux/notify.conf
-            echo "dux: created /etc/dux/notify.conf; add your ntfy/Slack/email settings there."
+        # Fresh installs get dux.toml; an existing notify.conf keeps working
+        # (it is still read, and dux.toml overrides it).
+        if [ ! -e /etc/dux/dux.toml ] && [ ! -e /etc/dux/notify.conf ]; then
+            install -m 0600 /usr/share/dux/dux.toml.example /etc/dux/dux.toml
+            echo "dux: created /etc/dux/dux.toml. Set up alerts with: dux setup"
         fi
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload || true
