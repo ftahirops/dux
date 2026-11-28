@@ -623,20 +623,7 @@ pub fn apply(item: &Item) -> Result<()> {
             );
             Ok(())
         }
-        Action::Remove { path } => {
-            let m = std::fs::symlink_metadata(path)?;
-            anyhow::ensure!(
-                m.is_file(),
-                "{} is no longer a regular file",
-                path.display()
-            );
-            crate::refuse_unless!(
-                !open_files().contains(&(m.dev(), m.ino())),
-                "{} is open; skipped",
-                path.display()
-            );
-            std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))
-        }
+        Action::Remove { path } => remove_file_beneath(path),
         Action::TailAndTruncate { path, keep } => {
             crate::refuse_unless!(
                 !is_binary_log(path),
@@ -824,14 +811,8 @@ pub fn remove_dir_same_fs(path: &Path) -> Result<()> {
         _ => Path::new("/"),
     };
     let name = path.file_name().context("no folder name")?;
-    let cparent = CString::new(parent.as_os_str().as_bytes())?;
-    // SAFETY: valid NUL-terminated path; the fd is closed below.
-    let pfd = unsafe {
-        libc::open(
-            cparent.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
+    // The parent is reached without following any symlink on the way.
+    let pfd = std::os::fd::IntoRawFd::into_raw_fd(open_dir_nofollow(parent)?);
     anyhow::ensure!(
         pfd >= 0,
         "opening {}: {}",
@@ -975,43 +956,192 @@ fn rm_at(
     Ok(())
 }
 
+/// Open the directory `dir` without following a symlink anywhere on the
+/// way: every component is opened with O_NOFOLLOW from `/`, so no part of
+/// the path can be swapped for a link to somewhere else while dux works.
+pub fn open_dir_nofollow(dir: &Path) -> Result<std::os::fd::OwnedFd> {
+    use std::ffi::CString;
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Component;
+    anyhow::ensure!(
+        dir.is_absolute(),
+        "{} is not an absolute path",
+        dir.display()
+    );
+    let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    // SAFETY: a valid NUL-terminated path; the fd is owned below.
+    let fd = unsafe { libc::open(c"/".as_ptr(), flags) };
+    anyhow::ensure!(fd >= 0, "opening /: {}", std::io::Error::last_os_error());
+    // SAFETY: fd was just opened and is owned by nothing else.
+    let mut cur = unsafe { OwnedFd::from_raw_fd(fd) };
+    for c in dir.components() {
+        match c {
+            Component::RootDir | Component::CurDir => continue,
+            Component::Normal(n) => {
+                let cn = CString::new(n.as_bytes())?;
+                // SAFETY: cur is an open directory; cn is NUL-terminated.
+                let fd = unsafe {
+                    libc::openat(std::os::fd::AsRawFd::as_raw_fd(&cur), cn.as_ptr(), flags)
+                };
+                anyhow::ensure!(
+                    fd >= 0,
+                    "{}: {} (a symlink on the way is refused; use the real path)",
+                    dir.display(),
+                    std::io::Error::last_os_error()
+                );
+                // SAFETY: as above.
+                cur = unsafe { OwnedFd::from_raw_fd(fd) };
+            }
+            _ => anyhow::bail!("{} must not contain ..", dir.display()),
+        }
+    }
+    Ok(cur)
+}
+
+fn fstatat_nofollow(
+    dir: &std::os::fd::OwnedFd,
+    name: &std::ffi::CStr,
+) -> std::io::Result<libc::stat> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: stat is plain data; dir is open; name is NUL-terminated.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    let r = unsafe {
+        libc::fstatat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            &mut st,
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if r == 0 {
+        Ok(st)
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+fn split_parent(path: &Path) -> Result<(PathBuf, std::ffi::CString)> {
+    use std::os::unix::ffi::OsStrExt;
+    let name = path
+        .file_name()
+        .with_context(|| format!("{} has no file name", path.display()))?;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("/"));
+    Ok((
+        parent.to_path_buf(),
+        std::ffi::CString::new(name.as_bytes())?,
+    ))
+}
+
+/// Remove one regular file that no process has open, through its parent
+/// directory handle (never through a symlink).
+pub fn remove_file_beneath(path: &Path) -> Result<()> {
+    use std::os::fd::AsRawFd;
+    let (parent, name) = split_parent(path)?;
+    let dir = open_dir_nofollow(&parent)?;
+    let st = fstatat_nofollow(&dir, &name).with_context(|| format!("{}", path.display()))?;
+    anyhow::ensure!(
+        st.st_mode & libc::S_IFMT == libc::S_IFREG,
+        "{} is no longer a regular file",
+        path.display()
+    );
+    crate::refuse_unless!(
+        !open_files().contains(&(st.st_dev, st.st_ino)),
+        "{} is open; skipped",
+        path.display()
+    );
+    // SAFETY: dir is open; name is NUL-terminated.
+    let r = unsafe { libc::unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) };
+    anyhow::ensure!(
+        r == 0,
+        "removing {}: {}",
+        path.display(),
+        std::io::Error::last_os_error()
+    );
+    Ok(())
+}
+
 /// Keep the last `keep` bytes in `<path>.dux-tail` and truncate the log in
 /// place, so the writer keeps its file handle and nothing breaks.
+///
+/// Everything goes through the parent directory's handle: the log is opened
+/// with O_NOFOLLOW and must have one link (a hard link to another file is
+/// refused); the tail is always a new file (O_EXCL), never one already there.
 pub fn tail_and_truncate(path: &Path, keep: u64) -> Result<()> {
     use std::io::{Read, Seek, SeekFrom, Write};
-    let m = std::fs::symlink_metadata(path)?;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let (parent, name) = split_parent(path)?;
+    let dir = open_dir_nofollow(&parent)?;
+    // SAFETY: dir is open; name is NUL-terminated; the fd is owned below.
+    let fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    anyhow::ensure!(
+        fd >= 0,
+        "opening {}: {}",
+        path.display(),
+        std::io::Error::last_os_error()
+    );
+    // SAFETY: fd was just opened and is owned by nothing else.
+    let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
+    let m = f.metadata()?;
     anyhow::ensure!(m.is_file(), "{} is not a regular file", path.display());
-    let mut f = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)?;
-    let len = f.metadata()?.len();
+    crate::refuse_unless!(
+        m.nlink() == 1,
+        "{} has {} hard links; it may be another file under this name, skipped",
+        path.display(),
+        m.nlink()
+    );
+    let len = m.len();
     let start = len.saturating_sub(keep);
     f.seek(SeekFrom::Start(start))?;
     let mut tail = Vec::with_capacity((len - start) as usize);
     f.read_to_end(&mut tail)?;
     // The copy gets the log's own owner and mode (logs are often 0640
-    // root:adm), and is never written through a planted symlink.
+    // root:adm). A file already at the tail name is replaced, never reused.
     let tail_path = tail_path(path);
+    let (_, tname) = split_parent(&tail_path)?;
+    if let Ok(old) = fstatat_nofollow(&dir, &tname) {
+        anyhow::ensure!(
+            old.st_mode & libc::S_IFMT != libc::S_IFDIR,
+            "{} exists and is a folder",
+            tail_path.display()
+        );
+        // SAFETY: dir is open; tname is NUL-terminated.
+        let r = unsafe { libc::unlinkat(dir.as_raw_fd(), tname.as_ptr(), 0) };
+        anyhow::ensure!(
+            r == 0,
+            "replacing {}: {}",
+            tail_path.display(),
+            std::io::Error::last_os_error()
+        );
+    }
     {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        match std::fs::symlink_metadata(&tail_path) {
-            Ok(old) => anyhow::ensure!(
-                old.is_file(),
-                "{} exists and is not a regular file",
-                tail_path.display()
-            ),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-        let mut t = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&tail_path)
-            .with_context(|| format!("creating {}", tail_path.display()))?;
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: as above; O_EXCL makes this a new file or an error.
+        let tfd = unsafe {
+            libc::openat(
+                dir.as_raw_fd(),
+                tname.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600 as libc::c_uint,
+            )
+        };
+        anyhow::ensure!(
+            tfd >= 0,
+            "creating {}: {}",
+            tail_path.display(),
+            std::io::Error::last_os_error()
+        );
+        // SAFETY: tfd was just created and is owned by nothing else.
+        let mut t = unsafe { std::fs::File::from_raw_fd(tfd) };
         // If the owner cannot be copied (not root), the copy stays private (0600).
         if std::os::unix::fs::fchown(&t, Some(m.uid()), Some(m.gid())).is_ok() {
             t.set_permissions(std::fs::Permissions::from_mode(m.mode() & 0o7777 & !0o111))?;
@@ -1026,6 +1156,51 @@ pub fn tail_and_truncate(path: &Path, keep: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_actions_never_follow_a_swapped_symlink_or_hard_link() {
+        let d = tmp("swap");
+        let victim = d.join("victim");
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("x.log.1"), b"victim rotated").unwrap();
+        std::fs::write(victim.join("secret"), b"do not touch").unwrap();
+        // A folder on the way replaced by a symlink to somewhere else.
+        std::os::unix::fs::symlink(&victim, d.join("logs")).unwrap();
+        assert!(remove_file_beneath(&d.join("logs/x.log.1")).is_err());
+        assert!(tail_and_truncate(&d.join("logs/secret"), 4).is_err());
+        assert!(victim.join("x.log.1").exists());
+        assert_eq!(
+            std::fs::read(victim.join("secret")).unwrap(),
+            b"do not touch"
+        );
+        // The file itself a symlink: refused.
+        let real = d.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        std::os::unix::fs::symlink(victim.join("secret"), real.join("app.log")).unwrap();
+        assert!(tail_and_truncate(&real.join("app.log"), 4).is_err());
+        assert_eq!(
+            std::fs::read(victim.join("secret")).unwrap(),
+            b"do not touch"
+        );
+        // A hard link to another file under a log's name: refused.
+        std::fs::hard_link(victim.join("secret"), real.join("hl.log")).unwrap();
+        assert!(tail_and_truncate(&real.join("hl.log"), 4).is_err());
+        assert_eq!(
+            std::fs::read(victim.join("secret")).unwrap(),
+            b"do not touch"
+        );
+        // A planted .dux-tail (hard link to the victim) is replaced, not written.
+        std::fs::write(real.join("w.log"), b"0123456789").unwrap();
+        std::fs::hard_link(victim.join("secret"), real.join("w.log.dux-tail")).unwrap();
+        tail_and_truncate(&real.join("w.log"), 4).unwrap();
+        assert_eq!(
+            std::fs::read(victim.join("secret")).unwrap(),
+            b"do not touch"
+        );
+        assert_eq!(std::fs::read(real.join("w.log.dux-tail")).unwrap(), b"6789");
+        assert_eq!(std::fs::metadata(real.join("w.log")).unwrap().len(), 0);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn same_fs_delete_removes_trees_and_never_follows_symlinks() {

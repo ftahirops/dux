@@ -178,19 +178,32 @@ fn truncate_refuses_symlinks_binary_logs_and_planted_tail_links() {
         keep: 0
     }))
     .is_err());
-    // A planted <log>.dux-tail symlink must not redirect the write.
+    // A planted <log>.dux-tail symlink must not redirect the write: it is
+    // replaced by a new file (O_EXCL), and the victim stays as it was.
     let victim = d.join("victim");
     std::fs::write(&victim, b"keep me").unwrap();
     std::os::unix::fs::symlink(&victim, d.join("app.log.dux-tail")).unwrap();
+    cleanup::apply(&item(Action::TailAndTruncate {
+        path: log.clone(),
+        keep: 10,
+    }))
+    .unwrap();
+    assert_eq!(std::fs::read(&victim).unwrap(), b"keep me");
+    let t = std::fs::symlink_metadata(d.join("app.log.dux-tail")).unwrap();
+    assert!(t.is_file() && t.len() == 10, "a new regular tail file");
+    assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+    // A folder at the tail name: refused, log untouched.
+    std::fs::write(&log, vec![b'x'; 1000]).unwrap();
+    std::fs::remove_file(d.join("app.log.dux-tail")).unwrap();
+    std::fs::create_dir(d.join("app.log.dux-tail")).unwrap();
     assert!(cleanup::apply(&item(Action::TailAndTruncate {
         path: log.clone(),
         keep: 10
     }))
     .is_err());
-    assert_eq!(std::fs::read(&victim).unwrap(), b"keep me");
     assert_eq!(
         std::fs::metadata(&log).unwrap().len(),
-        100_000,
+        1000,
         "log untouched when refused"
     );
     std::fs::remove_dir_all(&d).unwrap();
