@@ -60,6 +60,8 @@ const SKIP_FSTYPES: &[&str] = &[
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub interval: Duration,
+    /// Check interval for a disk past its warning level.
+    pub fast_interval: Duration,
     pub warn_pct: f64,
     pub crit_pct: f64,
     pub inode_warn_pct: f64,
@@ -112,7 +114,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            interval: Duration::from_secs(2),
+            interval: Duration::from_secs(60),
+            fast_interval: Duration::from_secs(5),
             warn_pct: 85.0,
             crit_pct: 95.0,
             inode_warn_pct: 85.0,
@@ -123,10 +126,12 @@ impl Default for Settings {
             burst_bytes: 5 << 30,
             window: Duration::from_secs(600),
             min_fs_bytes: 1 << 30,
-            warn_repeat: Duration::from_secs(3600),
-            crit_repeat: Duration::from_secs(900),
-            worsen_pct: 2.0,
-            worsen_min_gap: Duration::from_secs(300),
+            // No reminders by default (spec MON-10): alert on crossing a
+            // level, when clearly worse, and on recovery. 0 = never repeat.
+            warn_repeat: Duration::ZERO,
+            crit_repeat: Duration::ZERO,
+            worsen_pct: 5.0,
+            worsen_min_gap: Duration::from_secs(3600),
             ease_after: Duration::from_secs(120),
             fill_warn_history: Duration::from_secs(300),
             fill_crit_history: Duration::from_secs(180),
@@ -212,6 +217,7 @@ impl Settings {
             }
         };
         s.interval = dur("DUX_SENTINEL_INTERVAL", s.interval)?;
+        s.fast_interval = dur("DUX_SENTINEL_FAST_INTERVAL", s.fast_interval)?;
         s.warn_pct = pct("DUX_WARN_PCT", s.warn_pct)?;
         s.crit_pct = pct("DUX_CRIT_PCT", s.crit_pct)?;
         s.inode_warn_pct = pct("DUX_INODE_WARN_PCT", s.inode_warn_pct)?;
@@ -537,6 +543,9 @@ pub struct Sentinel {
     /// Alert keys allowed to broadcast with wall this tick: space or inode
     /// alerts on a disk that is critically full.
     wall_eligible: std::collections::HashSet<String>,
+    /// Keys already past the broadcast level (crossing it is a step of its
+    /// own and always alerts once, whatever the "worse" rule says).
+    past_wall: std::collections::HashSet<String>,
     was_readonly: HashMap<String, bool>,
 }
 
@@ -566,6 +575,7 @@ impl Sentinel {
             sent: VecDeque::new(),
             suppressed: 0,
             wall_eligible: Default::default(),
+            past_wall: Default::default(),
             was_readonly: HashMap::new(),
         }
     }
@@ -662,7 +672,8 @@ impl Sentinel {
         };
         let since_sent = now - st.last_sent;
         let worsened = clearly_worse && since_sent >= s.worsen_min_gap.as_secs() as i64;
-        if escalated || since_sent >= repeat.as_secs() as i64 || worsened {
+        let reminder = repeat.as_secs() > 0 && since_sent >= repeat.as_secs() as i64;
+        if escalated || reminder || worsened {
             self.conds.insert(
                 key.clone(),
                 CondState {
@@ -682,6 +693,25 @@ impl Sentinel {
         } else {
             self.conds.insert(key, st);
             None
+        }
+    }
+
+    /// The first sample past the broadcast level is a step of its own: make
+    /// the next judgement see it as clearly worse, so it alerts (and can
+    /// broadcast) once. Re-armed after dropping below the level minus the
+    /// hysteresis.
+    fn mark_wall_crossing(&mut self, key: &str, value: f64, now: i64) {
+        let s = &self.settings;
+        if value >= s.wall_pct {
+            if self.past_wall.insert(key.to_string()) {
+                let (gap, worse) = (s.worsen_min_gap.as_secs() as i64, s.worsen_pct);
+                if let Some(st) = self.conds.get_mut(key) {
+                    st.last_value = st.last_value.min(value - worse - 1.0);
+                    st.last_sent = st.last_sent.min(now - gap);
+                }
+            }
+        } else if value < s.wall_pct - s.hysteresis_pct {
+            self.past_wall.remove(key);
         }
     }
 
@@ -740,6 +770,7 @@ impl Sentinel {
         if pct >= self.settings.wall_pct {
             self.wall_eligible.insert(key.clone());
         }
+        self.mark_wall_crossing(&key, pct, now);
         let lvl = self.pct_level(&key, pct, self.settings.warn_pct, self.settings.crit_pct);
         let title = if lvl == Level::Ok {
             format!("{path} is back to {pct:.0}% full")
@@ -764,6 +795,7 @@ impl Sentinel {
             if ip >= self.settings.wall_pct {
                 self.wall_eligible.insert(key.clone());
             }
+            self.mark_wall_crossing(&key, ip, now);
             let lvl = self.pct_level(
                 &key,
                 ip,
@@ -1047,6 +1079,7 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
     });
     let mut writers = Writers::default();
     let mut last_writers = 0i64;
+    let mut next_check: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     let mut latency = crate::probes::Latency::default();
     let disks = crate::probes::physical_disks();
     let (mut last_probe, mut last_smart, mut last_cleanup) = (0i64, 0i64, 0i64);
@@ -1065,6 +1098,11 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
         let mut used: Vec<(String, u64)> = Vec::new();
         let mut seen_remote: Vec<(u64, u64, u64, u64)> = Vec::new();
         for m in &mount_list {
+            // Adaptive checks (spec MON-1): every `interval` while a disk is
+            // healthy, every `fast_interval` once it is past a warning level.
+            if next_check.get(&m.path).is_some_and(|t| now < *t) {
+                continue;
+            }
             match statvfs(&m.path) {
                 Ok(u)
                     if is_remote(&m.fstype) && {
@@ -1081,6 +1119,15 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
                         used.push((m.path.clone(), u.used));
                     }
                     alerts.extend(sentinel.observe(m, &u, now));
+                    let hot = u.used_pct() >= sentinel.settings.warn_pct
+                        || u.inode_pct()
+                            .is_some_and(|p| p >= sentinel.settings.inode_warn_pct);
+                    let every = if hot {
+                        sentinel.settings.fast_interval
+                    } else {
+                        sentinel.settings.interval
+                    };
+                    next_check.insert(m.path.clone(), now + every.as_secs().max(1) as i64);
                     alerts.extend(sentinel.feed(responding(&m.path, None), false, now));
                 }
                 Err(e) => {
@@ -1093,7 +1140,7 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
                 }
             }
         }
-        if now - last_writers >= 10 {
+        if now - last_writers >= 60 {
             writers.sample(now);
             last_writers = now;
         }
@@ -1195,7 +1242,13 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
         if once {
             return Ok(());
         }
-        std::thread::sleep(sentinel.settings.interval);
+        // Tick at the fast interval; each disk is checked only when due.
+        std::thread::sleep(
+            sentinel
+                .settings
+                .fast_interval
+                .min(sentinel.settings.interval),
+        );
     }
 }
 
@@ -1334,12 +1387,14 @@ mod tests {
             vec![(Severity::Warning, "space:/".into())]
         );
         assert!(one(&mut s, 87.0, 4).is_empty());
-        // Two points worse, but within the 5-minute minimum gap: quiet.
-        assert!(one(&mut s, 88.1, 6).is_empty());
+        // Five points worse, but within the 1-hour minimum gap: quiet.
+        assert!(one(&mut s, 91.1, 6).is_empty());
+        // Only two points worse after an hour: still quiet (spec MON-10).
+        assert!(one(&mut s, 88.5, 3700).is_empty());
         assert_eq!(
-            one(&mut s, 88.5, 310).len(),
+            one(&mut s, 91.5, 3702).len(),
             1,
-            "worse and past the minimum gap"
+            "five points worse and past the minimum gap"
         );
         // Escalates to critical immediately.
         assert_eq!(
@@ -1347,10 +1402,9 @@ mod tests {
             vec![(Severity::Critical, "space:/".into())]
         );
         assert!(one(&mut s, 96.0, 600).is_empty());
-        assert_eq!(
-            one(&mut s, 96.0, 312 + 900).len(),
-            1,
-            "critical repeats after 15 min"
+        assert!(
+            one(&mut s, 96.0, 312 + 7200).is_empty(),
+            "no reminders by default"
         );
         // 93% is inside the 3-point band below 95: still critical.
         assert!(one(&mut s, 93.0, 1300).is_empty());

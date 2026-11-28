@@ -37,7 +37,10 @@ DUX_MIN_PUSH=warning
 DUX_MIN_EMAIL=warning
 
 # ---- Thresholds ------------------------------------------------------------
-DUX_SENTINEL_INTERVAL=2s
+# Check each disk this often while it is healthy, and every
+# DUX_SENTINEL_FAST_INTERVAL once it is past a warning level.
+#DUX_SENTINEL_INTERVAL=60s
+#DUX_SENTINEL_FAST_INTERVAL=5s
 DUX_WARN_PCT=85
 DUX_CRIT_PCT=95
 DUX_INODE_WARN_PCT=85
@@ -60,9 +63,9 @@ DUX_MOUNTS=
 
 # ---- Flood control ---------------------------------------------------------
 # Repeat a still-active alert after this long (sooner if it gets 2 points worse).
-DUX_WARN_REPEAT=1h
-DUX_CRIT_REPEAT=15m
-DUX_WORSEN_PCT=2
+#DUX_WARN_REPEAT=0   (0 = never remind; alerts come on crossing, worse, recovery)
+#DUX_CRIT_REPEAT=0
+#DUX_WORSEN_PCT=5
 # wall: at most once per filesystem per 30 min, and 4 per hour in total.
 DUX_WALL_MIN_GAP=30m
 DUX_WALL_MAX_PER_HOUR=4
@@ -79,7 +82,7 @@ DUX_WALK_TRIGGER=1G
 DUX_WALK_THREADS=2
 DUX_SNAPSHOT_DIR=/var/lib/dux/sentinel
 # Repeat and recovery behaviour.
-DUX_WORSEN_MIN_GAP=5m
+#DUX_WORSEN_MIN_GAP=1h
 DUX_EASE_AFTER=2m
 DUX_FILL_WARN_HISTORY=5m
 

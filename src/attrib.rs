@@ -12,7 +12,7 @@
 //!   that are still open.
 
 use crate::notify::{Alert, Severity};
-use crate::walker::{self, Change, Tree};
+use crate::walker::{self, Change, DirNode, Tree};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -92,11 +92,6 @@ pub const CATALOG: &[Culprit] = &[
         fix: "systemd-tmpfiles --clean",
     },
     Culprit {
-        path: "/root/.cache",
-        label: "root's caches",
-        fix: "pip cache purge; go clean -cache; npm cache clean --force",
-    },
-    Culprit {
         path: "/var/lib/snapd",
         label: "snap revisions",
         fix: "snap set system refresh.retain=2",
@@ -106,7 +101,117 @@ pub const CATALOG: &[Culprit] = &[
         label: "kernels",
         fix: "apt-get autoremove --purge (keeps the running kernel)",
     },
+    Culprit {
+        path: "/var/lib/kubelet",
+        label: "Kubernetes pods and volumes",
+        fix: "kubectl delete unused pods/PVCs; crictl rmi --prune",
+    },
+    Culprit {
+        path: "/var/log/pods",
+        label: "Kubernetes container logs",
+        fix: "set kubelet containerLogMaxSize / containerLogMaxFiles",
+    },
+    Culprit {
+        path: "/var/lib/rancher/k3s",
+        label: "k3s images and data",
+        fix: "k3s crictl rmi --prune",
+    },
+    Culprit {
+        path: "/var/lib/mysql",
+        label: "MySQL data (binary logs inside)",
+        fix: "PURGE BINARY LOGS BEFORE NOW() - INTERVAL 7 DAY; set binlog_expire_logs_seconds (never delete files by hand)",
+    },
+    Culprit {
+        path: "/var/log/mysql",
+        label: "MySQL logs",
+        fix: "check logrotate for mysql; slow query log size",
+    },
+    Culprit {
+        path: "/var/lib/postgresql",
+        label: "PostgreSQL data (WAL inside)",
+        fix: "check archive_command and unused replication slots (pg_replication_slots); never delete pg_wal by hand",
+    },
+    Culprit {
+        path: "/var/log/postgresql",
+        label: "PostgreSQL logs",
+        fix: "check logrotate for postgresql; log_min_duration_statement",
+    },
+    Culprit {
+        path: "/var/log/mongodb",
+        label: "MongoDB logs",
+        fix: "db.adminCommand({logRotate: 1}); check systemLog.logRotate",
+    },
 ];
+
+/// Caches and logs inside every home folder (/home/<user> and /root),
+/// most specific first.
+pub static HOME_CULPRITS: &[Culprit] = &[
+    Culprit {
+        path: ".cache/go-build",
+        label: "Go build cache",
+        fix: "go clean -cache",
+    },
+    Culprit {
+        path: "go/pkg/mod",
+        label: "Go module cache",
+        fix: "go clean -modcache",
+    },
+    Culprit {
+        path: ".cargo/registry",
+        label: "Rust cargo registry",
+        fix: "cargo cache -a (cargo-cache) or remove ~/.cargo/registry/cache",
+    },
+    Culprit {
+        path: ".cache/pip",
+        label: "pip cache",
+        fix: "pip cache purge",
+    },
+    Culprit {
+        path: ".cache/yarn",
+        label: "yarn cache",
+        fix: "yarn cache clean",
+    },
+    Culprit {
+        path: ".npm",
+        label: "npm cache",
+        fix: "npm cache clean --force",
+    },
+    Culprit {
+        path: ".local/share/pnpm",
+        label: "pnpm store",
+        fix: "pnpm store prune",
+    },
+    Culprit {
+        path: ".m2/repository",
+        label: "Maven repository",
+        fix: "remove old versions in ~/.m2/repository",
+    },
+    Culprit {
+        path: ".gradle/caches",
+        label: "Gradle caches",
+        fix: "remove ~/.gradle/caches (rebuilt on next build)",
+    },
+    Culprit {
+        path: ".pm2/logs",
+        label: "pm2 logs",
+        fix: "pm2 flush; pm2 install pm2-logrotate",
+    },
+    Culprit {
+        path: ".cache",
+        label: "user caches",
+        fix: "pip cache purge; go clean -cache; npm cache clean --force",
+    },
+];
+
+/// The home folder and the rest of `path`: ("/home/ann", "go/pkg/mod/x").
+fn split_home(path: &str) -> Option<(String, &str)> {
+    if let Some(rest) = path.strip_prefix("/root/") {
+        return Some(("/root".into(), rest));
+    }
+    let rest = path.strip_prefix("/home/")?;
+    let (user, rest) = rest.split_once('/')?;
+    Some((format!("/home/{user}"), rest))
+}
 
 /// The most specific catalog entry covering `path`, if any.
 pub fn culprit_for(path: &str) -> Option<&'static Culprit> {
@@ -115,21 +220,14 @@ pub fn culprit_for(path: &str) -> Option<&'static Culprit> {
         .filter(|c| path == c.path || path.starts_with(&format!("{}/", c.path)))
         .max_by_key(|c| c.path.len())
         .or_else(|| {
-            // /home/<user>/.cache and friends.
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() >= 4 && parts[1] == "home" && parts[3] == ".cache" {
-                Some(&HOME_CACHE)
-            } else {
-                None
-            }
+            // Caches and logs inside /home/<user> and /root.
+            let (_, rest) = split_home(path)?;
+            HOME_CULPRITS
+                .iter()
+                .filter(|c| rest == c.path || rest.starts_with(&format!("{}/", c.path)))
+                .max_by_key(|c| c.path.len())
         })
 }
-
-static HOME_CACHE: Culprit = Culprit {
-    path: "/home/*/.cache",
-    label: "user caches",
-    fix: "pip cache purge; go clean -cache; npm cache clean --force",
-};
 
 /// Sizes of every catalog location present in a tree, largest first.
 pub fn catalog_sizes(tree: &Tree) -> Vec<(&'static Culprit, String, u64)> {
@@ -156,13 +254,37 @@ pub fn catalog_sizes(tree: &Tree) -> Vec<(&'static Culprit, String, u64)> {
         "/home" => Some(&tree.root),
         _ => None,
     };
+    let mut homes: Vec<(String, &DirNode)> = Vec::new();
     if let Some(home) = home {
-        for u in &home.children {
-            if let Some(cache) = u.children.iter().find(|c| c.name == ".cache") {
+        homes.extend(
+            home.children
+                .iter()
+                .map(|u| (format!("/home/{}", u.name), u)),
+        );
+    }
+    if root.is_empty() {
+        if let Some(r) = tree.root.find("root") {
+            homes.push(("/root".into(), r));
+        }
+    }
+    for (base, node) in homes {
+        for c in HOME_CULPRITS {
+            if let Some(n) = node.find(c.path) {
+                // `.cache` counts what is left after its more specific entries.
+                let inner: u64 = if c.path == ".cache" {
+                    HOME_CULPRITS
+                        .iter()
+                        .filter(|o| o.path.starts_with(".cache/"))
+                        .filter_map(|o| node.find(o.path))
+                        .map(|o| o.total_bytes)
+                        .sum()
+                } else {
+                    0
+                };
                 out.push((
-                    &HOME_CACHE,
-                    format!("/home/{}/.cache", u.name),
-                    cache.total_bytes,
+                    c,
+                    format!("{base}/{}", c.path),
+                    n.total_bytes.saturating_sub(inner),
                 ));
             }
         }
@@ -544,7 +666,9 @@ pub fn attribution_alert(
 ) -> Option<Alert> {
     let severity = match reason {
         Reason::Alert(s) => s,
-        Reason::Growth => Severity::Warning,
+        // A walk after plain growth is context, not an alert (spec MON-10):
+        // it goes to the system log only. Level alerts carry the attribution.
+        Reason::Growth => Severity::Info,
         Reason::Baseline | Reason::Startup => Severity::Info,
     };
     let growing: Vec<&Change> = changes.iter().filter(|c| c.delta() > 0).take(5).collect();
@@ -600,6 +724,48 @@ mod tests {
     use crate::walker::DirNode;
 
     #[test]
+    fn home_culprits_cover_language_caches_and_pm2_for_every_user_and_root() {
+        assert_eq!(
+            culprit_for("/home/ann/go/pkg/mod/x").unwrap().label,
+            "Go module cache"
+        );
+        assert_eq!(
+            culprit_for("/root/.cache/go-build/ab").unwrap().label,
+            "Go build cache"
+        );
+        assert_eq!(
+            culprit_for("/home/bob/.cache/other").unwrap().label,
+            "user caches"
+        );
+        assert_eq!(
+            culprit_for("/home/bob/.pm2/logs/app-out.log")
+                .unwrap()
+                .label,
+            "pm2 logs"
+        );
+        assert_eq!(
+            culprit_for("/var/lib/postgresql/16/main/pg_wal")
+                .unwrap()
+                .label,
+            "PostgreSQL data (WAL inside)"
+        );
+        assert!(culprit_for("/home/bob/projects/x").is_none());
+        let gb = node("go-build", 7 << 20, vec![]);
+        let other = node("misc", 2 << 20, vec![]);
+        let cache = node(".cache", 0, vec![gb, other]);
+        let root_home = node("root", 0, vec![cache]);
+        let t = tree("/", node("/", 0, vec![root_home]));
+        let found = catalog_sizes(&t);
+        let get = |p: &str| found.iter().find(|(_, q, _)| q == p).map(|(_, _, b)| *b);
+        assert_eq!(get("/root/.cache/go-build"), Some(7 << 20));
+        assert_eq!(
+            get("/root/.cache"),
+            Some(2 << 20),
+            "user caches count what is left"
+        );
+    }
+
+    #[test]
     fn culprit_lookup_prefers_the_most_specific_entry() {
         assert_eq!(
             culprit_for("/var/log/journal/abc").unwrap().label,
@@ -612,7 +778,7 @@ mod tests {
         );
         assert_eq!(
             culprit_for("/home/ann/.cache/pip").unwrap().label,
-            "user caches"
+            "pip cache"
         );
         assert!(culprit_for("/srv/data").is_none());
         assert!(

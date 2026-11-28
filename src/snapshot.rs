@@ -14,7 +14,7 @@ const MAGIC: &[u8; 8] = b"DUXSNAP1";
 /// Top files smaller than this are not stored; they never matter for "what is big".
 const MIN_TOP_FILE: u64 = 64 * 1024;
 /// History lines older than this are dropped when the file is rewritten.
-const HISTORY_KEEP_SECS: i64 = 90 * 86_400;
+const HISTORY_KEEP_SECS: i64 = 30 * 86_400;
 
 pub const DEFAULT_DIR: &str = "/var/lib/dux/sentinel";
 
@@ -247,8 +247,19 @@ pub fn append_history(dir: &Path, t: &Tree, top: &[(String, u64)]) -> Result<()>
         .append(true)
         .open(&path)?;
     writeln!(f, "{line}")?;
-    // Prune once the file passes 8 MiB.
-    if f.metadata().map(|m| m.len()).unwrap_or(0) > 8 << 20 {
+    // Keep 30 days (spec A2.4): prune when the oldest line is older.
+    let cutoff_now = crate::util::now_secs() - HISTORY_KEEP_SECS;
+    let oldest = std::fs::File::open(&path)
+        .ok()
+        .and_then(|fh| {
+            use std::io::BufRead;
+            std::io::BufReader::new(fh).lines().next()?.ok()
+        })
+        .and_then(|l| serde_json::from_str::<serde_json::Value>(&l).ok())
+        .and_then(|v| v["t"].as_i64());
+    if oldest.is_some_and(|t| t < cutoff_now)
+        || f.metadata().map(|m| m.len()).unwrap_or(0) > 8 << 20
+    {
         let cutoff = crate::util::now_secs() - HISTORY_KEEP_SECS;
         let text = std::fs::read_to_string(&path)?;
         let kept: String = text
