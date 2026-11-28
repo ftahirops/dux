@@ -6,3 +6,9 @@
 *.db-shm
 
 __pycache__/
+/.devnotes
+/HANDOFF.md
+/.aws
+/.codex
+/.agents
+/.claude

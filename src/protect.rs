@@ -31,7 +31,7 @@ pub fn normalize(path: &str) -> String {
     format!("/{}", parts.join("/"))
 }
 
-fn parse(text: &str) -> Vec<String> {
+pub(crate) fn parse(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| l.starts_with('/'))
@@ -104,12 +104,14 @@ fn forms(path: &Path) -> Vec<String> {
 /// Refuse if removing or rewriting `path` would touch a protected path, or
 /// if the list cannot be read.
 pub fn check_in(file: &Path, path: &Path) -> Result<()> {
-    let list = policy_from(file)?;
+    // An unreadable list is a safety refusal, not a plain failure.
+    let list = policy_from(file)
+        .map_err(|e| anyhow::Error::new(crate::util::Refused(format!("{e:#}"))))?;
     if list.is_empty() {
         return Ok(());
     }
     for f in forms(path) {
-        anyhow::ensure!(
+        crate::refuse_unless!(
             !conflicts(&list, &f),
             "{} is on, inside or contains a path on the never-touch list",
             path.display()

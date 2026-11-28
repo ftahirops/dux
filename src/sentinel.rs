@@ -397,9 +397,61 @@ impl Usage {
     }
 }
 
+/// Mounts whose usage check has not returned yet (a hung network share).
+static STATVFS_IN_FLIGHT: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Filesystem usage, but never blocking for more than 3 seconds: a dead NFS
+/// or CIFS server makes statvfs hang forever, and one hung mount must not stop
+/// alerts for every other disk. A mount whose earlier check is still stuck is
+/// reported "not responding" at once, so stuck threads never pile up.
+pub fn statvfs(path: &str) -> Result<Usage> {
+    statvfs_within(path, std::time::Duration::from_secs(3))
+}
+
+pub fn statvfs_within(path: &str, limit: std::time::Duration) -> Result<Usage> {
+    {
+        let flight = STATVFS_IN_FLIGHT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if flight.iter().any(|p| p == path) {
+            anyhow::bail!("{path} is not responding (an earlier check is still waiting; a network filesystem may be down)");
+        }
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let p = path.to_string();
+    STATVFS_IN_FLIGHT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(p.clone());
+    let spawned = std::thread::Builder::new()
+        .name("dux-statvfs".into())
+        .spawn(move || {
+            let r = statvfs_now(&p);
+            STATVFS_IN_FLIGHT
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|x| x != &p);
+            let _ = tx.send(r);
+        });
+    if spawned.is_err() {
+        STATVFS_IN_FLIGHT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|x| x != path);
+        return statvfs_now(path);
+    }
+    match rx.recv_timeout(limit) {
+        Ok(r) => r,
+        Err(_) => anyhow::bail!(
+            "{path} is not responding after {}s (a network filesystem may be down)",
+            limit.as_secs()
+        ),
+    }
+}
+
 // Field widths differ between glibc and musl, so the casts are kept.
 #[allow(clippy::unnecessary_cast)]
-pub fn statvfs(path: &str) -> Result<Usage> {
+fn statvfs_now(path: &str) -> Result<Usage> {
     let c = CString::new(path).context("mount path contains NUL")?;
     let mut st = std::mem::MaybeUninit::<libc::statvfs>::uninit();
     // SAFETY: c is a valid NUL-terminated path; st is written by the kernel on success.
@@ -919,6 +971,24 @@ fn mounts(settings: &Settings) -> Result<Vec<Mount>> {
     Ok(ms)
 }
 
+/// Whether a mount answers its usage check: a warning while it hangs (a
+/// network filesystem whose server is gone), Ok when it answers again.
+fn responding(path: &str, error: Option<&str>) -> crate::probes::Finding {
+    crate::probes::Finding {
+        key: format!("unresponsive:{path}"),
+        level: if error.is_some() { Level::Warning } else { Level::Ok },
+        value: 0.0,
+        title: match error {
+            Some(_) => format!("{path} is not responding"),
+            None => format!("{path} is responding again"),
+        },
+        body: error.map_or_else(
+            || "usage checks return normally".to_string(),
+            |e| format!("{e}. Programs that touch it will hang; check the server or unmount it (umount -l {path})."),
+        ),
+    }
+}
+
 /// One line per mount, like a compact `df`, for `--once`.
 pub fn snapshot_report(settings: &Settings) -> Result<String> {
     let mut s = format!(
@@ -1011,8 +1081,16 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
                         used.push((m.path.clone(), u.used));
                     }
                     alerts.extend(sentinel.observe(m, &u, now));
+                    alerts.extend(sentinel.feed(responding(&m.path, None), false, now));
                 }
-                Err(e) => tracing::debug!("skipping {}: {e:#}", m.path),
+                Err(e) => {
+                    let msg = format!("{e:#}");
+                    if msg.contains("not responding") {
+                        alerts.extend(sentinel.feed(responding(&m.path, Some(&msg)), false, now));
+                    } else {
+                        tracing::debug!("skipping {}: {msg}", m.path);
+                    }
+                }
             }
         }
         if now - last_writers >= 10 {

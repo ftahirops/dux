@@ -45,6 +45,9 @@ pub struct Suggestion {
 /// Command-line choices shared by every command that offers fixes.
 #[derive(clap::Args, Clone, Debug, Default)]
 pub struct FixArgs {
+    /// Show the cleanup suggestions and pick which to apply
+    #[arg(long)]
+    pub fix: bool,
     /// Apply these numbers from the fix list without asking, e.g. 1,3,5-7
     #[arg(long, value_name = "LIST")]
     pub select: Option<String>,
@@ -55,7 +58,7 @@ pub struct FixArgs {
     #[arg(long)]
     pub apply_all: bool,
     /// List the fixes but never ask or apply
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub no_fix: bool,
 }
 
@@ -138,6 +141,8 @@ pub fn assess(item: Item) -> Suggestion {
     let (safety, why, undo) = match &item.action {
         Action::Run { program, args } => {
             let a = args.join(" ");
+            // Podman takes the same subcommands and carries the same risks.
+            let program = if program == "podman" { "docker".to_string() } else { program.clone() };
             match (program.as_str(), a.as_str()) {
                 ("journalctl", _) => (Safety::Safe, "Deletes the oldest journal entries beyond the size budget; recent logs stay.", "Not needed: old journal entries are history only."),
                 ("apt-get", _) | ("dnf", _) => (Safety::Safe, "Deletes downloaded package files that are already installed.", "Downloaded again automatically when needed."),
@@ -295,8 +300,31 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
         println!("\nFixes: nothing to suggest for {title}.");
         return Ok(0);
     }
+    // Reports stay short: the fix list appears only when asked for.
+    let asked = args.fix || args.select.is_some() || args.apply_safe || args.apply_all;
+    if !asked {
+        if !args.no_fix {
+            let total: u64 = s.iter().filter(|x| x.item.is_some()).map(|x| x.frees).sum();
+            println!(
+                "\nCleanup: {} suggestions could free up to {}. Review them with --fix.",
+                s.len(),
+                crate::util::human(total as i64)
+            );
+        }
+        return Ok(0);
+    }
     s.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
-    let skipped = mark_protected(&mut s);
+    // An unreadable never-touch list (a normal user, or a damaged file)
+    // blocks every change; say that instead of calling everything protected.
+    let unreadable = crate::protect::policy_from(std::path::Path::new(crate::protect::FILE)).err();
+    if let Some(e) = &unreadable {
+        println!("\nNote: {e:#}. Fixes are shown, but none can be applied until the list can be read (run as root).");
+    }
+    let skipped = if unreadable.is_some() {
+        0
+    } else {
+        mark_protected(&mut s)
+    };
     if skipped > 0 {
         println!(
             "\n({skipped} suggestions are on the never-touch list {} and cannot be picked)",

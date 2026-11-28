@@ -4,8 +4,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: dux maintainers <root@localhost>
-Depends: libc6 (>= 2.39), curl
-Recommends: bsdutils | util-linux
+Recommends: curl, bsdutils | util-linux
 Suggests: smartmontools
 Description: disk-full alerts, folder attribution and safe cleanup
  dux watches free space and inodes on every disk every 2 seconds and sends

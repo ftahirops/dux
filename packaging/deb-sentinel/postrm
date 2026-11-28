@@ -3,7 +3,7 @@ set -e
 case "$1" in
     purge)
         rm -rf /var/lib/dux/sentinel
-        rm -f /etc/dux/notify.conf
+        rm -f /etc/dux/notify.conf /etc/dux/never-touch /etc/dux/never-touch.lock /etc/dux/web.env
         rmdir /etc/dux 2>/dev/null || true
         ;;
 esac

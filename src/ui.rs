@@ -461,7 +461,8 @@ fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
-    let total: u64 = app.entries.iter().map(|e| e.bytes).sum::<u64>().max(1);
+    let sum: u64 = app.entries.iter().map(|e| e.bytes).sum::<u64>();
+    let total = sum.max(1);
     let biggest = app
         .entries
         .iter()
@@ -470,9 +471,19 @@ fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
         .unwrap_or(1)
         .max(1);
     let now = crate::util::now_secs();
+    // Build rows only for the visible window: a folder can hold a million
+    // entries, and building them all on every frame made the UI crawl.
+    let visible = usize::from(body.height.saturating_sub(3)).max(1);
+    let sel = app.sel[BROWSE].min(app.entries.len().saturating_sub(1));
+    let start = sel
+        .saturating_sub(visible / 2)
+        .min(app.entries.len().saturating_sub(visible));
+    state.select((!app.entries.is_empty()).then_some(sel - start));
     let rows: Vec<Row> = app
         .entries
         .iter()
+        .skip(start)
+        .take(visible)
         .map(|e| {
             let path = e.path.to_string_lossy();
             let never = crate::protect::covered(&app.protected, &path);
@@ -538,7 +549,7 @@ fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
         .block(Block::default().borders(Borders::ALL).title(format!(
             " {}  {} in {} entries · sorted by {sort}{scan} ",
             app.cwd,
-            human(total as i64),
+            human(sum as i64),
             app.entries.len()
         )))
         .row_highlight_style(hl()),
@@ -1372,6 +1383,7 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
                 app.overlay = Overlay::Info(e);
             }
         }
+        KeyCode::Char('d' | 'N') if t == BROWSE && !app.is_root() => {}
         KeyCode::Char('d') if t == BROWSE => {
             if let Some(e) = app.selected_entry().cloned() {
                 let path = e.path.to_string_lossy().into_owned();
@@ -1623,6 +1635,124 @@ mod tests {
             app.message
         );
         assert!(d.join("sub/small.txt").exists() && d.join("sub/bigdir/data").exists());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+    #[test]
+    fn every_view_renders_at_every_size_with_huge_and_odd_data() {
+        use std::os::unix::ffi::OsStrExt;
+        let d = std::env::temp_dir().join(format!("dux-ui-sizes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("many")).unwrap();
+        for i in 0..1500 {
+            std::fs::write(d.join(format!("many/f{i:04}")), b"x").unwrap();
+        }
+        // Names that are not valid UTF-8, with control characters.
+        let bad = std::ffi::OsStr::from_bytes(b"bad\xff\xfename\n\x1b[31mred");
+        std::fs::write(d.join("many").join(bad), b"y").unwrap();
+        std::fs::create_dir_all(d.join("p/node_modules/x")).unwrap();
+        std::fs::write(
+            d.join("p/package.json"),
+            br#"{"name":"\u001b[2Jevil\nname"}"#,
+        )
+        .unwrap();
+        let root = d.to_string_lossy().into_owned();
+        let mut app = App::new(&root);
+        app.data = gather::gather(&root, 2, None);
+        let mut r = crate::docker::Report::default();
+        for i in 0..1000 {
+            r.containers.push(crate::docker::Container {
+                runtime: if i % 3 == 0 { "podman" } else { "docker" },
+                name: format!("c{i}-{}", "x".repeat(i % 50)),
+                image: format!("img{}", i % 40),
+                state: if i % 2 == 0 {
+                    "running".into()
+                } else {
+                    "exited".into()
+                },
+                project: (i % 5 != 0).then(|| format!("stack{}", i % 17)),
+                mounts: vec![format!("vol{}…", i % 30)],
+                writable: i as u64 * 1000,
+                log_bytes: i as u64 * 7000,
+                ..Default::default()
+            });
+        }
+        for i in 0..40 {
+            r.images.push(crate::docker::Image {
+                name: format!("img{i}"),
+                unique: i * 100,
+                ..Default::default()
+            });
+        }
+        for i in 0..300 {
+            r.volumes.push(crate::docker::Volume {
+                name: format!("vol{i}-{}", "y".repeat(60)),
+                size: i * 10,
+                ..Default::default()
+            });
+        }
+        r.on_disk.push(("/var/lib/docker/overlay2".into(), 5));
+        app.data.docker = Some(r);
+        app.loading = false;
+        app.picked = vec![false; app.data.fixes.len()];
+        app.cwd = d.join("many").to_string_lossy().into_owned();
+        app.list_dir();
+        assert!(app.entries.len() >= 1500);
+        let sizes = [
+            (1u16, 1u16),
+            (2, 2),
+            (10, 3),
+            (20, 5),
+            (40, 10),
+            (60, 15),
+            (80, 24),
+            (100, 30),
+            (132, 43),
+            (200, 60),
+            (250, 80),
+            (300, 4),
+            (5, 100),
+        ];
+        for (w, h) in sizes {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            for tab in 0..8 {
+                app.tab = tab;
+                for sub in 0..views::DSUB.len() {
+                    app.v.dsub = sub;
+                    app.sel[DOCKER] = 999;
+                    term.draw(|f| draw(f, &mut app)).unwrap();
+                    if tab != DOCKER {
+                        break;
+                    }
+                }
+            }
+            // Overlays and the job window at this size.
+            app.tab = BROWSE;
+            app.sel[BROWSE] = 0;
+            for o in 0..3 {
+                app.overlay = match o {
+                    0 => Overlay::Info(app.entries[0].clone()),
+                    1 => Overlay::Delete(app.entries[0].clone()),
+                    _ => Overlay::ApplyFixes {
+                        items: vec![
+                            Item {
+                                level: 1,
+                                what: "w".repeat(500),
+                                action: Action::Run {
+                                    program: "true".into(),
+                                    args: vec![]
+                                },
+                                frees: 1
+                            };
+                            30
+                        ],
+                        bytes: 1,
+                        risky: true,
+                    },
+                };
+                term.draw(|f| draw(f, &mut app)).unwrap();
+            }
+            app.overlay = Overlay::None;
+        }
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

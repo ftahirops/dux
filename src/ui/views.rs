@@ -49,6 +49,9 @@ pub struct State {
     log_open: BTreeSet<String>,
     proj_closed: BTreeSet<String>,
     pub job: Option<Job>,
+    /// "What's inside" a container's writable layer or a volume, by
+    /// resource name, computed when its detail page opens.
+    inside: BTreeMap<String, Result<Vec<(String, u64)>, String>>,
     history: Vec<HistoryRow>,
     history_at: Option<Instant>,
 }
@@ -87,6 +90,7 @@ fn fs_of(item: &Item, docker_root: Option<&str>) -> String {
         }
         Action::Run { program, .. } => std::path::PathBuf::from(match program.as_str() {
             "docker" => docker_root.unwrap_or("/var/lib/docker"),
+            "podman" => "/var/lib/containers",
             "journalctl" => "/var/log/journal",
             "apt-get" | "apt" => "/var/cache/apt",
             _ => "/",
@@ -351,11 +355,16 @@ fn truncate_log(c: &crate::docker::Container) -> Option<Item> {
 }
 
 fn docker_run(what: String, args: &[&str], frees: u64) -> Item {
+    runtime_run("docker", what, args, frees)
+}
+
+/// An action run with the container runtime that owns the resource.
+fn runtime_run(runtime: &str, what: String, args: &[&str], frees: u64) -> Item {
     Item {
         level: 3,
         what,
         action: Action::Run {
-            program: "docker".into(),
+            program: crate::docker::program(runtime).into(),
             args: args.iter().map(|s| s.to_string()).collect(),
         },
         frees,
@@ -540,7 +549,11 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
                         Color::Yellow
                     };
                     Row::new(vec![
-                        c.name.clone(),
+                        if c.runtime == "podman" {
+                            format!("{} [podman]", c.name)
+                        } else {
+                            c.name.clone()
+                        },
                         c.state.clone(),
                         stack_of(c),
                         human((c.writable + c.log_bytes) as i64),
@@ -886,7 +899,7 @@ fn draw_stack_page(f: &mut Frame, r: &Report, s: &Stack, area: Rect) {
     );
 }
 
-fn draw_docker_detail(f: &mut Frame, r: &Report, sub: usize, i: usize, area: Rect) {
+fn draw_docker_detail(f: &mut Frame, app: &App, r: &Report, sub: usize, i: usize, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     let title;
     match sub {
@@ -906,7 +919,10 @@ fn draw_docker_detail(f: &mut Frame, r: &Report, sub: usize, i: usize, area: Rec
                 return;
             };
             title = format!(" Container {} ", c.name);
-            lines.push(kv("name", c.name.clone()));
+            lines.push(kv(
+                "name",
+                format!("{} ({})", c.name, crate::docker::program(c.runtime)),
+            ));
             lines.push(kv("id", c.id.clone()));
             lines.push(kv(
                 "state",
@@ -976,10 +992,25 @@ fn draw_docker_detail(f: &mut Frame, r: &Report, sub: usize, i: usize, area: Rec
                     None => format!("  {m}"),
                 }));
             }
+            let res = app.v.inside.get(&c.name);
+            inside_lines(
+                "inside its writable layer (what it writes into itself)",
+                res,
+                &mut lines,
+            );
+            if let Some(Ok(v)) = res {
+                if let Some(advice) = crate::docker::layer_advice(c, v) {
+                    lines.push(
+                        Line::from(format!("advice {advice}"))
+                            .style(Style::default().fg(Color::Yellow)),
+                    );
+                }
+            }
             lines.push(Line::from(""));
+            let rt = crate::docker::program(c.runtime);
             lines.push(
                 Line::from(format!(
-                    "next   docker logs --tail 50 {} · docker inspect {}",
+                    "next   {rt} logs --tail 50 {} · {rt} inspect {}",
                     c.name, c.name
                 ))
                 .style(Style::default().fg(Color::Cyan)),
@@ -1063,6 +1094,7 @@ fn draw_docker_detail(f: &mut Frame, r: &Report, sub: usize, i: usize, area: Rec
                 let c = &r.containers[c];
                 lines.push(Line::from(format!("  {}  {}", c.name, c.state)));
             }
+            inside_lines("inside the volume", app.v.inside.get(&v.name), &mut lines);
             lines.push(Line::from(""));
             lines.push(
                 Line::from(
@@ -1104,7 +1136,7 @@ pub(super) fn draw_docker(f: &mut Frame, app: &App, area: Rect, state: &mut Tabl
     );
     if let Some((sub, key)) = &app.v.ddetail {
         match docker_index(r, *sub, key) {
-            Some(i) => draw_docker_detail(f, r, *sub, i, parts[1]),
+            Some(i) => draw_docker_detail(f, app, r, *sub, i, parts[1]),
             None => f.render_widget(
                 Paragraph::new(format!(
                     "{key} is no longer there (it changed in the last scan). Esc to go back."
@@ -1119,6 +1151,56 @@ pub(super) fn draw_docker(f: &mut Frame, app: &App, area: Rect, state: &mut Tabl
         draw_docker_overview(f, r, parts[1]);
     } else {
         draw_docker_list(f, r, app.v.dsub, parts[1], state);
+    }
+}
+
+/// Walk a container's writable layer or a volume for the detail page.
+fn load_inside(app: &mut App, r: &Report, sub: usize, key: &str) {
+    let res = match sub {
+        D_CONTAINERS | D_LOGS => r
+            .containers
+            .iter()
+            .find(|c| c.name == key)
+            .ok_or_else(|| "gone".to_string())
+            .and_then(|c| crate::docker::upper_dir(c.runtime, &c.id).map_err(|e| format!("{e:#}")))
+            .and_then(|d| crate::docker::inside(&d, 8).map_err(|e| format!("{e:#}"))),
+        D_VOLUMES => r
+            .volumes
+            .iter()
+            .find(|v| v.name == key)
+            .ok_or_else(|| "gone".to_string())
+            .and_then(|v| crate::docker::inside(&v.mountpoint, 8).map_err(|e| format!("{e:#}"))),
+        _ => return,
+    };
+    app.v.inside.insert(key.to_string(), res);
+}
+
+fn inside_lines(
+    title: &str,
+    res: Option<&Result<Vec<(String, u64)>, String>>,
+    lines: &mut Vec<Line<'static>>,
+) {
+    lines.push(Line::from(""));
+    lines.push(Line::from(title.to_string()).style(Style::default().add_modifier(Modifier::BOLD)));
+    match res {
+        Some(Ok(v)) if v.is_empty() => lines.push(Line::from("  (empty)")),
+        Some(Ok(v)) => {
+            for (p, b) in v {
+                let indent = if p.matches('/').count() > 1 {
+                    "      "
+                } else {
+                    "  "
+                };
+                lines.push(Line::from(format!("{indent}{:>10}  {p}", human(*b as i64))));
+            }
+        }
+        Some(Err(e)) => lines.push(
+            Line::from(format!("  not available: {e}")).style(Style::default().fg(Color::DarkGray)),
+        ),
+        None => lines.push(
+            Line::from("  (open the page again to load)")
+                .style(Style::default().fg(Color::DarkGray)),
+        ),
     }
 }
 
@@ -1195,9 +1277,11 @@ pub(crate) fn docker_action(
             }
             // Its writable layer may hold the only copy of data: RISKY.
             Ok(Some((
-                vec![docker_run(
+                vec![runtime_run(
+                    c.runtime,
                     format!(
-                        "remove stopped container {} and files written inside it",
+                        "remove stopped {} container {} and files written inside it",
+                        crate::docker::program(c.runtime),
                         c.name
                     ),
                     &["rm", &c.id],
@@ -1220,8 +1304,13 @@ pub(crate) fn docker_action(
                 im.name.clone()
             };
             Ok(Some((
-                vec![docker_run(
-                    format!("remove unused image {}", im.name),
+                vec![runtime_run(
+                    im.runtime,
+                    format!(
+                        "remove unused {} image {}",
+                        crate::docker::program(im.runtime),
+                        im.name
+                    ),
                     &["image", "rm", &id],
                     im.unique,
                 )],
@@ -1234,8 +1323,13 @@ pub(crate) fn docker_action(
                 return Err(format!("volume {} is used by a container", v.name));
             }
             Ok(Some((
-                vec![docker_run(
-                    format!("delete unused volume {} (data is lost)", v.name),
+                vec![runtime_run(
+                    v.runtime,
+                    format!(
+                        "delete unused {} volume {} (data is lost)",
+                        crate::docker::program(v.runtime),
+                        v.name
+                    ),
                     &["volume", "rm", &v.name],
                     v.size,
                 )],
@@ -2055,6 +2149,7 @@ pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
                 }
                 KeyCode::Enter if app.v.dsub != D_OVERVIEW && app.v.dsub != D_STORAGE => {
                     if let Some(k) = docker_key(&r, app.v.dsub, app.sel[DOCKER]) {
+                        load_inside(app, &r, app.v.dsub, &k);
                         app.v.ddetail = Some((app.v.dsub, k));
                     }
                     true

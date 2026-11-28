@@ -523,7 +523,7 @@ pub fn allowed(item: &Item) -> Result<()> {
             None => {
                 // A command whose reach dux does not know may only run when
                 // nothing is protected.
-                anyhow::ensure!(
+                crate::refuse_unless!(
                     crate::protect::policy_from(Path::new(crate::protect::FILE))?.is_empty(),
                     "{program} has no known scope and a never-touch list is in effect; skipped"
                 );
@@ -540,7 +540,7 @@ pub fn allowed(item: &Item) -> Result<()> {
 /// Apply one action. Re-checks safety at run time, not only when planning.
 pub fn apply(item: &Item) -> Result<()> {
     allowed(item)?;
-    anyhow::ensure!(
+    crate::refuse_unless!(
         !Path::new(KILL_SWITCH).exists(),
         "actions disabled by {KILL_SWITCH}"
     );
@@ -564,7 +564,7 @@ pub fn apply(item: &Item) -> Result<()> {
                 "{} is no longer a regular file",
                 path.display()
             );
-            anyhow::ensure!(
+            crate::refuse_unless!(
                 !open_files().contains(&(m.dev(), m.ino())),
                 "{} is open; skipped",
                 path.display()
@@ -572,7 +572,7 @@ pub fn apply(item: &Item) -> Result<()> {
             std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))
         }
         Action::TailAndTruncate { path, keep } => {
-            anyhow::ensure!(
+            crate::refuse_unless!(
                 !is_binary_log(path),
                 "{} is a binary log; use journalctl --vacuum-* instead",
                 path.display()
@@ -615,6 +615,18 @@ pub fn system_path(p: &str) -> bool {
         "/var/lib/apt",
         "/var/lib/rpm",
         "/var/lib/systemd",
+        // Container runtimes and databases: clean these with their own tools.
+        "/var/lib/docker",
+        "/var/lib/containerd",
+        "/var/lib/containers",
+        "/var/lib/kubelet",
+        "/var/lib/etcd",
+        "/var/lib/mysql",
+        "/var/lib/postgresql",
+        "/var/lib/mongodb",
+        "/var/lib/redis",
+        "/var/lib/clickhouse",
+        "/var/lib/elasticsearch",
     ];
     let p = p.trim_end_matches('/');
     p.is_empty()
@@ -637,7 +649,7 @@ pub fn remove_user_path(path: &Path) -> Result<()> {
         path.to_string_lossy().into_owned(),
         real.to_string_lossy().into_owned(),
     ] {
-        anyhow::ensure!(
+        crate::refuse_unless!(
             !system_path(&crate::protect::normalize(&p)),
             "{p} is a system or top-level path; dux will not delete it"
         );
@@ -645,13 +657,13 @@ pub fn remove_user_path(path: &Path) -> Result<()> {
     let p = real.to_string_lossy().into_owned();
     let m = std::fs::symlink_metadata(&real)?;
     if m.is_dir() {
-        anyhow::ensure!(
+        crate::refuse_unless!(
             !has_mount_inside(&p)?,
             "{p} has a filesystem mounted inside it"
         );
-        std::fs::remove_dir_all(&real).with_context(|| format!("removing {p}"))
+        remove_dir_same_fs(&real).with_context(|| format!("removing {p}"))
     } else {
-        anyhow::ensure!(
+        crate::refuse_unless!(
             !open_files().contains(&(m.dev(), m.ino())),
             "{p} is open by a running process"
         );
@@ -715,16 +727,180 @@ pub fn remove_tree(path: &Path) -> Result<()> {
     );
     let real = real_location(path)?;
     let p = real.to_string_lossy().into_owned();
-    anyhow::ensure!(
+    crate::refuse_unless!(
         !system_path(&p),
         "{p} is a system or top-level path; dux will not delete it"
     );
-    anyhow::ensure!(
+    crate::refuse_unless!(
         !has_mount_inside(&p)?,
         "{} has a filesystem mounted inside it",
         path.display()
     );
-    std::fs::remove_dir_all(&real).with_context(|| format!("removing {p}"))
+    remove_dir_same_fs(&real).with_context(|| format!("removing {p}"))
+}
+
+/// Delete a folder tree without ever leaving its filesystem or following a
+/// symlink: every step goes through directory handles (openat/unlinkat with
+/// O_NOFOLLOW), so a folder swapped for a symlink, or a filesystem mounted
+/// inside while the delete runs, stops the delete instead of reaching
+/// another disk. Stops at the first such entry and reports it.
+pub fn remove_dir_same_fs(path: &Path) -> Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("/"),
+    };
+    let name = path.file_name().context("no folder name")?;
+    let cparent = CString::new(parent.as_os_str().as_bytes())?;
+    // SAFETY: valid NUL-terminated path; the fd is closed below.
+    let pfd = unsafe {
+        libc::open(
+            cparent.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    anyhow::ensure!(
+        pfd >= 0,
+        "opening {}: {}",
+        parent.display(),
+        std::io::Error::last_os_error()
+    );
+    let cname = CString::new(name.as_bytes())?;
+    // The mount the tree starts on, taken from the folder itself.
+    // SAFETY: pfd is open; cname is valid.
+    let fd = unsafe {
+        libc::openat(
+            pfd,
+            cname.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        let e = std::io::Error::last_os_error();
+        // SAFETY: closing our own fd.
+        unsafe { libc::close(pfd) };
+        anyhow::bail!("{} is not a real folder: {e}", path.display());
+    }
+    let mount = mount_of(fd);
+    // SAFETY: closing our own fd.
+    unsafe { libc::close(fd) };
+    let Some(mount) = mount else {
+        // SAFETY: closing our own fd.
+        unsafe { libc::close(pfd) };
+        anyhow::bail!("cannot identify the filesystem of {}", path.display());
+    };
+    let r = rm_at(pfd, &cname, mount, path, 0);
+    // SAFETY: closing our own fd.
+    unsafe { libc::close(pfd) };
+    r
+}
+
+/// Which mount an open directory is on: (device, mount id). The mount id
+/// (statx STATX_MNT_ID) also tells apart a bind mount from the same disk;
+/// kernels without it give 0 and only the device is compared.
+fn mount_of(fd: libc::c_int) -> Option<(u64, u64)> {
+    crate::util::fd_mount(fd)
+}
+
+fn rm_at(
+    parent: libc::c_int,
+    name: &std::ffi::CStr,
+    mount: (u64, u64),
+    shown: &Path,
+    depth: usize,
+) -> Result<()> {
+    use std::ffi::CStr;
+    anyhow::ensure!(
+        depth < 4096,
+        "{} is nested too deeply to delete safely",
+        shown.display()
+    );
+    // SAFETY: parent is an open directory fd; name is NUL-terminated.
+    let fd = unsafe {
+        libc::openat(
+            parent,
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        let e = std::io::Error::last_os_error();
+        return match e.raw_os_error() {
+            // Not a directory (a file, or a symlink, which is removed as a link).
+            Some(libc::ENOTDIR) | Some(libc::ELOOP) => {
+                // SAFETY: unlinking a name inside our open parent.
+                let rc = unsafe { libc::unlinkat(parent, name.as_ptr(), 0) };
+                anyhow::ensure!(
+                    rc == 0,
+                    "removing {}: {}",
+                    shown.display(),
+                    std::io::Error::last_os_error()
+                );
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!("opening {}: {e}", shown.display())),
+        };
+    }
+    if mount_of(fd) != Some(mount) {
+        // SAFETY: closing our own fd.
+        unsafe { libc::close(fd) };
+        anyhow::bail!(
+            "{} is on another filesystem (mounted during the delete); stopped there",
+            shown.display()
+        );
+    }
+    // List the entries first, then delete them, through this fd only.
+    let mut names: Vec<std::ffi::CString> = Vec::new();
+    {
+        // SAFETY: dup of our fd; fdopendir takes ownership of the copy.
+        let d = unsafe { libc::fdopendir(libc::dup(fd)) };
+        if d.is_null() {
+            // SAFETY: closing our own fd.
+            unsafe { libc::close(fd) };
+            anyhow::bail!(
+                "listing {}: {}",
+                shown.display(),
+                std::io::Error::last_os_error()
+            );
+        }
+        loop {
+            // SAFETY: d is a valid DIR*.
+            let e = unsafe { libc::readdir(d) };
+            if e.is_null() {
+                break;
+            }
+            // SAFETY: d_name is NUL-terminated within the dirent.
+            let n = unsafe { CStr::from_ptr((*e).d_name.as_ptr()) };
+            if n.to_bytes() != b"." && n.to_bytes() != b".." {
+                names.push(n.to_owned());
+            }
+        }
+        // SAFETY: closing the DIR* we opened.
+        unsafe { libc::closedir(d) };
+    }
+    let mut result = Ok(());
+    for n in &names {
+        let child = shown.join(std::ffi::OsStr::new(
+            std::str::from_utf8(n.to_bytes()).unwrap_or("?"),
+        ));
+        if let Err(e) = rm_at(fd, n, mount, &child, depth + 1) {
+            result = Err(e);
+            break;
+        }
+    }
+    // SAFETY: closing our own fd.
+    unsafe { libc::close(fd) };
+    result?;
+    // SAFETY: removing the now-empty directory inside our open parent.
+    let rc = unsafe { libc::unlinkat(parent, name.as_ptr(), libc::AT_REMOVEDIR) };
+    anyhow::ensure!(
+        rc == 0,
+        "removing {}: {}",
+        shown.display(),
+        std::io::Error::last_os_error()
+    );
+    Ok(())
 }
 
 /// Keep the last `keep` bytes in `<path>.dux-tail` and truncate the log in
@@ -778,6 +954,62 @@ pub fn tail_and_truncate(path: &Path, keep: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_fs_delete_removes_trees_and_never_follows_symlinks() {
+        let d = tmp("samefs");
+        let outside = d.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep"), b"k").unwrap();
+        let t = d.join("tree");
+        std::fs::create_dir_all(t.join("a/b/c")).unwrap();
+        std::fs::write(t.join("a/b/c/f"), b"x").unwrap();
+        std::fs::write(t.join("top"), b"y").unwrap();
+        std::os::unix::fs::symlink(&outside, t.join("a/link")).unwrap();
+        remove_dir_same_fs(&t).unwrap();
+        assert!(!t.exists());
+        assert!(
+            outside.join("keep").exists(),
+            "a symlink inside is removed as a link, never followed"
+        );
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn same_fs_delete_stops_at_a_mounted_filesystem() {
+        // Only meaningful as root with /dev/shm (tmpfs) available.
+        if unsafe { libc::geteuid() } != 0 || !Path::new("/dev/shm").is_dir() {
+            return;
+        }
+        let d = tmp("mountmid");
+        let t = d.join("tree");
+        std::fs::create_dir_all(t.join("sub/mnt")).unwrap();
+        std::fs::write(t.join("sub/file"), b"x").unwrap();
+        // A bind mount of a folder on the SAME disk: same device, other mount.
+        let src = d.join("elsewhere");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("precious"), b"p").unwrap();
+        let ok = std::process::Command::new("mount")
+            .args(["--bind"])
+            .arg(&src)
+            .arg(t.join("sub/mnt"))
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            let r = remove_dir_same_fs(&t);
+            let _ = std::process::Command::new("umount")
+                .arg(t.join("sub/mnt"))
+                .status();
+            assert!(r.is_err(), "must stop at the mount");
+            assert!(
+                src.join("precious").exists(),
+                "nothing on the other filesystem is deleted"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn tmp(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("dux-cleanup-{tag}-{}", std::process::id()));

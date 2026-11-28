@@ -457,7 +457,7 @@ pub fn redact_url(url: &str) -> String {
     }
 }
 
-fn toml_value(text: &str, section: &str, key: &str) -> Option<String> {
+pub(crate) fn toml_value(text: &str, section: &str, key: &str) -> Option<String> {
     let mut in_sec = section.is_empty();
     for line in text.lines() {
         let l = line.trim();
@@ -497,7 +497,7 @@ pub fn read_small(path: &std::path::Path, max: u64) -> Option<String> {
 }
 
 /// Join git-config backslash-newline continuations into logical lines.
-fn git_config_lines(text: &str) -> Vec<String> {
+pub(crate) fn git_config_lines(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     for line in text.lines() {
@@ -703,6 +703,43 @@ pub fn pp_plan(projects: &[Project], stale_days: u64, now: i64) -> Vec<Item> {
     }
     items.sort_by_key(|i| std::cmp::Reverse(i.frees));
     items
+}
+
+/// A plain name for a file whose path says little: a container's log, an
+/// image layer, the swap file. None when the path speaks for itself.
+pub fn describe(path: &str) -> Option<String> {
+    if path == "/swap.img" || path == "/swapfile" || path.ends_with("/swapfile") {
+        return Some("swap file".into());
+    }
+    if let Some(rest) = path.strip_prefix("/var/lib/docker/containers/") {
+        let id = rest.split('/').next().unwrap_or("");
+        if path.ends_with("-json.log") {
+            let name =
+                std::fs::read_to_string(format!("/var/lib/docker/containers/{id}/config.v2.json"))
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                    .and_then(|v| {
+                        v["Name"]
+                            .as_str()
+                            .map(|n| n.trim_start_matches('/').to_string())
+                    });
+            return Some(match name {
+                Some(n) => format!("log of container {n}"),
+                None => format!("log of container {}", &id[..id.len().min(12)]),
+            });
+        }
+    }
+    if path.contains("/io.containerd.snapshotter.") || path.starts_with("/var/lib/docker/overlay2/")
+    {
+        return Some("inside a container or image layer".into());
+    }
+    if path.contains("/io.containerd.content.v1.content/blobs/") {
+        return Some("downloaded image layer (containerd)".into());
+    }
+    if path.starts_with("/var/lib/containers/storage/") {
+        return Some("Podman image or container layer".into());
+    }
+    None
 }
 
 #[cfg(test)]

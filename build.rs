@@ -6,10 +6,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::process::Command;
 
-const SOURCE_TREE_EXCLUDES: &[&[u8]] = &[
-    b"PRODUCTION_READINESS_AUDIT.md",
-    b".claude/settings.local.json",
-];
+const SOURCE_TREE_EXCLUDES: &[&[u8]] = &[b".claude/settings.local.json"];
 
 fn source_tree_sha256() -> Option<String> {
     let output = Command::new("git")

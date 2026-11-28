@@ -150,7 +150,13 @@ pub fn catalog_sizes(tree: &Tree) -> Vec<(&'static Culprit, String, u64)> {
             out.push((c, c.path.to_string(), n.total_bytes));
         }
     }
-    if let Some(home) = root.is_empty().then(|| tree.root.find("home")).flatten() {
+    // Per-user caches, whether /home is part of / or its own filesystem.
+    let home = match root {
+        "" => tree.root.find("home"),
+        "/home" => Some(&tree.root),
+        _ => None,
+    };
+    if let Some(home) = home {
         for u in &home.children {
             if let Some(cache) = u.children.iter().find(|c| c.name == ".cache") {
                 out.push((
@@ -684,6 +690,21 @@ mod tests {
         // A quiet baseline walk with nothing growing sends nothing.
         assert!(
             attribution_alert("h", "/", Reason::Baseline, &t, &[], Some(3 << 30), "").is_none()
+        );
+    }
+
+    #[test]
+    fn per_user_caches_when_home_is_its_own_filesystem() {
+        let cache = node(".cache", 9 << 20, vec![]);
+        let bob = node("bob", 0, vec![cache]);
+        let t = tree("/home", node("/home", 0, vec![bob]));
+        let found = catalog_sizes(&t);
+        assert!(
+            found
+                .iter()
+                .any(|(_, p, b)| p == "/home/bob/.cache" && *b == 9 << 20),
+            "{:?}",
+            found.iter().map(|(_, p, _)| p).collect::<Vec<_>>()
         );
     }
 

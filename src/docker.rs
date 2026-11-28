@@ -34,7 +34,7 @@ pub fn parse_si(s: &str) -> u64 {
 /// Docker prints labels as `k=v,k=v`, but a value can itself contain
 /// commas (compose `config_files` lists several files): a segment without
 /// `=` belongs to the previous value.
-fn labels_map(labels: &str) -> BTreeMap<String, String> {
+pub(crate) fn labels_map(labels: &str) -> BTreeMap<String, String> {
     let mut m: BTreeMap<String, String> = BTreeMap::new();
     let mut last: Option<String> = None;
     for seg in labels.split(',') {
@@ -68,6 +68,8 @@ fn list(s: &str) -> Vec<String> {
 
 #[derive(Clone, Debug, Default)]
 pub struct Image {
+    /// "docker" or "podman" (empty means docker).
+    pub runtime: &'static str,
     pub name: String,
     pub id: String,
     pub size: u64,
@@ -79,9 +81,12 @@ pub struct Image {
 
 #[derive(Clone, Debug, Default)]
 pub struct Container {
+    pub runtime: &'static str,
     pub name: String,
     pub id: String,
     pub image: String,
+    /// Image ID when the runtime reports it (Podman does).
+    pub image_id: String,
     pub state: String,
     pub status: String,
     pub writable: u64,
@@ -111,6 +116,7 @@ impl Container {
 
 #[derive(Clone, Debug, Default)]
 pub struct Volume {
+    pub runtime: &'static str,
     pub name: String,
     pub size: u64,
     pub links: u32,
@@ -191,7 +197,8 @@ impl Report {
 
     pub fn image_of(&self, c: &Container) -> Option<usize> {
         self.images.iter().position(|i| {
-            i.name == c.image
+            (!c.image_id.is_empty() && i.id == c.image_id && i.runtime == c.runtime)
+                || i.name == c.image
                 || i.name == format!("{}:latest", c.image)
                 || (!i.id.is_empty()
                     && (c.image == i.id
@@ -331,6 +338,7 @@ pub fn parse_df(text: &str) -> Result<Report> {
         let repo = s(i, "Repository");
         let tag = s(i, "Tag");
         r.images.push(Image {
+            runtime: "docker",
             name: if repo == "<none>" || repo.is_empty() {
                 format!(
                     "<none> {}",
@@ -355,6 +363,7 @@ pub fn parse_df(text: &str) -> Result<Report> {
         let labels = labels_map(&s(c, "Labels"));
         let lab = |k: &str| labels.get(k).filter(|v| !v.is_empty()).cloned();
         r.containers.push(Container {
+            runtime: "docker",
             name: s(c, "Names"),
             id: s(c, "ID"),
             image: s(c, "Image"),
@@ -380,6 +389,7 @@ pub fn parse_df(text: &str) -> Result<Report> {
     for vol in v["Volumes"].as_array().into_iter().flatten() {
         let labels = s(vol, "Labels");
         r.volumes.push(Volume {
+            runtime: "docker",
             name: s(vol, "Name"),
             size: parse_si(&s(vol, "Size")),
             links: s(vol, "Links").parse().unwrap_or(0),
@@ -413,9 +423,274 @@ fn docker(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Collect the full report from the running Docker daemon.
+/// What takes the space inside a folder (a container's writable layer or a
+/// volume): the biggest top-level folders, each with its biggest sub-folders,
+/// as paths relative to the folder ("/tmp", "/var/log/app"), biggest first.
+pub fn inside(path: &str, top: usize) -> Result<Vec<(String, u64)>> {
+    let t = crate::walker::walk(path, 2)?;
+    let mut first: Vec<&crate::walker::DirNode> = t.root.children.iter().collect();
+    first.sort_by_key(|c| std::cmp::Reverse(c.total_bytes));
+    let mut out = Vec::new();
+    for c in first.into_iter().filter(|c| c.total_bytes > 0).take(top) {
+        out.push((format!("/{}", c.name), c.total_bytes));
+        let mut kids: Vec<&crate::walker::DirNode> = c.children.iter().collect();
+        kids.sort_by_key(|k| std::cmp::Reverse(k.total_bytes));
+        for k in kids
+            .into_iter()
+            .filter(|k| k.total_bytes >= c.total_bytes / 10 && k.total_bytes > 0)
+            .take(3)
+        {
+            out.push((format!("/{}/{}", c.name, k.name), k.total_bytes));
+        }
+    }
+    Ok(out)
+}
+
+/// The folder holding a container's writable layer (overlay "upper" dir).
+pub fn upper_dir(runtime: &str, id: &str) -> Result<String> {
+    let args = ["inspect", "--format", "{{.GraphDriver.Data.UpperDir}}", id];
+    let classic = if runtime == "podman" {
+        podman(&args)
+    } else {
+        docker(&args)
+    };
+    if let Ok(out) = classic {
+        let d = out.trim().to_string();
+        if !d.is_empty() && d != "<no value>" {
+            return Ok(d);
+        }
+    }
+    // Docker with the containerd image store has no GraphDriver: ask
+    // containerd for the container's snapshot. `ctr ... mounts` only prints
+    // the mount command, it mounts nothing.
+    anyhow::ensure!(
+        runtime != "podman",
+        "Podman did not report a writable folder"
+    );
+    let out = Command::new("ctr")
+        .args([
+            "-n",
+            "moby",
+            "snapshots",
+            "--snapshotter",
+            "overlayfs",
+            "mounts",
+            "/nonexistent",
+            id,
+        ])
+        .output()
+        .context("running ctr (containerd image store)")?;
+    anyhow::ensure!(
+        out.status.success(),
+        "containerd has no snapshot for this container"
+    );
+    upperdir_from_mount(&String::from_utf8_lossy(&out.stdout))
+        .context("the storage driver does not expose a writable folder")
+}
+
+/// The `upperdir=` of an overlay mount command line.
+pub(crate) fn upperdir_from_mount(cmd: &str) -> Option<String> {
+    cmd.split(['=', ','])
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find(|w| w[0].ends_with("upperdir"))
+        .map(|w| w[1].trim().to_string())
+        .filter(|d| d.starts_with('/'))
+}
+
+/// Plain advice for a container that writes a lot into its own layer.
+pub fn layer_advice(c: &Container, inside: &[(String, u64)]) -> Option<String> {
+    let (top, bytes) = inside.iter().find(|(p, _)| p.matches('/').count() == 1)?;
+    // Name the sub-folder when it holds nearly all of it (/root/.cache, not /root).
+    let top = inside
+        .iter()
+        .find(|(p, b)| p.starts_with(&format!("{top}/")) && *b * 10 >= *bytes * 8)
+        .map_or(top, |(p, _)| p);
+    (c.writable >= 50 << 20 && *bytes >= 20 << 20).then(|| {
+        format!(
+            "{} writes {} into its own layer under {top}. That data is lost when the container is recreated and cannot be cleaned safely from outside. Mount a volume at {top} (or send logs to stdout or a log driver).",
+            c.name,
+            crate::util::human(*bytes as i64)
+        )
+    })
+}
+
+/// The command line tool for a runtime ("podman" or "docker").
+pub fn program(runtime: &str) -> &'static str {
+    if runtime == "podman" {
+        "podman"
+    } else {
+        "docker"
+    }
+}
+
+fn has(cmd: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(cmd).is_file()))
+}
+
+/// Parse `podman ps -a --size`, `podman images` and `podman volume ls`
+/// (all `--format json`) into report entries tagged "podman".
+pub fn parse_podman(ps: &str, images: &str, volumes: &str) -> Result<Report> {
+    let mut r = Report::default();
+    let arr = |t: &str| -> Result<Vec<Value>> {
+        let v: Value = serde_json::from_str(t.trim()).context("parsing podman output")?;
+        Ok(v.as_array().cloned().unwrap_or_default())
+    };
+    let st = |x: &Value, k: &str| x[k].as_str().unwrap_or("").to_string();
+    for i in arr(images)? {
+        let name = i["Names"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                format!(
+                    "<none> {}",
+                    st(&i, "Id").chars().take(12).collect::<String>()
+                )
+            });
+        let size = i["Size"].as_u64().unwrap_or(0);
+        let shared = i["SharedSize"].as_u64().unwrap_or(0);
+        r.images.push(Image {
+            runtime: "podman",
+            name,
+            id: st(&i, "Id"),
+            size,
+            unique: size.saturating_sub(shared),
+            shared,
+            containers: i["Containers"].as_u64().unwrap_or(0) as u32,
+            created: i["CreatedAt"].as_str().unwrap_or("").to_string(),
+        });
+    }
+    for c in arr(ps)? {
+        let labels: BTreeMap<String, String> = c["Labels"]
+            .as_object()
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let lab = |k: &str| labels.get(k).filter(|v| !v.is_empty()).cloned();
+        let strs = |k: &str| -> Vec<String> {
+            c[k].as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        r.containers.push(Container {
+            runtime: "podman",
+            name: strs("Names").first().cloned().unwrap_or_default(),
+            id: st(&c, "Id"),
+            image: st(&c, "Image"),
+            image_id: st(&c, "ImageID"),
+            state: st(&c, "State"),
+            status: st(&c, "Status"),
+            writable: c["Size"]["rwSize"].as_u64().unwrap_or(0),
+            project: lab("com.docker.compose.project").or_else(|| lab("io.podman.compose.project")),
+            service: lab("com.docker.compose.service"),
+            working_dir: lab("com.docker.compose.project.working_dir"),
+            config_files: lab("com.docker.compose.project.config_files")
+                .map(|f| list(&f))
+                .unwrap_or_default(),
+            command: strs("Command").join(" "),
+            created: st(&c, "CreatedAt"),
+            running_for: st(&c, "CreatedAt"),
+            ports: c["Ports"]
+                .as_array()
+                .map(|a| format!("{} port mapping(s)", a.len()))
+                .unwrap_or_default(),
+            networks: strs("Networks"),
+            mounts: strs("Mounts"),
+            ..Container::default()
+        });
+    }
+    for v in arr(volumes)? {
+        let labels = v["Labels"].as_object();
+        let lab = |k: &str| {
+            labels
+                .and_then(|m| m.get(k))
+                .and_then(|x| x.as_str())
+                .filter(|x| !x.is_empty())
+                .map(str::to_string)
+        };
+        r.volumes.push(Volume {
+            runtime: "podman",
+            name: st(&v, "Name"),
+            size: 0,
+            links: v["MountCount"].as_u64().unwrap_or(0) as u32,
+            project: lab("com.docker.compose.project"),
+            compose_name: lab("com.docker.compose.volume"),
+            driver: st(&v, "Driver"),
+            mountpoint: st(&v, "Mountpoint"),
+        });
+    }
+    Ok(r)
+}
+
+fn podman(args: &[&str]) -> Result<String> {
+    let out = Command::new("podman")
+        .args(args)
+        .output()
+        .context("running podman")?;
+    anyhow::ensure!(
+        out.status.success(),
+        "podman {}: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Collect Podman's containers, images and volumes (root storage).
+fn collect_podman() -> Result<Report> {
+    let mut r = parse_podman(
+        &podman(&["ps", "-a", "--size", "--format", "json"])?,
+        &podman(&["images", "--format", "json"])?,
+        &podman(&["volume", "ls", "--format", "json"])?,
+    )?;
+    for v in &mut r.volumes {
+        if let Ok(t) = crate::walker::walk(&v.mountpoint, 2) {
+            v.size = t.root.total_bytes;
+        }
+    }
+    // Containers are "used" by a volume when it is listed in their mounts.
+    for c in &mut r.containers {
+        let log = format!(
+            "/var/lib/containers/storage/overlay-containers/{}/userdata/ctr.log",
+            c.id
+        );
+        if let Ok(m) = std::fs::symlink_metadata(&log) {
+            use std::os::unix::fs::MetadataExt;
+            c.log_bytes = m.blocks() * 512;
+            c.log_path = log;
+        }
+    }
+    Ok(r)
+}
+
+/// Collect the full report from Docker and, when installed, Podman.
 pub fn collect() -> Result<Report> {
-    let mut r = parse_df(&docker(&["system", "df", "-v", "--format", "{{json .}}"])?)?;
+    let docker_report =
+        docker(&["system", "df", "-v", "--format", "{{json .}}"]).and_then(|t| parse_df(&t));
+    let mut r = match docker_report {
+        Ok(r) => r,
+        Err(e) if !has("podman") => return Err(e),
+        Err(_) => Report::default(),
+    };
+    for c in &mut r.containers {
+        c.runtime = "docker";
+    }
+    for i in &mut r.images {
+        i.runtime = "docker";
+    }
+    for v in &mut r.volumes {
+        v.runtime = "docker";
+    }
     r.root_dir = docker(&["info", "--format", "{{.DockerRootDir}}"])
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "/var/lib/docker".into());
@@ -436,6 +711,23 @@ pub fn collect() -> Result<Report> {
                         format!("{}/{}", root.trim_end_matches('/'), c.name),
                         c.total_bytes,
                     ));
+                }
+            }
+        }
+    }
+    if has("podman") {
+        if let Ok(p) = collect_podman() {
+            r.containers.extend(p.containers);
+            r.images.extend(p.images);
+            r.volumes.extend(p.volumes);
+            if std::path::Path::new("/var/lib/containers/storage").is_dir() {
+                if let Ok(t) = crate::walker::walk("/var/lib/containers/storage", 4) {
+                    for c in &t.root.children {
+                        r.on_disk.push((
+                            format!("/var/lib/containers/storage/{}", c.name),
+                            c.total_bytes,
+                        ));
+                    }
                 }
             }
         }
@@ -540,6 +832,52 @@ mod tests {
       {"Labels":"com.docker.compose.project=shop,com.docker.compose.volume=db","Links":"1","Name":"shop_db","Size":"2.5GB"},
       {"Labels":"","Links":"0","Name":"orphan","Size":"300MB"}],
      "BuildCache":[{"ID":"b1","InUse":false,"Size":"400MB"},{"ID":"b2","InUse":true,"Size":"100MB"}]}"#;
+
+    #[test]
+    fn upperdir_is_read_from_a_containerd_mount_line() {
+        let l = "mount -t overlay overlay /x -o workdir=/var/lib/containerd/s/876/work,upperdir=/var/lib/containerd/s/876/fs,lowerdir=/a:/b";
+        assert_eq!(
+            upperdir_from_mount(l).as_deref(),
+            Some("/var/lib/containerd/s/876/fs")
+        );
+        assert_eq!(upperdir_from_mount("nothing here"), None);
+    }
+
+    #[test]
+    fn inside_lists_the_biggest_folders_with_advice() {
+        let d = std::env::temp_dir().join(format!("dux-inside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("tmp/cache")).unwrap();
+        std::fs::create_dir_all(d.join("etc")).unwrap();
+        std::fs::write(d.join("tmp/cache/blob"), vec![1u8; 30 << 20]).unwrap();
+        std::fs::write(d.join("etc/conf"), b"x").unwrap();
+        let v = inside(d.to_str().unwrap(), 8).unwrap();
+        assert_eq!(v[0].0, "/tmp");
+        assert!(v.iter().any(|(p, _)| p == "/tmp/cache"));
+        let c = Container {
+            name: "app".into(),
+            writable: 60 << 20,
+            ..Container::default()
+        };
+        let a = layer_advice(&c, &v).unwrap();
+        assert!(a.contains("Mount a volume at /tmp/cache"), "{a}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn podman_json_is_parsed_and_linked() {
+        let ps = r#"[{"Names":["web"],"Id":"abc","Image":"docker.io/library/nginx:alpine","ImageID":"img1","State":"running","Status":"Up","Size":{"rwSize":12252},"Mounts":["pvol"],"Labels":{"com.docker.compose.project":"shop"},"Networks":["podman"],"Command":["nginx","-g"],"CreatedAt":"1 hour ago"}]"#;
+        let images = r#"[{"Names":["docker.io/library/nginx:alpine"],"Id":"img1","Size":63713880,"SharedSize":0,"Containers":1,"CreatedAt":"2 weeks ago"}]"#;
+        let vols = r#"[{"Name":"pvol","Driver":"local","Mountpoint":"/var/lib/containers/storage/volumes/pvol/_data","Labels":{},"MountCount":1}]"#;
+        let r = parse_podman(ps, images, vols).unwrap();
+        assert_eq!(r.containers[0].runtime, "podman");
+        assert_eq!(r.containers[0].writable, 12252);
+        assert_eq!(r.users_of_image(0), vec![0]);
+        assert_eq!(r.users_of_volume(0), vec![0]);
+        assert_eq!(r.stacks()[0].name, "shop");
+        assert_eq!(program("podman"), "podman");
+        assert_eq!(program(""), "docker");
+    }
 
     #[test]
     fn labels_with_commas_in_values_and_stacks() {

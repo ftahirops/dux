@@ -292,6 +292,19 @@ fn walk_dir(ctx: &Ctx, fd: libc::c_int, path: &[u8], name: String, self_blocks: 
         if let Some(p) = &ctx.opts.progress {
             p.fetch_add(1, Ordering::Relaxed);
         }
+        // A known mount point is skipped by name, before any stat: looking up
+        // a dead network mount (NFS, CIFS) would block this thread forever.
+        if !ctx.mount_points.is_empty() {
+            let mut child = path.to_vec();
+            if child != b"/" {
+                child.push(b'/');
+            }
+            child.extend_from_slice(ename.to_bytes());
+            if ctx.mount_points.contains(&child) {
+                node.skipped_mounts += 1;
+                continue;
+            }
+        }
         let Some(st) = stat_at(fd, &ename) else {
             node.errors += 1;
             ctx.errors.fetch_add(1, Ordering::Relaxed);

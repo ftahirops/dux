@@ -139,7 +139,16 @@ impl Latency {
             if let Some((pi, pm)) = self.prev.insert(name.to_string(), (ios, ms)) {
                 let dio = ios.saturating_sub(pi);
                 if dio < 50 {
-                    continue; // too few requests to judge
+                    // A quiet disk is not a slow disk: report Ok so an earlier
+                    // latency alert can recover instead of staying stuck.
+                    out.push(Finding {
+                        key: format!("latency:{name}"),
+                        level: Level::Ok,
+                        value: 0.0,
+                        title: format!("{name} latency back to normal (disk is quiet)"),
+                        body: format!("only {dio} requests in the last minute"),
+                    });
+                    continue;
                 }
                 let avg = ms.saturating_sub(pm) as f64 / dio as f64;
                 let level = if avg >= crit_ms {

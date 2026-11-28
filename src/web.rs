@@ -219,12 +219,12 @@ pub fn state_json(
                 "volumes": s.volumes.iter().map(|&v| d.volumes[v].name.clone()).collect::<Vec<_>>(),
                 "writable": s.writable, "logs": s.logs, "image_bytes": s.image_bytes, "volume_bytes": s.volume_bytes, "total": s.total(),
             })).collect::<Vec<_>>(),
-            "containers": d.containers.iter().map(|c| json!({"name": c.name, "id": c.id, "image": c.image, "state": c.state, "status": c.status, "running": c.running(),
+            "containers": d.containers.iter().map(|c| json!({"runtime": crate::docker::program(c.runtime), "name": c.name, "id": c.id, "image": c.image, "state": c.state, "status": c.status, "running": c.running(),
                 "writable": c.writable, "logs": c.log_bytes, "log_path": c.log_path, "project": c.project, "service": c.service, "working_dir": c.working_dir,
                 "command": c.command, "created": c.created, "ports": c.ports, "networks": c.networks, "mounts": c.mounts, "health": c.health})).collect::<Vec<_>>(),
-            "images": d.images.iter().enumerate().map(|(i, im)| json!({"name": im.name, "id": im.id, "size": im.size, "unique": im.unique, "shared": im.shared,
+            "images": d.images.iter().enumerate().map(|(i, im)| json!({"runtime": crate::docker::program(im.runtime), "name": im.name, "id": im.id, "size": im.size, "unique": im.unique, "shared": im.shared,
                 "containers": im.containers, "created": im.created, "used_by": names(image_users[i].clone())})).collect::<Vec<_>>(),
-            "volumes": d.volumes.iter().enumerate().map(|(i, v)| json!({"name": v.name, "compose_name": v.compose_name, "size": v.size, "links": v.links,
+            "volumes": d.volumes.iter().enumerate().map(|(i, v)| json!({"runtime": crate::docker::program(v.runtime), "name": v.name, "compose_name": v.compose_name, "size": v.size, "links": v.links,
                 "project": v.project, "driver": v.driver, "mountpoint": v.mountpoint, "used_by": names(d.users_of_volume(i))})).collect::<Vec<_>>(),
             "on_disk": d.on_disk.iter().map(|(p, b)| json!({"path": p, "bytes": b})).collect::<Vec<_>>(),
         })
@@ -584,6 +584,39 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
                 json!({"rows": rows, "file": crate::cleanup::AUDIT_LOG}),
             );
         }
+        ("GET", "/api/inside") => {
+            // Only containers and volumes in the current scan, by name.
+            let kind = query_param(&req.query, "kind").unwrap_or_default();
+            let name = percent_decode(&query_param(&req.query, "name").unwrap_or_default());
+            let g = srv.snapshot();
+            let r = g.as_ref().and_then(|g| g.docker.as_ref());
+            let res = match (kind.as_str(), r) {
+                ("container", Some(r)) => r
+                    .containers
+                    .iter()
+                    .find(|c| c.name == name)
+                    .ok_or_else(|| anyhow::anyhow!("no such container"))
+                    .and_then(|c| {
+                        let d = crate::docker::upper_dir(c.runtime, &c.id)?;
+                        let v = crate::docker::inside(&d, 8)?;
+                        Ok((v.clone(), crate::docker::layer_advice(c, &v)))
+                    }),
+                ("volume", Some(r)) => r
+                    .volumes
+                    .iter()
+                    .find(|v| v.name == name)
+                    .ok_or_else(|| anyhow::anyhow!("no such volume"))
+                    .and_then(|v| Ok((crate::docker::inside(&v.mountpoint, 8)?, None))),
+                _ => Err(anyhow::anyhow!("unknown target")),
+            };
+            match res {
+                Ok((v, advice)) => api_json(
+                    &mut s,
+                    json!({"rows": v.iter().map(|(p, b)| json!({"path": p, "bytes": b})).collect::<Vec<_>>(), "advice": advice}),
+                ),
+                Err(e) => api_json(&mut s, json!({"error": format!("{e:#}")})),
+            }
+        }
         ("GET", "/api/logtail") => {
             // Only files that are in dux's own log list can be read here.
             let p = percent_decode(&query_param(&req.query, "path").unwrap_or_default());
@@ -732,7 +765,8 @@ if(dsub==='Containers'||dsub==='Logs'){const list=dsub==='Logs'?d.containers.fil
 left=table(dsub==='Logs'?['size','container','stack','state','log file']:['container','state','stack','uses','writable','log','mounts','image'],list.map(c=>({cls:isSel('c:'+c.name)+(c.running?'':' dim'),onclick:pick('c:'+c.name),
 cells:dsub==='Logs'?[H(c.logs),c.name,c.project||'-',c.state,c.log_path]:[c.name,c.state,c.project||'-',H(c.writable+c.logs),H(c.writable),H(c.logs),c.mounts.length,c.image]})));
 const c=d.containers.find(x=>'c:'+x.name===sel);if(c){const mounts=el('div');mounts.appendChild(el('h3','Mounts'));mounts.appendChild(table(['mount','size','on disk'],c.mounts.map(m=>{const exact=d.volumes.find(x=>x.name===m),pre=m.endsWith('…')?d.volumes.filter(x=>x.name.startsWith(m.slice(0,-1))):[],vol=exact||(pre.length===1?pre[0]:null);return vol?['volume '+(vol.compose_name||vol.name),H(vol.size),vol.mountpoint]:[m,'','bind mount']})));
-mounts.appendChild(el('pre','docker logs --tail 50 '+c.name+'\ndocker inspect '+c.name));
+mounts.appendChild(el('pre',(c.runtime||'docker')+' logs --tail 50 '+c.name+'\n'+(c.runtime||'docker')+' inspect '+c.name));
+mounts.appendChild(insideBox('container',c.name,'Inside its writable layer (what it writes into itself)'));
 const b=[];if(c.logs>10*1048576)b.push({label:'Truncate log',cls:'CAUTION',run:()=>act({kind:'container',name:c.name,act:'truncate'},'Truncate the log of '+c.name+' (its last 10 MiB is kept aside)',false,c.logs-10*1048576)});
 if(!c.running)b.push({label:'Remove container (RISKY)',cls:'RISKY',run:()=>act({kind:'container',name:c.name,act:'remove'},'Remove stopped container '+c.name+' and the files written inside it (not its volumes). Its writable layer may hold the only copy of data.',true,c.writable+c.logs)});
 right=panel('Container '+c.name,[['id',c.id],['state',c.state+' · '+c.status+(c.health?' · health '+c.health:'')],['stack',(c.project||'-')+' · service '+(c.service||'-')],['source',c.working_dir],['image',c.image],['command',c.command],['created',c.created],['ports',c.ports],['networks',c.networks.join(', ')],['disk','writable '+H(c.writable)+' · log '+H(c.logs)],['log file',c.log_path]],b,mounts)}}
@@ -740,12 +774,16 @@ if(dsub==='Images'){left=table(['image','size','unique','shared','used by','crea
 const i=d.images.find(x=>'i:'+x.name===sel);if(i){const used=i.used_by.length>0||i.containers>0;right=panel('Image '+i.name,[['id',i.id],['size',H(i.size)+' · unique '+H(i.unique)+' · shared '+H(i.shared)],['created',i.created],['used by',used?(i.used_by.join(', ')||i.containers+' container(s)'):'no container: unused']],
 used?[]:[{label:'Remove image',cls:'CAUTION',run:()=>act({kind:'image',name:i.name,act:'remove'},'Remove unused image '+i.name+' (docker pull brings it back)',false,i.unique)}])}}
 if(dsub==='Volumes'){left=table(['volume','size','stack','used by','on disk'],d.volumes.map(x=>({cls:isSel('v:'+x.name)+(x.used_by.length||x.links?'':' dim'),onclick:pick('v:'+x.name),cells:[x.compose_name||x.name.slice(0,28),H(x.size),x.project||'-',x.used_by.length?x.used_by.join(', '):(x.links?x.links+' container(s)':'UNUSED'),x.mountpoint]})));
-const x=d.volumes.find(y=>'v:'+y.name===sel);if(x){const used=x.used_by.length>0||x.links>0;right=panel('Volume '+(x.compose_name||x.name),[['name',x.name],['stack',x.project],['size',H(x.size)],['driver',x.driver],['on disk',x.mountpoint],['mounted by',used?x.used_by.join(', ')||x.links+' container(s)':'no container: unused']],
-used?[]:[{label:'Delete volume (RISKY)',cls:'RISKY',run:()=>act({kind:'volume',name:x.name,act:'remove'},'Delete unused volume '+x.name+'. It may hold a database or uploads.',true,x.size)}])}}
+const x=d.volumes.find(y=>'v:'+y.name===sel);if(x){const used=x.used_by.length>0||x.links>0;const vin=el('div');vin.appendChild(insideBox('volume',x.name,'Inside the volume'));right=panel('Volume '+(x.compose_name||x.name),[['name',x.name],['stack',x.project],['size',H(x.size)],['driver',x.driver],['on disk',x.mountpoint],['mounted by',used?x.used_by.join(', ')||x.links+' container(s)':'no container: unused']],
+used?[]:[{label:'Delete volume (RISKY)',cls:'RISKY',run:()=>act({kind:'volume',name:x.name,act:'remove'},'Delete unused volume '+x.name+'. It may hold a database or uploads.',true,x.size)}],vin)}}
 if(dsub==='Storage'){const what=p=>p.endsWith('/overlay2')?'image layers and container writable layers':p.endsWith('/volumes')?'volumes':p.endsWith('/containers')?'container config and json logs':p.endsWith('/buildkit')?'build cache':p.includes('snapshot')?'containerd snapshots (image layers)':p.includes('content')?'containerd content store':'';
 left=table(['size','folder','what it holds'],d.on_disk.map(x=>[H(x.bytes),x.path,what(x.path)]));
 right=panel('Build cache',[['size',H(d.build_cache)],['reclaimable',H(d.build_cache_reclaimable)]],d.build_cache_reclaimable>0?[{label:'Prune build cache',cls:'SAFE',run:()=>act({kind:'storage',name:'',act:'prune'},'Prune Docker build cache unused for 7 days',false,d.build_cache_reclaimable)}]:[])}
 v.appendChild(split(left,right))}
+// "What's inside" a container layer or volume, loaded on demand.
+function insideBox(kind,name,title){const box=el('div');box.appendChild(el('h3',title));const p=el('p','loading...','muted');box.appendChild(p);
+api('/api/inside?kind='+kind+'&name='+encodeURIComponent(name)).then(r=>{p.remove();if(r.error){box.appendChild(el('p','not available: '+r.error,'muted'));return}
+box.appendChild(table(['size','folder'],r.rows.map(x=>[H(x.bytes),(x.path.split('/').length>2?'    ':'')+x.path])));if(r.advice)box.appendChild(el('p',r.advice,'warn'))});return box}
 // ---- Logs
 function logGroups(){const m=new Map();S.logs.forEach(l=>{const k=l.category+'\u001f'+l.owner;if(!m.has(k))m.set(k,{key:k,category:l.category,owner:l.owner,files:[],total:0,rotated:0,newest:0});const g=m.get(k);g.files.push(l);g.total+=l.bytes;if(l.rotated)g.rotated+=l.bytes;g.newest=Math.max(g.newest,l.mtime)});return[...m.values()].sort((a,b)=>b.total-a.total)}
 function renderLogs(v){const groups=logGroups(),rows=[];const total=S.logs.reduce((a,l)=>a+l.bytes,0);
