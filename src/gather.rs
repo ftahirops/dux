@@ -109,7 +109,7 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
     };
     let opts = WalkOptions {
         filter: Some(Box::new(|f: &FileView| {
-            (f.bytes >= 1 << 20 && insight::is_log(f.dir, f.name)) || f.bytes >= 50 << 20
+            (f.bytes >= 10 << 20 && insight::is_log(f.dir, f.name)) || f.bytes >= 50 << 20
         })),
         max_found: 300_000,
         progress,
@@ -118,7 +118,7 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
         Ok((tree, found)) => {
             let (logs, big): (Vec<FoundFile>, Vec<FoundFile>) = found.into_iter().partition(|f| {
                 let (dir, name) = f.path.rsplit_once('/').unwrap_or(("", &f.path));
-                f.bytes >= 1 << 20 && insight::is_log(dir.as_bytes(), name.as_bytes())
+                f.bytes >= 10 << 20 && insight::is_log(dir.as_bytes(), name.as_bytes())
             });
             g.logs = insight::logs_from_found(logs);
             g.journal_bytes = (root == "/").then(cleanup::journal_usage).flatten();
@@ -227,7 +227,9 @@ mod tests {
         std::fs::write(d.join("p/package.json"), b"{}").unwrap();
         std::fs::write(d.join("p/node_modules/x/a.js"), vec![1u8; 2 << 20]).unwrap();
         std::fs::create_dir_all(d.join("logs")).unwrap();
-        std::fs::write(d.join("logs/app.log.1"), vec![1u8; 2 << 20]).unwrap();
+        std::fs::write(d.join("logs/app.log.1"), vec![1u8; 11 << 20]).unwrap();
+        // Under the 10 MiB floor (spec A7.1): not listed.
+        std::fs::write(d.join("logs/small.log"), vec![1u8; 2 << 20]).unwrap();
         let g = gather(d.to_str().unwrap(), 2, Some(Arc::new(AtomicU64::new(0))));
         assert!(g.tree.is_some());
         assert_eq!(g.logs.len(), 1);

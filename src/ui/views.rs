@@ -1367,12 +1367,31 @@ pub fn log_owner(l: &LogFile, projects: &[Project]) -> (&'static str, String) {
     if p.contains("/journal/") {
         return ("Journal", "systemd-journald".into());
     }
+    if let Some((_, rest)) = p.split_once("/.pm2/logs/") {
+        let base = rest.trim_end_matches(".log");
+        let base = base.split("__").next().unwrap_or(base);
+        let app = ["-out", "-error", "-err"]
+            .iter()
+            .find_map(|s| base.strip_suffix(s))
+            .unwrap_or(base);
+        return ("pm2", app.to_string());
+    }
+    let dotnet = l
+        .writer
+        .as_deref()
+        .is_some_and(|w| w.split(' ').nth(1) == Some("dotnet"));
+    let app = if dotnet { ".NET" } else { "App" };
     if let Some(proj) = projects
         .iter()
         .find(|x| p.starts_with(&format!("{}/", x.path)))
     {
-        return ("App", proj.name.clone());
+        let dn = dotnet || proj.kinds.contains(&".net");
+        return (if dn { ".NET" } else { "App" }, proj.name.clone());
     }
+    let unit = l
+        .service
+        .as_deref()
+        .map(|s| s.trim_end_matches(".service").to_string());
     if let Some(rest) = p.strip_prefix("/var/log/") {
         let first = rest.split('/').next().unwrap_or(rest);
         let base = first.split(['.', '-']).next().unwrap_or(first);
@@ -1445,14 +1464,20 @@ pub fn log_owner(l: &LogFile, projects: &[Project]) -> (&'static str, String) {
         if OS.contains(&base) {
             return ("Operating system", base.to_string());
         }
+        // App logs are grouped under the systemd service writing them.
         return (
-            "App",
-            if rest.contains('/') {
-                first.to_string()
-            } else {
-                base.to_string()
-            },
+            app,
+            unit.unwrap_or_else(|| {
+                if rest.contains('/') {
+                    first.to_string()
+                } else {
+                    base.to_string()
+                }
+            }),
         );
+    }
+    if let Some(u) = unit {
+        return (app, u);
     }
     let parts: Vec<&str> = p.trim_start_matches('/').split('/').collect();
     let owner = match parts.as_slice() {
@@ -1465,7 +1490,7 @@ pub fn log_owner(l: &LogFile, projects: &[Project]) -> (&'static str, String) {
             .unwrap_or(&"other")
             .to_string(),
     };
-    ("App", owner)
+    (app, owner)
 }
 
 struct LogGroup {
@@ -2235,6 +2260,7 @@ mod tests {
             protected: false,
             per_min: None,
             writer: None,
+            service: None,
             container: None,
         }
     }
@@ -2399,6 +2425,17 @@ mod tests {
             log_owner(&log("/opt/forgejo/log/gitea.log"), &p),
             ("App", "forgejo".into())
         );
+        assert_eq!(
+            log_owner(&log("/root/.pm2/logs/api-out__2026-11-20.log"), &p),
+            ("pm2", "api".into())
+        );
+        let mut svc = log("/srv/shop/logs/app.log");
+        svc.service = Some("shop.service".into());
+        assert_eq!(log_owner(&svc, &p), ("App", "shop".into()));
+        let mut dn = log("/var/www/api/logs/x.log");
+        dn.writer = Some("42 dotnet".into());
+        dn.service = Some("kestrel-api.service".into());
+        assert_eq!(log_owner(&dn, &p), (".NET", "kestrel-api".into()));
         assert_eq!(proj_location("/home/alice/code/app"), "/home/alice");
         assert_eq!(proj_location("/srv/x"), "/srv");
     }

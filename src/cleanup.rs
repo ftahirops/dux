@@ -86,8 +86,26 @@ pub struct Item {
 
 /// Logs that may be legally or forensically required, or are sparse files
 /// whose apparent size is not real disk use.
+/// Also database, mail and kernel logs (spec A7.3).
 const PROTECTED: &[&str] = &[
-    "auth.log", "secure", "wtmp", "btmp", "lastlog", "faillog", "audit",
+    "auth.log",
+    "secure",
+    "wtmp",
+    "btmp",
+    "lastlog",
+    "faillog",
+    "audit",
+    "mysql",
+    "mariadb",
+    "postgresql",
+    "mongodb",
+    "redis",
+    "mail",
+    "mail.log",
+    "maillog",
+    "kern.log",
+    "kern",
+    "dmesg",
 ];
 
 /// Binary logs that are never truncated or deleted by path: journald's
@@ -720,8 +738,14 @@ pub fn remove_tree(path: &Path) -> Result<()> {
         path.display()
     );
     let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let parent = path.parent().unwrap_or(Path::new("/"));
     anyhow::ensure!(
-        crate::insight::ARTIFACTS.contains(&name.as_ref()),
+        crate::insight::ARTIFACTS.contains(&name.as_ref())
+            || crate::insight::conditional_artifact(
+                &name,
+                crate::insight::markers_on_disk(parent),
+                &parent.to_string_lossy()
+            ),
         "{} is not a known build-output folder",
         path.display()
     );
@@ -1106,6 +1130,14 @@ mod tests {
         assert!(is_protected(Path::new("btmp.1")));
         assert!(!is_protected(Path::new("syslog.1")));
         assert!(!is_protected(Path::new("nginx/access.log.2.gz")));
+        assert!(is_protected(Path::new("mysql/error.log.1")));
+        assert!(is_protected(Path::new("postgresql/postgresql-16-main.log")));
+        assert!(is_protected(Path::new("mail.log.2.gz")));
+        assert!(is_protected(Path::new("kern.log")));
+        assert!(
+            !is_protected(Path::new("mailman-web/x.log")),
+            "a prefix only, not any word"
+        );
     }
 
     #[test]

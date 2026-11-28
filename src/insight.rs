@@ -105,7 +105,18 @@ pub struct LogFile {
     pub protected: bool,
     pub per_min: Option<f64>,
     pub writer: Option<String>,
+    /// systemd unit of the writing process, e.g. "myapp.service".
+    pub service: Option<String>,
     pub container: Option<String>,
+}
+
+/// The systemd service a process belongs to, from /proc/<pid>/cgroup.
+pub fn service_of(pid: &str) -> Option<String> {
+    let cg = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+    cg.lines()
+        .flat_map(|l| l.rsplit(':').next().unwrap_or("").split('/'))
+        .rfind(|u| u.ends_with(".service") && !u.starts_with("user@"))
+        .map(str::to_string)
 }
 
 /// Is this file a log, by name or location?
@@ -151,13 +162,6 @@ pub struct LogReport {
 }
 
 impl LogReport {
-    pub fn total(&self, kind: Option<LogKind>) -> u64 {
-        self.logs
-            .iter()
-            .filter(|l| kind.is_none_or(|k| l.kind == k))
-            .map(|l| l.bytes)
-            .sum()
-    }
     pub fn rotated_total(&self) -> u64 {
         self.logs
             .iter()
@@ -180,6 +184,9 @@ pub fn logs_from_found(found: Vec<FoundFile>) -> Vec<LogFile> {
                 rotated: crate::cleanup::rotated_base(&name).is_some(),
                 protected: crate::cleanup::is_protected(std::path::Path::new(rel)),
                 writer: owners.get(&(f.dev, f.ino)).cloned(),
+                service: owners
+                    .get(&(f.dev, f.ino))
+                    .and_then(|w| service_of(w.split(' ').next().unwrap_or(""))),
                 container: (kind == LogKind::Docker)
                     .then(|| container_name(&f.path))
                     .flatten(),
@@ -258,7 +265,54 @@ pub const ARTIFACTS: &[&str] = &[
     ".angular",
     "coverage",
     ".cache",
+    "_build",
+    ".build",
+    ".terraform",
 ];
+
+/// Build output that only counts as such next to a matching project file
+/// (spec A8.2): `vendor` for PHP always and for Go when git does not track
+/// it; `bin` and `obj` for .NET.
+pub fn conditional_artifact(name: &str, parent_markers: u16, parent: &str) -> bool {
+    use crate::walker::{MARK_DOTNET, MARK_GO, MARK_PHP};
+    match name {
+        "bin" | "obj" => parent_markers & MARK_DOTNET != 0,
+        "vendor" => {
+            parent_markers & MARK_PHP != 0
+                || (parent_markers & MARK_GO != 0 && git_tracks(parent, "vendor") == Some(false))
+        }
+        _ => false,
+    }
+}
+
+/// Does git track anything under `dir/rel`? None when it cannot tell (no
+/// git binary); Some(false) when `dir` is not in a repository.
+pub fn git_tracks(dir: &str, rel: &str) -> Option<bool> {
+    let out = std::process::Command::new("git")
+        .args(["-C", dir, "ls-files", "--", rel])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .ok()?;
+    if out.status.success() {
+        return Some(!out.stdout.is_empty());
+    }
+    String::from_utf8_lossy(&out.stderr)
+        .contains("not a git repository")
+        .then_some(false)
+}
+
+/// Marker bits of the files directly in `dir`, read from disk.
+pub fn markers_on_disk(dir: &std::path::Path) -> u16 {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+                .map(|e| crate::walker::marker_for(e.file_name().as_encoded_bytes()))
+                .fold(0, |a, b| a | b)
+        })
+        .unwrap_or(0)
+}
 
 /// Never treated as projects: system and package-manager trees.
 const NOT_PROJECTS: &[&str] = &[
@@ -319,6 +373,11 @@ impl Project {
                 ".net" => ".NET",
                 "c/c++" => "C/C++",
                 "compose" => "Docker Compose",
+                "dart" => "Flutter/Dart",
+                "elixir" => "Elixir",
+                "swift" => "Swift",
+                "terraform" => "Terraform",
+                "pulumi" => "Pulumi",
                 other => other,
             })
             .collect();
@@ -350,6 +409,11 @@ pub fn kinds(m: u16) -> Vec<&'static str> {
         (MARK_DOTNET, ".net"),
         (MARK_CMAKE, "c/c++"),
         (MARK_COMPOSE, "compose"),
+        (MARK_DART, "dart"),
+        (MARK_ELIXIR, "elixir"),
+        (MARK_SWIFT, "swift"),
+        (MARK_TERRAFORM, "terraform"),
+        (MARK_PULUMI, "pulumi"),
         (MARK_GIT, "git"),
     ];
     all.iter()
@@ -371,7 +435,7 @@ fn activity(n: &DirNode) -> i64 {
 fn collect_artifacts(n: &DirNode, path: &str, depth: usize, out: &mut Vec<(String, u64)>) {
     for c in &n.children {
         let p = format!("{path}/{}", c.name);
-        if ARTIFACTS.contains(&c.name.as_str()) {
+        if ARTIFACTS.contains(&c.name.as_str()) || conditional_artifact(&c.name, n.markers, path) {
             out.push((p, c.total_bytes));
         } else if c.name != ".git" && depth < 6 {
             collect_artifacts(c, &p, depth + 1, out);
@@ -791,7 +855,7 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["app.log", "app.log.1"]);
         assert!(!r.logs[0].rotated && r.logs[1].rotated);
-        assert_eq!(r.total(Some(LogKind::App)), r.total(None));
+        assert!(r.logs.iter().all(|l| l.kind == LogKind::App));
         std::fs::remove_dir_all(&d).unwrap();
     }
 

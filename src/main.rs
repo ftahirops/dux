@@ -150,14 +150,17 @@ enum Cmd {
     Logs {
         #[arg(default_value = "/")]
         path: PathBuf,
-        #[arg(long, default_value_t = 25)]
+        #[arg(short = 'n', long, default_value_t = 25)]
         top: usize,
         /// Only list logs at least this big
-        #[arg(long, default_value = "1M")]
+        #[arg(long, default_value = "10M")]
         min: String,
         /// Seconds to sample log growth (0 = skip)
         #[arg(long, default_value_t = 3)]
         sample: u64,
+        /// Full paths and who writes each log
+        #[arg(short = 'l', long)]
+        long: bool,
         #[arg(long, default_value_t = 4)]
         threads: usize,
         #[command(flatten)]
@@ -172,7 +175,7 @@ enum Cmd {
     Pp {
         #[arg(default_value = "/")]
         path: PathBuf,
-        #[arg(long, default_value_t = 25)]
+        #[arg(short = 'n', long, default_value_t = 25)]
         top: usize,
         /// Projects idle this many days are offered for build-output cleanup
         #[arg(long, default_value_t = 10)]
@@ -745,6 +748,7 @@ fn real_main() -> Result<()> {
             top,
             min,
             sample,
+            long,
             threads,
             fixes,
         }) => {
@@ -760,29 +764,46 @@ fn real_main() -> Result<()> {
                 return Ok(());
             }
             let h = |b: u64| human(b as i64);
-            use insight::LogKind;
-            println!("Logs on {p} (walked in {:.1}s)", r.walk_seconds);
+            println!(
+                "Logs on {p} (walked in {:.1}s, logs of 10 MiB and up)",
+                r.walk_seconds
+            );
+            // Grouped by owner (spec CLI-5): OS, journal, web server, database,
+            // container, pm2, .NET, app (by the systemd service writing it).
+            let owners: Vec<(&str, String)> = r
+                .logs
+                .iter()
+                .map(|l| ui::views::log_owner(l, &[]))
+                .collect();
+            let mut groups: Vec<(&str, u64, usize)> = Vec::new();
             if let Some(j) = r.journal_bytes {
-                println!("  journal     {:>10}  (journalctl --disk-usage)", h(j));
+                groups.push(("Journal", j, 0));
             }
-            println!(
-                "  system      {:>10}  /var/log",
-                h(r.total(Some(LogKind::System)))
-            );
-            println!(
-                "  docker      {:>10}  container logs",
-                h(r.total(Some(LogKind::Docker)))
-            );
-            println!(
-                "  apps        {:>10}  application logs elsewhere",
-                h(r.total(Some(LogKind::App)))
-            );
-            println!(
-                "  rotated     {:>10}  old rotated copies (safe to remove: dux cleanup --level 2)",
-                h(r.rotated_total())
-            );
-            println!("\n      size   growth/min  age  kind    path");
-            for l in r.logs.iter().take(top) {
+            for (l, (cat, _)) in r.logs.iter().zip(&owners) {
+                if *cat == "Journal" && r.journal_bytes.is_some() {
+                    continue;
+                }
+                match groups.iter_mut().find(|g| g.0 == *cat) {
+                    Some(g) => {
+                        g.1 += l.bytes;
+                        g.2 += 1;
+                    }
+                    None => groups.push((cat, l.bytes, 1)),
+                }
+            }
+            groups.sort_by_key(|g| std::cmp::Reverse(g.1));
+            for (cat, b, _) in &groups {
+                println!("  {:<17} {:>10}", cat, h(*b));
+            }
+            if r.rotated_total() > 0 {
+                println!(
+                    "  {:<17} {:>10}  old rotated copies (dux logs --fix)",
+                    "(rotated)",
+                    h(r.rotated_total())
+                );
+            }
+            println!("\n        size  growth/min   age  owner                 path");
+            for (l, (_, owner)) in r.logs.iter().zip(&owners).take(top) {
                 let g = l
                     .per_min
                     .map(|g| {
@@ -800,20 +821,29 @@ fn real_main() -> Result<()> {
                 if l.protected {
                     note.push_str(" [protected]");
                 }
-                if let Some(c) = &l.container {
-                    note.push_str(&format!(" [{c}]"));
+                if long {
+                    if let Some(w) = &l.writer {
+                        note.push_str(&format!(" [written by {w}]"));
+                    }
                 }
-                if let Some(w) = &l.writer {
-                    note.push_str(&format!(" [written by {w}]"));
-                }
+                let path = if long {
+                    l.path.clone()
+                } else {
+                    util::shorten_middle(&l.path, 60)
+                };
                 println!(
-                    "  {:>9}  {:>10}  {:>4}  {:<6}  {}{note}",
+                    "  {:>10}  {:>10}  {:>4}  {:<20}  {path}{note}",
                     h(l.bytes),
                     g,
                     insight::age_text(l.mtime, now),
-                    l.kind.label(),
-                    l.path
+                    util::shorten_middle(owner, 20),
                 );
+            }
+            if r.logs.len() > top {
+                println!("  ... {} more (-n {})", r.logs.len() - top, r.logs.len());
+            }
+            if !long {
+                println!("More: -n 50 · -l (full paths, writers) · --min 1M · --fix");
             }
             let mut s: Vec<fix::Suggestion> = Vec::new();
             if let Some(j) = r.journal_bytes.filter(|j| *j > 1 << 30) {
@@ -864,6 +894,45 @@ fn real_main() -> Result<()> {
                         frees: l.bytes.saturating_sub(10 << 20),
                     }));
                 }
+            }
+            // Protected logs (spec A7.3): only on a disk at 97 % or more, and
+            // only by an interactive answer (RISKY is never applied by
+            // --select / --apply-*), for protected logs over 250 MB.
+            for l in r.logs.iter().filter(|l| {
+                l.protected
+                    && !l.rotated
+                    && l.bytes > 250_000_000
+                    && !cleanup::is_binary_log(std::path::Path::new(&l.path))
+            }) {
+                let Ok(u) = sentinel::statvfs(&l.path) else {
+                    continue;
+                };
+                if u.used_pct() < 97.0 {
+                    continue;
+                }
+                let item = cleanup::Item {
+                    level: 2,
+                    what: format!(
+                        "truncate protected log {} ({}, disk {:.0}% full; keep its last 10 MiB)",
+                        l.path,
+                        h(l.bytes),
+                        u.used_pct()
+                    ),
+                    action: cleanup::Action::TailAndTruncate {
+                        path: l.path.clone().into(),
+                        keep: 10 << 20,
+                    },
+                    frees: l.bytes.saturating_sub(10 << 20),
+                };
+                s.push(fix::suggestion(
+                    fix::Safety::Risky,
+                    item.what.clone(),
+                    "A protected log (security, database, mail or kernel): it may be needed for audits or recovery. Offered only because the disk is critically full.",
+                    "Older lines are gone; the saved .dux-tail and rotated copies remain.",
+                    item.frees,
+                    Some(item),
+                    None,
+                ));
             }
             fix::offer("logs", s, &fixes)?;
         }

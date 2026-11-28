@@ -70,6 +70,11 @@ pub const MARK_COMPOSE: u16 = 1 << 7;
 pub const MARK_GIT: u16 = 1 << 8;
 pub const MARK_CMAKE: u16 = 1 << 9;
 pub const MARK_DOTNET: u16 = 1 << 10;
+pub const MARK_DART: u16 = 1 << 11;
+pub const MARK_ELIXIR: u16 = 1 << 12;
+pub const MARK_SWIFT: u16 = 1 << 13;
+pub const MARK_TERRAFORM: u16 = 1 << 14;
+pub const MARK_PULUMI: u16 = 1 << 15;
 
 /// Marker bit for a file name, if it identifies a project.
 pub fn marker_for(name: &[u8]) -> u16 {
@@ -86,6 +91,11 @@ pub fn marker_for(name: &[u8]) -> u16 {
         }
         b"CMakeLists.txt" => MARK_CMAKE,
         n if n.ends_with(b".csproj") || n.ends_with(b".sln") => MARK_DOTNET,
+        b"pubspec.yaml" => MARK_DART,
+        b"mix.exs" => MARK_ELIXIR,
+        b"Package.swift" => MARK_SWIFT,
+        b"Pulumi.yaml" | b"Pulumi.yml" => MARK_PULUMI,
+        n if n.ends_with(b".tf") => MARK_TERRAFORM,
         _ => 0,
     }
 }
@@ -785,6 +795,11 @@ mod tests {
         assert_eq!(t.root.markers, 0);
         assert_eq!(marker_for(b"Cargo.toml"), MARK_RUST);
         assert_eq!(marker_for(b"App.csproj"), MARK_DOTNET);
+        assert_eq!(marker_for(b"pubspec.yaml"), MARK_DART);
+        assert_eq!(marker_for(b"mix.exs"), MARK_ELIXIR);
+        assert_eq!(marker_for(b"Package.swift"), MARK_SWIFT);
+        assert_eq!(marker_for(b"main.tf"), MARK_TERRAFORM);
+        assert_eq!(marker_for(b"Pulumi.yaml"), MARK_PULUMI);
         std::fs::remove_dir_all(&d).unwrap();
     }
 
