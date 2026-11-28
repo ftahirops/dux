@@ -266,19 +266,12 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
         );
     }
     fixes.extend(
-        insight::pp_plan(&g.projects, 0, g.at)
+        insight::pp_plan(&g.projects, 10, g.at)
             .into_iter()
             .map(fix::assess),
     );
-    for f in &g.biggest {
-        if !g.logs.iter().any(|l| l.path == f.path) {
-            fixes.push(fix::delete_file(
-                &f.path,
-                "One of the biggest files on this disk; dux cannot know whether you still need it.",
-                f.bytes,
-            ));
-        }
-    }
+    // Big files are information (Disk usage, `dux biggest`), never a delete
+    // suggestion: being big says nothing about being deletable.
     let mut held: std::collections::BTreeMap<(i32, String), i64> = Default::default();
     for d in crate::deleted::deleted_open().unwrap_or_default() {
         *held.entry((d.pid, d.process)).or_default() += d.size;
@@ -325,7 +318,10 @@ mod tests {
         assert_eq!(g.logs.len(), 1);
         assert_eq!(g.projects.len(), 1);
         assert!(g.fixes.iter().any(|f| f.title.contains("rotated log")));
-        assert!(g.fixes.iter().any(|f| f.title.contains("build output")));
+        // The project was just created: in use, so its build output is not offered.
+        assert!(!g.fixes.iter().any(|f| f.title.contains("node_modules")));
+        // Big files are never a delete suggestion.
+        assert!(!g.fixes.iter().any(|f| f.title.starts_with("delete ")));
         assert!(!g.disks.is_empty());
         std::fs::remove_dir_all(&d).unwrap();
     }

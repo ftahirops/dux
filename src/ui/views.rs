@@ -16,7 +16,7 @@ use ratatui::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{channel, Receiver};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------- state ----
 
@@ -105,6 +105,29 @@ fn fs_of(item: &Item, docker_root: Option<&str>) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// Space freed on `fs` since `before`. Docker and Podman give space back a
+/// little later (containerd collects garbage): wait until it settles, up to
+/// 15 s.
+fn settled(fs: &str, before: u64, slow: bool) -> i64 {
+    let mut last = avail(fs) as i64 - before as i64;
+    if !slow {
+        return last;
+    }
+    let start = Instant::now();
+    let mut stable = 0;
+    while start.elapsed() < Duration::from_secs(15) && stable < 4 {
+        std::thread::sleep(Duration::from_millis(500));
+        let now = avail(fs) as i64 - before as i64;
+        if now == last {
+            stable += 1
+        } else {
+            stable = 0;
+            last = now;
+        }
+    }
+    last
+}
+
 fn avail(fs: &str) -> u64 {
     crate::sentinel::statvfs(fs).map(|u| u.avail).unwrap_or(0)
 }
@@ -124,7 +147,11 @@ impl Job {
                 let before = avail(&fs);
                 let step = match crate::cleanup::apply(item) {
                     Ok(()) => {
-                        let got = avail(&fs) as i64 - before as i64;
+                        let got = settled(
+                            &fs,
+                            before,
+                            matches!(&item.action, Action::Run { program, .. } if program == "docker" || program == "podman"),
+                        );
                         ok += 1;
                         freed += got.max(0);
                         Step::Done(got)
@@ -573,6 +600,12 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
         }
         D_IMAGES => {
             let image_users = r.image_users();
+            let unused_of = |i: usize| image_users[i].is_empty() && r.images[i].containers == 0;
+            let n_unused = (0..r.images.len()).filter(|&i| unused_of(i)).count();
+            let b_unused: u64 = (0..r.images.len())
+                .filter(|&i| unused_of(i))
+                .map(|i| r.images[i].unique)
+                .sum();
             let rows: Vec<Row> = r
                 .images
                 .iter()
@@ -587,7 +620,15 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
                     } else {
                         format!("{} container(s)", users.len().max(im.containers as usize))
                     };
+                    // Grouped: in use first, then unused (sorted so at collection).
+                    let first_of_group = i == 0 || unused_of(i) != unused_of(i - 1);
+                    let group = match (first_of_group, unused_of(i)) {
+                        (true, false) => format!("IN USE ({})", r.images.len() - n_unused),
+                        (true, true) => format!("UNUSED ({n_unused}, {})", human(b_unused as i64)),
+                        _ => String::new(),
+                    };
                     Row::new(vec![
+                        group,
                         im.name.clone(),
                         human(im.size as i64),
                         human(im.unique as i64),
@@ -606,8 +647,8 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
                 })
                 .collect();
             f.render_stateful_widget(
-                Table::new(rows, [Constraint::Length(40), Constraint::Length(10), Constraint::Length(10), Constraint::Length(10), Constraint::Length(14), Constraint::Length(14), Constraint::Min(16)])
-                    .header(hdr(&["image", "size", "unique", "shared", "used by", "created", "containers"]))
+                Table::new(rows, [Constraint::Length(20), Constraint::Length(40), Constraint::Length(10), Constraint::Length(10), Constraint::Length(10), Constraint::Length(14), Constraint::Length(14), Constraint::Min(16)])
+                    .header(hdr(&["group", "image", "size", "unique", "shared", "used by", "created", "containers"]))
                     .block(block(format!(" {} images, {} on disk (shared layers once) · Enter: details · x: remove unused ", r.images.len(), human(r.images_total() as i64))))
                     .row_highlight_style(hl()),
                 area,
@@ -615,6 +656,12 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
             );
         }
         D_VOLUMES => {
+            let unused_of = |i: usize| r.volumes[i].links == 0 && r.users_of_volume(i).is_empty();
+            let n_unused = (0..r.volumes.len()).filter(|&i| unused_of(i)).count();
+            let b_unused: u64 = (0..r.volumes.len())
+                .filter(|&i| unused_of(i))
+                .map(|i| r.volumes[i].size)
+                .sum();
             let rows: Vec<Row> = r
                 .volumes
                 .iter()
@@ -626,7 +673,14 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
                         .map(|&c| r.containers[c].name.clone())
                         .collect();
                     let unused = v.links == 0 && users.is_empty();
+                    let first_of_group = i == 0 || unused_of(i) != unused_of(i - 1);
+                    let group = match (first_of_group, unused) {
+                        (true, false) => format!("IN USE ({})", r.volumes.len() - n_unused),
+                        (true, true) => format!("UNUSED ({n_unused}, {})", human(b_unused as i64)),
+                        _ => String::new(),
+                    };
                     Row::new(vec![
+                        group,
                         v.compose_name
                             .clone()
                             .unwrap_or_else(|| v.name.chars().take(28).collect()),
@@ -650,6 +704,7 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
                 Table::new(
                     rows,
                     [
+                        Constraint::Length(20),
                         Constraint::Length(30),
                         Constraint::Length(11),
                         Constraint::Length(16),
@@ -657,7 +712,9 @@ fn draw_docker_list(f: &mut Frame, r: &Report, sub: usize, area: Rect, state: &m
                         Constraint::Min(16),
                     ],
                 )
-                .header(hdr(&["volume", "size", "stack", "used by", "on disk"]))
+                .header(hdr(&[
+                    "group", "volume", "size", "stack", "used by", "on disk",
+                ]))
                 .block(block(format!(
                     " {} volumes, {} · Enter: details · x: remove unused (RISKY) ",
                     r.volumes.len(),

@@ -500,6 +500,15 @@ pub const SETTINGS: &[Setting] = &[
         "false",
         "Remove Docker volumes no container uses (they may hold data)",
     ),
+    // [ui]
+    s(
+        "ui",
+        "refresh",
+        "DUX_UI_REFRESH",
+        Duration,
+        "5s",
+        "How often the Activity view refreshes (1s-60s); F6 freezes it",
+    ),
     // [programs]
     s(
         "programs",

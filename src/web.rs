@@ -599,7 +599,7 @@ async function renderActivity(v){const a=await api('/api/activity');if(tab!=='Ac
 v.appendChild(el('h3','Disk I/O now'));v.appendChild(table(['disk','read/s','write/s'],(a.disks||[]).map(d=>[d.disk,H(d.read_bps),H(d.write_bps)])));
 v.appendChild(el('h3','Processes writing and reading most'));v.appendChild(table(['writes/s','reads/s','pid','process','service / container'],(a.processes||[]).map(p=>[H(p.write_bps),H(p.read_bps),p.pid,p.name,p.unit||''])));
 v.appendChild(el('h3','Files being written'));v.appendChild(table(['write/s','growth/s','size','writer','path'],(a.writing||[]).map(w=>[H(w.write_bps),H(w.growth_bps),H(w.size),w.process+' ('+w.pid+')',w.path])));
-actTimer=setTimeout(()=>{if(tab==='Activity')render()},2000)}
+actTimer=setTimeout(()=>{if(tab==='Activity')render()},5000)}
 function renderServices(v){const t=S.services.reduce((a,s)=>a+s.total,0);v.appendChild(el('p',S.services.length+' running services use '+H(t)+' in their data folders and logs.'));
 v.appendChild(table(['service','total','data','logs','folders'],S.services.map(s=>[s.name,H(s.total),H(s.folders.reduce((a,f)=>a+f[1],0)),H(s.logs),s.folders.map(f=>f[0]).join(', ')])))}
 // ---- Docker

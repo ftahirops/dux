@@ -357,6 +357,18 @@ pub struct Project {
 
 impl Project {
     /// Human-readable type, e.g. "Node.js + Docker Compose (git)".
+    pub fn name_or_dir(&self) -> String {
+        if self.name.is_empty() {
+            self.path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&self.path)
+                .to_string()
+        } else {
+            self.name.clone()
+        }
+    }
+
     pub fn type_label(&self) -> String {
         let mut parts: Vec<&str> = self
             .kinds
@@ -746,6 +758,25 @@ pub fn idle_at_least(title: &str, days: u64) -> bool {
         .is_some_and(|n| n >= days)
 }
 
+/// What a build-output folder is, by its name.
+pub fn artifact_kind(name: &str) -> &'static str {
+    match name {
+        "node_modules" => "npm packages, rebuilt by npm install",
+        "target" => "build output, rebuilt by cargo or maven",
+        ".venv" | "venv" => "Python virtualenv, rebuilt from requirements",
+        "dist" | "build" | "_build" | ".build" => "build output",
+        ".next" | ".nuxt" | ".angular" | ".turbo" | ".parcel-cache" => "framework build cache",
+        "__pycache__" | ".pytest_cache" | ".mypy_cache" | ".tox" => "Python cache",
+        ".gradle" => "Gradle cache",
+        "coverage" => "test coverage report",
+        ".cache" => "tool cache",
+        ".terraform" => "Terraform providers and modules, rebuilt by terraform init",
+        "vendor" => "dependencies, rebuilt by composer/go mod vendor",
+        "bin" | "obj" => ".NET build output",
+        _ => "build output",
+    }
+}
+
 /// Remove build output in projects idle for at least `stale_days`.
 pub fn pp_plan(projects: &[Project], stale_days: u64, now: i64) -> Vec<Item> {
     let mut items = Vec::new();
@@ -758,7 +789,11 @@ pub fn pp_plan(projects: &[Project], stale_days: u64, now: i64) -> Vec<Item> {
             if *bytes >= 1 << 20 {
                 items.push(Item {
                     level: 4,
-                    what: format!("build output in {} (idle {idle} days)", p.path),
+                    what: format!(
+                        "{dir} ({}, project {} idle {idle} days)",
+                        artifact_kind(dir.rsplit('/').next().unwrap_or("")),
+                        p.name_or_dir()
+                    ),
                     action: Action::RemoveTree { path: dir.into() },
                     frees: *bytes,
                 });

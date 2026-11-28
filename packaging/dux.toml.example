@@ -126,6 +126,10 @@
 # Remove Docker volumes no container uses (they may hold data)
 #docker_volumes = false
 
+[ui]
+# How often the Activity view refreshes (1s-60s); F6 freezes it
+#refresh = "5s"
+
 [programs]
 # curl used for HTTP and mail
 #curl = "curl"

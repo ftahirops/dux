@@ -68,6 +68,8 @@ fn list(s: &str) -> Vec<String> {
 
 #[derive(Clone, Debug, Default)]
 pub struct Image {
+    /// Docker's own "dangling" (what `image prune` removes when unused).
+    pub dangling: bool,
     /// "docker" or "podman" (empty means docker).
     pub runtime: &'static str,
     pub name: String,
@@ -273,6 +275,26 @@ impl Report {
         v
     }
 
+    /// In use first, then unused; biggest first in each group. Views and
+    /// actions address rows by position, so this runs once, at collection.
+    pub fn organise(&mut self) {
+        let users = self.image_users();
+        let mut im: Vec<(bool, Image)> = self
+            .images
+            .drain(..)
+            .enumerate()
+            .map(|(i, x)| (users[i].is_empty() && x.containers == 0, x))
+            .collect();
+        im.sort_by_key(|(unused, x)| (*unused, std::cmp::Reverse(x.unique)));
+        self.images = im.into_iter().map(|(_, x)| x).collect();
+        let vu: Vec<bool> = (0..self.volumes.len())
+            .map(|i| self.volumes[i].links == 0 && self.users_of_volume(i).is_empty())
+            .collect();
+        let mut vo: Vec<(bool, Volume)> = vu.into_iter().zip(self.volumes.drain(..)).collect();
+        vo.sort_by_key(|(unused, x)| (*unused, std::cmp::Reverse(x.size)));
+        self.volumes = vo.into_iter().map(|(_, x)| x).collect();
+    }
+
     pub fn images_total(&self) -> u64 {
         // Shared layers count once: sum of unique sizes plus the largest shared size.
         self.images.iter().map(|i| i.unique).sum::<u64>()
@@ -338,6 +360,7 @@ pub fn parse_df(text: &str) -> Result<Report> {
         let repo = s(i, "Repository");
         let tag = s(i, "Tag");
         r.images.push(Image {
+            dangling: false,
             runtime: "docker",
             name: if repo == "<none>" || repo.is_empty() {
                 format!(
@@ -553,6 +576,7 @@ pub fn parse_podman(ps: &str, images: &str, volumes: &str) -> Result<Report> {
         let size = i["Size"].as_u64().unwrap_or(0);
         let shared = i["SharedSize"].as_u64().unwrap_or(0);
         r.images.push(Image {
+            dangling: false,
             runtime: "podman",
             name,
             id: st(&i, "Id"),
@@ -691,6 +715,20 @@ pub fn collect() -> Result<Report> {
     for v in &mut r.volumes {
         v.runtime = "docker";
     }
+    // Dangling as Docker means it: with the containerd image store an
+    // untagged name is not the same thing, and pruning it frees nothing.
+    if let Ok(t) = docker(&["images", "-f", "dangling=true", "-q", "--no-trunc"]) {
+        let ids: Vec<&str> = t
+            .lines()
+            .map(|l| l.trim().trim_start_matches("sha256:"))
+            .filter(|l| !l.is_empty())
+            .collect();
+        for i in &mut r.images {
+            let id = i.id.trim_start_matches("sha256:");
+            i.dangling =
+                !id.is_empty() && ids.iter().any(|d| d.starts_with(id) || id.starts_with(d));
+        }
+    }
     r.root_dir = docker(&["info", "--format", "{{.DockerRootDir}}"])
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "/var/lib/docker".into());
@@ -737,6 +775,7 @@ pub fn collect() -> Result<Report> {
     r.containers
         .sort_by_key(|c| std::cmp::Reverse(c.writable + c.log_bytes));
     r.volumes.sort_by_key(|v| std::cmp::Reverse(v.size));
+    r.organise();
     Ok(r)
 }
 
@@ -759,7 +798,7 @@ pub fn plan(r: &Report, include_images: bool, include_containers: bool, big_log:
     let dangling: u64 = r
         .images
         .iter()
-        .filter(|i| i.name.starts_with("<none>") && i.containers == 0)
+        .filter(|i| i.dangling && i.containers == 0)
         .map(|i| i.unique)
         .sum();
     if dangling > 0 {
@@ -890,6 +929,7 @@ mod tests {
         assert_eq!(m["com.docker.compose.service"], "db");
         let mut r = Report::default();
         r.images.push(Image {
+            dangling: false,
             name: "pg:16".into(),
             unique: 100,
             ..Image::default()
@@ -975,6 +1015,10 @@ mod tests {
     #[test]
     fn cleanup_plan_is_opt_in_for_images_and_containers_and_never_volumes() {
         let mut r = parse_df(SAMPLE).unwrap();
+        // Docker's own dangling filter marks this one (collect() asks Docker).
+        for i in r.images.iter_mut().filter(|i| i.name.starts_with("<none>")) {
+            i.dangling = true;
+        }
         r.containers[0].log_bytes = 500 << 20;
         r.containers[0].log_path = "/var/lib/docker/containers/c1/c1-json.log".into();
         let safe = plan(&r, false, false, 100 << 20);

@@ -65,6 +65,16 @@ const SERVICES: usize = 8;
 const SCREENS: usize = 9;
 
 /// Which of the five views a screen belongs to.
+/// The Activity refresh interval: [ui] refresh in dux.toml (default 5 s).
+fn ui_refresh() -> Duration {
+    crate::notify::NotifyConfig::load(std::path::Path::new(crate::config::DEFAULT_FILE))
+        .ok()
+        .and_then(|c| c.raw.get("DUX_UI_REFRESH").cloned())
+        .and_then(|v| crate::util::parse_duration(&v).ok())
+        .map(|s| Duration::from_secs((s as u64).clamp(1, 60)))
+        .unwrap_or(Duration::from_secs(5))
+}
+
 fn view_of(screen: usize) -> usize {
     match screen {
         BROWSE | DISKS => 0,
@@ -142,6 +152,15 @@ struct App {
     /// State of the organised views (Docker, Logs, Projects, History) and
     /// the running action job.
     v: views::State,
+    /// Activity refresh interval and freeze (F6 / f).
+    every: Duration,
+    frozen: bool,
+    samples: u32,
+    /// Docker report fetched apart from the walk, so its view is ready fast.
+    rx_docker: Option<Receiver<Option<crate::docker::Report>>>,
+    /// The data shown is the sentinel's snapshot from this time, until the
+    /// fresh walk finishes.
+    snapshot_at: Option<i64>,
     /// Rows that fit on one page of the current list (set while drawing).
     page: std::cell::Cell<usize>,
     /// Where the top bar, list and key bar were drawn, for mouse clicks.
@@ -174,6 +193,11 @@ impl App {
             overlay: Overlay::None,
             message: String::new(),
             v: views::State::default(),
+            every: ui_refresh(),
+            frozen: false,
+            samples: 0,
+            rx_docker: None,
+            snapshot_at: None,
             page: std::cell::Cell::new(20),
             areas: std::cell::Cell::new(Default::default()),
         }
@@ -190,10 +214,34 @@ impl App {
         self.rx = Some(rx);
         self.loading = true;
         self.data.disks = gather::disks();
+        // Instant start: the sentinel's last snapshot of this disk shows
+        // folder sizes at once, until the fresh walk replaces it.
+        if self.data.tree.is_none() {
+            if let Ok(Some(t)) = crate::snapshot::load(
+                std::path::Path::new(crate::snapshot::DEFAULT_DIR),
+                &self.root,
+            ) {
+                self.snapshot_at = Some(t.started_at);
+                self.data.tree = Some(t);
+            }
+        }
+        if self.data.docker.is_none() {
+            let (dtx, drx) = channel();
+            std::thread::spawn(move || {
+                let _ = dtx.send(crate::docker::collect().ok());
+            });
+            self.rx_docker = Some(drx);
+        }
         self.list_dir();
     }
 
     fn poll(&mut self) {
+        if let Some(Ok(d)) = self.rx_docker.as_ref().map(|r| r.try_recv()) {
+            if self.data.docker.is_none() {
+                self.data.docker = d;
+            }
+            self.rx_docker = None;
+        }
         let Some(rx) = &self.rx else { return };
         let Ok(mut g) = rx.try_recv() else { return };
         // Biggest first (spec UI-2).
@@ -213,6 +261,7 @@ impl App {
         }
         self.data = g;
         self.loading = false;
+        self.snapshot_at = None;
         self.rx = None;
         // The project list was replaced: marks made on the old one are void.
         if self.project_open.take().is_some() {
@@ -483,7 +532,8 @@ fn draw(f: &mut Frame, app: &mut App) {
     let mut state = TableState::default();
     state.select(Some(sel));
     *state.offset_mut() = sel - sel % page;
-    let needs_walk = matches!(app.tab, DOCKER | LOGS | PROJECTS | FIXES | SERVICES);
+    let needs_walk = matches!(app.tab, LOGS | PROJECTS | FIXES | SERVICES)
+        || (app.tab == DOCKER && app.data.docker.is_none());
     if app.loading && needs_walk {
         f.render_widget(
             Paragraph::new(format!(
@@ -592,8 +642,17 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::styled(p, Style::default().fg(Color::Cyan)));
     }
     if app.loading {
+        let from = app
+            .snapshot_at
+            .map(|t| {
+                format!(
+                    "showing the snapshot from {} ago; ",
+                    crate::insight::age_text(t, crate::util::now_secs())
+                )
+            })
+            .unwrap_or_default();
         spans.push(Span::raw(format!(
-            " scanning: {} entries ",
+            " {from}updating: {} entries scanned ",
             app.progress.load(Ordering::Relaxed)
         )));
     }
@@ -613,6 +672,10 @@ fn keybar(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Esc", "Back"),
         ]),
         DOCKER | LOGS | PROJECTS | SERVICES => v.extend([("F2", "Group"), ("F3", "Open")]),
+        ACTIVITY => v.extend([
+            ("F6", if app.frozen { "Unfreeze" } else { "Freeze" }),
+            ("+/-", "Speed"),
+        ]),
         FIXES => v.extend([
             ("F2", "Safe"),
             ("F3", "Pick"),
@@ -1060,9 +1123,14 @@ fn draw_activity(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
         )
         .header(hdr(&["disk", "read", "write"]))
         .block(Block::default().borders(Borders::ALL).title(format!(
-            " Disk I/O now: read {} · write {} ",
+            " Disk I/O: read {} · write {} · {} ",
             rate(tr),
-            rate(tw)
+            rate(tw),
+            if app.frozen {
+                "FROZEN (F6)".to_string()
+            } else {
+                format!("every {} s", app.every.as_secs())
+            }
         ))),
         top[0],
     );
@@ -1535,7 +1603,7 @@ fn help_text(app: &App) -> String {
         SERVICES => "Services: disk use of each running service (data folders and logs) · F2 next group",
         FIXES => "Cleanup: F3/Space pick · F2/s all SAFE · a all but RISKY · c clear · F4/n never-touch on/off · F9/Enter apply (asks first; RISKY needs D)",
         HISTORY => "History: every action dux took, newest first",
-        _ => "Activity: disk I/O now and who is writing",
+        _ => "Activity: disk I/O now and who is writing · F6/f freeze · +/- refresh speed (default 5 s; [ui] refresh in dux.toml)",
     };
     format!("{this}\n\n{common}\n\nany key to close")
 }
@@ -1602,6 +1670,24 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     let page = app.page.get().max(1);
     match code {
         KeyCode::Char('q') => return true,
+        KeyCode::F(6) | KeyCode::Char('f' | 'F') if t == ACTIVITY => {
+            app.frozen = !app.frozen;
+            app.message = if app.frozen {
+                "Frozen: the numbers stay as they are. F6 or f to continue.".into()
+            } else {
+                "Live again.".into()
+            };
+        }
+        KeyCode::Char(c @ ('+' | '-')) if t == ACTIVITY => {
+            let s = app.every.as_secs();
+            let s = if c == '+' {
+                (s + 1).min(60)
+            } else {
+                s.saturating_sub(1).max(1)
+            };
+            app.every = Duration::from_secs(s);
+            app.message = format!("Activity refreshes every {s} s.");
+        }
         KeyCode::Char(c @ '1'..='5') => switch_view(app, (c as usize) - ('1' as usize)),
         KeyCode::Tab => switch_view(app, (view_of(app.tab) + 1) % VIEWS.len()),
         KeyCode::BackTab => switch_view(app, (view_of(app.tab) + VIEWS.len() - 1) % VIEWS.len()),
@@ -1851,13 +1937,18 @@ pub fn run(root: &str) -> Result<()> {
         if let Some(j) = app.v.job.as_mut() {
             j.poll();
         }
-        if app.tab == ACTIVITY
-            && app
-                .last_sample
-                .is_none_or(|t| t.elapsed() >= Duration::from_secs(1))
+        // Activity: every `every` (5 s by default; +/- change it), not while
+        // frozen. The second sample comes after 1 s so rates show at once.
+        let due = if app.samples < 2 {
+            Duration::from_secs(1)
+        } else {
+            app.every
+        };
+        if app.tab == ACTIVITY && !app.frozen && app.last_sample.is_none_or(|t| t.elapsed() >= due)
         {
             app.live = app.sampler.sample();
             app.last_sample = Some(Instant::now());
+            app.samples += 1;
         }
         term.draw(|f| draw(f, &mut app))?;
         if event::poll(Duration::from_millis(250))? {
