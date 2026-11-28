@@ -1,12 +1,18 @@
-//! `dux` / `dux ui`: the terminal UI.
+//! `dux` / `dux ui`: the terminal UI (spec UI-1..6, A11).
 //!
-//! 1 Browse (ncdu style, the first screen): folders and files of the current
-//!   directory by size; Enter/→ open, ←/Backspace up, s/n/C/M sort, i info,
-//!   d delete (with safety checks), N never touch.
-//! 2 Disks · 3 Activity (live I/O and who is writing) · 4 Docker · 5 Logs
-//! 6 Projects: Enter opens a project page with details and its cleanable
-//!   folders, each marked r remove / k keep / n never touch.
-//! 7 Fixes: Space toggles, s safe, a all, n never touch, Enter apply.
+//! Five views, chosen with 1-5, Tab or a click on the top bar:
+//! 1 Disk usage: folder browser, biggest first, a disk selector on top
+//!   (F2); read-only: nothing here changes a file.
+//! 2 Activity: disk I/O now and who is writing.
+//! 3 Usage by group: Docker, Projects, Services, Logs (F2 cycles), each in
+//!   detail.
+//! 4 Cleanup: everything that can be cleaned, summed per group; pick and
+//!   apply with a confirmation (RISKY ones typed).
+//! 5 History: every action dux took.
+//!
+//! An htop-style key bar (F-keys with names, clickable) sits at the bottom;
+//! lists fit one screen and page with PgUp/PgDn (or the mouse wheel);
+//! never-touch can be added and removed (F4) wherever a path is shown.
 
 use crate::cleanup::{Action, Item};
 use crate::fix::Safety;
@@ -21,7 +27,7 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Clear, Gauge, Paragraph, Row, Table, TableState, Tabs, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState, Tabs, Wrap},
 };
 use std::io::stdout;
 use std::os::unix::fs::MetadataExt;
@@ -32,15 +38,20 @@ use std::time::{Duration, Instant};
 
 pub(crate) mod views;
 
-const TABS: [&str; 8] = [
-    "1 Browse",
-    "2 Disks",
-    "3 Activity",
-    "4 Docker",
-    "5 Logs",
-    "6 Projects",
-    "7 Fixes",
-    "8 History",
+/// The five views (spec UI-1).
+const VIEWS: [&str; 5] = [
+    "1 Disk usage",
+    "2 Activity",
+    "3 Usage by group",
+    "4 Cleanup",
+    "5 History",
+];
+/// The groups of view 3, in order.
+const GROUPS: [(usize, &str); 4] = [
+    (DOCKER, "Docker"),
+    (PROJECTS, "Projects"),
+    (SERVICES, "Services"),
+    (LOGS, "Logs"),
 ];
 const BROWSE: usize = 0;
 const DISKS: usize = 1;
@@ -50,13 +61,18 @@ const LOGS: usize = 4;
 const PROJECTS: usize = 5;
 const FIXES: usize = 6;
 const HISTORY: usize = 7;
+const SERVICES: usize = 8;
+const SCREENS: usize = 9;
 
-#[derive(Clone, Copy, PartialEq)]
-enum Sort {
-    Size,
-    Name,
-    Count,
-    Mtime,
+/// Which of the five views a screen belongs to.
+fn view_of(screen: usize) -> usize {
+    match screen {
+        BROWSE | DISKS => 0,
+        ACTIVITY => 1,
+        DOCKER | LOGS | PROJECTS | SERVICES => 2,
+        FIXES => 3,
+        _ => 4,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -65,8 +81,6 @@ struct Entry {
     name: String,
     /// The exact path on disk: every action uses this, never the display name.
     path: std::path::PathBuf,
-    dev: u64,
-    ino: u64,
     is_dir: bool,
     bytes: u64,
     items: u64,
@@ -95,8 +109,10 @@ enum Overlay {
         items: Vec<Item>,
         bytes: u64,
     },
-    Delete(Entry),
+    /// Taking a path off the never-touch list: asks first.
+    Unprotect(String),
     Info(Entry),
+    Help,
 }
 
 struct App {
@@ -106,10 +122,11 @@ struct App {
     loading: bool,
     progress: Arc<AtomicU64>,
     rx: Option<Receiver<Gathered>>,
-    sel: [usize; 8],
+    sel: [usize; SCREENS],
+    /// The group screen view 3 shows.
+    group: usize,
     cwd: String,
     entries: Vec<Entry>,
-    sort: Sort,
     picked: Vec<bool>,
     project_open: Option<usize>,
     project_marks: Vec<Mark>,
@@ -125,6 +142,10 @@ struct App {
     /// State of the organised views (Docker, Logs, Projects, History) and
     /// the running action job.
     v: views::State,
+    /// Rows that fit on one page of the current list (set while drawing).
+    page: std::cell::Cell<usize>,
+    /// Where the top bar, list and key bar were drawn, for mouse clicks.
+    areas: std::cell::Cell<(Rect, Rect, Rect)>,
 }
 
 impl App {
@@ -136,10 +157,10 @@ impl App {
             loading: true,
             progress: Arc::new(AtomicU64::new(0)),
             rx: None,
-            sel: [0; 8],
+            sel: [0; SCREENS],
+            group: DOCKER,
             cwd: root.to_string(),
             entries: Vec::new(),
-            sort: Sort::Size,
             picked: Vec::new(),
             project_open: None,
             project_marks: Vec::new(),
@@ -153,6 +174,8 @@ impl App {
             overlay: Overlay::None,
             message: String::new(),
             v: views::State::default(),
+            page: std::cell::Cell::new(20),
+            areas: std::cell::Cell::new(Default::default()),
         }
     }
 
@@ -172,7 +195,9 @@ impl App {
 
     fn poll(&mut self) {
         let Some(rx) = &self.rx else { return };
-        let Ok(g) = rx.try_recv() else { return };
+        let Ok(mut g) = rx.try_recv() else { return };
+        // Biggest first (spec UI-2).
+        g.fixes.sort_by_key(|x| std::cmp::Reverse(x.frees));
         self.picked = vec![false; g.fixes.len()];
         self.changes.clear();
         self.changes_at = None;
@@ -215,7 +240,10 @@ impl App {
     /// listing of this one directory.
     fn list_dir(&mut self) {
         let mut v = Vec::new();
-        let node = self.node(&self.cwd).cloned();
+        let node = self.node(&self.cwd);
+        let by_name: std::collections::HashMap<&str, &DirNode> = node
+            .map(|n| n.children.iter().map(|c| (c.name.as_str(), c)).collect())
+            .unwrap_or_default();
         if let Ok(rd) = std::fs::read_dir(&self.cwd) {
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
@@ -223,16 +251,11 @@ impl App {
                 let Ok(m) = path.symlink_metadata() else {
                     continue;
                 };
-                let (dev, ino) = (m.dev(), m.ino());
                 if m.is_dir() {
-                    let child = node
-                        .as_ref()
-                        .and_then(|n| n.children.iter().find(|c| c.name == name));
+                    let child = by_name.get(name.as_str()).copied();
                     v.push(Entry {
                         name,
                         path,
-                        dev,
-                        ino,
                         is_dir: true,
                         bytes: child.map_or(0, |c| c.total_bytes),
                         items: child.map_or(0, |c| c.total_entries),
@@ -243,8 +266,6 @@ impl App {
                     v.push(Entry {
                         name,
                         path,
-                        dev,
-                        ino,
                         is_dir: false,
                         bytes: m.blocks() * 512,
                         items: 1,
@@ -254,21 +275,9 @@ impl App {
                 }
             }
         }
+        // Biggest first, always (spec A11.4).
+        v.sort_by(|a, b| b.bytes.cmp(&a.bytes).then(a.name.cmp(&b.name)));
         self.entries = v;
-        self.sort_entries();
-    }
-
-    fn sort_entries(&mut self) {
-        match self.sort {
-            Sort::Size => self
-                .entries
-                .sort_by(|a, b| b.bytes.cmp(&a.bytes).then(a.name.cmp(&b.name))),
-            Sort::Name => self
-                .entries
-                .sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name))),
-            Sort::Count => self.entries.sort_by_key(|e| std::cmp::Reverse(e.items)),
-            Sort::Mtime => self.entries.sort_by_key(|e| std::cmp::Reverse(e.mtime)),
-        }
     }
 
     fn selected_entry(&self) -> Option<&Entry> {
@@ -280,6 +289,7 @@ impl App {
             BROWSE => self.entries.len(),
             DISKS => self.data.disks.len(),
             ACTIVITY => self.live.writing.len(),
+            SERVICES => self.data.services.len(),
             DOCKER | LOGS | PROJECTS | HISTORY => views::rows(self),
             _ => self.data.fixes.len(),
         }
@@ -288,7 +298,7 @@ impl App {
     fn picked_total(&self) -> (usize, u64, bool) {
         let mut out = (0, 0, false);
         for (i, x) in self.data.fixes.iter().enumerate() {
-            if self.picked.get(i).copied().unwrap_or(false) {
+            if self.picked.get(i).copied().unwrap_or(false) && !self.fix_protected(x) {
                 out.0 += 1;
                 out.1 += x.frees;
                 out.2 |= x.safety == Safety::Risky;
@@ -314,6 +324,36 @@ impl App {
             .collect();
         self.project_open = Some(i);
         self.project_sel = 0;
+    }
+
+    /// Is this fix's target on the never-touch list now?
+    fn fix_protected(&self, x: &crate::fix::Suggestion) -> bool {
+        crate::fix::target_path(x).is_some_and(|p| crate::protect::covered(&self.protected, &p))
+    }
+
+    /// Never-touch on/off for a path (spec A11.7): adds it, or asks before
+    /// taking it off when it is on the list itself.
+    fn toggle_never_touch(&mut self, path: &str) {
+        let n = crate::protect::normalize(path);
+        if self.protected.contains(&n) {
+            self.overlay = Overlay::Unprotect(n);
+        } else if crate::protect::covered(&self.protected, path) {
+            self.message = format!(
+                "{path} is inside a never-touch folder; remove that folder from the list instead"
+            );
+        } else {
+            self.never_touch(path);
+        }
+    }
+
+    fn unprotect(&mut self, path: &str) {
+        match crate::protect::remove(path) {
+            Ok(_) => {
+                self.protected = crate::protect::load();
+                self.message = format!("{path} is off the never-touch list");
+            }
+            Err(e) => self.message = format!("NOT changed: {e:#} (run as root)"),
+        }
     }
 
     /// Returns true only when the path is really on the saved list.
@@ -392,24 +432,26 @@ fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
     let chunks = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Min(5),
-        Constraint::Length(3),
+        Constraint::Min(3),
+        Constraint::Length(1),
+        Constraint::Length(1),
     ])
     .split(area);
     let rootpct = app
         .data
         .disks
         .iter()
-        .find(|d| d.path == "/")
+        .find(|d| d.path == app.root)
+        .or_else(|| app.data.disks.iter().find(|d| d.path == "/"))
         .map(|d| d.usage.used_pct())
         .unwrap_or(0.0);
     f.render_widget(
-        Tabs::new(TABS.to_vec())
-            .select(app.tab)
+        Tabs::new(VIEWS.to_vec())
+            .select(view_of(app.tab))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!(" dux · {} · disk {:.1}% used ", app.root, rootpct)),
+                    .title(format!(" dux · {} · {:.1}% used ", app.root, rootpct)),
             )
             .highlight_style(
                 Style::default()
@@ -419,44 +461,276 @@ fn draw(f: &mut Frame, app: &mut App) {
             ),
         chunks[0],
     );
-    let body = chunks[1];
+    // Views 1 and 3 have a selector line on top of their list.
+    let mut body = chunks[1];
+    let view = view_of(app.tab);
+    if (view == 0 || view == 2) && body.height > 3 {
+        let parts = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(body);
+        let line = if view == 0 {
+            disk_line(app)
+        } else {
+            group_line(app)
+        };
+        f.render_widget(Paragraph::new(line), parts[0]);
+        body = parts[1];
+    }
+    app.areas.set((chunks[0], body, chunks[3]));
+    // One page of rows per screen (spec A11.5): the list never scrolls by
+    // a line, it turns pages.
+    let page = usize::from(body.height.saturating_sub(3)).max(1);
+    app.page.set(page);
+    let sel = app.sel[app.tab].min(app.rows().saturating_sub(1));
     let mut state = TableState::default();
-    state.select(Some(app.sel[app.tab].min(app.rows().saturating_sub(1))));
-    let needs_walk = matches!(app.tab, DOCKER | LOGS | PROJECTS | FIXES);
+    state.select(Some(sel));
+    *state.offset_mut() = sel - sel % page;
+    let needs_walk = matches!(app.tab, DOCKER | LOGS | PROJECTS | FIXES | SERVICES);
     if app.loading && needs_walk {
         f.render_widget(
             Paragraph::new(format!(
-                "Scanning {} ... {} entries so far.\nBrowse, Disks and Activity work already.",
+                "Scanning {} ... {} entries so far.\nDisk usage and Activity work already.",
                 app.root,
                 app.progress.load(Ordering::Relaxed)
             ))
             .block(Block::default().borders(Borders::ALL)),
             body,
         );
-        draw_footer(f, app, chunks[2]);
-        draw_overlay(f, app, area);
-        if let Some(job) = &app.v.job {
-            views::draw_job(f, job, area);
+    } else {
+        match app.tab {
+            BROWSE => draw_browse(f, app, body, &mut state),
+            DISKS => draw_disks(f, app, body, &mut state),
+            ACTIVITY => draw_activity(f, app, body, &mut state),
+            DOCKER => views::draw_docker(f, app, body, &mut state),
+            LOGS => views::draw_logs(f, app, body, &mut state),
+            PROJECTS => match app.project_open {
+                Some(i) => draw_project(f, app, i, body),
+                None => views::draw_projects(f, app, body, &mut state),
+            },
+            SERVICES => draw_services(f, app, body, &mut state),
+            HISTORY => views::draw_history(f, app, body, &mut state),
+            _ => draw_fixes(f, app, body, &mut state),
         }
-        return;
     }
-    match app.tab {
-        BROWSE => draw_browse(f, app, body, &mut state),
-        DISKS => draw_disks(f, app, body, &mut state),
-        ACTIVITY => draw_activity(f, app, body, &mut state),
-        DOCKER => views::draw_docker(f, app, body, &mut state),
-        LOGS => views::draw_logs(f, app, body, &mut state),
-        PROJECTS => match app.project_open {
-            Some(i) => draw_project(f, app, i, body),
-            None => views::draw_projects(f, app, body, &mut state),
-        },
-        HISTORY => views::draw_history(f, app, body, &mut state),
-        _ => draw_fixes(f, app, body, &mut state),
-    }
-    draw_footer(f, app, chunks[2]);
+    draw_status(f, app, chunks[2]);
+    draw_keybar(f, app, chunks[3]);
     draw_overlay(f, app, area);
     if let Some(job) = &app.v.job {
         views::draw_job(f, job, area);
+    }
+}
+
+/// "Disks: [/ 59%]  /data 81%  ...  F2 choose"
+fn disk_line(app: &App) -> Line<'static> {
+    let mut spans = vec![Span::raw(" Disks: ")];
+    for d in app
+        .data
+        .disks
+        .iter()
+        .filter(|d| crate::attrib::walkable(&d.fstype))
+        .take(12)
+    {
+        let pct = d.usage.used_pct();
+        let c = if pct >= 95.0 {
+            Color::Red
+        } else if pct >= 85.0 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+        let txt = format!(" {} {pct:.0}% ", d.path);
+        spans.push(if d.path == app.root {
+            Span::styled(txt, Style::default().fg(Color::Black).bg(c))
+        } else {
+            Span::styled(txt, Style::default().fg(c))
+        });
+    }
+    spans.push(Span::styled(
+        "  F2 choose",
+        Style::default().fg(Color::DarkGray),
+    ));
+    Line::from(spans)
+}
+
+/// "Groups: [Docker]  Projects  Services  Logs   F2 next"
+fn group_line(app: &App) -> Line<'static> {
+    let mut spans = vec![Span::raw(" Groups: ")];
+    for (scr, name) in GROUPS {
+        let txt = format!(" {name} ");
+        spans.push(if scr == app.tab {
+            Span::styled(txt, Style::default().fg(Color::Black).bg(Color::Cyan))
+        } else {
+            Span::raw(txt)
+        });
+    }
+    spans.push(Span::styled(
+        "  F2 next",
+        Style::default().fg(Color::DarkGray),
+    ));
+    Line::from(spans)
+}
+
+/// Which page of how many, for the status line.
+fn page_text(app: &App) -> String {
+    let rows = app.rows();
+    let page = app.page.get().max(1);
+    if rows <= page {
+        return String::new();
+    }
+    let sel = app.sel[app.tab].min(rows.saturating_sub(1));
+    format!(" page {}/{} ", sel / page + 1, rows.div_ceil(page))
+}
+
+fn draw_status(f: &mut Frame, app: &App, area: Rect) {
+    let mut spans = Vec::new();
+    if !app.message.is_empty() {
+        spans.push(Span::styled(
+            format!(" {} ", app.message),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+    let p = page_text(app);
+    if !p.is_empty() {
+        spans.push(Span::styled(p, Style::default().fg(Color::Cyan)));
+    }
+    if app.loading {
+        spans.push(Span::raw(format!(
+            " scanning: {} entries ",
+            app.progress.load(Ordering::Relaxed)
+        )));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// The key bar of the current screen: (label, name).
+fn keybar(app: &App) -> Vec<(&'static str, &'static str)> {
+    let mut v = vec![("F1", "Help")];
+    match app.tab {
+        BROWSE => v.extend([("F2", "Disk"), ("F3", "Info"), ("F4", "Never-touch")]),
+        DISKS => v.extend([("F2", "Back"), ("Enter", "Browse")]),
+        PROJECTS if app.project_open.is_some() => v.extend([
+            ("F2", "Group"),
+            ("F4", "Never-touch"),
+            ("F9", "Apply"),
+            ("Esc", "Back"),
+        ]),
+        DOCKER | LOGS | PROJECTS | SERVICES => v.extend([("F2", "Group"), ("F3", "Open")]),
+        FIXES => v.extend([
+            ("F2", "Safe"),
+            ("F3", "Pick"),
+            ("F4", "Never-touch"),
+            ("F9", "Apply"),
+        ]),
+        _ => {}
+    }
+    v.extend([("F5", "Rescan"), ("F10", "Quit")]);
+    v
+}
+
+/// x ranges of the key bar items, for clicks.
+fn keybar_hit(app: &App, x0: u16, col: u16) -> Option<&'static str> {
+    let mut x = x0;
+    for (k, name) in keybar(app) {
+        let w = (k.len() + name.len() + 2) as u16;
+        if col >= x && col < x + w {
+            return Some(k);
+        }
+        x += w;
+    }
+    None
+}
+
+fn draw_keybar(f: &mut Frame, app: &App, area: Rect) {
+    let mut spans = Vec::new();
+    for (k, name) in keybar(app) {
+        spans.push(Span::styled(
+            k.to_string(),
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!("{name}  "),
+            Style::default().fg(Color::Black).bg(Color::Cyan),
+        ));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn draw_services(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
+    let rows: Vec<Row> = app
+        .data
+        .services
+        .iter()
+        .map(|s| {
+            let data: u64 = s.folders.iter().map(|(_, b)| b).sum();
+            Row::new(vec![
+                s.name.clone(),
+                human(s.total as i64),
+                human(data as i64),
+                human(s.logs as i64),
+                s.folders
+                    .iter()
+                    .map(|(p, _)| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ])
+        })
+        .collect();
+    let total: u64 = app.data.services.iter().map(|s| s.total).sum();
+    f.render_stateful_widget(
+        Table::new(
+            rows,
+            [
+                Constraint::Length(28),
+                Constraint::Length(11),
+                Constraint::Length(11),
+                Constraint::Length(11),
+                Constraint::Min(10),
+            ],
+        )
+        .header(hdr(&["service", "total", "data", "logs", "folders"]))
+        .block(Block::default().borders(Borders::ALL).title(format!(
+            " Services: {} running services use {} (data folders and logs) ",
+            app.data.services.len(),
+            human(total as i64)
+        )))
+        .row_highlight_style(hl()),
+        body,
+        state,
+    );
+}
+
+/// The group a cleanup suggestion is summed under (spec UI-1 view 4).
+fn fix_group(x: &crate::fix::Suggestion) -> &'static str {
+    let Some(item) = &x.item else {
+        return "Explained only";
+    };
+    match &item.action {
+        Action::Run { program, .. } => match std::path::Path::new(program)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+        {
+            "journalctl" => "Journal",
+            "logrotate" => "Logs",
+            "docker" | "podman" => "Docker",
+            "apt-get" | "apt" | "dnf" | "yum" => "Packages",
+            _ => "System",
+        },
+        Action::TailAndTruncate { path, .. } if path.to_string_lossy().contains("/containers/") => {
+            "Docker"
+        }
+        Action::TailAndTruncate { .. } => "Logs",
+        Action::Remove { .. } if item.level >= 4 => "Big files",
+        Action::Remove { path } => {
+            let p = path.to_string_lossy();
+            if p.contains("/crash") || p.contains("coredump") {
+                "System"
+            } else {
+                "Logs"
+            }
+        }
+        Action::RemoveTree { .. } => "Projects",
     }
 }
 
@@ -473,12 +747,11 @@ fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
     let now = crate::util::now_secs();
     // Build rows only for the visible window: a folder can hold a million
     // entries, and building them all on every frame made the UI crawl.
-    let visible = usize::from(body.height.saturating_sub(3)).max(1);
+    let visible = app.page.get().max(1);
     let sel = app.sel[BROWSE].min(app.entries.len().saturating_sub(1));
-    let start = sel
-        .saturating_sub(visible / 2)
-        .min(app.entries.len().saturating_sub(visible));
+    let start = sel - sel % visible;
     state.select((!app.entries.is_empty()).then_some(sel - start));
+    *state.offset_mut() = 0;
     let rows: Vec<Row> = app
         .entries
         .iter()
@@ -519,12 +792,6 @@ fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
             .style(style)
         })
         .collect();
-    let sort = match app.sort {
-        Sort::Size => "size",
-        Sort::Name => "name",
-        Sort::Count => "items",
-        Sort::Mtime => "changed",
-    };
     let scan = if app.loading {
         format!(
             " · scanning {} entries…",
@@ -547,7 +814,7 @@ fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
         )
         .header(hdr(&["size", "", "share", "items", "age", "name"]))
         .block(Block::default().borders(Borders::ALL).title(format!(
-            " {}  {} in {} entries · sorted by {sort}{scan} ",
+            " {}  {} in {} entries · biggest first · read-only{scan} ",
             app.cwd,
             human(sum as i64),
             app.entries.len()
@@ -696,23 +963,54 @@ fn draw_fixes(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
         .iter()
         .enumerate()
         .map(|(i, x)| {
-            let mark = if x.item.is_none() {
+            let never = app.fix_protected(x);
+            let mark = if x.item.is_none() || never {
                 " - "
-            } else if app.picked[i] {
+            } else if app.picked.get(i).copied().unwrap_or(false) {
                 "[x]"
             } else {
                 "[ ]"
+            };
+            let title = if never {
+                format!("[never touch] {}", x.title)
+            } else {
+                x.title.clone()
             };
             Row::new(vec![
                 mark.to_string(),
                 x.safety.label().to_string(),
                 human(x.frees as i64),
-                x.title.clone(),
+                fix_group(x).to_string(),
+                title,
             ])
-            .style(Style::default().fg(color(x.safety)))
+            .style(if never {
+                Style::default().fg(Color::Magenta)
+            } else {
+                Style::default().fg(color(x.safety))
+            })
         })
         .collect();
     let (n, b, _) = app.picked_total();
+    // Summed per group, biggest first.
+    let mut sums: Vec<(&str, u64)> = Vec::new();
+    for x in app
+        .data
+        .fixes
+        .iter()
+        .filter(|x| x.item.is_some() && !app.fix_protected(x))
+    {
+        let g = fix_group(x);
+        match sums.iter_mut().find(|s| s.0 == g) {
+            Some(s) => s.1 += x.frees,
+            None => sums.push((g, x.frees)),
+        }
+    }
+    sums.retain(|s| s.1 > 0);
+    sums.sort_by_key(|s| std::cmp::Reverse(s.1));
+    let sums: Vec<String> = sums
+        .iter()
+        .map(|(g, b)| format!("{g} {}", human(*b as i64)))
+        .collect();
     f.render_stateful_widget(
         Table::new(
             rows,
@@ -720,15 +1018,20 @@ fn draw_fixes(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
                 Constraint::Length(4),
                 Constraint::Length(8),
                 Constraint::Length(11),
+                Constraint::Length(15),
                 Constraint::Min(30),
             ],
         )
-        .header(hdr(&["", "rating", "frees", "fix"]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Fixes: {n} picked, {} ", human(b as i64))),
-        )
+        .header(hdr(&["", "rating", "frees", "group", "what"]))
+        .block(Block::default().borders(Borders::ALL).title(format!(
+            " Cleanup: {} · {n} picked, {} ",
+            if sums.is_empty() {
+                "nothing to clean".to_string()
+            } else {
+                sums.join(" · ")
+            },
+            human(b as i64)
+        )))
         .row_highlight_style(hl()),
         parts[0],
         state,
@@ -1032,50 +1335,6 @@ fn draw_activity(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
     );
 }
 
-fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let help = match app.tab {
-        BROWSE => "↑↓ move · Enter/→ open · ←/Bksp up · s/n/C/M sort · i info · d delete · N never touch · 2-8 views · q quit",
-        DOCKER if app.v.ddetail.is_some() => "t truncate log · x remove · Esc back",
-        DOCKER => "←→ Overview/Stacks/Containers/Images/Volumes/Logs/Storage · ↑↓ move · Enter details · t truncate · x remove · b prune cache",
-        LOGS => "↑↓ move · Enter open/close group · t truncate · r remove rotated · v vacuum journal · 1-8 views",
-        PROJECTS if app.project_open.is_some() => "r remove · k keep · n never touch · a all · Enter apply · Esc back",
-        PROJECTS => "↑↓ move · Enter open group / project page · 1-8 views · q quit",
-        FIXES => "Space toggle · s safe · a all · c clear · n never touch · Enter apply · q quit",
-        HISTORY => "↑↓ move · every action dux took, newest first · 1-8 views · q quit",
-        _ => "↑↓ move · 1-8 views · r rescan · q quit",
-    };
-    let msg = if app.message.is_empty() {
-        help.to_string()
-    } else {
-        format!("{} · {help}", app.message)
-    };
-    let root = app
-        .data
-        .disks
-        .iter()
-        .find(|d| d.path == "/")
-        .map(|d| d.usage.used_pct())
-        .unwrap_or(0.0);
-    f.render_widget(
-        Gauge::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(" {msg} ")),
-            )
-            .gauge_style(Style::default().fg(if root >= 95.0 {
-                Color::Red
-            } else if root >= 85.0 {
-                Color::Yellow
-            } else {
-                Color::Green
-            }))
-            .label(format!("/ {root:.1}% used"))
-            .ratio((root / 100.0).clamp(0.0, 1.0)),
-        area,
-    );
-}
-
 /// A centred box tall enough for its wrapped text, so the key to press is
 /// never cut off by a long path.
 fn popup(f: &mut Frame, area: Rect, title: &str, text: String) {
@@ -1134,20 +1393,15 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
             let list: String = items.iter().map(|x| format!("\n  - {}", x.what)).collect();
             popup(f, area, "Confirm", format!("Remove these folders, freeing about {}?{list}\nThey are rebuilt by the project's own tools (npm install, cargo build...).\n\nPress y to remove, Esc to cancel.", human(*bytes as i64)));
         }
-        Overlay::Delete(e) => {
+        Overlay::Unprotect(p) => {
             popup(
                 f,
                 area,
-                "Delete",
-                format!(
-                    "RISKY: permanently delete {}{}?\nSize {}{}. This cannot be undone.\n\nPress D to delete, Esc to cancel.",
-                    crate::insight::clean_text(&e.path.to_string_lossy(), 400),
-                    if e.is_dir { "/ and everything in it" } else { "" },
-                    human(e.bytes as i64),
-                    if e.is_dir { format!(", {} items", e.items) } else { String::new() }
-                ),
+                "Never-touch",
+                format!("Take {p} off the never-touch list?\ndux may then suggest and apply changes inside it again.\n\nPress y to remove it from the list, Esc to keep it."),
             );
         }
+        Overlay::Help => popup(f, area, "Help", help_text(app)),
         Overlay::Info(e) => {
             let path = e.path.to_string_lossy();
             let users = crate::insight::users();
@@ -1155,18 +1409,16 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                 .map(|c| format!("{}: {}", c.label, c.fix))
                 .unwrap_or_else(|| "-".into());
             let safety = if crate::protect::is_protected(&e.path) {
-                "on (or containing a path on) the never-touch list"
-            } else if crate::cleanup::system_path(&path) {
-                "system or top-level path: dux will not delete it"
+                "on (or inside) the never-touch list; F4 takes it off"
             } else {
-                "you can delete it with d (RISKY)"
+                "not protected; F4 puts it on the never-touch list"
             };
             popup(
                 f,
                 area,
                 "Info",
                 format!(
-                    "{}\ntype      {}\nsize      {}\nitems     {}\nchanged   {} ago\nowner     {}\nknown as  {culprit}\ndelete    {safety}\n\nany key to close",
+                    "{}\ntype      {}\nsize      {}\nitems     {}\nchanged   {} ago\nowner     {}\nknown as  {culprit}\nnever-touch {safety}\n\nThis view is read-only; cleanup is in view 4.\nany key to close",
                     crate::insight::clean_text(&path, 400),
                     if e.is_dir { "folder" } else { "file" },
                     human(e.bytes as i64),
@@ -1201,42 +1453,26 @@ fn overlay_key(app: &mut App, code: KeyCode) -> bool {
                 app.message = "Nothing removed.".into();
             }
         }
-        Overlay::Delete(e) => {
-            if code != KeyCode::Char('D') {
-                app.message = "Nothing deleted.".into();
-                return true;
-            }
-            // Still the same file or folder that was shown?
-            let same = e
-                .path
-                .symlink_metadata()
-                .is_ok_and(|m| m.dev() == e.dev && m.ino() == e.ino);
-            if !same {
-                app.message = format!(
-                    "{} changed since the prompt opened; nothing deleted.",
-                    e.path.display()
-                );
-                return true;
-            }
-            if app.is_root() {
-                let item = Item {
-                    level: 4,
-                    what: format!("delete {}", e.path.display()),
-                    action: Action::RemoveUserPath {
-                        path: e.path.clone(),
-                    },
-                    frees: e.bytes,
-                };
-                match crate::cleanup::apply(&item) {
-                    Ok(()) => {
-                        app.message =
-                            format!("Deleted {} ({})", e.path.display(), human(e.bytes as i64));
-                        app.entries.retain(|x| x.path != e.path);
+        Overlay::Unprotect(p) => {
+            if matches!(code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+                app.unprotect(&p);
+                // Project folders no longer covered go back to "keep".
+                if let Some(pi) = app.project_open {
+                    if let Some(proj) = app.data.projects.get(pi) {
+                        for ((d, _), m) in
+                            proj.artifact_dirs.iter().zip(app.project_marks.iter_mut())
+                        {
+                            if *m == Mark::Never && !crate::protect::covered(&app.protected, d) {
+                                *m = Mark::Keep;
+                            }
+                        }
                     }
-                    Err(err) => app.message = format!("Not deleted: {err:#}"),
                 }
+            } else {
+                app.message = format!("{p} stays on the never-touch list");
             }
         }
+        Overlay::Help => {}
     }
     true
 }
@@ -1264,7 +1500,10 @@ fn project_key(app: &mut App, code: KeyCode) -> bool {
                 .and_then(|p| p.artifact_dirs.get(app.project_sel))
                 .map(|(d, _)| d.clone());
             if let Some(d) = dir {
-                if app.never_touch(&d) {
+                let n = crate::protect::normalize(&d);
+                if app.protected.contains(&n) {
+                    app.overlay = Overlay::Unprotect(n);
+                } else if app.never_touch(&d) {
                     set(app, Mark::Never);
                 }
             }
@@ -1305,6 +1544,36 @@ fn project_key(app: &mut App, code: KeyCode) -> bool {
     false
 }
 
+fn switch_view(app: &mut App, v: usize) {
+    if matches!(app.tab, DOCKER | LOGS | PROJECTS | SERVICES) {
+        app.group = app.tab;
+    }
+    app.tab = match v {
+        0 => BROWSE,
+        1 => ACTIVITY,
+        2 => app.group,
+        3 => FIXES,
+        _ => HISTORY,
+    };
+}
+
+fn help_text(app: &App) -> String {
+    let common = "1-5 or Tab: views · ↑↓ move · PgUp/PgDn pages · F5 rescan · F10 or q quit\nMouse: click a view, a row or a key; the wheel moves.";
+    let this = match app.tab {
+        BROWSE => "Disk usage (read-only): Enter/→ open a folder · ←/Backspace up · F2 choose a disk · F3 info · F4 never-touch on/off",
+        DISKS => "Choose a disk: Enter browses it · F2 or Esc back",
+        DOCKER => "Docker: ←→ Overview/Stacks/Containers/Images/Volumes/Logs/Storage · Enter details · t truncate log · x remove · b prune build cache · F2 next group",
+        LOGS => "Logs: Enter open/close a group · t truncate · r remove rotated · v vacuum journal · F2 next group",
+        PROJECTS if app.project_open.is_some() => "Project page: r remove · k keep · F4/n never-touch on/off · a all · F9/Enter apply · Esc back",
+        PROJECTS => "Projects: Enter opens a group or a project page · F2 next group",
+        SERVICES => "Services: disk use of each running service (data folders and logs) · F2 next group",
+        FIXES => "Cleanup: F3/Space pick · F2/s all SAFE · a all but RISKY · c clear · F4/n never-touch on/off · F9/Enter apply (asks first; RISKY needs D)",
+        HISTORY => "History: every action dux took, newest first",
+        _ => "Activity: disk I/O now and who is writing",
+    };
+    format!("{this}\n\n{common}\n\nany key to close")
+}
+
 /// Returns true to quit.
 fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     if code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
@@ -1322,6 +1591,40 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     if overlay_key(app, code) {
         return false;
     }
+    match code {
+        KeyCode::F(1) => {
+            app.overlay = Overlay::Help;
+            return false;
+        }
+        KeyCode::F(10) => return true,
+        KeyCode::F(5) => {
+            app.message = "Rescanning...".into();
+            app.reload();
+            return false;
+        }
+        KeyCode::F(2) if matches!(app.tab, DOCKER | LOGS | PROJECTS | SERVICES) => {
+            let i = GROUPS.iter().position(|(g, _)| *g == app.tab).unwrap_or(0);
+            app.project_open = None;
+            app.tab = GROUPS[(i + 1) % GROUPS.len()].0;
+            app.group = app.tab;
+            return false;
+        }
+        _ => {}
+    }
+    // F-keys name the same actions as the letters of each screen.
+    let code = match (app.tab, code) {
+        (PROJECTS, KeyCode::F(4)) if app.project_open.is_some() => KeyCode::Char('n'),
+        (PROJECTS, KeyCode::F(9)) if app.project_open.is_some() => KeyCode::Enter,
+        (DOCKER | LOGS | PROJECTS | SERVICES, KeyCode::F(3)) => KeyCode::Enter,
+        (FIXES, KeyCode::F(2)) => KeyCode::Char('s'),
+        (FIXES, KeyCode::F(3)) => KeyCode::Char(' '),
+        (FIXES, KeyCode::F(4)) => KeyCode::Char('n'),
+        (FIXES, KeyCode::F(9)) => KeyCode::Enter,
+        (BROWSE, KeyCode::F(3)) => KeyCode::Char('i'),
+        (BROWSE, KeyCode::F(4)) => KeyCode::Char('N'),
+        (DISKS, KeyCode::F(2)) => KeyCode::Esc,
+        (_, c) => c,
+    };
     if app.tab == PROJECTS && app.project_open.is_some() {
         return project_key(app, code);
     }
@@ -1330,22 +1633,47 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     }
     let rows = app.rows();
     let t = app.tab;
+    let page = app.page.get().max(1);
     match code {
         KeyCode::Char('q') => return true,
-        KeyCode::Char(c @ '1'..='8') => app.tab = (c as usize) - ('1' as usize),
-        KeyCode::Tab => app.tab = (app.tab + 1) % TABS.len(),
-        KeyCode::BackTab => app.tab = (app.tab + TABS.len() - 1) % TABS.len(),
+        KeyCode::Char(c @ '1'..='5') => switch_view(app, (c as usize) - ('1' as usize)),
+        KeyCode::Tab => switch_view(app, (view_of(app.tab) + 1) % VIEWS.len()),
+        KeyCode::BackTab => switch_view(app, (view_of(app.tab) + VIEWS.len() - 1) % VIEWS.len()),
+        KeyCode::Char('g') if matches!(t, DOCKER | LOGS | PROJECTS | SERVICES) => {
+            return key(app, KeyCode::F(2), KeyModifiers::NONE)
+        }
         KeyCode::Down | KeyCode::Char('j') => {
             app.sel[t] = (app.sel[t] + 1).min(rows.saturating_sub(1))
         }
         KeyCode::Up | KeyCode::Char('k') => app.sel[t] = app.sel[t].saturating_sub(1),
-        KeyCode::PageDown => app.sel[t] = (app.sel[t] + 20).min(rows.saturating_sub(1)),
-        KeyCode::PageUp => app.sel[t] = app.sel[t].saturating_sub(20),
+        KeyCode::PageDown => {
+            app.sel[t] = (app.sel[t] - app.sel[t] % page + page).min(rows.saturating_sub(1))
+        }
+        KeyCode::PageUp => app.sel[t] = (app.sel[t] - app.sel[t] % page).saturating_sub(page),
         KeyCode::Home => app.sel[t] = 0,
         KeyCode::End => app.sel[t] = rows.saturating_sub(1),
         KeyCode::Char('r') if t != BROWSE => {
             app.message = "Rescanning...".into();
             app.reload();
+        }
+        KeyCode::F(2) if t == BROWSE => {
+            app.sel[DISKS] = app
+                .data
+                .disks
+                .iter()
+                .position(|d| d.path == app.root)
+                .unwrap_or(0);
+            app.tab = DISKS;
+        }
+        KeyCode::Esc | KeyCode::Left | KeyCode::Backspace if t == DISKS => app.tab = BROWSE,
+        KeyCode::Enter if t == DISKS => {
+            if let Some(d) = app.data.disks.get(app.sel[DISKS]).cloned() {
+                app.root = d.path.clone();
+                app.cwd = d.path;
+                app.sel[BROWSE] = 0;
+                app.tab = BROWSE;
+                app.reload();
+            }
         }
         KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if t == BROWSE => {
             if let Some(e) = app.selected_entry().filter(|e| e.is_dir).cloned() {
@@ -1369,41 +1697,15 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
                     .unwrap_or(0);
             }
         }
-        KeyCode::Char(c @ ('s' | 'n' | 'C' | 'M')) if t == BROWSE => {
-            app.sort = match c {
-                's' => Sort::Size,
-                'n' => Sort::Name,
-                'C' => Sort::Count,
-                _ => Sort::Mtime,
-            };
-            app.sort_entries();
-        }
         KeyCode::Char('i') if t == BROWSE => {
             if let Some(e) = app.selected_entry().cloned() {
                 app.overlay = Overlay::Info(e);
             }
         }
-        KeyCode::Char('d' | 'N') if t == BROWSE && !app.is_root() => {}
-        KeyCode::Char('d') if t == BROWSE => {
-            if let Some(e) = app.selected_entry().cloned() {
-                let path = e.path.to_string_lossy().into_owned();
-                if crate::protect::is_protected(&e.path) {
-                    app.message =
-                        format!("{path} is on (or contains a path on) the never-touch list");
-                } else if crate::cleanup::system_path(&path) {
-                    app.message =
-                        format!("{path} is a system or top-level path; dux will not delete it");
-                } else {
-                    app.overlay = Overlay::Delete(e);
-                }
-            }
-        }
-        KeyCode::Char('N') if t == BROWSE => {
+        KeyCode::Char('N' | 'n') if t == BROWSE => {
             if let Some(e) = app.selected_entry().cloned() {
                 match e.path.to_str() {
-                    Some(p) => {
-                        app.never_touch(p);
-                    }
+                    Some(p) => app.toggle_never_touch(p),
                     None => {
                         app.message =
                             "This name is not valid UTF-8; the never-touch list cannot store it."
@@ -1414,30 +1716,46 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         }
         KeyCode::Char(' ') if t == FIXES => {
             let i = app.sel[FIXES];
-            if app.data.fixes.get(i).is_some_and(|x| x.item.is_some()) {
-                app.picked[i] = !app.picked[i];
+            let ok = app
+                .data
+                .fixes
+                .get(i)
+                .is_some_and(|x| x.item.is_some() && !app.fix_protected(x));
+            if ok {
+                if let Some(p) = app.picked.get_mut(i) {
+                    *p = !*p;
+                }
+                app.sel[FIXES] = (i + 1).min(rows.saturating_sub(1));
             }
         }
-        KeyCode::Char('s') if t == FIXES => {
-            for (i, x) in app.data.fixes.iter().enumerate() {
-                app.picked[i] = x.item.is_some() && x.safety == Safety::Safe;
-            }
-        }
-        KeyCode::Char('a') if t == FIXES => {
-            for (i, x) in app.data.fixes.iter().enumerate() {
-                app.picked[i] = x.item.is_some() && x.safety != Safety::Risky;
-            }
+        KeyCode::Char(c @ ('s' | 'a')) if t == FIXES => {
+            let picks: Vec<bool> = app
+                .data
+                .fixes
+                .iter()
+                .map(|x| {
+                    x.item.is_some()
+                        && !app.fix_protected(x)
+                        && if c == 's' {
+                            x.safety == Safety::Safe
+                        } else {
+                            x.safety != Safety::Risky
+                        }
+                })
+                .collect();
+            app.picked = picks;
         }
         KeyCode::Char('c') if t == FIXES => app.picked.iter_mut().for_each(|p| *p = false),
         KeyCode::Char('n') if t == FIXES => {
             let i = app.sel[FIXES];
-            if let Some(p) = app.data.fixes.get(i).and_then(crate::fix::target_path) {
-                if app.never_touch(&p) {
-                    app.data.fixes.remove(i);
-                    app.picked.remove(i);
+            match app.data.fixes.get(i).and_then(crate::fix::target_path) {
+                Some(p) => {
+                    app.toggle_never_touch(&p);
+                    if let Some(x) = app.picked.get_mut(i) {
+                        *x = false;
+                    }
                 }
-            } else {
-                app.message = "This fix has no single path to protect.".into();
+                None => app.message = "This fix has no single path to protect.".into(),
             }
         }
         KeyCode::Enter if t == FIXES && app.loading => {
@@ -1446,14 +1764,16 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         KeyCode::Enter if t == FIXES => {
             let (n, bytes, risky) = app.picked_total();
             if n == 0 {
-                app.message = "Pick fixes first: Space, s (safe) or a (all).".into();
+                app.message = "Pick fixes first: F3/Space, F2 (all SAFE) or a.".into();
             } else {
                 let items: Vec<Item> = app
                     .data
                     .fixes
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| app.picked.get(*i).copied().unwrap_or(false))
+                    .filter(|(i, x)| {
+                        app.picked.get(*i).copied().unwrap_or(false) && !app.fix_protected(x)
+                    })
                     .filter_map(|(_, x)| x.item.clone())
                     .collect();
                 app.overlay = Overlay::ApplyFixes {
@@ -1468,25 +1788,97 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     false
 }
 
+/// Mouse (spec A11.6): click a view or a key, click a row to select it (a
+/// second click opens it), the wheel moves. Returns true to quit.
+fn mouse(app: &mut App, m: crossterm::event::MouseEvent) -> bool {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (tabs, body, keys) = app.areas.get();
+    let (col, row) = (m.column, m.row);
+    match m.kind {
+        MouseEventKind::ScrollDown => {
+            return key(app, KeyCode::Down, KeyModifiers::NONE);
+        }
+        MouseEventKind::ScrollUp => {
+            return key(app, KeyCode::Up, KeyModifiers::NONE);
+        }
+        MouseEventKind::Down(MouseButton::Left) => {}
+        _ => return false,
+    }
+    if row == keys.y && keys.height > 0 {
+        return match keybar_hit(app, keys.x, col) {
+            Some("Enter") => key(app, KeyCode::Enter, KeyModifiers::NONE),
+            Some("Esc") => key(app, KeyCode::Esc, KeyModifiers::NONE),
+            Some(k) => match k.trim_start_matches('F').parse::<u8>() {
+                Ok(n) => key(app, KeyCode::F(n), KeyModifiers::NONE),
+                Err(_) => false,
+            },
+            None => false,
+        };
+    }
+    if !matches!(app.overlay, Overlay::None) || app.v.job.is_some() {
+        return false;
+    }
+    if row == tabs.y + 1 {
+        let mut x = tabs.x + 1;
+        for (i, t) in VIEWS.iter().enumerate() {
+            let w = t.chars().count() as u16 + 2;
+            if col >= x && col < x + w {
+                switch_view(app, i);
+                return false;
+            }
+            x += w + 1;
+        }
+        return false;
+    }
+    // Rows of the simple lists: border, header, then one row per line.
+    if matches!(app.tab, BROWSE | DISKS | FIXES | SERVICES)
+        && row >= body.y + 2
+        && row + 1 < body.y + body.height
+    {
+        let page = app.page.get().max(1);
+        let sel = app.sel[app.tab];
+        let i = sel - sel % page + usize::from(row - body.y - 2);
+        if i < app.rows() {
+            if i == sel && matches!(app.tab, BROWSE | DISKS) {
+                return key(app, KeyCode::Enter, KeyModifiers::NONE);
+            }
+            app.sel[app.tab] = i;
+        }
+    }
+    false
+}
+
 pub fn run(root: &str) -> Result<()> {
     let mut app = App::new(root);
     app.reload();
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = execute!(
+            stdout(),
+            crossterm::event::DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         prev(info);
     }));
     struct Guard;
     impl Drop for Guard {
         fn drop(&mut self) {
             let _ = disable_raw_mode();
-            let _ = execute!(stdout(), LeaveAlternateScreen);
+            let _ = execute!(
+                stdout(),
+                crossterm::event::DisableMouseCapture,
+                LeaveAlternateScreen
+            );
         }
     }
     let _guard = Guard;
     enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
+    execute!(
+        stdout(),
+        EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
     let mut term = Terminal::new(CrosstermBackend::new(stdout()))?;
     loop {
         app.poll();
@@ -1503,10 +1895,14 @@ pub fn run(root: &str) -> Result<()> {
         }
         term.draw(|f| draw(f, &mut app))?;
         if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(k) = event::read()? {
-                if k.kind == KeyEventKind::Press && key(&mut app, k.code, k.modifiers) {
-                    return Ok(());
+            match event::read()? {
+                Event::Key(k) if k.kind == KeyEventKind::Press => {
+                    if key(&mut app, k.code, k.modifiers) {
+                        return Ok(());
+                    }
                 }
+                Event::Mouse(m) if mouse(&mut app, m) => return Ok(()),
+                _ => {}
             }
         }
     }
@@ -1544,7 +1940,7 @@ mod tests {
         );
         assert!(names.contains(&"shop") && names.contains(&"logs"));
         let mut term = Terminal::new(TestBackend::new(140, 45)).unwrap();
-        for tab in 0..8 {
+        for tab in 0..SCREENS {
             app.tab = tab;
             term.draw(|f| draw(f, &mut app)).unwrap();
         }
@@ -1585,58 +1981,105 @@ mod tests {
         assert!(matches!(app.overlay, Overlay::ApplyFixes { .. }));
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
         assert_eq!(app.message, "Nothing applied.");
+        // View 1 is read-only: no delete key any more.
         app.tab = BROWSE;
-        app.cwd = "/".into();
-        app.list_dir();
-        app.sel[BROWSE] = app
-            .entries
-            .iter()
-            .position(|e| e.name == "etc")
-            .unwrap_or(0);
         key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
         assert!(
             matches!(app.overlay, Overlay::None),
-            "no delete prompt for a top-level folder"
+            "no delete in Disk usage"
         );
         assert!(key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE));
         std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
-    fn a_delete_prompt_stays_bound_to_what_it_showed() {
-        let d = std::env::temp_dir().join(format!("dux-ui-bind-{}", std::process::id()));
+    fn five_views_key_bar_pages_mouse_and_never_touch_undo() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let d = std::env::temp_dir().join(format!("dux-ui-keys-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(d.join("sub")).unwrap();
-        std::fs::write(d.join("sub/small.txt"), b"x").unwrap();
-        std::fs::create_dir_all(d.join("sub/bigdir")).unwrap();
-        std::fs::write(d.join("sub/bigdir/data"), vec![1u8; 1 << 20]).unwrap();
-        let sub = d.join("sub").to_string_lossy().into_owned();
-        let mut app = App::new(&sub);
+        std::fs::create_dir_all(&d).unwrap();
+        for i in 0..120 {
+            std::fs::write(d.join(format!("f{i:03}")), vec![1u8; 4096 * (i + 1)]).unwrap();
+        }
+        let root = d.to_string_lossy().into_owned();
+        let mut app = App::new(&root);
         app.loading = false;
         app.list_dir();
-        app.sel[BROWSE] = app
-            .entries
-            .iter()
-            .position(|e| e.name == "small.txt")
-            .unwrap();
-        key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
-        assert!(matches!(&app.overlay, Overlay::Delete(e) if e.name == "small.txt"));
-        // A scan finishing re-sorts the list under the open prompt.
-        app.entries.reverse();
-        assert!(matches!(&app.overlay, Overlay::Delete(e) if e.name == "small.txt"));
-        // Replaced on disk since the prompt opened: nothing is deleted.
-        std::fs::remove_file(d.join("sub/small.txt")).unwrap();
-        std::fs::write(d.join("sub/other"), b"y").unwrap();
-        std::fs::write(d.join("sub/small.txt"), b"new").unwrap();
-        key(&mut app, KeyCode::Char('D'), KeyModifiers::NONE);
-        assert!(
-            app.message.contains("changed since the prompt opened"),
-            "{}",
-            app.message
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        // Digits pick the five views; 3 remembers the group.
+        for (k, want) in [
+            ('2', ACTIVITY),
+            ('3', DOCKER),
+            ('4', FIXES),
+            ('5', HISTORY),
+            ('1', BROWSE),
+        ] {
+            key(&mut app, KeyCode::Char(k), KeyModifiers::NONE);
+            assert_eq!(app.tab, want, "key {k}");
+        }
+        app.tab = DOCKER;
+        key(&mut app, KeyCode::F(2), KeyModifiers::NONE);
+        assert_eq!(app.tab, PROJECTS, "F2 cycles groups");
+        key(&mut app, KeyCode::Char('1'), KeyModifiers::NONE);
+        key(&mut app, KeyCode::Char('3'), KeyModifiers::NONE);
+        assert_eq!(app.tab, PROJECTS, "view 3 remembers the group");
+        // Pages: one screen of rows, PgDn turns a page.
+        app.tab = BROWSE;
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let page = app.page.get();
+        assert!(page > 5 && page < 30, "{page}");
+        key(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
+        assert_eq!(app.sel[BROWSE], page);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(page_text(&app).contains("page 2/"), "{}", page_text(&app));
+        // Biggest first, always.
+        assert!(app.entries.windows(2).all(|w| w[0].bytes >= w[1].bytes));
+        // Mouse: a click on the key bar's F1 opens help; a click on view 4.
+        let (tabs, body, keys) = app.areas.get();
+        let click = |c, r| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: c,
+            row: r,
+            modifiers: KeyModifiers::NONE,
+        };
+        mouse(&mut app, click(keys.x + 1, keys.y));
+        assert!(matches!(app.overlay, Overlay::Help));
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        let x4 = tabs.x + 1 + VIEWS[..3].iter().map(|t| t.len() as u16 + 3).sum::<u16>();
+        mouse(&mut app, click(x4 + 1, tabs.y + 1));
+        assert_eq!(app.tab, FIXES, "click on view 4");
+        mouse(&mut app, click(tabs.x + 2, tabs.y + 1));
+        assert_eq!(app.tab, BROWSE);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let (_, body2, _) = app.areas.get();
+        assert_eq!(body, body2);
+        mouse(&mut app, click(body.x + 3, body.y + 4));
+        assert_eq!(
+            app.sel[BROWSE] % page,
+            2,
+            "click selects the third row of the page"
         );
-        assert!(d.join("sub/small.txt").exists() && d.join("sub/bigdir/data").exists());
+        // Never-touch undo asks first and is bound to the path shown.
+        let target = app
+            .selected_entry()
+            .unwrap()
+            .path
+            .to_string_lossy()
+            .into_owned();
+        app.protected = vec![crate::protect::normalize(&target)];
+        key(&mut app, KeyCode::F(4), KeyModifiers::NONE);
+        assert!(
+            matches!(&app.overlay, Overlay::Unprotect(p) if *p == crate::protect::normalize(&target))
+        );
+        app.entries.reverse(); // a rescan re-sorting under the prompt
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.message.contains("stays on the never-touch list"));
         std::fs::remove_dir_all(&d).unwrap();
     }
+
     #[test]
     fn every_view_renders_at_every_size_with_huge_and_odd_data() {
         use std::os::unix::ffi::OsStrExt;
@@ -1714,7 +2157,7 @@ mod tests {
         ];
         for (w, h) in sizes {
             let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-            for tab in 0..8 {
+            for tab in 0..SCREENS {
                 app.tab = tab;
                 for sub in 0..views::DSUB.len() {
                     app.v.dsub = sub;
@@ -1728,10 +2171,11 @@ mod tests {
             // Overlays and the job window at this size.
             app.tab = BROWSE;
             app.sel[BROWSE] = 0;
-            for o in 0..3 {
+            for o in 0..4 {
                 app.overlay = match o {
                     0 => Overlay::Info(app.entries[0].clone()),
-                    1 => Overlay::Delete(app.entries[0].clone()),
+                    1 => Overlay::Unprotect("/x".repeat(300)),
+                    2 => Overlay::Help,
                     _ => Overlay::ApplyFixes {
                         items: vec![
                             Item {

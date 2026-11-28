@@ -32,7 +32,7 @@ fn item(action: Action) -> Item {
 fn delete_through_a_symlinked_parent_into_etc_is_refused() {
     let d = tmp("symetc");
     std::os::unix::fs::symlink("/etc", d.join("link")).unwrap();
-    let r = cleanup::apply(&item(Action::RemoveUserPath {
+    let r = cleanup::apply(&item(Action::Remove {
         path: d.join("link/hostname"),
     }));
     assert!(
@@ -52,7 +52,7 @@ fn dot_dot_escapes_are_judged_at_the_real_location() {
     let d = tmp("dotdot");
     let p = d.join("a/../../../../../../etc/hosts");
     std::fs::create_dir_all(d.join("a")).unwrap();
-    assert!(cleanup::apply(&item(Action::RemoveUserPath { path: p })).is_err());
+    assert!(cleanup::apply(&item(Action::Remove { path: p })).is_err());
     assert!(Path::new("/etc/hosts").exists());
     std::fs::remove_dir_all(&d).unwrap();
 }
@@ -82,16 +82,16 @@ fn runtime_and_database_stores_are_system_paths() {
 }
 
 #[test]
-fn a_symlink_is_removed_as_a_link_and_its_target_kept() {
+fn a_symlink_is_never_removed_or_followed() {
     let d = tmp("linkonly");
     std::fs::create_dir_all(d.join("data")).unwrap();
     std::fs::write(d.join("data/precious"), b"p").unwrap();
-    std::os::unix::fs::symlink(d.join("data"), d.join("shortcut")).unwrap();
-    cleanup::apply(&item(Action::RemoveUserPath {
-        path: d.join("shortcut"),
+    std::os::unix::fs::symlink(d.join("data/precious"), d.join("shortcut.log.1")).unwrap();
+    assert!(cleanup::apply(&item(Action::Remove {
+        path: d.join("shortcut.log.1"),
     }))
-    .unwrap();
-    assert!(!d.join("shortcut").exists());
+    .is_err());
+    assert!(d.join("shortcut.log.1").symlink_metadata().is_ok());
     assert!(d.join("data/precious").exists());
     std::fs::remove_dir_all(&d).unwrap();
 }

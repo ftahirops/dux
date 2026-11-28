@@ -81,8 +81,7 @@ fn fs_of(item: &Item, docker_root: Option<&str>) -> String {
     let p = match &item.action {
         Action::Remove { path }
         | Action::TailAndTruncate { path, .. }
-        | Action::RemoveTree { path }
-        | Action::RemoveUserPath { path } => {
+        | Action::RemoveTree { path } => {
             // Measure on the folder: the path itself is gone afterwards.
             path.parent()
                 .map(|d| d.to_path_buf())

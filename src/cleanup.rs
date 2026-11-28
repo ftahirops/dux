@@ -71,8 +71,6 @@ pub enum Action {
     TailAndTruncate { path: PathBuf, keep: u64 },
     /// Remove a build-output folder (`node_modules`, `target`...) and everything in it.
     RemoveTree { path: PathBuf },
-    /// Remove a file or folder the user picked by hand (browser `d`).
-    RemoveUserPath { path: PathBuf },
 }
 
 #[derive(Clone, Debug)]
@@ -570,7 +568,7 @@ pub fn open_now() -> HashSet<(u64, u64)> {
 /// The paths an action changes, for never-touch and approved-folder checks.
 pub fn targets(item: &Item) -> Option<Vec<PathBuf>> {
     Some(match &item.action {
-        Action::Remove { path } | Action::RemoveTree { path } | Action::RemoveUserPath { path } => {
+        Action::Remove { path } | Action::RemoveTree { path } => {
             vec![path.clone()]
         }
         Action::TailAndTruncate { path, .. } => vec![path.clone(), tail_path(path)],
@@ -580,7 +578,7 @@ pub fn targets(item: &Item) -> Option<Vec<PathBuf>> {
 
 pub fn allowed(item: &Item) -> Result<()> {
     let targets: Vec<PathBuf> = match &item.action {
-        Action::Remove { path } | Action::RemoveTree { path } | Action::RemoveUserPath { path } => {
+        Action::Remove { path } | Action::RemoveTree { path } => {
             vec![path.clone()]
         }
         Action::TailAndTruncate { path, .. } => vec![path.clone(), tail_path(path)],
@@ -633,7 +631,6 @@ pub fn apply(item: &Item) -> Result<()> {
             tail_and_truncate(path, *keep)
         }
         Action::RemoveTree { path } => remove_tree(path),
-        Action::RemoveUserPath { path } => remove_user_path(path),
     };
     audit(serde_json::json!({
         "t": crate::util::now_secs(),
@@ -690,38 +687,6 @@ pub fn system_path(p: &str) -> bool {
         || UNDER
             .iter()
             .any(|u| p == *u || p.starts_with(&format!("{u}/")))
-}
-
-/// Delete a file or folder the user chose. Refuses system paths, top-level
-/// folders, symlinked folders, folders with a mount inside, and open files.
-pub fn remove_user_path(path: &Path) -> Result<()> {
-    // Judge and delete the real location: the parent resolved by the kernel
-    // plus the final name (never followed, so a symlink is removed as a link).
-    let real = real_location(path)?;
-    for p in [
-        path.to_string_lossy().into_owned(),
-        real.to_string_lossy().into_owned(),
-    ] {
-        crate::refuse_unless!(
-            !system_path(&crate::protect::normalize(&p)),
-            "{p} is a system or top-level path; dux will not delete it"
-        );
-    }
-    let p = real.to_string_lossy().into_owned();
-    let m = std::fs::symlink_metadata(&real)?;
-    if m.is_dir() {
-        crate::refuse_unless!(
-            !has_mount_inside(&p)?,
-            "{p} has a filesystem mounted inside it"
-        );
-        remove_dir_same_fs(&real).with_context(|| format!("removing {p}"))
-    } else {
-        crate::refuse_unless!(
-            !open_files().contains(&(m.dev(), m.ino())),
-            "{p} is open by a running process"
-        );
-        std::fs::remove_file(&real).with_context(|| format!("removing {p}"))
-    }
 }
 
 /// The real path of `path`: its parent canonicalized, plus the final name.
@@ -1323,12 +1288,6 @@ mod tests {
         ] {
             assert!(!system_path(p), "{p} may be deleted by the user");
         }
-        let r = tmp("userdel");
-        std::fs::create_dir_all(r.join("a/b")).unwrap();
-        std::fs::write(r.join("a/b/f"), b"x").unwrap();
-        remove_user_path(&r.join("a")).unwrap();
-        assert!(!r.join("a").exists());
-        std::fs::remove_dir_all(&r).unwrap();
     }
 
     #[test]
@@ -1499,7 +1458,6 @@ mod tests {
                 }
                 Action::Remove { path } => format!("rm:{}", path.display()),
                 Action::RemoveTree { path } => format!("rmtree:{}", path.display()),
-                Action::RemoveUserPath { path } => format!("rmuser:{}", path.display()),
             })
             .collect();
         kinds.sort();

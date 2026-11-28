@@ -189,7 +189,6 @@ pub fn kind_of(item: &Item) -> Option<Kind> {
             cleanup::rotated_base(&name).map(|_| Kind::RotatedLogs)
         }
         Action::RemoveTree { .. } => Some(Kind::BuildCaches),
-        Action::RemoveUserPath { .. } => None,
     }
 }
 
@@ -692,15 +691,15 @@ mod tests {
             permitted(&p, &rm("/srv/app/logs/data.db")).is_err(),
             "not a rotated log"
         );
-        let user = Item {
+        let big = Item {
             level: 4,
-            what: "x".into(),
-            action: Action::RemoveUserPath {
-                path: "/srv/app/logs/a".into(),
+            what: "delete a biggest file".into(),
+            action: Action::Remove {
+                path: "/srv/app/logs/huge.bin".into(),
             },
             frees: 1,
         };
-        assert!(permitted(&p, &user).is_err(), "never a user pick");
+        assert!(permitted(&p, &big).is_err(), "never a biggest-file delete");
         let journal = Item {
             level: 1,
             what: "j".into(),

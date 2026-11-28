@@ -28,7 +28,95 @@ pub struct Gathered {
     pub apps: Vec<(String, String, u64, i64)>,
     pub docker: Option<crate::docker::Report>,
     pub fixes: Vec<Suggestion>,
+    pub services: Vec<ServiceUse>,
     pub errors: Vec<String>,
+}
+
+/// Disk use of one running systemd service: its data folders and logs.
+#[derive(Clone, Debug, Default)]
+pub struct ServiceUse {
+    pub name: String,
+    pub folders: Vec<(String, u64)>,
+    pub logs: u64,
+    pub total: u64,
+}
+
+fn running_services() -> Vec<String> {
+    let Ok(out) = std::process::Command::new("systemctl")
+        .args([
+            "list-units",
+            "--type=service",
+            "--state=running",
+            "--no-legend",
+            "--plain",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .filter(|u| u.ends_with(".service"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Where a service's data usually lives, by its name ("mysqld" -> mysql).
+fn service_bases(unit: &str) -> Vec<String> {
+    let base = unit.trim_end_matches(".service");
+    let base = base.split('@').next().unwrap_or(base);
+    let mut v = vec![base.to_string()];
+    for suffix in ["d", "-server", "-agent", "-daemon"] {
+        if let Some(b) = base.strip_suffix(suffix).filter(|b| b.len() >= 3) {
+            v.push(b.to_string());
+        }
+    }
+    v
+}
+
+pub fn services(units: &[String], tree: &Tree, logs: &[LogFile]) -> Vec<ServiceUse> {
+    let root = tree.root_path.trim_end_matches('/');
+    let mut out = Vec::new();
+    for unit in units {
+        let bases = service_bases(unit);
+        let mut s = ServiceUse {
+            name: unit.trim_end_matches(".service").to_string(),
+            ..ServiceUse::default()
+        };
+        for b in &bases {
+            for dir in ["/var/lib", "/var/cache", "/srv", "/opt"] {
+                let p = format!("{dir}/{b}");
+                if s.folders.iter().any(|(q, _)| *q == p) {
+                    continue;
+                }
+                let Some(rel) = p.strip_prefix(root).map(|r| r.trim_start_matches('/')) else {
+                    continue;
+                };
+                if let Some(n) = tree.root.find(rel).filter(|n| n.total_bytes > 0) {
+                    s.folders.push((p, n.total_bytes));
+                }
+            }
+        }
+        s.logs = logs
+            .iter()
+            .filter(|l| {
+                l.service.as_deref() == Some(unit.as_str())
+                    || bases
+                        .iter()
+                        .any(|b| l.path.starts_with(&format!("/var/log/{b}/")))
+            })
+            .map(|l| l.bytes)
+            .sum();
+        s.total = s.folders.iter().map(|(_, b)| b).sum::<u64>() + s.logs;
+        if s.total >= 1 << 20 {
+            out.push(s);
+        }
+    }
+    out.sort_by_key(|s| std::cmp::Reverse(s.total));
+    out
 }
 
 pub fn disks() -> Vec<Disk> {
@@ -128,6 +216,7 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
             g.biggest = big;
             g.projects = insight::projects(&tree);
             g.apps = insight::apps(&tree);
+            g.services = services(&running_services(), &tree, &g.logs);
             g.tree = Some(tree);
         }
         Err(e) => g.errors.push(format!("walk {root}: {e:#}")),
@@ -209,7 +298,8 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
         Some(i) => seen.insert(format!("{:?}", i.action)),
         None => true,
     });
-    crate::fix::drop_protected(&mut fixes);
+    // Never-touch fixes stay listed (marked by the views), so protecting
+    // one can be undone where it was done.
     fixes.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
     g.fixes = fixes;
     g

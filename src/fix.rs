@@ -167,7 +167,6 @@ pub fn assess(item: Item) -> Suggestion {
             }
         }
         Action::TailAndTruncate { .. } => (Safety::Caution, "Empties a big active log in place; its last 10 MiB are saved as .dux-tail and the app keeps writing.", "Older lines are gone; the saved tail and rotated copies remain."),
-        Action::RemoveUserPath { .. } => (Safety::Risky, "Deletes a file or folder you picked; dux cannot know if you still need it.", "Only from your own backup."),
         Action::RemoveTree { .. } => (Safety::Caution, "Deletes build output (node_modules, target, .venv...). Source code and git history are untouched.", "Rebuild with the project's tools: npm install, cargo build..."),
     };
     Suggestion {
@@ -255,8 +254,7 @@ pub fn target_path(s: &Suggestion) -> Option<String> {
     match &s.item.as_ref()?.action {
         Action::Remove { path }
         | Action::TailAndTruncate { path, .. }
-        | Action::RemoveTree { path }
-        | Action::RemoveUserPath { path } => Some(path.to_string_lossy().into_owned()),
+        | Action::RemoveTree { path } => Some(path.to_string_lossy().into_owned()),
         Action::Run { .. } => None,
     }
 }
@@ -270,12 +268,6 @@ fn blocked(x: &Suggestion) -> bool {
 /// Drop suggestions the never-touch list forbids (same rules as apply time:
 /// real locations, parents of listed paths, command scopes; an unreadable
 /// list blocks everything). Returns how many were dropped.
-pub fn drop_protected(s: &mut Vec<Suggestion>) -> usize {
-    let before = s.len();
-    s.retain(|x| !blocked(x));
-    before - s.len()
-}
-
 /// Keep forbidden suggestions in the list but make them unselectable, so
 /// the numbers a user saw in a preview still name the same fixes.
 fn mark_protected(s: &mut [Suggestion]) -> usize {
