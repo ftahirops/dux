@@ -303,3 +303,56 @@ mod tests {
             .contains("allocated file size exceeds supported range"));
     }
 }
+
+/// "2026-08-01T10:20:30Z" or "2026-08-01T10:20:30+02:00" -> unix seconds.
+pub fn parse_rfc3339(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let (date, rest) = s.split_once('T')?;
+    let mut d = date.split('-').map(|x| x.parse::<i64>());
+    let (y, m, day) = (d.next()?.ok()?, d.next()?.ok()?, d.next()?.ok()?);
+    let hms: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == ':')
+        .collect();
+    let mut t = hms.split(':').map(|x| x.parse::<i64>().unwrap_or(0));
+    let (h, mi, se) = (t.next()?, t.next().unwrap_or(0), t.next().unwrap_or(0));
+    let tail = &rest[hms.len()..];
+    let tail = tail.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
+    let off = match tail.chars().next() {
+        Some(sign @ ('+' | '-')) => {
+            let mut o = tail[1..].split(':').map(|x| x.parse::<i64>().unwrap_or(0));
+            let v = o.next().unwrap_or(0) * 3600 + o.next().unwrap_or(0) * 60;
+            if sign == '+' {
+                v
+            } else {
+                -v
+            }
+        }
+        _ => 0,
+    };
+    // Days from civil (Howard Hinnant).
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + mi * 60 + se - off)
+}
+
+#[cfg(test)]
+mod rfc_tests {
+    #[test]
+    fn rfc3339() {
+        assert_eq!(super::parse_rfc3339("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            super::parse_rfc3339("2026-11-28T13:06:41Z"),
+            Some(1795871201)
+        );
+        assert_eq!(
+            super::parse_rfc3339("2026-11-28T15:06:41+02:00"),
+            Some(1795871201)
+        );
+    }
+}

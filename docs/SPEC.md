@@ -310,6 +310,20 @@ containers, emit, classify, fault) is **deleted** [decided, done].
 | A6.16 | Deleted-but-open files | explained | RISKY | keep (explained only) |
 | A6.17 | Go/cargo/npm/pip caches, pm2 and .NET logs | — | — | add |
 
+**A6 revision (owner decisions, 2026-11-28, after testing on vps1).** Cleanup lists only data a rule identifies as deletable; size alone never qualifies:
+
+| ID | Rule | Decision |
+| --- | --- | --- |
+| A6.15 | Delete a biggest file | **removed**: big files are information only (Disk usage, `dux biggest`) |
+| A6.18 | Never listed | databases (*.sqlite*, *.db, *.mdb, database folders), program binaries, /usr /bin /lib /boot, Docker/containerd internals, swap, git object stores, app state (~/.local/share, ~/.claude, ~/.codex and similar) |
+| A6.19 | Project leftovers | full research catalog per ecosystem, each folder only next to its marker file, as the exact folder with its kind; never source or .git; only when the project is not in use: no running process uses it (cwd, exe, open files), no systemd unit, pm2 app or Docker bind mount points into it, no web root points into it, and nothing changed in 10 days |
+| A6.20 | Tool caches | pip, npm, yarn, go-build, cargo registry, Gradle, composer, Cypress, Puppeteer/Playwright old browser versions (newest kept), node-gyp, electron: SAFE, through each tool's own command where it has one; Hugging Face, Maven repo, Go modules: CAUTION; never under ~/.local/share |
+| A6.21 | Leftovers | SAFE, older than 7 days: *~, *.orig, *.rej, core dumps, hs_err_pid*.log, .DS_Store, Thumbs.db. CAUTION, older than 30 days, never the newest of a series, never under /etc, never open: *.bak, *.old, *.tmp, *.swp |
+| A6.22 | CMS and dumps | SAFE: WordPress cache and upgrade folders, Laravel/Symfony/Magento/Drupal caches (never sessions), Duplicator installer leftovers. CAUTION, older than 30 days, only when a newer one of the same site/database exists (the newest is never offered): .wpress, UpdraftPlus, BackWPup, Duplicator, Akeeba .jpa, *.sql(.gz), *.dump. Dumps inside a web root are flagged as a security risk |
+| A6.23 | Server level | SAFE: apt/dnf cache, journal over 1 GiB, old snap revisions, crash/core dumps, Docker build cache, rotated logs. CAUTION: old kernels (running + one fallback kept), /tmp > 10 d and /var/tmp > 30 d (never sockets or open files), CI runner work dirs (GitLab, GitHub Actions, Jenkins) idle 7+ days; each through its own tool |
+| A6.24 | Docker volumes | one group row; only anonymous volumes unused for 30+ days are offered (RISKY, typed); named volumes are information only |
+| A6.25 | Layout | categories folded with totals; Enter opens a category; items under 10 MiB are counted but not listed one by one |
+
 ### A7. Logs
 | ID | Feature | Was | Decision |
 | --- | --- | --- | --- |

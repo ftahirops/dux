@@ -252,6 +252,14 @@ pub fn command_scope(program: &str, _args: &[String]) -> Option<Vec<PathBuf>> {
         "logrotate" => &["/var/log"],
         "systemd-tmpfiles" => &["/tmp", "/var/tmp"],
         "snap" => &["/var/lib/snapd"],
+        // runuser -u USER -- env HOME=H tool ...: reaches that user's home.
+        "runuser" => {
+            let home = _args
+                .iter()
+                .find_map(|a| a.strip_prefix("HOME="))
+                .map(str::to_string);
+            return home.map(|h| vec![PathBuf::from(h)]);
+        }
         _ => return None,
     };
     Some(dirs.iter().map(PathBuf::from).collect())

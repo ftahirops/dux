@@ -268,6 +268,19 @@ pub const ARTIFACTS: &[&str] = &[
     "_build",
     ".build",
     ".terraform",
+    ".svelte-kit",
+    ".output",
+    ".vite",
+    "storybook-static",
+    ".nyc_output",
+    ".ruff_cache",
+    ".hypothesis",
+    ".nox",
+    ".stack-work",
+    "dist-newstyle",
+    ".zig-cache",
+    "zig-cache",
+    ".dart_tool",
 ];
 
 /// Build output that only counts as such next to a matching project file
@@ -277,6 +290,10 @@ pub fn conditional_artifact(name: &str, parent_markers: u16, parent: &str) -> bo
     use crate::walker::{MARK_DOTNET, MARK_GO, MARK_PHP};
     match name {
         "bin" | "obj" => parent_markers & MARK_DOTNET != 0,
+        "deps" => parent_markers & crate::walker::MARK_ELIXIR != 0,
+        "CMakeFiles" => parent_markers & crate::walker::MARK_CMAKE != 0,
+        n if n.starts_with("cmake-build-") => parent_markers & crate::walker::MARK_CMAKE != 0,
+        n if n.ends_with(".egg-info") => parent_markers & crate::walker::MARK_PYTHON != 0,
         "vendor" => {
             parent_markers & MARK_PHP != 0
                 || (parent_markers & MARK_GO != 0 && git_tracks(parent, "vendor") == Some(false))

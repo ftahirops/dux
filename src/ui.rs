@@ -152,6 +152,8 @@ struct App {
     /// State of the organised views (Docker, Logs, Projects, History) and
     /// the running action job.
     v: views::State,
+    /// Cleanup categories opened with Enter (spec A6.25).
+    open_cats: std::collections::HashSet<&'static str>,
     /// Activity refresh interval and freeze (F6 / f).
     every: Duration,
     frozen: bool,
@@ -193,6 +195,7 @@ impl App {
             overlay: Overlay::None,
             message: String::new(),
             v: views::State::default(),
+            open_cats: Default::default(),
             every: ui_refresh(),
             frozen: false,
             samples: 0,
@@ -340,7 +343,7 @@ impl App {
             ACTIVITY => self.live.writing.len(),
             SERVICES => self.data.services.len(),
             DOCKER | LOGS | PROJECTS | HISTORY => views::rows(self),
-            _ => self.data.fixes.len(),
+            _ => cleanup_rows(self).len(),
         }
     }
 
@@ -677,6 +680,7 @@ fn keybar(app: &App) -> Vec<(&'static str, &'static str)> {
             ("+/-", "Speed"),
         ]),
         FIXES => v.extend([
+            ("Enter", "Open"),
             ("F2", "Safe"),
             ("F3", "Pick"),
             ("F4", "Never-touch"),
@@ -984,62 +988,174 @@ fn draw_project(f: &mut Frame, app: &App, i: usize, body: Rect) {
     );
 }
 
+/// One row of the folded Cleanup list (spec A6.25).
+#[derive(Clone, Debug, PartialEq)]
+enum CRow {
+    /// A category with its total; Enter opens it.
+    Cat(&'static str),
+    /// One suggestion (index into data.fixes).
+    Item(usize),
+    /// The items under 10 MiB of a category, counted together.
+    Small(&'static str),
+}
+
+const SMALL: u64 = 10 << 20;
+
+fn cleanup_rows(app: &App) -> Vec<CRow> {
+    let mut cats: Vec<(&'static str, u64, bool)> = Vec::new();
+    for x in &app.data.fixes {
+        let c = crate::fix::group(x);
+        let b = if x.item.is_some() { x.frees } else { 0 };
+        match cats.iter_mut().find(|e| e.0 == c) {
+            Some(e) => e.1 += b,
+            None => cats.push((c, b, x.item.is_some())),
+        }
+    }
+    // Biggest first; categories with nothing to apply at the end.
+    cats.sort_by_key(|(c, b, _)| (*b == 0, std::cmp::Reverse(*b), *c));
+    let mut out = Vec::new();
+    for (c, _, _) in cats {
+        out.push(CRow::Cat(c));
+        if !app.open_cats.contains(c) {
+            continue;
+        }
+        let mut items: Vec<usize> = (0..app.data.fixes.len())
+            .filter(|&i| crate::fix::group(&app.data.fixes[i]) == c)
+            .collect();
+        items.sort_by_key(|&i| std::cmp::Reverse(app.data.fixes[i].frees));
+        let small = items
+            .iter()
+            .filter(|&&i| app.data.fixes[i].item.is_some() && app.data.fixes[i].frees < SMALL)
+            .count();
+        for i in items {
+            let x = &app.data.fixes[i];
+            if x.item.is_none() || x.frees >= SMALL || small <= 1 {
+                out.push(CRow::Item(i));
+            }
+        }
+        if small > 1 {
+            out.push(CRow::Small(c));
+        }
+    }
+    out
+}
+
+/// The suggestions a row stands for.
+fn row_fixes(app: &App, r: &CRow) -> Vec<usize> {
+    match r {
+        CRow::Item(i) => vec![*i],
+        CRow::Cat(c) => (0..app.data.fixes.len())
+            .filter(|&i| crate::fix::group(&app.data.fixes[i]) == *c)
+            .collect(),
+        CRow::Small(c) => (0..app.data.fixes.len())
+            .filter(|&i| {
+                let x = &app.data.fixes[i];
+                crate::fix::group(x) == *c && x.item.is_some() && x.frees < SMALL
+            })
+            .collect(),
+    }
+}
+
+fn pickable(app: &App, i: usize) -> bool {
+    app.data
+        .fixes
+        .get(i)
+        .is_some_and(|x| x.item.is_some() && !app.fix_protected(x))
+}
+
 fn draw_fixes(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
     let parts = Layout::vertical([Constraint::Min(5), Constraint::Length(5)]).split(body);
-    let rows: Vec<Row> = app
-        .data
-        .fixes
+    let rows_model = cleanup_rows(app);
+    let page = app.page.get().max(1);
+    let sel = app.sel[FIXES].min(rows_model.len().saturating_sub(1));
+    let start = sel - sel % page;
+    state.select((!rows_model.is_empty()).then_some(sel - start));
+    *state.offset_mut() = 0;
+    let mark_of = |idx: &[usize]| {
+        let can: Vec<usize> = idx.iter().copied().filter(|&i| pickable(app, i)).collect();
+        let on = can
+            .iter()
+            .filter(|&&i| app.picked.get(i).copied().unwrap_or(false))
+            .count();
+        if can.is_empty() {
+            " - "
+        } else if on == can.len() {
+            "[x]"
+        } else if on > 0 {
+            "[~]"
+        } else {
+            "[ ]"
+        }
+    };
+    let rows: Vec<Row> = rows_model
         .iter()
-        .enumerate()
-        .map(|(i, x)| {
-            let never = app.fix_protected(x);
-            let mark = if x.item.is_none() || never {
-                " - "
-            } else if app.picked.get(i).copied().unwrap_or(false) {
-                "[x]"
-            } else {
-                "[ ]"
-            };
-            let title = if never {
-                format!("[never touch] {}", x.title)
-            } else {
-                x.title.clone()
-            };
-            Row::new(vec![
-                mark.to_string(),
-                x.safety.label().to_string(),
-                human(x.frees as i64),
-                crate::fix::group(x).to_string(),
-                title,
-            ])
-            .style(if never {
-                Style::default().fg(Color::Magenta)
-            } else {
-                Style::default().fg(color(x.safety))
-            })
+        .skip(start)
+        .take(page)
+        .map(|r| {
+            let idx = row_fixes(app, r);
+            let bytes: u64 = idx
+                .iter()
+                .filter(|&&i| app.data.fixes[i].item.is_some())
+                .map(|&i| app.data.fixes[i].frees)
+                .sum();
+            match r {
+                CRow::Cat(c) => {
+                    let open = app.open_cats.contains(c);
+                    let worst = idx
+                        .iter()
+                        .map(|&i| app.data.fixes[i].safety)
+                        .max()
+                        .unwrap_or(Safety::Safe);
+                    Row::new(vec![
+                        mark_of(&idx).to_string(),
+                        String::new(),
+                        human(bytes as i64),
+                        format!("{} {c} ({})", if open { "▾" } else { "▸" }, idx.len()),
+                    ])
+                    .style(
+                        Style::default()
+                            .add_modifier(Modifier::BOLD)
+                            .fg(color(worst)),
+                    )
+                }
+                CRow::Small(_) => Row::new(vec![
+                    mark_of(&idx).to_string(),
+                    String::new(),
+                    human(bytes as i64),
+                    format!("    {} smaller items (under 10 MiB each)", idx.len()),
+                ])
+                .style(Style::default().fg(Color::Gray)),
+                CRow::Item(i) => {
+                    let x = &app.data.fixes[*i];
+                    let never = app.fix_protected(x);
+                    let title = if never {
+                        format!("[never touch] {}", x.title)
+                    } else {
+                        x.title.clone()
+                    };
+                    Row::new(vec![
+                        mark_of(&idx).to_string(),
+                        x.safety.label().to_string(),
+                        human(x.frees as i64),
+                        format!("    {title}"),
+                    ])
+                    .style(if never {
+                        Style::default().fg(Color::Magenta)
+                    } else {
+                        Style::default().fg(color(x.safety))
+                    })
+                }
+            }
         })
         .collect();
     let (n, b, _) = app.picked_total();
-    // Summed per group, biggest first.
-    let mut sums: Vec<(&str, u64)> = Vec::new();
-    for x in app
+    let total: u64 = app
         .data
         .fixes
         .iter()
         .filter(|x| x.item.is_some() && !app.fix_protected(x))
-    {
-        let g = crate::fix::group(x);
-        match sums.iter_mut().find(|s| s.0 == g) {
-            Some(s) => s.1 += x.frees,
-            None => sums.push((g, x.frees)),
-        }
-    }
-    sums.retain(|s| s.1 > 0);
-    sums.sort_by_key(|s| std::cmp::Reverse(s.1));
-    let sums: Vec<String> = sums
-        .iter()
-        .map(|(g, b)| format!("{g} {}", human(*b as i64)))
-        .collect();
+        .map(|x| x.frees)
+        .sum();
     f.render_stateful_widget(
         Table::new(
             rows,
@@ -1047,40 +1163,33 @@ fn draw_fixes(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
                 Constraint::Length(4),
                 Constraint::Length(8),
                 Constraint::Length(11),
-                Constraint::Length(15),
                 Constraint::Min(30),
             ],
         )
-        .header(hdr(&["", "rating", "frees", "group", "what"]))
+        .header(hdr(&["", "rating", "frees", "category / what"]))
         .block(Block::default().borders(Borders::ALL).title(format!(
-            " Cleanup: {} · {n} picked, {} ",
-            if sums.is_empty() {
-                "nothing to clean".to_string()
-            } else {
-                sums.join(" · ")
-            },
+            " Cleanup: up to {} · {n} picked, {} · Enter opens a category ",
+            human(total as i64),
             human(b as i64)
         )))
         .row_highlight_style(hl()),
         parts[0],
         state,
     );
-    let detail = app
-        .data
-        .fixes
-        .get(app.sel[FIXES])
-        .map(|x| {
+    let detail = match rows_model.get(sel) {
+        Some(CRow::Item(i)) => app.data.fixes.get(*i).map(|x| {
             format!(
                 "{}\nUndo: {}{}",
                 x.why,
                 x.undo,
-                x.manual
-                    .as_ref()
-                    .map(|m| format!("\nBy hand: {m}"))
-                    .unwrap_or_default()
+                x.manual.as_ref().map(|m| format!("\nBy hand: {m}")).unwrap_or_default()
             )
-        })
-        .unwrap_or_default();
+        }),
+        Some(CRow::Cat(c)) => Some(format!("{c}: Enter opens or closes it; Space picks every SAFE and CAUTION item in it (RISKY ones are picked one by one).")),
+        Some(CRow::Small(c)) => Some(format!("Every {c} item under 10 MiB, picked together with Space.")),
+        None => None,
+    }
+    .unwrap_or_default();
     f.render_widget(
         Paragraph::new(detail).wrap(Wrap { trim: true }).block(
             Block::default()
@@ -1601,7 +1710,7 @@ fn help_text(app: &App) -> String {
         PROJECTS if app.project_open.is_some() => "Project page: r remove · k keep · F4/n never-touch on/off · a all · F9/Enter apply · Esc back",
         PROJECTS => "Projects: Enter opens a group or a project page · F2 next group",
         SERVICES => "Services: disk use of each running service (data folders and logs) · F2 next group",
-        FIXES => "Cleanup: F3/Space pick · F2/s all SAFE · a all but RISKY · c clear · F4/n never-touch on/off · F9/Enter apply (asks first; RISKY needs D)",
+        FIXES => "Cleanup: categories folded with totals · Enter opens one · F3/Space picks an item, a category or its smaller items · F2/s all SAFE · a all but RISKY · c clear · F4/n never-touch on/off · F9 apply (asks first; RISKY needs D)",
         HISTORY => "History: every action dux took, newest first",
         _ => "Activity: disk I/O now and who is writing · F6/f freeze · +/- refresh speed (default 5 s; [ui] refresh in dux.toml)",
     };
@@ -1653,7 +1762,7 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         (FIXES, KeyCode::F(2)) => KeyCode::Char('s'),
         (FIXES, KeyCode::F(3)) => KeyCode::Char(' '),
         (FIXES, KeyCode::F(4)) => KeyCode::Char('n'),
-        (FIXES, KeyCode::F(9)) => KeyCode::Enter,
+        (FIXES, KeyCode::F(9)) => KeyCode::Char('!'),
         (BROWSE, KeyCode::F(3)) => KeyCode::Char('i'),
         (BROWSE, KeyCode::F(4)) => KeyCode::Char('N'),
         (DISKS, KeyCode::F(2)) => KeyCode::Esc,
@@ -1767,17 +1876,35 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             }
         }
         KeyCode::Char(' ') if t == FIXES => {
-            let i = app.sel[FIXES];
-            let ok = app
-                .data
-                .fixes
-                .get(i)
-                .is_some_and(|x| x.item.is_some() && !app.fix_protected(x));
-            if ok {
-                if let Some(p) = app.picked.get_mut(i) {
-                    *p = !*p;
+            let rows_model = cleanup_rows(app);
+            let sel = app.sel[FIXES];
+            if let Some(r) = rows_model.get(sel) {
+                // A category or the small-items row picks its SAFE and
+                // CAUTION items; RISKY ones only one by one.
+                let idx: Vec<usize> = row_fixes(app, r)
+                    .into_iter()
+                    .filter(|&i| pickable(app, i))
+                    .filter(|&i| {
+                        matches!(r, CRow::Item(_)) || app.data.fixes[i].safety != Safety::Risky
+                    })
+                    .collect();
+                let all_on = !idx.is_empty()
+                    && idx
+                        .iter()
+                        .all(|&i| app.picked.get(i).copied().unwrap_or(false));
+                for i in idx {
+                    if let Some(p) = app.picked.get_mut(i) {
+                        *p = !all_on;
+                    }
                 }
-                app.sel[FIXES] = (i + 1).min(rows.saturating_sub(1));
+                app.sel[FIXES] = (sel + 1).min(rows.saturating_sub(1));
+            }
+        }
+        KeyCode::Enter if t == FIXES => {
+            if let Some(CRow::Cat(c)) = cleanup_rows(app).get(app.sel[FIXES]).cloned() {
+                if !app.open_cats.remove(c) {
+                    app.open_cats.insert(c);
+                }
             }
         }
         KeyCode::Char(c @ ('s' | 'a')) if t == FIXES => {
@@ -1799,7 +1926,10 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         }
         KeyCode::Char('c') if t == FIXES => app.picked.iter_mut().for_each(|p| *p = false),
         KeyCode::Char('n') if t == FIXES => {
-            let i = app.sel[FIXES];
+            let i = match cleanup_rows(app).get(app.sel[FIXES]) {
+                Some(CRow::Item(i)) => *i,
+                _ => usize::MAX,
+            };
             match app.data.fixes.get(i).and_then(crate::fix::target_path) {
                 Some(p) => {
                     app.toggle_never_touch(&p);
@@ -1810,10 +1940,10 @@ fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
                 None => app.message = "This fix has no single path to protect.".into(),
             }
         }
-        KeyCode::Enter if t == FIXES && app.loading => {
+        KeyCode::Char('!') if t == FIXES && app.loading => {
             app.message = "Scanning; apply fixes when the scan finishes.".into();
         }
-        KeyCode::Enter if t == FIXES => {
+        KeyCode::Char('!') if t == FIXES => {
             let (n, bytes, risky) = app.picked_total();
             if n == 0 {
                 app.message = "Pick fixes first: F3/Space, F2 (all SAFE) or a.".into();
@@ -2032,9 +2162,19 @@ mod tests {
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
         assert!(app.project_open.is_none());
         app.tab = FIXES;
-        key(&mut app, KeyCode::Char('a'), KeyModifiers::NONE);
-        assert!(app.picked_total().0 >= 2);
+        // Folded: one row per category; Enter opens the first one.
+        let cats = cleanup_rows(&app)
+            .iter()
+            .filter(|r| matches!(r, CRow::Cat(_)))
+            .count();
+        assert_eq!(cleanup_rows(&app).len(), cats, "all folded at first");
+        app.sel[FIXES] = 0;
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(cleanup_rows(&app).len() > cats, "Enter opens a category");
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        key(&mut app, KeyCode::Char('a'), KeyModifiers::NONE);
+        assert!(app.picked_total().0 >= 1);
+        key(&mut app, KeyCode::F(9), KeyModifiers::NONE);
         assert!(matches!(app.overlay, Overlay::ApplyFixes { .. }));
         key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
         assert_eq!(app.message, "Nothing applied.");

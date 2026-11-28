@@ -127,6 +127,8 @@ pub struct Volume {
     pub mountpoint: String,
     /// Compose volume name inside its project.
     pub compose_name: Option<String>,
+    /// Creation time (unix), 0 when unknown.
+    pub created: i64,
 }
 
 /// A compose project (or the standalone containers), with everything it owns.
@@ -412,6 +414,7 @@ pub fn parse_df(text: &str) -> Result<Report> {
     for vol in v["Volumes"].as_array().into_iter().flatten() {
         let labels = s(vol, "Labels");
         r.volumes.push(Volume {
+            created: 0,
             runtime: "docker",
             name: s(vol, "Name"),
             size: parse_si(&s(vol, "Size")),
@@ -643,6 +646,7 @@ pub fn parse_podman(ps: &str, images: &str, volumes: &str) -> Result<Report> {
                 .map(str::to_string)
         };
         r.volumes.push(Volume {
+            created: 0,
             runtime: "podman",
             name: st(&v, "Name"),
             size: 0,
@@ -727,6 +731,21 @@ pub fn collect() -> Result<Report> {
             let id = i.id.trim_start_matches("sha256:");
             i.dangling =
                 !id.is_empty() && ids.iter().any(|d| d.starts_with(id) || id.starts_with(d));
+        }
+    }
+    // Volume ages, for "unused for 30+ days" (spec A6.24).
+    if !r.volumes.is_empty() {
+        let mut a = vec!["volume", "inspect", "--format", "{{.Name}} {{.CreatedAt}}"];
+        let names: Vec<String> = r.volumes.iter().map(|v| v.name.clone()).collect();
+        a.extend(names.iter().map(String::as_str));
+        if let Ok(t) = docker(&a) {
+            for l in t.lines() {
+                if let Some((n, c)) = l.split_once(' ') {
+                    if let Some(v) = r.volumes.iter_mut().find(|v| v.name == n) {
+                        v.created = crate::util::parse_rfc3339(c).unwrap_or(0);
+                    }
+                }
+            }
         }
     }
     r.root_dir = docker(&["info", "--format", "{{.DockerRootDir}}"])
@@ -935,6 +954,7 @@ mod tests {
             ..Image::default()
         });
         r.volumes.push(Volume {
+            created: 0,
             name: "xgm_data_0123456789abcdef".into(),
             size: 50,
             ..Volume::default()
@@ -967,6 +987,7 @@ mod tests {
         assert_eq!(st[0].working_dir.as_deref(), Some("/opt/x"));
         // A shortened mount that two volumes share is not attributed to either.
         r.volumes.push(Volume {
+            created: 0,
             name: "xgm_data_0123zzzz".into(),
             ..Volume::default()
         });

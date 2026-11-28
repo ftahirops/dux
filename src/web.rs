@@ -680,7 +680,12 @@ v.appendChild(table(['size','','entries','name'],r.children.map(c=>{const n=c.di
 function renderFixes(v){const sums={};S.fixes.filter(f=>f.applicable).forEach(f=>{sums[f.group]=(sums[f.group]||0)+f.frees});
 const g=Object.entries(sums).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
 v.appendChild(el('p','Can be cleaned: '+(g.length?g.map(([k,b])=>k+' '+H(b)).join(' · '):'nothing')+'. Read-only here: apply with dux fix or in dux ui (view 4).'));
-v.appendChild(table(['rating','frees','group','what','what it does','undo'],S.fixes.map(f=>({cls:f.never_touch?'muted':'',cells:[el('b',f.safety,f.safety),H(f.frees),f.group,(f.never_touch?'[never touch] ':'')+f.title,f.why+(f.manual?' By hand: '+f.manual:''),f.undo]}))))}
+const by={};S.fixes.forEach(f=>{(by[f.group]=by[f.group]||[]).push(f)});
+Object.keys(by).sort((a,b)=>(sums[b]||0)-(sums[a]||0)).forEach(k=>{const d=el('details'),sm=el('summary',k+' · '+H(sums[k]||0)+' · '+by[k].length+' items');d.appendChild(sm);
+const big=by[k].filter(f=>f.frees>=10485760||!f.applicable),small=by[k].filter(f=>f.frees<10485760&&f.applicable);
+const rows=big.map(f=>({cls:f.never_touch?'muted':'',cells:[el('b',f.safety,f.safety),H(f.frees),(f.never_touch?'[never touch] ':'')+f.title,f.why+(f.manual?' By hand: '+f.manual:''),f.undo]}));
+if(small.length)rows.push({cls:'muted',cells:['',H(small.reduce((a,f)=>a+f.frees,0)),small.length+' smaller items (under 10 MiB each)','','']});
+d.appendChild(table(['rating','frees','what','what it does','undo'],rows));v.appendChild(d)})}
 document.getElementById('refresh').onclick=async()=>{await api('/api/refresh',{method:'POST'});load()};
 load();setInterval(load,300000);
 </script></body></html>"##;

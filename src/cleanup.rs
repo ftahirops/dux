@@ -186,6 +186,15 @@ fn open_files() -> HashSet<(u64, u64)> {
     out
 }
 
+/// `files_under` for other modules.
+pub fn files_under_pub(dir: &Path, max_depth: usize) -> Vec<(PathBuf, std::fs::Metadata)> {
+    files_under(dir, max_depth)
+}
+
+pub fn dir_bytes_pub(dir: &Path) -> u64 {
+    dir_bytes(dir)
+}
+
 /// Regular files under `dir` on the same filesystem, without following symlinks.
 fn files_under(dir: &Path, max_depth: usize) -> Vec<(PathBuf, std::fs::Metadata)> {
     let mut out = Vec::new();
@@ -755,7 +764,8 @@ pub fn remove_tree(path: &Path) -> Result<()> {
                 &name,
                 crate::insight::markers_on_disk(parent),
                 &parent.to_string_lossy()
-            ),
+            )
+            || crate::catalog::known_dir(path),
         "{} is not a known build-output folder",
         path.display()
     );

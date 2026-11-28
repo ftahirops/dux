@@ -40,6 +40,15 @@ pub struct Suggestion {
     /// What dux runs if picked; None means "do this by hand" (`manual`).
     pub item: Option<Item>,
     pub manual: Option<String>,
+    /// The Cleanup category it is summed and folded under.
+    pub category: Option<&'static str>,
+}
+
+impl Suggestion {
+    pub fn with_category(mut self, c: &'static str) -> Suggestion {
+        self.category = Some(c);
+        self
+    }
 }
 
 /// Command-line choices shared by every command that offers fixes.
@@ -79,6 +88,7 @@ pub fn suggestion(
         frees,
         item,
         manual,
+        category: None,
     }
 }
 
@@ -177,6 +187,7 @@ pub fn assess(item: Item) -> Suggestion {
         frees: item.frees,
         item: Some(item),
         manual: None,
+        category: None,
     }
 }
 
@@ -305,7 +316,18 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
         }
         return Ok(0);
     }
-    s.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
+    // By category (biggest category first), then biggest first (spec A6.25).
+    let mut cat_total: std::collections::HashMap<&str, u64> = Default::default();
+    for x in &s {
+        *cat_total.entry(group(x)).or_default() += x.frees;
+    }
+    s.sort_by(|a, b| {
+        let (ga, gb) = (group(a), group(b));
+        cat_total[gb]
+            .cmp(&cat_total[ga])
+            .then(ga.cmp(gb))
+            .then(b.frees.cmp(&a.frees))
+    });
     // An unreadable never-touch list (a normal user, or a damaged file)
     // blocks every change; say that instead of calling everything protected.
     let unreadable = crate::protect::policy_from(std::path::Path::new(crate::protect::FILE)).err();
@@ -337,7 +359,12 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
         h(t[1]),
         h(t[2])
     );
+    let mut last_group = "";
     for (i, x) in s.iter().enumerate() {
+        if group(x) != last_group {
+            last_group = group(x);
+            println!("\n  {last_group} ({})", h(cat_total[last_group]));
+        }
         println!(
             "  {:>3}. {:<7} {:>10}  {}",
             i + 1,
@@ -431,6 +458,9 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
 
 /// The group a cleanup suggestion is summed under (spec UI-1 view 4).
 pub fn group(x: &Suggestion) -> &'static str {
+    if let Some(c) = x.category {
+        return c;
+    }
     let Some(item) = &x.item else {
         return "Explained only";
     };

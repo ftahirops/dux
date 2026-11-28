@@ -1,6 +1,7 @@
 mod api;
 mod attrib;
 mod auto;
+mod catalog;
 mod cleanup;
 mod config;
 mod deleted;

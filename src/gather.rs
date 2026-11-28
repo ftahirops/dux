@@ -29,6 +29,8 @@ pub struct Gathered {
     pub docker: Option<crate::docker::Report>,
     pub fixes: Vec<Suggestion>,
     pub services: Vec<ServiceUse>,
+    /// Files the cleanup catalog matched by name (leftovers, backups, dumps).
+    pub leftovers: Vec<FoundFile>,
     pub errors: Vec<String>,
 }
 
@@ -197,13 +199,21 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
     };
     let opts = WalkOptions {
         filter: Some(Box::new(|f: &FileView| {
-            (f.bytes >= 10 << 20 && insight::is_log(f.dir, f.name)) || f.bytes >= 50 << 20
+            (f.bytes >= 10 << 20 && insight::is_log(f.dir, f.name))
+                || f.bytes >= 50 << 20
+                || crate::catalog::file_rule(f.dir, f.name).is_some()
         })),
         max_found: 300_000,
         progress,
     };
     match walker::walk_with(root, threads, opts) {
         Ok((tree, found)) => {
+            let (leftovers, found): (Vec<FoundFile>, Vec<FoundFile>) =
+                found.into_iter().partition(|f| {
+                    let (dir, name) = f.path.rsplit_once('/').unwrap_or(("", &f.path));
+                    crate::catalog::file_rule(dir.as_bytes(), name.as_bytes()).is_some()
+                });
+            g.leftovers = leftovers;
             let (logs, big): (Vec<FoundFile>, Vec<FoundFile>) = found.into_iter().partition(|f| {
                 let (dir, name) = f.path.rsplit_once('/').unwrap_or(("", &f.path));
                 f.bytes >= 10 << 20 && insight::is_log(dir.as_bytes(), name.as_bytes())
@@ -259,17 +269,35 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
                 .filter(|i| !matches!(i.action, Action::TailAndTruncate { .. }))
                 .map(fix::assess),
         );
-        fixes.extend(
-            r.unused_volumes()
-                .filter(|v| v.size >= 1 << 20)
-                .map(|v| fix::delete_volume(&v.name, v.size)),
-        );
+        fixes.extend(crate::catalog::volume_suggestions(r, g.at));
     }
+    // Project build output, only in projects nothing uses (spec A6.19).
+    let in_use = crate::catalog::InUse::collect(g.docker.as_ref());
+    let idle: Vec<insight::Project> = g
+        .projects
+        .iter()
+        .filter(|p| !in_use.uses(&p.path))
+        .cloned()
+        .collect();
     fixes.extend(
-        insight::pp_plan(&g.projects, 10, g.at)
+        insight::pp_plan(&idle, 10, g.at)
             .into_iter()
-            .map(fix::assess),
+            .map(|i| fix::assess(i).with_category(crate::catalog::PROJECTS)),
     );
+    // The catalog: leftovers, old backups, web app caches, tool caches, CI
+    // folders, server items (spec A6.19-A6.23).
+    fixes.extend(crate::catalog::file_suggestions(
+        &g.leftovers,
+        g.at,
+        &in_use.web_roots,
+    ));
+    if let Some(t) = &g.tree {
+        fixes.extend(crate::catalog::folder_suggestions(t, g.at));
+        fixes.extend(crate::catalog::tool_suggestions(t));
+    }
+    if root == "/" {
+        fixes.extend(crate::catalog::server_suggestions(g.at));
+    }
     // Big files are information (Disk usage, `dux biggest`), never a delete
     // suggestion: being big says nothing about being deletable.
     let mut held: std::collections::BTreeMap<(i32, String), i64> = Default::default();
@@ -291,6 +319,11 @@ pub fn gather(root: &str, threads: usize, progress: Option<Arc<AtomicU64>>) -> G
         Some(i) => seen.insert(format!("{:?}", i.action)),
         None => true,
     });
+    // An action that frees nothing measurable is noise, not a suggestion.
+    fixes.retain(|x| x.item.is_none() || x.frees > 0);
+    // Final guard (spec A6.18): nothing in a never-listed place, whatever
+    // produced it.
+    fixes.retain(|x| crate::fix::target_path(x).is_none_or(|p| !crate::catalog::never(&p)));
     // Never-touch fixes stay listed (marked by the views), so protecting
     // one can be undone where it was done.
     fixes.sort_by(|a, b| a.safety.cmp(&b.safety).then(b.frees.cmp(&a.frees)));
