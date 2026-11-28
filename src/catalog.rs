@@ -676,6 +676,7 @@ pub fn tool_suggestions(tree: &Tree) -> Vec<Suggestion> {
                 "--".into(),
                 "env".into(),
                 format!("HOME={home}"),
+                format!("DUX_SCOPE={p}"),
                 bin.to_string_lossy().into_owned(),
             ];
             a.extend(args.iter().map(|s| s.to_string()));
@@ -886,6 +887,22 @@ fn collect_conf(d: &Path, depth: usize, out: &mut Vec<PathBuf>) {
 
 // --------------------------------------------------------------- server
 
+/// Bytes in `dir` that systemd-tmpfiles' age rule would remove: untouched
+/// (atime, mtime, ctime) for `days`, never sockets or service-private dirs.
+pub fn tmp_aged(dir: &str, days: i64, now: i64) -> u64 {
+    crate::cleanup::files_under_pub(Path::new(dir), 4)
+        .into_iter()
+        .filter(|(p, m)| {
+            let ps = p.to_string_lossy();
+            now - m.mtime().max(m.atime()).max(m.ctime()) >= days * DAY
+                && !ps.contains("systemd-private-")
+                && !ps.contains(".X11-unix")
+                && !ps.contains("snap-private-tmp")
+        })
+        .map(|(_, m)| m.blocks() * 512)
+        .sum()
+}
+
 /// A6.23 server items not in cleanup::plan: old snap revisions, old
 /// kernels, aged /tmp and /var/tmp.
 pub fn server_suggestions(now: i64) -> Vec<Suggestion> {
@@ -929,20 +946,7 @@ pub fn server_suggestions(now: i64) -> Vec<Suggestion> {
     }
     out.extend(old_kernels());
     // /tmp older than 10 days, /var/tmp older than 30 (systemd defaults).
-    let mut tmp_bytes = 0u64;
-    for (d, days) in [("/tmp", 10), ("/var/tmp", 30)] {
-        for (p, m) in crate::cleanup::files_under_pub(Path::new(d), 4) {
-            let newest = m.mtime().max(m.atime()).max(m.ctime());
-            let ps = p.to_string_lossy();
-            if now - newest >= days * DAY
-                && !ps.contains("systemd-private-")
-                && !ps.contains(".X11-unix")
-                && !ps.contains("snap-private-tmp")
-            {
-                tmp_bytes += m.blocks() * 512;
-            }
-        }
-    }
+    let tmp_bytes = tmp_aged("/tmp", 10, now) + tmp_aged("/var/tmp", 30, now);
     if tmp_bytes >= 1 << 20 {
         let item = Item {
             level: 3,

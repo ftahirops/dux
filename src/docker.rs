@@ -70,6 +70,9 @@ fn list(s: &str) -> Vec<String> {
 pub struct Image {
     /// Docker's own "dangling" (what `image prune` removes when unused).
     pub dangling: bool,
+    /// When the image arrived on this host (unix; 0 unknown). Docker's
+    /// `--filter until=` judges by this, not by the build date.
+    pub arrived: i64,
     /// "docker" or "podman" (empty means docker).
     pub runtime: &'static str,
     pub name: String,
@@ -363,6 +366,7 @@ pub fn parse_df(text: &str) -> Result<Report> {
         let tag = s(i, "Tag");
         r.images.push(Image {
             dangling: false,
+            arrived: 0,
             runtime: "docker",
             name: if repo == "<none>" || repo.is_empty() {
                 format!(
@@ -580,6 +584,7 @@ pub fn parse_podman(ps: &str, images: &str, volumes: &str) -> Result<Report> {
         let shared = i["SharedSize"].as_u64().unwrap_or(0);
         r.images.push(Image {
             dangling: false,
+            arrived: 0,
             runtime: "podman",
             name,
             id: st(&i, "Id"),
@@ -733,6 +738,47 @@ pub fn collect() -> Result<Report> {
                 !id.is_empty() && ids.iter().any(|d| d.starts_with(id) || id.starts_with(d));
         }
     }
+    // Arrival time of each image on this host (LastTagTime), for
+    // `image prune --filter until=` which uses it, not the build date.
+    if !r.images.is_empty() {
+        let ids: Vec<String> = r
+            .images
+            .iter()
+            .filter(|i| !i.id.is_empty())
+            .map(|i| i.id.clone())
+            .collect();
+        let mut a = vec![
+            "image".to_string(),
+            "inspect".into(),
+            "--format".into(),
+            "{{.Id}} {{.Metadata.LastTagTime}} {{.Created}}".into(),
+        ];
+        a.extend(ids);
+        let args: Vec<&str> = a.iter().map(String::as_str).collect();
+        if let Ok(t) = docker(&args) {
+            for l in t.lines() {
+                let mut f = l.split_whitespace();
+                let (Some(id), Some(d), Some(tm)) = (f.next(), f.next(), f.next()) else {
+                    continue;
+                };
+                let id = id.trim_start_matches("sha256:");
+                // "0001-01-01" means never tagged here: fall back to the build date.
+                let when = crate::util::parse_rfc3339(&format!("{d}T{tm}Z"))
+                    .filter(|t| *t > 0)
+                    .or_else(|| {
+                        f.find(|x| x.contains('T'))
+                            .and_then(crate::util::parse_rfc3339)
+                    })
+                    .unwrap_or(0);
+                for i in r.images.iter_mut().filter(|i| {
+                    let x = i.id.trim_start_matches("sha256:");
+                    !x.is_empty() && (id.starts_with(x) || x.starts_with(id))
+                }) {
+                    i.arrived = when;
+                }
+            }
+        }
+    }
     // Volume ages, for "unused for 30+ days" (spec A6.24).
     if !r.volumes.is_empty() {
         let mut a = vec!["volume", "inspect", "--format", "{{.Name}} {{.CreatedAt}}"];
@@ -846,11 +892,18 @@ pub fn plan(r: &Report, include_images: bool, include_containers: bool, big_log:
         }
     }
     if include_images {
-        let unused: u64 = r.unused_images().map(|i| i.unique).sum();
+        // Only what `prune --filter until=720h` really removes: unused images
+        // that arrived on this host 30+ days ago (not built 30+ days ago).
+        let now = crate::util::now_secs();
+        let unused: u64 = r
+            .unused_images()
+            .filter(|i| i.arrived > 0 && now - i.arrived >= 30 * 86_400)
+            .map(|i| i.unique)
+            .sum();
         if unused > 0 {
             items.push(Item {
                 level: 4,
-                what: "images not used by any container, older than 30 days".into(),
+                what: "unused images that arrived here 30+ days ago".into(),
                 action: run(&["image", "prune", "-a", "-f", "--filter", "until=720h"]),
                 frees: unused,
             });
@@ -949,6 +1002,7 @@ mod tests {
         let mut r = Report::default();
         r.images.push(Image {
             dangling: false,
+            arrived: 0,
             name: "pg:16".into(),
             unique: 100,
             ..Image::default()
@@ -1039,6 +1093,10 @@ mod tests {
         // Docker's own dangling filter marks this one (collect() asks Docker).
         for i in r.images.iter_mut().filter(|i| i.name.starts_with("<none>")) {
             i.dangling = true;
+        }
+        // Arrived here long ago (what prune --filter until= judges by).
+        for i in r.images.iter_mut() {
+            i.arrived = 1;
         }
         r.containers[0].log_bytes = 500 << 20;
         r.containers[0].log_path = "/var/lib/docker/containers/c1/c1-json.log".into();

@@ -452,7 +452,19 @@ fn real_main() -> Result<()> {
                         c.dim,
                         c.reset
                     );
-                    println!("   {:>11}  {}→ {}{}", "", c.green, k.fix, c.reset);
+                    // systemd-tmpfiles removes only old files: say how much.
+                    let fix = match cpath.as_str() {
+                        "/tmp" | "/var/tmp" => {
+                            let days = if cpath == "/tmp" { 10 } else { 30 };
+                            let aged = catalog::tmp_aged(cpath, days, util::now_secs());
+                            format!(
+                                "systemd-tmpfiles --clean frees only files untouched {days}+ days: {} here; the rest is recent or in use (dux where {cpath})",
+                                human(aged as i64)
+                            )
+                        }
+                        _ => k.fix.to_string(),
+                    };
+                    println!("   {:>11}  {}→ {fix}{}", "", c.green, c.reset);
                 }
                 if cul.len() > 10 {
                     println!(
@@ -1099,65 +1111,19 @@ fn real_main() -> Result<()> {
             // `dux fix` is the fix list: always show it.
             fixes.fix = true;
             let before = sentinel::statvfs("/")?;
-            let mut s: Vec<fix::Suggestion> = Vec::new();
-            let opts = cleanup::Options {
-                level: 3,
-                used_pct: before.used_pct(),
-                ..cleanup::Options::default()
-            };
-            s.extend(cleanup::plan(&opts).into_iter().map(fix::assess));
-            if let Ok(r) = docker::collect() {
-                s.extend(
-                    docker::plan(&r, true, true, 100 << 20)
-                        .into_iter()
-                        .map(fix::assess),
-                );
-                for v in r.unused_volumes().filter(|v| v.size >= 1 << 20) {
-                    s.push(fix::delete_volume(&v.name, v.size));
-                }
-            }
-            let mut held: std::collections::BTreeMap<(i32, String), i64> = Default::default();
-            for d in deleted::deleted_open().unwrap_or_default() {
-                *held.entry((d.pid, d.process.clone())).or_default() += d.size;
-            }
-            for ((pid, proc_name), size) in held {
-                if size >= 100 << 20 {
-                    s.push(fix::risky(
-                        format!("deleted files still held open by pid {pid} ({proc_name})"),
-                        "The files are already deleted; the space comes back only when this process closes them, so restarting it interrupts that service.",
-                        format!("systemctl status {pid}  # find its service, then restart it at a quiet time"),
-                        size as u64,
-                    ));
-                }
-            }
-            if !quick {
-                eprintln!("dux fix: walking / for idle projects and big old files...");
-                let now = util::now_secs();
-                let opts = walker::WalkOptions {
-                    filter: Some(Box::new(move |f: &walker::FileView| {
-                        let d = String::from_utf8_lossy(f.dir);
-                        f.bytes >= 1 << 30
-                            && now - f.mtime >= 180 * 86_400
-                            && (d.starts_with("/home")
-                                || d.starts_with("/root")
-                                || d.starts_with("/srv")
-                                || d.starts_with("/opt")
-                                || d.contains("backup"))
-                    })),
-                    max_found: 200,
-                    progress: None,
+            // The one Cleanup list (UI, web, --json): only rule-based items
+            // (spec A6.18-A6.25). --quick skips the walk.
+            let mut s: Vec<fix::Suggestion> = if quick {
+                let opts = cleanup::Options {
+                    level: 3,
+                    used_pct: before.used_pct(),
+                    ..cleanup::Options::default()
                 };
-                let (tree, old_big) = walker::walk_with("/", 4, opts)?;
-                let projects = insight::projects(&tree);
-                s.extend(
-                    insight::pp_plan(&projects, stale_days, now)
-                        .into_iter()
-                        .map(fix::assess),
-                );
-                for f in old_big {
-                    s.push(fix::delete_file(&f.path, &format!("Untouched for {} days; it may be an old backup or download, or something important.", (now - f.mtime) / 86_400), f.bytes));
-                }
-            }
+                cleanup::plan(&opts).into_iter().map(fix::assess).collect()
+            } else {
+                gather::gather("/", 4, None).fixes
+            };
+            let _ = stale_days;
             if let Some(l) = level {
                 // Items carry the cleanup level they belong to; hand-only
                 // explanations stay visible at every level.

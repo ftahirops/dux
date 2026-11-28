@@ -468,7 +468,15 @@ fn collect_artifacts(n: &DirNode, path: &str, depth: usize, out: &mut Vec<(Strin
         // .pulumi may hold the only copy of a stack's state: offered apart,
         // as RISKY with its warning (catalog::pulumi_suggestions), never as
         // plain build output.
+        // Generic names (dist, build, bin...) are build output only right next
+        // to their project file; deep under assets/ they are vendored code.
+        const GENERIC: &[&str] = &[
+            "dist", "build", "_build", ".build", "out", "target", "coverage", "bin", "obj",
+            "vendor", "deps", ".cache",
+        ];
+        let generic_ok = !GENERIC.contains(&c.name.as_str()) || n.markers != 0;
         if c.name != ".pulumi"
+            && generic_ok
             && (ARTIFACTS.contains(&c.name.as_str())
                 || conditional_artifact(&c.name, n.markers, path))
         {
@@ -497,7 +505,26 @@ pub fn projects(tree: &Tree) -> Vec<Project> {
         }
         // Top-level folders (/root, /home, /srv...) are never projects themselves.
         let depth = path.matches('/').count();
-        if n.markers != 0 && path != "/" && depth >= 2 {
+        // A home folder is never a project (its .cache is not build output),
+        // nor is anything inside a tool's own cache (~/.npm/_npx/...).
+        let home =
+            path == "/root" || (path.starts_with("/home/") && path.matches('/').count() == 2);
+        let in_cache = [
+            "/.npm/",
+            "/.cache/",
+            "/.cargo/",
+            "/.rustup/",
+            "/go/pkg/mod/",
+            "/.local/",
+            "/.nvm/",
+            "/.pyenv/",
+        ]
+        .iter()
+        .any(|c| format!("{path}/").contains(c));
+        if in_cache {
+            return;
+        }
+        if n.markers != 0 && path != "/" && depth >= 2 && !home {
             let mut arts = Vec::new();
             collect_artifacts(n, path, 0, &mut arts);
             arts.sort_by_key(|(_, b)| std::cmp::Reverse(*b));
@@ -810,7 +837,14 @@ pub fn pp_plan(projects: &[Project], stale_days: u64, now: i64) -> Vec<Item> {
             continue;
         }
         for (dir, bytes) in &p.artifact_dirs {
-            if *bytes >= 1 << 20 {
+            // A folder git tracks files in is source (vendored or committed
+            // build output), never deletable build output.
+            if *bytes >= 1 << 20
+                && git_tracks(
+                    &p.path,
+                    dir.strip_prefix(&format!("{}/", p.path)).unwrap_or(dir),
+                ) == Some(false)
+            {
                 items.push(Item {
                     level: 4,
                     what: format!(
@@ -868,6 +902,41 @@ pub fn describe(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generic_build_names_count_only_next_to_their_project_file() {
+        let d = std::env::temp_dir().join(format!("dux-gen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let p = d.join("app");
+        std::fs::create_dir_all(p.join("dist")).unwrap();
+        std::fs::create_dir_all(p.join("assets/ag_grid/dist")).unwrap();
+        std::fs::create_dir_all(p.join("web/node_modules/x")).unwrap();
+        std::fs::write(p.join("package.json"), b"{}").unwrap();
+        for f in [
+            "dist/a.js",
+            "assets/ag_grid/dist/grid.js",
+            "web/node_modules/x/i.js",
+        ] {
+            std::fs::write(p.join(f), vec![1u8; 4096]).unwrap();
+        }
+        let t = crate::walker::walk(d.to_str().unwrap(), 1).unwrap();
+        let pr = projects(&t);
+        let dirs: Vec<&str> = pr[0]
+            .artifact_dirs
+            .iter()
+            .map(|(x, _)| x.as_str())
+            .collect();
+        assert!(dirs.iter().any(|x| x.ends_with("/app/dist")), "{dirs:?}");
+        assert!(
+            dirs.iter().any(|x| x.ends_with("/web/node_modules")),
+            "{dirs:?}"
+        );
+        assert!(
+            !dirs.iter().any(|x| x.contains("ag_grid")),
+            "vendored: {dirs:?}"
+        );
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     fn tmp(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("dux-insight-{tag}-{}", std::process::id()));

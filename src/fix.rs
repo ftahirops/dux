@@ -66,6 +66,10 @@ pub struct FixArgs {
     /// Apply every SAFE and CAUTION fix without asking
     #[arg(long)]
     pub apply_all: bool,
+    /// Check the picked fixes without changing anything: every safety check
+    /// runs, commands with a dry-run of their own use it (go clean -n)
+    #[arg(long)]
+    pub dry_run: bool,
     /// List the fixes but never ask or apply
     #[arg(long, hide = true)]
     pub no_fix: bool,
@@ -159,7 +163,7 @@ pub fn assess(item: Item) -> Suggestion {
                 ("systemd-tmpfiles", _) => (Safety::Safe, "Removes temporary files older than the system's age rules; files in use are skipped.", "Not needed: they are temporary."),
                 ("docker", a) if a.starts_with("builder prune") => (Safety::Safe, "Removes Docker build cache unused for 7 days.", "Rebuilt on the next docker build (slower once)."),
                 ("docker", "image prune -f") => (Safety::Safe, "Removes untagged images no container uses.", "Not needed: nothing runs from them."),
-                ("docker", a) if a.starts_with("image prune -a") => (Safety::Caution, "Removes images no container uses, older than 30 days.", "docker pull downloads them again (needs registry access)."),
+                ("docker", a) if a.starts_with("image prune -a") => (Safety::Caution, "Removes images no container uses that arrived on this host 30+ days ago.", "docker pull downloads them again (needs registry access)."),
                 ("docker", a) if a.starts_with("rm ") => (Safety::Risky, "Removes a stopped container and the files written inside it (not its volumes); its writable layer may hold the only copy of data.", "Recreate it with docker run or compose up; files written inside it are gone."),
                 ("docker", a) if a.starts_with("image rm") => (Safety::Caution, "Removes an image no container uses.", "docker pull downloads it again (needs registry access)."),
                 ("docker", a) if a.starts_with("container prune") => (Safety::Risky, "Removes stopped containers older than 7 days and files written inside them.", "Recreate with docker run / compose up; their internal files are gone."),
@@ -304,7 +308,8 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
         return Ok(0);
     }
     // Reports stay short: the fix list appears only when asked for.
-    let asked = args.fix || args.select.is_some() || args.apply_safe || args.apply_all;
+    let asked =
+        args.fix || args.select.is_some() || args.apply_safe || args.apply_all || args.dry_run;
     if !asked {
         if !args.no_fix {
             let total: u64 = s.iter().filter(|x| x.item.is_some()).map(|x| x.frees).sum();
@@ -323,8 +328,11 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
     }
     s.sort_by(|a, b| {
         let (ga, gb) = (group(a), group(b));
-        cat_total[gb]
-            .cmp(&cat_total[ga])
+        cat_total
+            .get(gb)
+            .copied()
+            .unwrap_or(0)
+            .cmp(&cat_total.get(ga).copied().unwrap_or(0))
             .then(ga.cmp(gb))
             .then(b.frees.cmp(&a.frees))
     });
@@ -363,7 +371,10 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
     for (i, x) in s.iter().enumerate() {
         if group(x) != last_group {
             last_group = group(x);
-            println!("\n  {last_group} ({})", h(cat_total[last_group]));
+            println!(
+                "\n  {last_group} ({})",
+                h(cat_total.get(last_group).copied().unwrap_or(0))
+            );
         }
         println!(
             "  {:>3}. {:<7} {:>10}  {}",
@@ -385,6 +396,8 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
         choose("all", &s).map_err(|e| anyhow::anyhow!(e))?
     } else if args.apply_safe {
         choose("safe", &s).map_err(|e| anyhow::anyhow!(e))?
+    } else if args.dry_run && !std::io::stdin().is_terminal() {
+        choose("all", &s).map_err(|e| anyhow::anyhow!(e))?
     } else if args.no_fix || !std::io::stdin().is_terminal() {
         println!("\nPick fixes with --select 1,3 | --apply-safe | --apply-all (or run on a terminal to choose).");
         return Ok(0);
@@ -399,6 +412,29 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
     };
     if picked.is_empty() {
         println!("Nothing applied.");
+        return Ok(0);
+    }
+    if args.dry_run {
+        println!("\nDry run: nothing is changed.");
+        let (mut ok, mut no) = (0, 0);
+        for &i in &picked {
+            let Some(item) = &s[i].item else { continue };
+            match crate::cleanup::check(item) {
+                Ok(what) => {
+                    ok += 1;
+                    println!(
+                        "  OK      {:>10}  {}\n                      {what}",
+                        h(s[i].frees),
+                        s[i].title
+                    );
+                }
+                Err(e) => {
+                    no += 1;
+                    println!("  REFUSED {:>10}  {}: {e:#}", h(s[i].frees), s[i].title);
+                }
+            }
+        }
+        println!("\n{ok} would run, {no} would be refused.");
         return Ok(0);
     }
     let risky: Vec<usize> = picked

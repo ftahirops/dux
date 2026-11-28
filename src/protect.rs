@@ -254,11 +254,13 @@ pub fn command_scope(program: &str, _args: &[String]) -> Option<Vec<PathBuf>> {
         "snap" => &["/var/lib/snapd"],
         // runuser -u USER -- env HOME=H tool ...: reaches that user's home.
         "runuser" => {
-            let home = _args
+            // The tool's own cache folder (DUX_SCOPE=), else the whole home.
+            let scope = _args
                 .iter()
-                .find_map(|a| a.strip_prefix("HOME="))
+                .find_map(|a| a.strip_prefix("DUX_SCOPE="))
+                .or_else(|| _args.iter().find_map(|a| a.strip_prefix("HOME=")))
                 .map(str::to_string);
-            return home.map(|h| vec![PathBuf::from(h)]);
+            return scope.map(|h| vec![PathBuf::from(h)]);
         }
         _ => return None,
     };

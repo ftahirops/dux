@@ -620,6 +620,112 @@ pub fn allowed(item: &Item) -> Result<()> {
     Ok(())
 }
 
+/// Dry run of one action (`dux fix --dry-run`): every check `apply` makes,
+/// nothing changed. A command with a dry-run mode of its own is run in it
+/// (go clean -n); others are checked to exist. Returns what would happen.
+pub fn check(item: &Item) -> Result<String> {
+    allowed(item)?;
+    crate::refuse_unless!(
+        !Path::new(KILL_SWITCH).exists(),
+        "actions disabled by {KILL_SWITCH}"
+    );
+    match &item.action {
+        Action::Run { program, args } => {
+            // runuser -u USER -- env VAR=... TOOL ARGS: the tool is the first
+            // word after env that is not an assignment.
+            let tool = if program == "runuser" {
+                args.iter()
+                    .skip_while(|a| *a != "env")
+                    .skip(1)
+                    .find(|a| !a.contains('='))
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                program.clone()
+            };
+            let name = Path::new(&tool)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            anyhow::ensure!(
+                Path::new(&tool).is_absolute() && Path::new(&tool).is_file() || has_program(&tool),
+                "{tool} is not installed here"
+            );
+            // go clean has a real dry run: -n prints what it would remove.
+            if name == "go" && args.iter().any(|a| a == "clean") {
+                let mut a = args.clone();
+                let pos = a.iter().position(|x| x == "clean").unwrap_or(0);
+                a.insert(pos + 1, "-n".into());
+                let out = Command::new(program).args(&a).output()?;
+                anyhow::ensure!(
+                    out.status.success(),
+                    "go clean -n failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+                let first = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                return Ok(format!("go clean -n: {first}"));
+            }
+            Ok(format!("would run: {program} {}", args.join(" ")))
+        }
+        Action::Remove { path } => {
+            let (parent, name) = split_parent(path)?;
+            let dir = open_dir_nofollow(&parent)?;
+            let st =
+                fstatat_nofollow(&dir, &name).with_context(|| format!("{}", path.display()))?;
+            anyhow::ensure!(
+                st.st_mode & libc::S_IFMT == libc::S_IFREG,
+                "{} is not a regular file",
+                path.display()
+            );
+            crate::refuse_unless!(
+                !open_files().contains(&(st.st_dev, st.st_ino)),
+                "{} is open by a process",
+                path.display()
+            );
+            Ok(format!(
+                "would remove {} ({})",
+                path.display(),
+                crate::util::human((st.st_blocks * 512) as i64)
+            ))
+        }
+        Action::TailAndTruncate { path, keep } => {
+            crate::refuse_unless!(!is_binary_log(path), "{} is a binary log", path.display());
+            let (parent, name) = split_parent(path)?;
+            let dir = open_dir_nofollow(&parent)?;
+            let st = fstatat_nofollow(&dir, &name)?;
+            anyhow::ensure!(
+                st.st_mode & libc::S_IFMT == libc::S_IFREG,
+                "{} is not a regular file",
+                path.display()
+            );
+            crate::refuse_unless!(
+                st.st_nlink == 1,
+                "{} has {} hard links",
+                path.display(),
+                st.st_nlink
+            );
+            Ok(format!(
+                "would empty {} in place ({} now, last {} kept aside)",
+                path.display(),
+                crate::util::human(st.st_size),
+                crate::util::human(*keep as i64)
+            ))
+        }
+        Action::RemoveTree { path } => {
+            remove_tree_opts(path, true)?;
+            Ok(format!(
+                "would remove folder {} ({})",
+                path.display(),
+                crate::util::human(dir_bytes(path) as i64)
+            ))
+        }
+    }
+}
+
 /// Apply one action. Re-checks safety at run time, not only when planning.
 pub fn apply(item: &Item) -> Result<()> {
     allowed(item)?;
@@ -750,6 +856,11 @@ fn tail_path(log: &Path) -> PathBuf {
 /// with a known build-output name, or that has a filesystem mounted inside it
 /// (removing it would delete files on the other filesystem).
 pub fn remove_tree(path: &Path) -> Result<()> {
+    remove_tree_opts(path, false)
+}
+
+/// `dry`: every check, then stop before deleting.
+fn remove_tree_opts(path: &Path, dry: bool) -> Result<()> {
     let m = std::fs::symlink_metadata(path)?;
     anyhow::ensure!(
         m.is_dir() && !m.file_type().is_symlink(),
@@ -791,6 +902,11 @@ pub fn remove_tree(path: &Path) -> Result<()> {
         "{} has a filesystem mounted inside it",
         path.display()
     );
+    if dry {
+        // The same no-follow walk would be used: check it opens.
+        open_dir_nofollow(&lexical)?;
+        return Ok(());
+    }
     remove_dir_same_fs(&lexical).with_context(|| format!("removing {p}"))
 }
 
