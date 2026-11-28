@@ -2110,7 +2110,13 @@ pub(super) fn draw_history(f: &mut Frame, app: &mut App, area: Rect, state: &mut
             Row::new(vec![
                 format!("{} ago", crate::insight::age_text(h.t, now)),
                 mark.to_string(),
-                human(h.bytes),
+                // A step records what it was expected to free; a batch line
+                // records what was measured on disk.
+                if h.ok.is_none() {
+                    format!("{} measured", human(h.bytes))
+                } else {
+                    format!("~{} expected", human(h.bytes))
+                },
                 h.what.clone(),
                 h.note.clone(),
             ])
