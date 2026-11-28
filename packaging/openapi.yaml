@@ -1,0 +1,59 @@
+openapi: 3.0.3
+info:
+  title: dux read-only API
+  version: "1"
+  description: |
+    Read-only: no endpoint changes anything on the server. Every request needs
+    the access token printed by `dux web`, as `X-Dux-Token: <token>`,
+    `Authorization: Bearer <token>`, or `?token=<token>`. Each `/api/v1`
+    document is built by the same code as the matching CLI `--json` output.
+servers:
+  - url: http://127.0.0.1:8099
+security:
+  - token: []
+  - bearer: []
+components:
+  securitySchemes:
+    token: {type: apiKey, in: header, name: X-Dux-Token}
+    bearer: {type: http, scheme: bearer}
+  responses:
+    NotReady:
+      description: The first scan is still running.
+paths:
+  /api/v1/disks:
+    get: {summary: "Mounted filesystems: size, used, free, inodes (= dux sentinel --once --json)", responses: {"200": {description: OK}}}
+  /api/v1/folders:
+    get:
+      summary: Sub-folders of a folder in the last scan, biggest first
+      parameters:
+        - {name: path, in: query, schema: {type: string}}
+        - {name: n, in: query, schema: {type: integer, default: 25}}
+      responses: {"200": {description: OK}, "503": {$ref: "#/components/responses/NotReady"}}
+  /api/v1/biggest:
+    get:
+      summary: Biggest files and folders (= dux biggest --json)
+      parameters: [{name: n, in: query, schema: {type: integer, default: 10}}]
+      responses: {"200": {description: OK}, "503": {$ref: "#/components/responses/NotReady"}}
+  /api/v1/logs:
+    get: {summary: "Every log with its owner group, writer and service (= dux logs --json)", responses: {"200": {description: OK}, "503": {$ref: "#/components/responses/NotReady"}}}
+  /api/v1/docker:
+    get: {summary: "Docker and Podman images, containers, volumes, build cache (= dux docker --json)", responses: {"200": {description: OK}, "404": {description: No container runtime}, "503": {$ref: "#/components/responses/NotReady"}}}
+  /api/v1/projects:
+    get: {summary: "Projects and apps (= dux projects --json)", responses: {"200": {description: OK}, "503": {$ref: "#/components/responses/NotReady"}}}
+  /api/v1/fixes:
+    get: {summary: "Cleanup suggestions as data, never actions (= dux fix --json)", responses: {"200": {description: OK}, "503": {$ref: "#/components/responses/NotReady"}}}
+  /api/v1/activity:
+    get: {summary: "Disk I/O now and who writes (= dux io --json)", responses: {"200": {description: OK}}}
+  /api/v1/history:
+    get: {summary: Every action dux took, newest first, responses: {"200": {description: OK}}}
+  /api/v1/history/folders:
+    get:
+      summary: Folder sizes per sentinel snapshot, oldest first
+      parameters: [{name: days, in: query, schema: {type: integer, default: 30, maximum: 365}}]
+      responses: {"200": {description: OK}}
+  /api/v1/health:
+    get: {summary: "The sentinel's status: running, age of its last report, active alerts, growth per mount", responses: {"200": {description: OK}}}
+  /metrics:
+    get:
+      summary: Prometheus text (per mount used/free/inodes and growth, active alerts, sentinel health, folder sizes and growth)
+      responses: {"200": {description: OK, content: {text/plain: {}}}}

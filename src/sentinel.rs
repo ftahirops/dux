@@ -382,7 +382,20 @@ pub fn parse_mountinfo(text: &str) -> Vec<Mount> {
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The sentinel's report for `/metrics` and `/api/v1/health`, rewritten
+/// every check (in the snapshot folder).
+pub const STATUS_FILE: &str = "status.json";
+
+/// Write the status report atomically.
+fn write_status(dir: &std::path::Path, v: &serde_json::Value) {
+    let _ = std::fs::create_dir_all(dir);
+    let tmp = dir.join(format!("{STATUS_FILE}.new"));
+    if std::fs::write(&tmp, v.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, dir.join(STATUS_FILE));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Usage {
     pub total: u64,
     pub used: u64,
@@ -718,6 +731,18 @@ impl Sentinel {
         } else if value < s.wall_pct - s.hysteresis_pct {
             self.past_wall.remove(key);
         }
+    }
+
+    /// Conditions at warning or critical now: (key, severity label).
+    pub fn active(&self) -> Vec<(String, &'static str)> {
+        let mut v: Vec<(String, &'static str)> = self
+            .conds
+            .iter()
+            .filter(|(_, c)| c.level != Level::Ok)
+            .map(|(k, c)| (k.clone(), c.level.severity().label()))
+            .collect();
+        v.sort();
+        v
     }
 
     /// Run a health-probe finding through the same alert logic.
@@ -1090,6 +1115,10 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
     let (mut last_probe, mut last_smart, mut last_regrow) = (0i64, 0i64, 0i64);
     let mut last_auto: HashMap<String, i64> = HashMap::new();
     let auto_busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Growth per mount over at least a minute, for /metrics.
+    let mut rate_prev: HashMap<String, (i64, u64)> = HashMap::new();
+    let mut rates: HashMap<String, f64> = HashMap::new();
+    let started = now_secs();
     let mut sentinel = Sentinel::new(settings, host.clone());
     let mut last_mount_refresh = now_secs();
     crate::util::systemd_notify("READY=1\nSTATUS=watching free space and inodes");
@@ -1179,6 +1208,19 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
                         used.push((m.path.clone(), u.used));
                     }
                     pcts.push((m.path.clone(), u.used_pct()));
+                    match rate_prev.get(&m.path).copied() {
+                        Some((t0, u0)) if now - t0 >= 60 => {
+                            rates.insert(
+                                m.path.clone(),
+                                (u.used as f64 - u0 as f64) / (now - t0) as f64,
+                            );
+                            rate_prev.insert(m.path.clone(), (now, u.used));
+                        }
+                        None => {
+                            rate_prev.insert(m.path.clone(), (now, u.used));
+                        }
+                        _ => {}
+                    }
                     alerts.extend(sentinel.observe(m, &u, now));
                     let hot = u.used_pct() >= sentinel.settings.warn_pct
                         || u.inode_pct()
@@ -1307,6 +1349,23 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
             } else {
                 notify::send_async(cfg, d.alert, d.wall, now);
             }
+        }
+        if !cfg.dry_run && !once {
+            let alerts: Vec<serde_json::Value> = sentinel
+                .active()
+                .into_iter()
+                .map(|(k, s)| serde_json::json!({"key": k, "severity": s}))
+                .collect();
+            write_status(
+                &sentinel.settings.snapshot_dir,
+                &serde_json::json!({
+                    "t": now, "started": started, "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
+                    "host": host, "check_every": sentinel.settings.interval.as_secs(),
+                    "check_every_when_warning": sentinel.settings.fast_interval.as_secs(),
+                    "alerts": alerts, "growth_bytes_per_second": rates,
+                    "automatic_cleanup": sentinel.settings.auto.enabled,
+                }),
+            );
         }
         crate::util::systemd_notify("WATCHDOG=1");
         if once {

@@ -700,40 +700,6 @@ fn draw_services(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
     );
 }
 
-/// The group a cleanup suggestion is summed under (spec UI-1 view 4).
-fn fix_group(x: &crate::fix::Suggestion) -> &'static str {
-    let Some(item) = &x.item else {
-        return "Explained only";
-    };
-    match &item.action {
-        Action::Run { program, .. } => match std::path::Path::new(program)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-        {
-            "journalctl" => "Journal",
-            "logrotate" => "Logs",
-            "docker" | "podman" => "Docker",
-            "apt-get" | "apt" | "dnf" | "yum" => "Packages",
-            _ => "System",
-        },
-        Action::TailAndTruncate { path, .. } if path.to_string_lossy().contains("/containers/") => {
-            "Docker"
-        }
-        Action::TailAndTruncate { .. } => "Logs",
-        Action::Remove { .. } if item.level >= 4 => "Big files",
-        Action::Remove { path } => {
-            let p = path.to_string_lossy();
-            if p.contains("/crash") || p.contains("coredump") {
-                "System"
-            } else {
-                "Logs"
-            }
-        }
-        Action::RemoveTree { .. } => "Projects",
-    }
-}
-
 fn draw_browse(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
     let sum: u64 = app.entries.iter().map(|e| e.bytes).sum::<u64>();
     let total = sum.max(1);
@@ -980,7 +946,7 @@ fn draw_fixes(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
                 mark.to_string(),
                 x.safety.label().to_string(),
                 human(x.frees as i64),
-                fix_group(x).to_string(),
+                crate::fix::group(x).to_string(),
                 title,
             ])
             .style(if never {
@@ -999,7 +965,7 @@ fn draw_fixes(f: &mut Frame, app: &App, body: Rect, state: &mut TableState) {
         .iter()
         .filter(|x| x.item.is_some() && !app.fix_protected(x))
     {
-        let g = fix_group(x);
+        let g = crate::fix::group(x);
         match sums.iter_mut().find(|s| s.0 == g) {
             Some(s) => s.1 += x.frees,
             None => sums.push((g, x.frees)),

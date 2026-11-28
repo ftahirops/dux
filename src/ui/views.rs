@@ -175,32 +175,6 @@ impl Job {
         self.finished.is_some()
     }
 
-    /// JSON for the web dashboard's progress window.
-    pub fn to_json(&self) -> serde_json::Value {
-        let (ok, failed, freed) = self.counts();
-        let elapsed = self
-            .finished
-            .unwrap_or_else(Instant::now)
-            .duration_since(self.started)
-            .as_secs_f64();
-        let steps: Vec<serde_json::Value> = self
-            .items
-            .iter()
-            .zip(&self.steps)
-            .map(|(it, st)| {
-                let (state, freed, error) = match st {
-                    Step::Pending => ("pending", 0, None),
-                    Step::Running => ("running", 0, None),
-                    Step::Done(b) => ("done", (*b).max(0), None),
-                    Step::Failed(e) => ("failed", 0, Some(e.clone())),
-                };
-                serde_json::json!({"what": it.what, "expected": it.frees, "state": state, "freed": freed, "error": error})
-            })
-            .collect();
-        serde_json::json!({"title": self.title, "done": self.done(), "ok": ok, "failed": failed, "freed": freed,
-            "expected": self.items.iter().map(|i| i.frees).sum::<u64>(), "seconds": elapsed, "steps": steps})
-    }
-
     fn counts(&self) -> (usize, usize, i64) {
         let mut c = (0, 0, 0i64);
         for s in &self.steps {

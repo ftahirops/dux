@@ -17,6 +17,7 @@ install -Dm644 packaging/dux.toml.example "$OUT/usr/share/doc/dux/dux.toml.examp
 # Outside /usr/share/doc: minimal systems (Ubuntu images) do not install docs.
 install -Dm644 packaging/dux.toml.example "$OUT/usr/share/dux/dux.toml.example"
 install -Dm644 README.md "$OUT/usr/share/doc/dux/README.md"
+install -Dm644 packaging/openapi.yaml "$OUT/usr/share/doc/dux/openapi.yaml"
 install -Dm644 LICENSE "$OUT/usr/share/doc/dux/copyright"
 install -d "$OUT/DEBIAN"
 sed "s/@VERSION@/${VERSION}-${REV}/" packaging/deb-sentinel/control > "$OUT/DEBIAN/control"

@@ -1,3 +1,4 @@
+mod api;
 mod attrib;
 mod auto;
 mod cleanup;
@@ -228,11 +229,8 @@ enum Cmd {
         /// Access token (default: a new random one, printed at start)
         #[arg(long)]
         token: Option<String>,
-        /// Allow applying fixes from the dashboard
-        #[arg(long)]
-        allow_actions: bool,
         /// Seconds between background refreshes
-        #[arg(long, default_value_t = 900)]
+        #[arg(long, default_value_t = 300)]
         refresh: u64,
     },
     /// Live disk I/O: who is writing and reading which files
@@ -340,6 +338,10 @@ fn real_main() -> Result<()> {
             init_alert_logging();
             let (mut cfg, settings) = notify::NotifyConfig::load_checked(&config)?;
             cfg.dry_run = dry_run;
+            if once && json {
+                println!("{}", api::disks_json(&gather::disks()));
+                return Ok(());
+            }
             if once {
                 print!("{}", sentinel::snapshot_report(&settings)?);
             }
@@ -533,19 +535,7 @@ fn real_main() -> Result<()> {
         }) => {
             let r = docker::collect()?;
             if json {
-                let imgs: Vec<_> = r.images.iter().map(|i| serde_json::json!({"name": i.name, "id": i.id, "size": i.size, "unique": i.unique, "shared": i.shared, "containers": i.containers, "created": i.created})).collect();
-                let cons: Vec<_> = r.containers.iter().map(|c| serde_json::json!({"name": c.name, "image": c.image, "state": c.state, "status": c.status, "writable": c.writable, "log_bytes": c.log_bytes, "project": c.project})).collect();
-                let vols: Vec<_> = r.volumes.iter().map(|v| serde_json::json!({"name": v.name, "size": v.size, "links": v.links, "project": v.project})).collect();
-                let disk: Vec<_> = r
-                    .on_disk
-                    .iter()
-                    .map(|(p, b)| serde_json::json!({"path": p, "bytes": b}))
-                    .collect();
-                let proj: Vec<_> = r.by_project().into_iter().map(|(k, v)| serde_json::json!({"project": k, "images": v[0], "writable": v[1], "logs": v[2], "volumes": v[3]})).collect();
-                println!(
-                    "{}",
-                    serde_json::json!({"root": r.root_dir, "images": imgs, "containers": cons, "volumes": vols, "build_cache": r.build_cache, "build_cache_reclaimable": r.build_cache_reclaimable, "on_disk": disk, "projects": proj})
-                );
+                println!("{}", api::docker_json(&r));
                 return Ok(());
             }
             let h = |b: u64| human(b as i64);
@@ -670,15 +660,7 @@ fn real_main() -> Result<()> {
                 walker::largest_at_depth(&b.tree.root, 2, top)
             };
             if json {
-                let fl: Vec<_> = b.files.iter().map(|f| serde_json::json!({"path": f.path, "bytes": f.bytes, "apparent": f.apparent, "mtime": f.mtime, "owner": users.get(&f.uid), "what": insight::describe(&f.path)})).collect();
-                let dirs: Vec<_> = folder_rows()
-                    .into_iter()
-                    .map(|(p, b)| serde_json::json!({"path": p, "bytes": b}))
-                    .collect();
-                println!(
-                    "{}",
-                    serde_json::json!({"files": fl, "folders": dirs, "entries": b.tree.stats.entries, "file_count": b.tree.stats.files, "folder_count": b.tree.stats.dirs, "unreadable": b.tree.stats.errors, "hardlinks_counted_once": b.tree.stats.hardlinks_deduped, "seconds": b.tree.stats.seconds})
-                );
+                println!("{}", api::biggest_json(&b.tree, &b.files, top));
                 return Ok(());
             }
             let width = util::term_width().max(60);
@@ -781,11 +763,7 @@ fn real_main() -> Result<()> {
             let r = insight::logs(&p, threads, sentinel::parse_bytes(&min)?, sample)?;
             let now = util::now_secs();
             if json {
-                let logs: Vec<_> = r.logs.iter().map(|l| serde_json::json!({"path": l.path, "bytes": l.bytes, "kind": l.kind.label(), "rotated": l.rotated, "protected": l.protected, "bytes_per_min": l.per_min, "writer": l.writer, "container": l.container, "mtime": l.mtime})).collect();
-                println!(
-                    "{}",
-                    serde_json::json!({"journal_bytes": r.journal_bytes, "logs": logs})
-                );
+                println!("{}", api::logs_json(&r.logs, r.journal_bytes, &[]));
                 return Ok(());
             }
             let h = |b: u64| human(b as i64);
@@ -975,9 +953,7 @@ fn real_main() -> Result<()> {
             let now = util::now_secs();
             let h = |b: u64| human(b as i64);
             if json {
-                let ps: Vec<_> = projects.iter().map(|x| serde_json::json!({"name": x.name, "type": x.type_label(), "description": x.description, "branch": x.branch, "remote": x.remote, "path": x.path, "kinds": x.kinds, "total": x.total, "source": x.source(), "build_output": x.artifacts, "git": x.git, "last_activity": x.last_activity, "build_output_dirs": x.artifact_dirs})).collect();
-                let ap: Vec<_> = apps.iter().map(|(n, p, b, t)| serde_json::json!({"app": n, "path": p, "bytes": b, "newest_change": t})).collect();
-                println!("{}", serde_json::json!({"projects": ps, "apps": ap}));
+                println!("{}", api::projects_json(&projects, &apps));
                 return Ok(());
             }
             println!(
@@ -1047,6 +1023,12 @@ fn real_main() -> Result<()> {
             stale_days,
             quick,
         }) => {
+            // The same list as the dashboard and /api/v1/fixes (as data).
+            if json {
+                let g = gather::gather("/", 4, None);
+                println!("{}", api::fixes_json(&g.fixes));
+                return Ok(());
+            }
             // `dux fix` is the fix list: always show it.
             fixes.fix = true;
             let before = sentinel::statvfs("/")?;
@@ -1132,7 +1114,6 @@ fn real_main() -> Result<()> {
             path,
             listen,
             token,
-            allow_actions,
             refresh,
         }) => {
             let token = match token {
@@ -1146,20 +1127,8 @@ fn real_main() -> Result<()> {
                 eprintln!("dux web: WARNING listening on {listen}, reachable from other machines; keep the token secret");
             }
             println!("dux web: open http://{listen}/?token={token}");
-            println!(
-                "dux web: {}",
-                if allow_actions {
-                    "fixes CAN be applied from the page"
-                } else {
-                    "read-only (add --allow-actions to apply fixes)"
-                }
-            );
-            let srv = web::Server::new(
-                path.to_string_lossy().into_owned(),
-                token,
-                allow_actions,
-                refresh,
-            );
+            println!("dux web: read-only dashboard; API at /api/v1/..., Prometheus at /metrics (Authorization: Bearer <token>)");
+            let srv = web::Server::new(path.to_string_lossy().into_owned(), token, refresh);
             web::serve(srv, &listen)?;
         }
         Some(Cmd::Io {
@@ -1176,14 +1145,7 @@ fn real_main() -> Result<()> {
                 n += 1;
                 let r = live::rate_text;
                 if json {
-                    let w: Vec<_> = l.writing.iter().take(top).map(|x| serde_json::json!({"path": x.path, "pid": x.pid, "process": x.process, "unit": x.unit, "write_bps": x.write_bps, "growth_bps": x.growth_bps, "size": x.size})).collect();
-                    let rd: Vec<_> = l.reading.iter().take(top).map(|x| serde_json::json!({"path": x.path, "pid": x.pid, "process": x.process, "read_bps": x.read_bps})).collect();
-                    let p: Vec<_> = l.procs.iter().take(top).map(|x| serde_json::json!({"pid": x.pid, "name": x.name, "unit": x.unit, "read_bps": x.read_bps, "write_bps": x.write_bps})).collect();
-                    let d: Vec<_> = l.disks.iter().map(|x| serde_json::json!({"disk": x.name, "read_bps": x.read_bps, "write_bps": x.write_bps})).collect();
-                    println!(
-                        "{}",
-                        serde_json::json!({"disks": d, "processes": p, "writing": w, "reading": rd})
-                    );
+                    println!("{}", api::io_json(&l, top));
                 } else {
                     let (tr, tw) = l
                         .disks

@@ -1,15 +1,17 @@
-//! `dux web`: a small local web dashboard over the same data as `dux ui`.
+//! `dux web`: a read-only web dashboard and API (spec 4.6, A12).
 //!
-//! - Listens on 127.0.0.1 by default; every request needs the access token
-//!   (`?token=` for page loads, `X-Dux-Token` header for API calls).
-//! - Read-only unless started with `--allow-actions`. Applying fixes is a
-//!   POST that must carry the token in a header (so other web pages cannot
-//!   trigger it), and RISKY items additionally need `"confirm": "delete"`.
-//! - Data is gathered in the background on start, every `refresh` seconds,
-//!   and on POST /api/refresh.
+//! - Read-only (API-1): no endpoint changes anything on the server; the
+//!   dashboard shows the five views of the terminal UI without actions.
+//! - Listens on 127.0.0.1 by default (API-2); every request needs the access
+//!   token: `?token=` for page loads, `X-Dux-Token` or `Authorization:
+//!   Bearer` for API calls and /metrics.
+//! - `/api/v1/...` (API-3/4): disks, folders, biggest, logs, docker,
+//!   projects, fixes, history, history/folders, health; each is built by the
+//!   same code as the matching CLI `--json` output.
+//! - `/metrics` (API-5/8): Prometheus text.
+//! - Data is gathered on start, every `refresh` seconds (default 5 min) and
+//!   on POST /api/refresh (a rescan, which changes nothing on disk).
 
-use crate::cleanup::Item;
-use crate::fix::Safety;
 use crate::gather::{self, Gathered};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -22,15 +24,12 @@ use std::time::Duration;
 pub struct Server {
     pub root: String,
     pub token: String,
-    pub allow_actions: bool,
     pub refresh_secs: u64,
     state: Mutex<Option<Arc<Gathered>>>,
     walking: AtomicBool,
     progress: Arc<AtomicU64>,
-    /// The action job started from the dashboard (one at a time).
-    job: Mutex<Option<crate::ui::views::Job>>,
-    /// Set once a finished job has triggered its rescan.
-    job_rescanned: AtomicBool,
+    /// Live I/O for the Activity view, sampled at most once a second.
+    live: Mutex<(crate::live::Sampler, Option<std::time::Instant>, Value)>,
 }
 
 /// A fresh 128-bit token. Fails instead of returning a guessable one when
@@ -42,19 +41,6 @@ pub fn random_token() -> anyhow::Result<String> {
         .map_err(|e| anyhow::anyhow!("cannot read /dev/urandom for the access token: {e}"))?;
     anyhow::ensure!(b.iter().any(|x| *x != 0), "/dev/urandom returned zeros");
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
-}
-
-/// A stable identity for a fix: the same fix keeps its key across regathers,
-/// a different fix never shares it, so a stale page cannot apply the wrong one.
-pub fn fix_key(x: &crate::fix::Suggestion) -> String {
-    let text = format!("{}|{:?}", x.title, x.item.as_ref().map(|i| &i.action));
-    // FNV-1a, 64-bit.
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in text.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{h:016x}")
 }
 
 /// Percent-decode a query value (UTF-8; invalid sequences are kept as-is).
@@ -87,18 +73,30 @@ fn same(a: &str, b: &str) -> bool {
 }
 
 impl Server {
-    pub fn new(root: String, token: String, allow_actions: bool, refresh_secs: u64) -> Arc<Server> {
+    pub fn new(root: String, token: String, refresh_secs: u64) -> Arc<Server> {
         Arc::new(Server {
             root,
             token,
-            allow_actions,
             refresh_secs,
             state: Mutex::new(None),
             walking: AtomicBool::new(false),
             progress: Arc::new(AtomicU64::new(0)),
-            job: Mutex::new(None),
-            job_rescanned: AtomicBool::new(true),
+            live: Mutex::new((crate::live::Sampler::default(), None, Value::Null)),
         })
+    }
+
+    /// Activity: disk I/O now and who writes, as `dux io --json` shows it.
+    fn activity(&self) -> Value {
+        let mut l = self
+            .live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if l.1.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
+            let x = l.0.sample();
+            l.2 = crate::api::io_json(&x, 15);
+            l.1 = Some(std::time::Instant::now());
+        }
+        l.2.clone()
     }
 
     fn regather(self: &Arc<Self>) {
@@ -123,41 +121,6 @@ impl Server {
         });
     }
 
-    /// Start a job unless one is still running.
-    fn start_job(self: &Arc<Self>, title: String, items: Vec<Item>) -> Result<(), String> {
-        let mut j = self
-            .job
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(cur) = j.as_mut() {
-            cur.poll();
-            if !cur.done() {
-                return Err("another action is still running".into());
-            }
-        }
-        let root = self
-            .snapshot()
-            .and_then(|g| g.docker.as_ref().map(|d| d.root_dir.clone()));
-        *j = Some(crate::ui::views::Job::start(title, items, root));
-        self.job_rescanned.store(false, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn job_json(self: &Arc<Self>) -> Value {
-        let mut j = self
-            .job
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(job) = j.as_mut() else {
-            return json!({"none": true});
-        };
-        job.poll();
-        if job.done() && !self.job_rescanned.swap(true, Ordering::SeqCst) {
-            self.regather();
-        }
-        job.to_json()
-    }
-
     fn snapshot(&self) -> Option<Arc<Gathered>> {
         self.state
             .lock()
@@ -167,18 +130,13 @@ impl Server {
 }
 
 /// JSON for the dashboard.
-pub fn state_json(
-    g: Option<&Gathered>,
-    walking: bool,
-    progress: u64,
-    allow_actions: bool,
-) -> Value {
+pub fn state_json(g: Option<&Gathered>, walking: bool, progress: u64) -> Value {
     let disks: Vec<Value> = gather::disks()
         .into_iter()
         .map(|d| json!({"path": d.path, "fstype": d.fstype, "total": d.usage.total, "used": d.usage.used, "avail": d.usage.avail, "pct": d.usage.used_pct(), "inode_pct": d.usage.inode_pct()}))
         .collect();
     let Some(g) = g else {
-        return json!({"ready": false, "walking": walking, "progress": progress, "disks": disks, "allow_actions": allow_actions});
+        return json!({"ready": false, "walking": walking, "progress": progress, "disks": disks});
     };
     let folders: Vec<Value> = g
         .tree
@@ -229,112 +187,18 @@ pub fn state_json(
             "on_disk": d.on_disk.iter().map(|(p, b)| json!({"path": p, "bytes": b})).collect::<Vec<_>>(),
         })
     });
-    let fixes: Vec<Value> = g
-        .fixes
+    let fixes = crate::api::fixes_json(&g.fixes);
+    let services: Vec<Value> = g
+        .services
         .iter()
-        .enumerate()
-        .map(|(i, x)| json!({"id": i, "key": fix_key(x), "safety": x.safety.label(), "title": x.title, "why": x.why, "undo": x.undo, "frees": x.frees, "applicable": x.item.is_some(), "manual": x.manual}))
+        .map(|x| json!({"name": x.name, "total": x.total, "logs": x.logs, "folders": x.folders}))
         .collect();
     json!({
-        "ready": true, "walking": walking, "progress": progress, "allow_actions": allow_actions, "at": g.at,
+        "ready": true, "walking": walking, "progress": progress, "at": g.at, "services": services,
         "disks": disks, "folders": folders, "logs": logs, "journal_bytes": g.journal_bytes,
         "biggest": g.biggest.iter().map(|f| json!({"path": f.path, "bytes": f.bytes, "mtime": f.mtime})).collect::<Vec<_>>(),
         "projects": projects, "apps": apps, "docker": docker, "fixes": fixes, "errors": g.errors,
     })
-}
-
-/// The items for picked fix keys. Unknown keys, hand-only and unconfirmed
-/// RISKY fixes are an error: nothing runs unless every pick is valid.
-pub fn resolve_keys(
-    g: &Gathered,
-    keys: &[String],
-    confirm: Option<&str>,
-) -> Result<Vec<Item>, String> {
-    let mut items = Vec::new();
-    for k in keys {
-        let x = g
-            .fixes
-            .iter()
-            .find(|x| fix_key(x) == *k)
-            .ok_or("a picked fix is no longer offered; reload the page")?;
-        let item = x
-            .item
-            .clone()
-            .ok_or_else(|| format!("{} must be done by hand", x.title))?;
-        if x.safety == Safety::Risky && confirm != Some("delete") {
-            return Err(format!("{} is RISKY: confirm with delete", x.title));
-        }
-        items.push(item);
-    }
-    if items.is_empty() {
-        return Err("nothing picked".into());
-    }
-    Ok(items)
-}
-
-/// Build the items for a dashboard action, resolving its target by name in
-/// the current scan (never by list position).
-pub fn action_items(g: &Gathered, v: &Value) -> Result<(Vec<Item>, bool), String> {
-    use crate::ui::views;
-    use crossterm::event::KeyCode;
-    let act = v["act"].as_str().unwrap_or("");
-    let name = v["name"].as_str().unwrap_or("");
-    let key = |c: &str| match c {
-        "truncate" => Some(KeyCode::Char('t')),
-        "remove" => Some(KeyCode::Char('x')),
-        "prune" => Some(KeyCode::Char('b')),
-        _ => None,
-    };
-    match v["kind"].as_str().unwrap_or("") {
-        kind @ ("container" | "image" | "volume" | "stack" | "storage") => {
-            let r = g.docker.as_ref().ok_or("Docker is not available")?;
-            let (sub, idx) = match kind {
-                "container" => (
-                    views::D_CONTAINERS,
-                    r.containers.iter().position(|c| c.name == name),
-                ),
-                "image" => (
-                    views::D_IMAGES,
-                    r.images.iter().position(|i| i.name == name),
-                ),
-                "volume" => (
-                    views::D_VOLUMES,
-                    r.volumes.iter().position(|x| x.name == name),
-                ),
-                "stack" => (
-                    views::D_STACKS,
-                    r.stacks().iter().position(|x| x.name == name),
-                ),
-                _ => (views::D_STORAGE, Some(0)),
-            };
-            let idx = idx.ok_or_else(|| format!("{name} is no longer there; reload the page"))?;
-            let code = key(act).ok_or("unknown action")?;
-            views::docker_action(r, sub, idx, code)?
-                .ok_or_else(|| "this action does not apply here".to_string())
-        }
-        "log" => {
-            let l = g
-                .logs
-                .iter()
-                .find(|l| l.path == name)
-                .ok_or("that log is no longer listed; reload the page")?;
-            match act {
-                "truncate" => Ok((vec![views::log_truncate_item(l)?], false)),
-                "remove" => Ok((views::log_remove_items(std::iter::once(l))?, false)),
-                _ => Err("unknown action".into()),
-            }
-        }
-        "log-group" => {
-            let (cat, owner) = (v["category"].as_str().unwrap_or(""), name);
-            let files = g.logs.iter().filter(|l| {
-                let (c, o) = views::log_owner(l, &g.projects);
-                c == cat && o == owner
-            });
-            Ok((views::log_remove_items(files)?, false))
-        }
-        "journal" => Ok((vec![views::journal_item(g.journal_bytes)?], false)),
-        _ => Err("unknown target".into()),
-    }
 }
 
 struct Request {
@@ -342,7 +206,6 @@ struct Request {
     path: String,
     query: String,
     headers: Vec<(String, String)>,
-    body: Vec<u8>,
 }
 
 fn read_request(s: &mut TcpStream) -> Option<Request> {
@@ -381,13 +244,15 @@ fn read_request(s: &mut TcpStream) -> Option<Request> {
     if len > 64 * 1024 {
         return None;
     }
-    let mut body = buf[head_end + 4..].to_vec();
-    while body.len() < len {
+    // Read-only: a body is read to the end (so closing does not reset the
+    // connection) but never used.
+    let mut got = buf.len() - (head_end + 4);
+    while got < len {
         let n = s.read(&mut tmp).ok()?;
         if n == 0 {
             break;
         }
-        body.extend_from_slice(&tmp[..n]);
+        got += n;
     }
     let (path, query) = target
         .split_once('?')
@@ -398,7 +263,6 @@ fn read_request(s: &mut TcpStream) -> Option<Request> {
         path,
         query,
         headers,
-        body,
     })
 }
 
@@ -430,7 +294,13 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
         .headers
         .iter()
         .find(|(k, _)| k == "x-dux-token")
-        .map(|(_, v)| v.clone());
+        .map(|(_, v)| v.clone())
+        .or_else(|| {
+            req.headers
+                .iter()
+                .find(|(k, _)| k == "authorization")
+                .and_then(|(_, v)| v.strip_prefix("Bearer ").map(|t| t.trim().to_string()))
+        });
     let query_token = query_param(&req.query, "token");
     let authed = header_token
         .as_deref()
@@ -463,7 +333,6 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
                     g.as_deref(),
                     srv.walking.load(Ordering::Relaxed),
                     srv.progress.load(Ordering::Relaxed),
-                    srv.allow_actions,
                 ),
             );
         }
@@ -496,82 +365,6 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
         ("POST", "/api/refresh") if header_token.is_some() => {
             srv.regather();
             api_json(&mut s, json!({"ok": true}));
-        }
-        ("POST", "/api/apply") if header_token.is_some() => {
-            if !srv.allow_actions {
-                respond(
-                    &mut s,
-                    "403 Forbidden",
-                    "application/json",
-                    br#"{"error":"start dux web with --allow-actions to apply fixes"}"#,
-                );
-                return;
-            }
-            let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
-            let keys: Vec<String> = v["keys"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let Some(g) = srv.snapshot() else {
-                respond(
-                    &mut s,
-                    "409 Conflict",
-                    "application/json",
-                    br#"{"error":"data not ready"}"#,
-                );
-                return;
-            };
-            match resolve_keys(&g, &keys, v["confirm"].as_str()) {
-                Ok(items) => {
-                    match srv.start_job(format!("Applying {} fixes", items.len()), items) {
-                        Ok(()) => api_json(&mut s, json!({"job": true})),
-                        Err(e) => api_json(&mut s, json!({"error": e})),
-                    }
-                }
-                Err(e) => api_json(&mut s, json!({"error": e})),
-            }
-        }
-        ("POST", "/api/action") if header_token.is_some() => {
-            if !srv.allow_actions {
-                respond(
-                    &mut s,
-                    "403 Forbidden",
-                    "application/json",
-                    br#"{"error":"start dux web with --allow-actions to apply fixes"}"#,
-                );
-                return;
-            }
-            let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
-            let Some(g) = srv.snapshot() else {
-                api_json(&mut s, json!({"error": "data not ready"}));
-                return;
-            };
-            match action_items(&g, &v) {
-                Ok((items, risky)) if risky && v["confirm"].as_str() != Some("delete") => {
-                    let _ = items;
-                    api_json(&mut s, json!({"error": "RISKY: confirm with delete"}));
-                }
-                Ok((items, _)) => {
-                    let title = if items.len() == 1 {
-                        items[0].what.clone()
-                    } else {
-                        format!("Applying {} actions", items.len())
-                    };
-                    match srv.start_job(title, items) {
-                        Ok(()) => api_json(&mut s, json!({"job": true})),
-                        Err(e) => api_json(&mut s, json!({"error": e})),
-                    }
-                }
-                Err(e) => api_json(&mut s, json!({"error": e})),
-            }
-        }
-        ("GET", "/api/job") => {
-            let j = srv.job_json();
-            api_json(&mut s, j);
         }
         ("GET", "/api/history") => {
             let rows: Vec<Value> = crate::ui::views::load_history()
@@ -637,11 +430,82 @@ fn handle(srv: &Arc<Server>, mut s: TcpStream) {
                 );
             }
         }
+        ("GET", "/api/activity") => {
+            let v = srv.activity();
+            api_json(&mut s, v);
+        }
+        ("GET", "/metrics") => {
+            let dir = crate::sentinel::Settings::default().snapshot_dir;
+            let t = crate::api::metrics_text(&gather::disks(), &dir, crate::util::now_secs());
+            respond(&mut s, "200 OK", "text/plain; version=0.0.4", t.as_bytes());
+        }
+        ("GET", p) if p.starts_with("/api/v1/") => {
+            let dir = crate::sentinel::Settings::default().snapshot_dir;
+            let now = crate::util::now_secs();
+            let name = &p["/api/v1/".len()..];
+            let g = srv.snapshot();
+            let v = match (name, g.as_deref()) {
+                ("disks", _) => Some(crate::api::disks_json(&gather::disks())),
+                ("health", _) => Some(crate::api::health_json(&dir, now)),
+                ("history", _) => Some(crate::api::history_json()),
+                ("history/folders", _) => {
+                    let days: i64 = query_param(&req.query, "days")
+                        .and_then(|d| d.parse().ok())
+                        .unwrap_or(30);
+                    Some(crate::api::folder_history_json(
+                        &dir,
+                        now - days.clamp(1, 365) * 86_400,
+                    ))
+                }
+                ("activity", _) => Some(srv.activity()),
+                ("folders", Some(g)) => g.tree.as_ref().map(|t| {
+                    let p = percent_decode(&query_param(&req.query, "path").unwrap_or_default());
+                    let n = query_param(&req.query, "n")
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(25);
+                    crate::api::folders_json(t, &p, n)
+                }),
+                ("biggest", Some(g)) => g.tree.as_ref().map(|t| {
+                    let n = query_param(&req.query, "n")
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(10);
+                    crate::api::biggest_json(t, &g.biggest, n)
+                }),
+                ("logs", Some(g)) => {
+                    Some(crate::api::logs_json(&g.logs, g.journal_bytes, &g.projects))
+                }
+                ("docker", Some(g)) => g.docker.as_ref().map(crate::api::docker_json),
+                ("projects", Some(g)) => Some(crate::api::projects_json(&g.projects, &g.apps)),
+                ("fixes", Some(g)) => Some(crate::api::fixes_json(&g.fixes)),
+                (_, None)
+                    if ["folders", "biggest", "logs", "docker", "projects", "fixes"]
+                        .contains(&name) =>
+                {
+                    respond(
+                        &mut s,
+                        "503 Service Unavailable",
+                        "application/json",
+                        br#"{"error":"the first scan is still running"}"#,
+                    );
+                    return;
+                }
+                _ => None,
+            };
+            match v {
+                Some(v) => api_json(&mut s, v),
+                None => respond(
+                    &mut s,
+                    "404 Not Found",
+                    "application/json",
+                    br#"{"error":"no such endpoint or no data"}"#,
+                ),
+            }
+        }
         ("POST", _) => respond(
             &mut s,
-            "403 Forbidden",
+            "405 Method Not Allowed",
             "text/plain",
-            b"POST requests need the X-Dux-Token header\n",
+            b"dux web is read-only\n",
         ),
         _ => respond(&mut s, "404 Not Found", "text/plain", b"not found\n"),
     }
@@ -703,8 +567,9 @@ pre{background:var(--bg);padding:8px;overflow-x:auto;font-size:12px;margin:8px 0
 <div id="modal"><div class="card" id="card"></div></div>
 <script>
 const token=new URLSearchParams(location.search).get('token')||'';
-let S=null,tab='Disks',folder='',picked=new Set(),dsub='Overview',sel=null,openGroups=new Set(),closedPlaces=new Set(),H_ROWS=null;
-const tabs=['Disks','Folders','Biggest','Docker','Logs','Projects','Fixes','History'];
+let S=null,tab='Disk usage',grp='Docker',actTimer=null,folder='',picked=new Set(),dsub='Overview',sel=null,openGroups=new Set(),closedPlaces=new Set(),H_ROWS=null;
+const tabs=['Disk usage','Activity','Usage by group','Cleanup','History'];
+const groups=['Docker','Projects','Services','Logs'];
 const dsubs=['Overview','Stacks','Containers','Images','Volumes','Logs','Storage'];
 const H=b=>{if(b==null)return'-';const neg=b<0;b=Math.abs(b);const u=['B','KiB','MiB','GiB','TiB'];let i=0;while(b>=1024&&i<4){b/=1024;i++}return(neg?'-':'')+(i?b.toFixed(2):b)+' '+u[i]};
 const el=(t,txt,cls)=>{const e=document.createElement(t);if(txt!=null)e.textContent=txt;if(cls)e.className=cls;return e};
@@ -715,34 +580,28 @@ cells.forEach(c=>{const td=el('td');if(c instanceof Node)td.appendChild(c);else{
 function barc(f){const s=el('span',null,'bar');s.style.width=Math.max(1,Math.round(f*120))+'px';return s}
 function kv(pairs){const d=el('div',null,'kv');pairs.forEach(([k,v])=>{d.appendChild(el('b',k));d.appendChild(el('span',v==null||v===''?'-':String(v)))});return d}
 function panel(title,pairs,buttons,extra){const p=el('div',null,'panel');p.appendChild(el('h4',title));p.appendChild(kv(pairs));if(extra)p.appendChild(extra);
-if(buttons&&buttons.length){const b=el('div',null,'btns');buttons.forEach(x=>{const btn=el('button',x.label,x.cls||'');btn.disabled=!S.allow_actions;btn.title=S.allow_actions?(x.title||''):'start dux web with --allow-actions';btn.onclick=x.run;b.appendChild(btn)});p.appendChild(b)}return p}
-function split(left,right){const d=el('div',null,'split');d.appendChild(left);d.appendChild(right||panel('Details',[['','Click a row to see its details and actions.']]));return d}
+return p}
+function split(left,right){const d=el('div',null,'split');d.appendChild(left);d.appendChild(right||panel('Details',[['','Click a row to see its details.']]));return d}
 async function api(p,opt){const r=await fetch(p,Object.assign({headers:{'X-Dux-Token':token,'Content-Type':'application/json'}},opt||{}));try{return await r.json()}catch(e){return{error:'HTTP '+r.status}}}
 async function load(){S=await api('/api/state');render();if(!S.ready||S.walking)setTimeout(load,2000)}
-// Actions: confirm, start a job on the server, show its live progress.
-async function act(body,label,risky,expected){let confirmWord=null;
-if(risky){confirmWord=prompt('RISKY: '+label+'\nThis can lose data and cannot be undone. Type delete to go ahead:');if(confirmWord!=='delete'){alert('Nothing done.');return}}
-else if(!confirm(label+(expected?'\nFrees about '+H(expected)+'.':'')+'\n\nGo ahead?'))return;
-body.confirm=confirmWord;const r=await api('/api/action',{method:'POST',body:JSON.stringify(body)});if(r.error){alert(r.error);return}showJob()}
-async function showJob(){const m=document.getElementById('modal'),c=document.getElementById('card');m.style.display='flex';
-const tick=async()=>{const j=await api('/api/job');c.textContent='';if(j.none){m.style.display='none';return}
-c.appendChild(el('h3',j.title+(j.done?' · finished in '+j.seconds.toFixed(1)+'s':' · running '+Math.floor(j.seconds)+'s')));
-const n=j.steps.length||1,d=j.ok+j.failed;const pr=el('div',null,'prog'),fill=el('div');fill.style.width=Math.round(d*100/n)+'%';pr.appendChild(fill);c.appendChild(pr);
-c.appendChild(el('p',j.ok+' done · '+j.failed+' failed · freed '+H(j.freed)+' measured on disk (expected about '+H(j.expected)+')',j.failed?'warn':'ok'));
-c.appendChild(table(['','expected','what','result'],j.steps.map(s=>({cls:s.state==='failed'?'':'',cells:[el('b',{pending:'·',running:'…',done:'OK',failed:'!!'}[s.state],s.state==='done'?'ok':s.state==='failed'?'bad':'muted'),H(s.expected),s.what,s.state==='done'?'freed '+H(s.freed):s.state==='failed'?s.error:s.state]}))));
-if(j.done){const b=el('button','Close');b.onclick=()=>{m.style.display='none';setTimeout(load,800)};c.appendChild(el('p'));c.appendChild(b)}else setTimeout(tick,700)};tick()}
-function render(){const nav=document.getElementById('tabs');nav.textContent='';tabs.forEach(t=>{const b=el('button',t,t===tab?'on':'');b.onclick=()=>{tab=t;sel=null;render()};nav.appendChild(b)});
-document.getElementById('status').textContent=(S.walking?('walking... '+S.progress+' entries'):(S.at?('as of '+new Date(S.at*1000).toLocaleTimeString()):''))+(S.allow_actions?'':' · read-only');
-const v=document.getElementById('view');v.textContent='';
-if(tab==='Disks'){v.appendChild(table(['mount','type','size','free','used','inodes'],S.disks.map(d=>[d.path,d.fstype,H(d.total),H(d.avail),(()=>{const s=el('span');s.appendChild(barc(d.pct/100));s.appendChild(document.createTextNode(' '+d.pct.toFixed(1)+'%'));return s})(),d.inode_pct==null?'-':d.inode_pct.toFixed(1)+'%'])));return}
+function render(){const nav=document.getElementById('tabs');nav.textContent='';tabs.forEach((t,i)=>{const b=el('button',(i+1)+' '+t,t===tab?'on':'');b.onclick=()=>{tab=t;sel=null;render()};nav.appendChild(b)});
+document.getElementById('status').textContent=(S.walking?('scanning... '+S.progress+' entries'):(S.at?('as of '+new Date(S.at*1000).toLocaleTimeString()):''))+' · read-only';
+const v=document.getElementById('view');v.textContent='';if(actTimer&&tab!=='Activity'){clearTimeout(actTimer);actTimer=null}
+if(tab==='Activity'){renderActivity(v);return}
 if(tab==='History'){renderHistory(v);return}
-if(!S.ready){v.appendChild(el('p','Walking the filesystem... '+S.progress+' entries so far.','muted'));return}
-if(tab==='Folders'){renderFolder(v);return}
-if(tab==='Biggest'){v.appendChild(table(['size','changed','path'],S.biggest.map(f=>[H(f.bytes),ago(f.mtime),f.path])));return}
-if(tab==='Docker'){renderDocker(v);return}
-if(tab==='Logs'){renderLogs(v);return}
-if(tab==='Projects'){renderProjects(v);return}
-if(tab==='Fixes')renderFixes(v)}
+if(tab==='Disk usage'){v.appendChild(table(['mount','type','size','free','used','inodes'],S.disks.map(d=>[d.path,d.fstype,H(d.total),H(d.avail),(()=>{const s=el('span');s.appendChild(barc(d.pct/100));s.appendChild(document.createTextNode(' '+d.pct.toFixed(1)+'%'));return s})(),d.inode_pct==null?'-':d.inode_pct.toFixed(1)+'%'])))}
+if(!S.ready){v.appendChild(el('p','Scanning the filesystem... '+S.progress+' entries so far.','muted'));return}
+if(tab==='Disk usage'){renderFolder(v);v.appendChild(el('h3','Biggest files'));v.appendChild(table(['size','changed','path'],S.biggest.slice(0,25).map(f=>[H(f.bytes),ago(f.mtime),f.path])));return}
+if(tab==='Usage by group'){const sb=el('div',null,'sub');groups.forEach(t=>{const b=el('button',t,t===grp?'on':'');b.onclick=()=>{grp=t;sel=null;render()};sb.appendChild(b)});v.appendChild(sb);
+if(grp==='Docker')renderDocker(v);else if(grp==='Projects')renderProjects(v);else if(grp==='Services')renderServices(v);else renderLogs(v);return}
+if(tab==='Cleanup')renderFixes(v)}
+async function renderActivity(v){const a=await api('/api/activity');if(tab!=='Activity')return;v.textContent='';
+v.appendChild(el('h3','Disk I/O now'));v.appendChild(table(['disk','read/s','write/s'],(a.disks||[]).map(d=>[d.disk,H(d.read_bps),H(d.write_bps)])));
+v.appendChild(el('h3','Processes writing and reading most'));v.appendChild(table(['writes/s','reads/s','pid','process','service / container'],(a.processes||[]).map(p=>[H(p.write_bps),H(p.read_bps),p.pid,p.name,p.unit||''])));
+v.appendChild(el('h3','Files being written'));v.appendChild(table(['write/s','growth/s','size','writer','path'],(a.writing||[]).map(w=>[H(w.write_bps),H(w.growth_bps),H(w.size),w.process+' ('+w.pid+')',w.path])));
+actTimer=setTimeout(()=>{if(tab==='Activity')render()},2000)}
+function renderServices(v){const t=S.services.reduce((a,s)=>a+s.total,0);v.appendChild(el('p',S.services.length+' running services use '+H(t)+' in their data folders and logs.'));
+v.appendChild(table(['service','total','data','logs','folders'],S.services.map(s=>[s.name,H(s.total),H(s.folders.reduce((a,f)=>a+f[1],0)),H(s.logs),s.folders.map(f=>f[0]).join(', ')])))}
 // ---- Docker
 function renderDocker(v){const d=S.docker;if(!d){v.appendChild(el('p','Docker is not available on this host.','muted'));return}
 const sb=el('div',null,'sub');dsubs.forEach(t=>{const b=el('button',t,t===dsub?'on':'');b.onclick=()=>{dsub=t;sel=null;render()};sb.appendChild(b)});v.appendChild(sb);
@@ -818,26 +677,17 @@ async function renderFolder(v){const r=await api('/api/tree?path='+encodeURIComp
 const crumbs=el('p');const up=el('a','⬑ up');up.onclick=()=>{folder=folder.split('/').slice(0,-1).join('/');render()};crumbs.appendChild(el('b',(folder||'/')+'  '));if(folder)crumbs.appendChild(up);v.appendChild(crumbs);
 v.appendChild(table(['size','','entries','name'],r.children.map(c=>{const n=c.dirs?el('a',c.name+'/'):el('span',c.name);if(c.dirs)n.onclick=()=>{folder=(folder+'/'+c.name).replace('//','/');render()};return[H(c.bytes),barc(c.bytes/top),c.entries,n]})))}
 // ---- Fixes
-function renderFixes(v){const tot={SAFE:0,CAUTION:0,RISKY:0};S.fixes.forEach(f=>tot[f.safety]+=f.frees);
-v.appendChild(el('p','SAFE '+H(tot.SAFE)+' · CAUTION '+H(tot.CAUTION)+' · RISKY '+H(tot.RISKY)));
-const bar=el('div');bar.id='actions';const sum=el('span','','muted');const upd=()=>{let b=0;S.fixes.forEach(f=>{if(picked.has(f.id))b+=f.frees});sum.textContent=picked.size+' picked, '+H(b)};
-const pick=(f)=>{picked.clear();S.fixes.forEach(x=>{if(x.applicable&&f(x))picked.add(x.id)});render()};
-[['Select all SAFE',x=>x.safety==='SAFE'],['Select SAFE + CAUTION',x=>x.safety!=='RISKY'],['Clear',x=>false]].forEach(([t,f])=>{const b=el('button',t);b.onclick=()=>pick(f);bar.appendChild(b)});
-const go=el('button','Apply picked');go.disabled=!S.allow_actions;go.title=S.allow_actions?'':'start dux web with --allow-actions';go.onclick=apply;bar.appendChild(go);bar.appendChild(sum);v.appendChild(bar);
-v.appendChild(table(['','rating','frees','fix','what it does','undo'],S.fixes.map(f=>{const c=el('input');c.type='checkbox';c.disabled=!f.applicable;c.checked=picked.has(f.id);c.onchange=()=>{c.checked?picked.add(f.id):picked.delete(f.id);upd()};return[c,el('b',f.safety,f.safety),H(f.frees),f.title,f.why+(f.manual?' By hand: '+f.manual:''),f.undo]})));upd()}
-async function apply(){const ids=[...picked];if(!ids.length)return;let b=0,risky=false;S.fixes.forEach(f=>{if(picked.has(f.id)){b+=f.frees;risky=risky||f.safety==='RISKY'}});
-let confirmWord=null;if(risky){confirmWord=prompt('Your selection includes RISKY items that can lose data. Type delete to include them:');if(confirmWord!=='delete'){alert('Nothing applied.');return}}
-else if(!confirm('Apply '+ids.length+' fixes, freeing about '+H(b)+'?'))return;
-const keys=S.fixes.filter(f=>picked.has(f.id)).map(f=>f.key);
-const r=await api('/api/apply',{method:'POST',body:JSON.stringify({keys,confirm:confirmWord})});if(r.error){alert(r.error);return}picked.clear();showJob()}
+function renderFixes(v){const sums={};S.fixes.filter(f=>f.applicable).forEach(f=>{sums[f.group]=(sums[f.group]||0)+f.frees});
+const g=Object.entries(sums).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+v.appendChild(el('p','Can be cleaned: '+(g.length?g.map(([k,b])=>k+' '+H(b)).join(' · '):'nothing')+'. Read-only here: apply with dux fix or in dux ui (view 4).'));
+v.appendChild(table(['rating','frees','group','what','what it does','undo'],S.fixes.map(f=>({cls:f.never_touch?'muted':'',cells:[el('b',f.safety,f.safety),H(f.frees),f.group,(f.never_touch?'[never touch] ':'')+f.title,f.why+(f.manual?' By hand: '+f.manual:''),f.undo]}))))}
 document.getElementById('refresh').onclick=async()=>{await api('/api/refresh',{method:'POST'});load()};
-load();api('/api/job').then(j=>{if(!j.none&&!j.done)showJob()});
+load();setInterval(load,300000);
 </script></body></html>"##;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cleanup::{Action, Item};
 
     #[test]
     fn token_comparison() {
@@ -863,64 +713,17 @@ mod tests {
     }
 
     #[test]
-    fn apply_refuses_risky_without_delete_and_manual_items() {
-        let d = std::env::temp_dir().join(format!("dux-web-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("big.iso");
-        std::fs::write(&f, b"x").unwrap();
-        let g = Gathered {
-            fixes: vec![
-                crate::fix::delete_file(f.to_str().unwrap(), "test", 1),
-                crate::fix::risky("held".into(), "w", "restart".into(), 5),
-            ],
-            ..Gathered::default()
-        };
-        let keys: Vec<String> = g
-            .fixes
-            .iter()
-            .map(fix_key)
-            .chain(["0000000000000000".to_string()])
-            .collect();
-        assert_ne!(keys[0], keys[1], "different fixes, different keys");
-        assert!(
-            resolve_keys(&g, &keys, None).is_err(),
-            "unknown key: nothing runs"
-        );
-        assert!(
-            resolve_keys(&g, &keys[..1], None).is_err(),
-            "RISKY needs delete"
-        );
-        assert!(
-            resolve_keys(&g, &keys[1..2], Some("delete")).is_err(),
-            "hand-only fix"
-        );
-        assert_eq!(
-            resolve_keys(&g, &keys[..1], Some("delete")).unwrap().len(),
-            1
-        );
-        assert!(f.exists(), "resolving never applies anything");
-        let _ = Item {
-            level: 0,
-            what: String::new(),
-            action: Action::Remove { path: f.clone() },
-            frees: 0,
-        };
-        std::fs::remove_dir_all(&d).unwrap();
-    }
-
-    #[test]
     fn end_to_end_auth_and_state() {
         let srv = Server::new(
             std::env::temp_dir().to_string_lossy().into_owned(),
             "t0ken".into(),
-            false,
             3600,
         );
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();
         let s2 = srv.clone();
         std::thread::spawn(move || {
-            for c in l.incoming().flatten().take(4) {
+            for c in l.incoming().flatten().take(10) {
                 handle(&s2, c);
             }
         });
@@ -941,5 +744,29 @@ mod tests {
         );
         let page = get("/?token=t0ken", "");
         assert!(page.contains("<title>dux</title>") && page.contains("X-Frame-Options: DENY"));
+        // The API: same documents as the CLI, Prometheus with a bearer token.
+        let disks = get("/api/v1/disks", "X-Dux-Token: t0ken\r\n");
+        assert!(
+            disks.starts_with("HTTP/1.1 200") && disks.contains("\"inode_pct\""),
+            "{disks}"
+        );
+        let m = get("/metrics", "Authorization: Bearer t0ken\r\n");
+        assert!(
+            m.starts_with("HTTP/1.1 200") && m.contains("# TYPE dux_disk_used_bytes gauge"),
+            "{m}"
+        );
+        assert!(get("/metrics", "").starts_with("HTTP/1.1 401"));
+        let early = get("/api/v1/logs", "X-Dux-Token: t0ken\r\n");
+        assert!(early.starts_with("HTTP/1.1 503"), "{early}");
+        // Read-only: what used to apply fixes is gone.
+        let post = |path: &str| {
+            let mut c = TcpStream::connect(addr).unwrap();
+            write!(c, "POST {path} HTTP/1.1\r\nHost: x\r\nX-Dux-Token: t0ken\r\nContent-Length: 2\r\n\r\n{{}}").unwrap();
+            let mut out = String::new();
+            c.read_to_string(&mut out).unwrap();
+            out
+        };
+        assert!(post("/api/apply").starts_with("HTTP/1.1 405"));
+        assert!(post("/api/action").starts_with("HTTP/1.1 405"));
     }
 }

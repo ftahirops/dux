@@ -429,6 +429,40 @@ pub fn offer(title: &str, mut s: Vec<Suggestion>, args: &FixArgs) -> anyhow::Res
     Ok(freed)
 }
 
+/// The group a cleanup suggestion is summed under (spec UI-1 view 4).
+pub fn group(x: &Suggestion) -> &'static str {
+    let Some(item) = &x.item else {
+        return "Explained only";
+    };
+    match &item.action {
+        Action::Run { program, .. } => match std::path::Path::new(program)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+        {
+            "journalctl" => "Journal",
+            "logrotate" => "Logs",
+            "docker" | "podman" => "Docker",
+            "apt-get" | "apt" | "dnf" | "yum" => "Packages",
+            _ => "System",
+        },
+        Action::TailAndTruncate { path, .. } if path.to_string_lossy().contains("/containers/") => {
+            "Docker"
+        }
+        Action::TailAndTruncate { .. } => "Logs",
+        Action::Remove { .. } if item.level >= 4 => "Big files",
+        Action::Remove { path } => {
+            let p = path.to_string_lossy();
+            if p.contains("/crash") || p.contains("coredump") {
+                "System"
+            } else {
+                "Logs"
+            }
+        }
+        Action::RemoveTree { .. } => "Projects",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
