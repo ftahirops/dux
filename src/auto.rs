@@ -118,6 +118,11 @@ impl Policy {
         p.docker_volumes = yes("DUX_AUTO_DOCKER_VOLUMES");
         for f in &p.folders {
             anyhow::ensure!(
+                !f.chars()
+                    .any(|c| c.is_control() || c.is_whitespace() || c == '%'),
+                "DUX_AUTO_FOLDERS: {f:?} has a space, control character or %; give the plain path"
+            );
+            anyhow::ensure!(
                 f.starts_with('/'),
                 "DUX_AUTO_FOLDERS: {f} is not a full path"
             );
@@ -177,7 +182,6 @@ pub fn kind_of(item: &Item) -> Option<Kind> {
             let a = args.join(" ");
             match name.as_str() {
                 "journalctl" if a.contains("--vacuum") => Some(Kind::Journal),
-                "logrotate" => Some(Kind::TruncateLogs),
                 "docker" | "podman" if a.starts_with("image prune") => Some(Kind::DockerImages),
                 "docker" | "podman" if a.starts_with("volume rm ") => Some(Kind::DockerVolumes),
                 _ => None,
@@ -434,6 +438,11 @@ pub fn run(
         p.stop_pct > 0.0 && used().is_some_and(|(pct, _)| pct < p.stop_pct)
     };
     let mut run_one = |i: &Item, out: &mut Outcome, st: &mut State| {
+        // Approval is checked again right before acting, not only when planning.
+        if let Err(e) = permitted(p, i) {
+            out.skipped.push((i.what.clone(), format!("{e:#}")));
+            return;
+        }
         let size_before = match &i.action {
             Action::TailAndTruncate { path, .. } => std::fs::metadata(path).map(|m| m.len()).ok(),
             _ => None,
@@ -665,8 +674,12 @@ pub fn apply_dropin(p: &Policy) -> Result<String> {
     }
     match &want {
         Some(t) => {
+            use std::os::unix::fs::PermissionsExt;
             std::fs::create_dir_all(path.parent().unwrap_or(Path::new("/")))?;
-            std::fs::write(path, t).with_context(|| format!("writing {DROPIN} (run as root)"))?;
+            let tmp = path.with_extension("conf.dux-new");
+            std::fs::write(&tmp, t).with_context(|| format!("writing {DROPIN} (run as root)"))?;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644))?;
+            std::fs::rename(&tmp, path)?;
         }
         None => {
             let _ = std::fs::remove_file(path);
@@ -760,6 +773,17 @@ mod tests {
             _ => None,
         };
         assert!(Policy::from_raw(&root).is_err(), "/ cannot be approved");
+        for bad in ["/srv/a /etc", "/srv/a\nExecStartPre=/bin/sh", "/srv/%h"] {
+            let f = |k: &str| match k {
+                "DUX_AUTO" | "DUX_AUTO_ROTATED_LOGS" => Some("true".to_string()),
+                "DUX_AUTO_FOLDERS" => Some(bad.to_string()),
+                _ => None,
+            };
+            assert!(
+                Policy::from_raw(&f).is_err(),
+                "{bad:?} must not reach the drop-in"
+            );
+        }
         let stop = |k: &str| match k {
             "DUX_AUTO_START_PCT" => Some("90".to_string()),
             "DUX_AUTO_STOP_PCT" => Some("95".to_string()),

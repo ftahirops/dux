@@ -253,12 +253,22 @@ fn logrotate_config_for(root: &Path, log: &Path) -> Option<PathBuf> {
             .map(|p| p.trim_matches('"'))
             .collect();
         if patterns.iter().any(|p| glob_match(p, &target)) {
-            let lists_protected = patterns.iter().any(|p| {
-                Path::new(p)
-                    .file_name()
-                    .is_some_and(|n| is_protected(Path::new(n)))
+            // Forced only when every path the config lists is under
+            // /var/log, not protected (any part of it) and not near a
+            // never-touch path; otherwise the log is truncated on its own.
+            // Patterns name real paths (/var/log/...), whatever `root` is.
+            let safe = patterns.iter().all(|p| {
+                let p = Path::new(p);
+                let Ok(rel) = p.strip_prefix("/var/log") else {
+                    return false;
+                };
+                let literal: PathBuf = p
+                    .components()
+                    .take_while(|c| !c.as_os_str().to_string_lossy().contains(['*', '?', '[']))
+                    .collect();
+                !is_protected(rel) && !crate::protect::is_protected(&literal)
             });
-            return (!lists_protected).then_some(f);
+            return safe.then_some(f);
         }
     }
     None
@@ -749,8 +759,19 @@ pub fn remove_tree(path: &Path) -> Result<()> {
         "{} is not a known build-output folder",
         path.display()
     );
+    // The path must be its own real location: a folder on the way swapped
+    // for a symlink would point the checks below at the wrong place. The
+    // delete then walks the same path with O_NOFOLLOW, so a swap after this
+    // check fails instead of following the link.
     let real = real_location(path)?;
-    let p = real.to_string_lossy().into_owned();
+    let lexical = std::path::absolute(path)?;
+    crate::refuse_unless!(
+        real == lexical,
+        "{} is reached through a symlink ({}); skipped",
+        path.display(),
+        real.display()
+    );
+    let p = lexical.to_string_lossy().into_owned();
     crate::refuse_unless!(
         !system_path(&p),
         "{p} is a system or top-level path; dux will not delete it"
@@ -760,7 +781,7 @@ pub fn remove_tree(path: &Path) -> Result<()> {
         "{} has a filesystem mounted inside it",
         path.display()
     );
-    remove_dir_same_fs(&real).with_context(|| format!("removing {p}"))
+    remove_dir_same_fs(&lexical).with_context(|| format!("removing {p}"))
 }
 
 /// Delete a folder tree without ever leaving its filesystem or following a
@@ -1121,6 +1142,45 @@ pub fn tail_and_truncate(path: &Path, keep: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn logrotate_is_forced_only_for_configs_that_stay_in_safe_places() {
+        let r = tmp("lrsafe");
+        put(&r.join("var/log/app/app.log"), 3 << 20, 0);
+        std::fs::create_dir_all(r.join("etc/logrotate.d")).unwrap();
+        let log = r.join("var/log/app/app.log");
+        for (conf, forced) in [
+            ("/var/log/app/*.log {\n daily\n}\n", true),
+            ("/var/log/app/*.log /srv/data/*.log {\n daily\n}\n", false),
+            (
+                "/var/log/app/*.log /var/log/mysql/*.log {\n daily\n}\n",
+                false,
+            ),
+            (
+                "/var/log/app/*.log /var/log/audit/*.log {\n daily\n}\n",
+                false,
+            ),
+        ] {
+            std::fs::write(r.join("etc/logrotate.d/app"), conf).unwrap();
+            assert_eq!(logrotate_config_for(&r, &log).is_some(), forced, "{conf}");
+        }
+        std::fs::remove_dir_all(&r).unwrap();
+    }
+
+    #[test]
+    fn a_build_folder_reached_through_a_symlink_is_never_deleted() {
+        let d = tmp("treeswap");
+        let other = d.join("srv/bob/app");
+        std::fs::create_dir_all(other.join("node_modules/x")).unwrap();
+        std::fs::write(other.join("package.json"), b"{}").unwrap();
+        std::fs::write(other.join("node_modules/x/keep.js"), b"k").unwrap();
+        std::fs::create_dir_all(d.join("home/alice/code")).unwrap();
+        // alice's project folder swapped for a link to bob's app
+        std::os::unix::fs::symlink(&other, d.join("home/alice/code/proj")).unwrap();
+        assert!(remove_tree(&d.join("home/alice/code/proj/node_modules")).is_err());
+        assert!(other.join("node_modules/x/keep.js").exists());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn file_actions_never_follow_a_swapped_symlink_or_hard_link() {

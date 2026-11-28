@@ -1528,7 +1528,20 @@ pub(crate) fn tail_lines(path: &str, n: usize) -> Vec<String> {
     {
         return vec!["(compressed or binary; not shown)".into()];
     }
-    let Ok(mut f) = std::fs::File::open(path) else {
+    // Never through a symlink: the file may have been swapped since the scan.
+    use std::os::unix::fs::OpenOptionsExt;
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .and_then(|f| {
+            if f.metadata()?.is_file() {
+                Ok(f)
+            } else {
+                Err(std::io::Error::other("not a file"))
+            }
+        })
+    else {
         return vec!["(cannot open)".into()];
     };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);

@@ -1121,7 +1121,13 @@ fn real_main() -> Result<()> {
             refresh,
         }) => {
             let token = match token {
-                Some(t) => t,
+                Some(t) => {
+                    anyhow::ensure!(
+                        t.len() >= 16 && !t.chars().any(char::is_whitespace),
+                        "--token needs at least 16 characters (no spaces); leave it out for a random one"
+                    );
+                    t
+                }
                 None => web::random_token()?,
             };
             let loopback = listen.starts_with("127.")
