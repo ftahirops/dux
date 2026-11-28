@@ -18,6 +18,8 @@ CPUQuota=50%
 Environment=MALLOC_ARENA_MAX=2
 # Folder snapshots and growth history live here.
 StateDirectory=dux/sentinel
+# The audit log of every action dux takes (automatic cleanup included).
+LogsDirectory=dux
 TasksMax=32
 NoNewPrivileges=yes
 ProtectSystem=strict

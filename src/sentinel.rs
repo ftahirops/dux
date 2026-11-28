@@ -1115,6 +1115,7 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
     let (mut last_probe, mut last_smart, mut last_regrow) = (0i64, 0i64, 0i64);
     let mut last_auto: HashMap<String, i64> = HashMap::new();
     let auto_busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut auto_checked: Option<crate::auto::Policy> = None;
     // Growth per mount over at least a minute, for /metrics.
     let mut rate_prev: HashMap<String, (i64, u64)> = HashMap::new();
     let mut rates: HashMap<String, f64> = HashMap::new();
@@ -1276,6 +1277,24 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
         }
         // Automatic cleanup (spec 4.5): only when the user enabled and
         // approved it, per disk at its start level, never in a dry run.
+        // Once per policy: approved folders the sandboxed service cannot change.
+        if sentinel.settings.auto.enabled && auto_checked.as_ref() != Some(&sentinel.settings.auto)
+        {
+            auto_checked = Some(sentinel.settings.auto.clone());
+            let ro = crate::auto::unwritable(&sentinel.settings.auto);
+            if !ro.is_empty() {
+                alerts.push(Alert {
+                    severity: Severity::Warning,
+                    title: "automatic cleanup cannot change its approved folders".into(),
+                    body: format!(
+                        "read-only for dux-sentinel: {}. Run `dux auto allow` (or dux setup) to let the service change them.",
+                        ro.join(", ")
+                    ),
+                    key: "auto:readonly".into(),
+                    host: host.clone(),
+                });
+            }
+        }
         let auto = &sentinel.settings.auto;
         if auto.enabled && !cfg.dry_run {
             for (mp, pct) in &pcts {

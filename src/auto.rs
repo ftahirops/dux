@@ -620,6 +620,91 @@ pub fn run_live(cfg: &NotifyConfig, p: &Policy, host: &str, mount: &str, state_d
     }
 }
 
+// ---------------------------------------------------------- the service
+
+/// The sentinel service runs sandboxed (ProtectSystem=strict, ProtectHome
+/// read-only): this drop-in lets it change the approved folders, and only
+/// those.
+pub const DROPIN: &str = "/etc/systemd/system/dux-sentinel.service.d/dux-auto.conf";
+
+pub fn dropin_text(p: &Policy) -> String {
+    let mut dirs: Vec<String> = p.folders.clone();
+    if p.journal
+        && !dirs
+            .iter()
+            .any(|d| d == "/var/log" || d == "/var/log/journal")
+    {
+        dirs.push("/var/log/journal".into());
+    }
+    let homes = dirs.iter().any(|d| {
+        d == "/root" || d.starts_with("/root/") || d == "/home" || d.starts_with("/home/")
+    });
+    let mut t = String::from(
+        "# Written by dux (dux setup / dux auto allow): automatic cleanup may change\n\
+         # these folders, and only these. Re-run dux setup to change the list.\n[Service]\n",
+    );
+    for d in &dirs {
+        // "-": a folder that does not exist (yet) never stops the service.
+        t.push_str(&format!("ReadWritePaths=-{d}\n"));
+    }
+    if homes {
+        t.push_str("ProtectHome=no\n");
+    }
+    t
+}
+
+/// Write (automatic cleanup on) or remove (off) the drop-in, then reload
+/// systemd and restart the sentinel so the sandbox matches. Returns what
+/// was done.
+pub fn apply_dropin(p: &Policy) -> Result<String> {
+    let path = Path::new(DROPIN);
+    let want = (p.enabled && (!p.folders.is_empty() || p.journal)).then(|| dropin_text(p));
+    let have = std::fs::read_to_string(path).ok();
+    if want == have {
+        return Ok("the service already allows the approved folders".into());
+    }
+    match &want {
+        Some(t) => {
+            std::fs::create_dir_all(path.parent().unwrap_or(Path::new("/")))?;
+            std::fs::write(path, t).with_context(|| format!("writing {DROPIN} (run as root)"))?;
+        }
+        None => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+    if Path::new("/run/systemd/system").exists() {
+        let ok = |a: &[&str]| {
+            std::process::Command::new("systemctl")
+                .args(a)
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        if !ok(&["daemon-reload"]) || !ok(&["try-restart", "dux-sentinel.service"]) {
+            return Ok(format!(
+                "{DROPIN} updated; restart dux-sentinel to apply it"
+            ));
+        }
+    }
+    Ok(match want {
+        Some(_) => format!(
+            "the service may now change: {} ({DROPIN})",
+            p.folders.join(", ")
+        ),
+        None => "automatic cleanup is off; the service is read-only again".into(),
+    })
+}
+
+/// Approved folders the running process cannot change (read-only mounts,
+/// or the service sandbox without the drop-in).
+pub fn unwritable(p: &Policy) -> Vec<String> {
+    p.folders
+        .iter()
+        .filter(|f| Path::new(f).exists())
+        .filter(|f| crate::sentinel::statvfs(f).is_ok_and(|u| u.readonly))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -633,6 +718,20 @@ mod tests {
             build_caches: true,
             ..Policy::default()
         }
+    }
+
+    #[test]
+    fn the_service_drop_in_allows_exactly_the_approved_folders() {
+        let mut p = pol(&["/var/log", "/home/ann/app/logs"]);
+        p.journal = true;
+        let t = dropin_text(&p);
+        assert!(t.contains("ReadWritePaths=-/var/log\n"));
+        assert!(t.contains("ReadWritePaths=-/home/ann/app/logs\n"));
+        assert!(t.contains("ProtectHome=no"), "a home folder is approved");
+        assert!(!t.contains("/var/log/journal"), "covered by /var/log");
+        let t = dropin_text(&pol(&["/srv/app/logs"]));
+        assert!(!t.contains("ProtectHome"), "homes stay read-only");
+        assert_eq!(t.matches("ReadWritePaths").count(), 1);
     }
 
     #[test]

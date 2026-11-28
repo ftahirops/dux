@@ -410,6 +410,17 @@ pub fn run(a: &mut dyn Ask, path: &Path, never_touch: &Path) -> Result<()> {
         "\nWrote {} (mode 600). The sentinel applies it within seconds.",
         path.display()
     ));
+    // The service sandbox must allow the approved folders (and nothing else);
+    // only for the real config, never for a test file elsewhere.
+    if path == Path::new(config::DEFAULT_FILE) {
+        match crate::sentinel::Settings::from_config(&cfg).map(|s| s.auto) {
+            Ok(pol) => match crate::auto::apply_dropin(&pol) {
+                Ok(msg) => a.say(&format!("Automatic cleanup: {msg}.")),
+                Err(e) => a.say(&format!("Automatic cleanup: {e:#}")),
+            },
+            Err(e) => a.say(&format!("Automatic cleanup: {e:#}")),
+        }
+    }
     let legacy = path.with_file_name("notify.conf");
     if legacy.exists() && path.extension().is_some_and(|e| e == "toml") {
         a.say(&format!(

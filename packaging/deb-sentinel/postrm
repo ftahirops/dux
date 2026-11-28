@@ -3,8 +3,11 @@ set -e
 case "$1" in
     purge)
         rm -rf /var/lib/dux/sentinel
-        rm -f /etc/dux/dux.toml /etc/dux/dux.toml.dux-new /etc/dux/notify.conf /etc/dux/never-touch /etc/dux/never-touch.lock /etc/dux/web.env
+        rm -f /etc/dux/dux.toml /etc/dux/dux.toml.dux-new /etc/dux/notify.conf /etc/dux/never-touch /etc/dux/never-touch.lock /etc/dux/web.env /etc/dux/disable-actions
         rmdir /etc/dux 2>/dev/null || true
+        rmdir /var/lib/dux 2>/dev/null || true
+        rm -f /etc/systemd/system/dux-sentinel.service.d/dux-auto.conf
+        rmdir /etc/systemd/system/dux-sentinel.service.d 2>/dev/null || true
         ;;
 esac
 if [ -d /run/systemd/system ]; then

@@ -61,9 +61,10 @@ enum Cmd {
     },
     /// Background watcher that alerts when a disk fills (runs as a service)
     ///
-    /// Watch free space and inodes on every mount every few seconds and send
-    /// alerts: system log, ntfy, Slack, webhook, email, and wall for critical
-    /// ones. Exact and cheap: one statvfs call per mount, no scanning.
+    /// Watch free space and inodes on every mount (every minute; every 5 s
+    /// once a disk is past its warning level) and alert through the system
+    /// log, ntfy, Slack, a webhook, email and wall: on crossing a level, when
+    /// clearly worse, and on recovery. Runs automatic cleanup when approved.
     Sentinel {
         /// Config file (dux.toml; an old notify.conf beside it is read too)
         #[arg(long, default_value = notify::DEFAULT_CONFIG)]
@@ -216,10 +217,11 @@ enum Cmd {
         #[arg(default_value = "/")]
         path: PathBuf,
     },
-    /// Web dashboard: token protected, read-only unless --allow-actions
+    /// Read-only web dashboard, JSON API and Prometheus metrics (token protected)
     ///
-    /// Local web dashboard with the same data and fix picker. Listens on
-    /// 127.0.0.1 and needs a token; read-only unless --allow-actions.
+    /// The five views of the terminal UI, read-only, plus /api/v1/... (the
+    /// same JSON as the CLI --json output) and /metrics. Listens on
+    /// 127.0.0.1 and needs the token for every request.
     Web {
         /// Filesystem to report on
         #[arg(default_value = "/")]
@@ -260,9 +262,11 @@ enum Cmd {
     ///
     /// `dux auto` shows the approved folders and actions, build output
     /// announced for deletion, and logs watched after cleanup. `dux auto keep
-    /// PATH` keeps announced build output from automatic deletion.
+    /// PATH` keeps announced build output from automatic deletion. `dux auto
+    /// allow` lets the sandboxed service change the approved folders (done
+    /// by dux setup; needed after editing dux.toml by hand).
     Auto {
-        #[arg(value_parser = ["status", "keep", "unkeep"], default_value = "status")]
+        #[arg(value_parser = ["status", "keep", "unkeep", "allow"], default_value = "status")]
         op: String,
         path: Option<PathBuf>,
         #[arg(long, default_value = notify::DEFAULT_CONFIG)]
@@ -1324,6 +1328,7 @@ fn real_main() -> Result<()> {
                     st.save(&dir)?;
                 }
                 ("keep" | "unkeep", None) => anyhow::bail!("dux auto {op} PATH"),
+                ("allow", _) => println!("{}", auto::apply_dropin(&s.auto)?),
                 _ => {
                     let a = &s.auto;
                     if !a.enabled {
