@@ -34,32 +34,32 @@ pub const CATALOG: &[Culprit] = &[
     Culprit {
         path: "/var/log",
         label: "system logs",
-        fix: "check logrotate; remove old rotated *.gz / *.1 files",
+        fix: "old rotated copies and big active logs: dux logs --fix (checked items; security, database, mail and kernel logs are protected)",
     },
     Culprit {
         path: "/var/lib/docker/containers",
         label: "Docker container logs",
-        fix: "set log-opts max-size in /etc/docker/daemon.json; truncate the big *-json.log",
+        fix: "big container logs: dux docker --fix truncates them in place; to cap them for good set \"log-opts\": {\"max-size\": \"100m\"} in /etc/docker/daemon.json",
     },
     Culprit {
         path: "/var/lib/docker/overlay2",
         label: "Docker images and layers",
-        fix: "docker image prune -a --filter until=720h",
+        fix: "unused images: docker image prune -a removes every image no container uses (see dux docker, Images, which ones)",
     },
     Culprit {
         path: "/var/lib/docker/volumes",
         label: "Docker volumes (data)",
-        fix: "docker volume ls -f dangling=true; remove only unused volumes",
+        fix: "volumes may hold databases or uploads: dux never removes named ones. Check them in dux docker, Volumes; remove one only after checking: docker volume rm NAME",
     },
     Culprit {
         path: "/var/lib/docker/buildkit",
         label: "Docker build cache",
-        fix: "docker builder prune --filter until=168h",
+        fix: "docker builder prune (build cache, rebuilt on the next build)",
     },
     Culprit {
         path: "/var/lib/containerd",
         label: "container images and layers (Docker's containerd store)",
-        fix: "docker image prune -a (every image no container uses, any age; --filter until=720h only those that arrived 30+ days ago); docker container prune; docker builder prune. Never delete files here by hand",
+        fix: "Docker images and layers: docker image prune -a removes every image no container uses; never delete files here by hand",
     },
     Culprit {
         path: "/var/cache/apt",
@@ -74,37 +74,37 @@ pub const CATALOG: &[Culprit] = &[
     Culprit {
         path: "/var/crash",
         label: "crash dumps",
-        fix: "remove old dumps; keep the newest few",
+        fix: "old crash dumps: dux fix removes them (the newest 5 are kept)",
     },
     Culprit {
         path: "/var/lib/systemd/coredump",
         label: "core dumps",
-        fix: "coredumpctl list; remove old dumps",
+        fix: "old core dumps: dux fix removes them (the newest 5 are kept); coredumpctl list shows them",
     },
     Culprit {
         path: "/var/tmp",
         label: "temporary files",
-        fix: "systemd-tmpfiles --clean",
+        fix: "systemd-tmpfiles --clean (only files untouched 30+ days)",
     },
     Culprit {
         path: "/tmp",
         label: "temporary files",
-        fix: "systemd-tmpfiles --clean",
+        fix: "systemd-tmpfiles --clean (only files untouched 10+ days)",
     },
     Culprit {
         path: "/var/lib/snapd",
         label: "snap revisions",
-        fix: "snap set system refresh.retain=2",
+        fix: "old snap revisions: dux fix removes them; to keep fewer from now on: snap set system refresh.retain=2",
     },
     Culprit {
         path: "/boot",
         label: "kernels",
-        fix: "apt-get autoremove --purge (keeps the running kernel)",
+        fix: "old kernels: dux fix offers them (the running one and one fallback are kept)",
     },
     Culprit {
         path: "/var/lib/kubelet",
         label: "Kubernetes pods and volumes",
-        fix: "kubectl delete unused pods/PVCs; crictl rmi --prune",
+        fix: "Kubernetes images: crictl rmi --prune removes images no container uses; pods and volumes are removed through kubectl, never by deleting files here",
     },
     Culprit {
         path: "/var/log/pods",
@@ -124,7 +124,7 @@ pub const CATALOG: &[Culprit] = &[
     Culprit {
         path: "/var/log/mysql",
         label: "MySQL logs",
-        fix: "check logrotate for mysql; slow query log size",
+        fix: "MySQL logs: check its logrotate rule and the slow query log size",
     },
     Culprit {
         path: "/var/lib/postgresql",
@@ -134,7 +134,7 @@ pub const CATALOG: &[Culprit] = &[
     Culprit {
         path: "/var/log/postgresql",
         label: "PostgreSQL logs",
-        fix: "check logrotate for postgresql; log_min_duration_statement",
+        fix: "PostgreSQL logs: check its logrotate rule and log_min_duration_statement",
     },
     Culprit {
         path: "/var/log/mongodb",
@@ -159,7 +159,7 @@ pub static HOME_CULPRITS: &[Culprit] = &[
     Culprit {
         path: ".cargo/registry",
         label: "Rust cargo registry",
-        fix: "cargo cache -a (cargo-cache) or remove ~/.cargo/registry/cache",
+        fix: "downloaded crates: dux fix removes ~/.cargo/registry/cache and src (downloaded again on the next build)",
     },
     Culprit {
         path: ".cache/pip",
@@ -184,22 +184,22 @@ pub static HOME_CULPRITS: &[Culprit] = &[
     Culprit {
         path: ".m2/repository",
         label: "Maven repository",
-        fix: "remove old versions in ~/.m2/repository",
+        fix: "Maven repository: dux fix offers it (CAUTION: it may hold artifacts built here)",
     },
     Culprit {
         path: ".gradle/caches",
         label: "Gradle caches",
-        fix: "remove ~/.gradle/caches (rebuilt on next build)",
+        fix: "Gradle caches: dux fix removes them (rebuilt on the next build)",
     },
     Culprit {
         path: ".pm2/logs",
         label: "pm2 logs",
-        fix: "pm2 flush; pm2 install pm2-logrotate",
+        fix: "pm2 flush (empties the pm2 logs); pm2 install pm2-logrotate keeps them small",
     },
     Culprit {
         path: ".cache",
         label: "user caches",
-        fix: "pip cache purge; go clean -cache; npm cache clean --force",
+        fix: "caches of several tools: dux fix lists the ones it knows, each with its own command",
     },
 ];
 

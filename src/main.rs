@@ -376,7 +376,33 @@ fn real_main() -> Result<()> {
             let fs = sentinel::statvfs(&p)?;
             let mut writers = attrib::Writers::default();
             writers.sample(util::now_secs());
-            let tree = walker::walk(&p, threads)?;
+            // One walk gives the tree and the checked Cleanup list (the same
+            // list as dux fix, the UI and the web).
+            let g = gather::gather(&p, threads, None);
+            let tree = g.tree.clone().context("the walk failed")?;
+            // Bytes the checked Cleanup list frees under a folder.
+            // `inner`: other listed folders inside `dir`, counted on their own line.
+            let freeable_in = |dir: &str, inner: &[String]| -> (u64, usize) {
+                let d = format!("{}/", dir.trim_end_matches('/'));
+                let mut out = (0u64, 0usize);
+                for x in g.fixes.iter().filter(|x| x.safety != fix::Safety::Risky) {
+                    let Some(item) = &x.item else { continue };
+                    let inside = cleanup::targets(item).is_some_and(|t| {
+                        t.iter().any(|p| {
+                            let p = format!("{}/", p.to_string_lossy());
+                            p.starts_with(&d)
+                                && !inner.iter().any(|i| {
+                                    p.starts_with(&format!("{}/", i.trim_end_matches('/')))
+                                })
+                        })
+                    });
+                    if inside {
+                        out.0 += x.frees;
+                        out.1 += 1;
+                    }
+                }
+                out
+            };
             std::thread::sleep(std::time::Duration::from_secs(1));
             writers.sample(util::now_secs());
             let deleted = deleted::deleted_open().unwrap_or_default();
@@ -464,7 +490,26 @@ fn real_main() -> Result<()> {
                         }
                         _ => k.fix.to_string(),
                     };
-                    println!("   {:>11}  {}→ {fix}{}", "", c.green, c.reset);
+                    let inner: Vec<String> = cul
+                        .iter()
+                        .map(|(_, q, _)| q.clone())
+                        .filter(|q| {
+                            q != cpath
+                                && q.starts_with(&format!("{}/", cpath.trim_end_matches('/')))
+                        })
+                        .collect();
+                    let (fb, fnum) = freeable_in(cpath, &inner);
+                    if fnum > 0 {
+                        println!(
+                            "   {:>11}  {}→ dux fix can free {} here ({fnum} checked item{}){}",
+                            "",
+                            c.green,
+                            human(fb as i64),
+                            if fnum == 1 { "" } else { "s" },
+                            c.reset
+                        );
+                    }
+                    println!("   {:>11}  {}{fix}{}", "", c.dim, c.reset);
                 }
                 if cul.len() > 10 {
                     println!(
@@ -507,28 +552,7 @@ fn real_main() -> Result<()> {
                 head("WRITING NOW");
                 println!("   {w}");
             }
-            let opts = cleanup::Options {
-                level: 3,
-                used_pct: fs.used_pct(),
-                ..cleanup::Options::default()
-            };
-            let mut s: Vec<fix::Suggestion> =
-                cleanup::plan(&opts).into_iter().map(fix::assess).collect();
-            if let Ok(r) = docker::collect() {
-                s.extend(
-                    docker::plan(&r, false, false, 100 << 20)
-                        .into_iter()
-                        .map(fix::assess),
-                );
-            }
-            for d in deleted.iter().filter(|d| d.size >= 100 << 20) {
-                s.push(fix::risky(
-                    format!("{} held by deleted file {} (pid {} {})", human(d.size), d.path, d.pid, d.process),
-                    "Already deleted but still open; the space returns when that process closes it.",
-                    format!("restart the service of pid {} at a quiet time", d.pid),
-                    d.size as u64,
-                ));
-            }
+            let s: Vec<fix::Suggestion> = g.fixes;
             fix::offer("this disk", s, &fixes)?;
         }
         Some(Cmd::Where { mount, dir, top }) => {
