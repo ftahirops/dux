@@ -104,9 +104,27 @@
 # Where folder snapshots and history are kept
 #snapshot_dir = "/var/lib/dux/sentinel"
 
-[cleanup]
-# Automatic cleanup on a critical disk: 0 = off, 1 = journal, 2 = + logs, 3 = + caches
-#auto_level = 0
+[auto]
+# Clean up automatically when a disk reaches start_pct
+#enabled = false
+# Start when a disk is this full
+#start_pct = 90
+# Stop once below this (0 = free as much as the approved actions allow)
+#stop_pct = 0
+# The only folders it may touch, e.g. /var/log, /srv/app/logs
+#folders = []
+# Shrink the systemd journal to 1 GiB (needs /var/log approved)
+#journal = false
+# Remove rotated log copies, keeping the newest 3
+#rotated_logs = false
+# Empty active logs over 50 MiB in place, keeping their last 10 MiB
+#truncate_logs = false
+# Remove build output of projects idle 10+ days (announced 24 h before)
+#build_caches = false
+# Remove Docker images no container uses, older than 30 days
+#docker_images = false
+# Remove Docker volumes no container uses (they may hold data)
+#docker_volumes = false
 
 [programs]
 # curl used for HTTP and mail

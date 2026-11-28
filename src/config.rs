@@ -418,14 +418,87 @@ pub const SETTINGS: &[Setting] = &[
         "/var/lib/dux/sentinel",
         "Where folder snapshots and history are kept",
     ),
-    // [cleanup]
+    // [auto] automatic cleanup (spec 4.5): off unless turned on here or in
+    // `dux setup`, with the folders it may touch and each kind of action approved.
     s(
-        "cleanup",
-        "auto_level",
-        "DUX_AUTO_CLEANUP_LEVEL",
-        Number,
+        "auto",
+        "enabled",
+        "DUX_AUTO",
+        Bool,
+        "false",
+        "Clean up automatically when a disk reaches start_pct",
+    ),
+    s(
+        "auto",
+        "start_pct",
+        "DUX_AUTO_START_PCT",
+        Percent,
+        "90",
+        "Start when a disk is this full",
+    ),
+    s(
+        "auto",
+        "stop_pct",
+        "DUX_AUTO_STOP_PCT",
+        Percent,
         "0",
-        "Automatic cleanup on a critical disk: 0 = off, 1 = journal, 2 = + logs, 3 = + caches",
+        "Stop once below this (0 = free as much as the approved actions allow)",
+    ),
+    s(
+        "auto",
+        "folders",
+        "DUX_AUTO_FOLDERS",
+        List,
+        "[]",
+        "The only folders it may touch, e.g. /var/log, /srv/app/logs",
+    ),
+    s(
+        "auto",
+        "journal",
+        "DUX_AUTO_JOURNAL",
+        Bool,
+        "false",
+        "Shrink the systemd journal to 1 GiB (needs /var/log approved)",
+    ),
+    s(
+        "auto",
+        "rotated_logs",
+        "DUX_AUTO_ROTATED_LOGS",
+        Bool,
+        "false",
+        "Remove rotated log copies, keeping the newest 3",
+    ),
+    s(
+        "auto",
+        "truncate_logs",
+        "DUX_AUTO_TRUNCATE_LOGS",
+        Bool,
+        "false",
+        "Empty active logs over 50 MiB in place, keeping their last 10 MiB",
+    ),
+    s(
+        "auto",
+        "build_caches",
+        "DUX_AUTO_BUILD_CACHES",
+        Bool,
+        "false",
+        "Remove build output of projects idle 10+ days (announced 24 h before)",
+    ),
+    s(
+        "auto",
+        "docker_images",
+        "DUX_AUTO_DOCKER_IMAGES",
+        Bool,
+        "false",
+        "Remove Docker images no container uses, older than 30 days",
+    ),
+    s(
+        "auto",
+        "docker_volumes",
+        "DUX_AUTO_DOCKER_VOLUMES",
+        Bool,
+        "false",
+        "Remove Docker volumes no container uses (they may hold data)",
     ),
     // [programs]
     s(
@@ -591,8 +664,15 @@ pub fn line_of(text: &str, section: &str, key: Option<&str>) -> usize {
 }
 
 fn parse_toml(text: &str, path: &Path, l: &mut Loaded) -> Result<()> {
-    let table: toml::Table = toml::from_str(text)
-        .map_err(|e| anyhow::anyhow!("{}: {}", path.display(), e.to_string().trim_end()))?;
+    // Only the file, line and reason: the parser's own message quotes the
+    // offending line, which may hold a token or password.
+    let table: toml::Table = toml::from_str(text).map_err(|e| {
+        let line = e
+            .span()
+            .map(|sp| text[..sp.start.min(text.len())].matches('\n').count() + 1)
+            .unwrap_or(0);
+        anyhow::anyhow!("{}:{line}: {}", path.display(), e.message().trim_end())
+    })?;
     for (section, v) in &table {
         let Some(t) = v.as_table() else {
             bail!(
@@ -844,11 +924,14 @@ mod tests {
                 "[disk]\ncheck_every = \"soon\"\n",
                 ":2: [disk] check_every: `soon` is not a duration",
             ),
-            ("[disk]\nwarn_pct = 80\nwarn_pct = 81\n", "line 3"),
+            ("[disk]\nwarn_pct = 80\nwarn_pct = 81\n", ":3: "),
+            // A parse error never quotes the line: it may hold a secret.
+            ("[alerts]\nsmtp_pass = \"hunter2\n", ":2: "),
         ] {
             std::fs::write(&p, text).unwrap();
             let e = format!("{:#}", load(&p).unwrap_err());
             assert!(e.contains(want), "{text:?}: {e}");
+            assert!(!e.contains("hunter2"), "secret leaked: {e}");
         }
         // A value that parses but is invalid together with another one.
         std::fs::write(&p, "[disk]\nwarn_pct = 96\n").unwrap();

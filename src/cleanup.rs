@@ -329,108 +329,12 @@ pub fn plan(o: &Options) -> Vec<Item> {
         return items;
     }
 
-    // Level 2a: rotated logs, newest `rotated_keep` of each kept.
-    let log_dir = o.root.join("var/log");
-    let mut groups: HashMap<(PathBuf, String), Vec<(PathBuf, std::fs::Metadata)>> = HashMap::new();
-    for (p, m) in files_under(&log_dir, 6) {
-        let rel = p.strip_prefix(&log_dir).unwrap_or(&p).to_path_buf();
-        if is_protected(&rel) || is_binary_log(&p) || open.contains(&(m.dev(), m.ino())) {
-            continue;
-        }
-        let name = p
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        if let Some(base) = rotated_base(&name) {
-            groups
-                .entry((p.parent().unwrap_or(&log_dir).to_path_buf(), base))
-                .or_default()
-                .push((p, m));
-        }
-    }
-    let mut rotated: Vec<Item> = Vec::new();
-    for ((_, base), mut files) in groups {
-        files.sort_by_key(|(_, m)| std::cmp::Reverse(m.mtime()));
-        for (p, m) in files.into_iter().skip(o.rotated_keep) {
-            rotated.push(Item {
-                level: 2,
-                what: format!("rotated log of {base}"),
-                action: Action::Remove { path: p },
-                frees: m.blocks() * 512,
-            });
-        }
-    }
-    rotated.sort_by_key(|i| std::cmp::Reverse(i.frees));
-    items.extend(rotated);
-
-    // Level 2b: big active logs, only when the disk is getting full.
-    if o.used_pct >= o.logs_min_used_pct {
-        let mut candidates: Vec<(PathBuf, std::fs::Metadata, bool)> = files_under(&log_dir, 6)
-            .into_iter()
-            .filter(|(p, _)| {
-                let name = p.file_name().unwrap_or_default().to_string_lossy();
-                rotated_base(&name).is_none()
-                    && !is_protected(p.strip_prefix(&log_dir).unwrap_or(p))
-                    && !is_binary_log(p)
-            })
-            .map(|(p, m)| (p, m, false))
-            .collect();
-        let docker = o.root.join("var/lib/docker/containers");
-        candidates.extend(
-            files_under(&docker, 1)
-                .into_iter()
-                .filter(|(p, _)| p.to_string_lossy().ends_with("-json.log"))
-                .map(|(p, m)| (p, m, true)),
-        );
-        let mut forced: HashSet<PathBuf> = HashSet::new();
-        for (p, m, is_docker) in candidates {
-            let bytes = m.blocks() * 512;
-            if bytes < o.big_log {
-                continue;
-            }
-            let conf = (!is_docker)
-                .then(|| logrotate_config_for(&o.root, &p))
-                .flatten();
-            // One forced rotation per config, however many of its logs are big.
-            if let Some(c) = &conf {
-                if !forced.insert(c.clone()) {
-                    continue;
-                }
-            }
-            let item = match conf {
-                Some(c) => Item {
-                    level: 2,
-                    what: format!(
-                        "big log {} ({}), rotate with its logrotate config",
-                        p.display(),
-                        crate::util::human(bytes as i64)
-                    ),
-                    action: Action::Run {
-                        program: "logrotate".into(),
-                        args: vec!["-f".into(), c.to_string_lossy().into_owned()],
-                    },
-                    frees: bytes.saturating_sub(o.tail_keep),
-                },
-                None => Item {
-                    level: 2,
-                    what: format!(
-                        "big {} {} ({}), keep last {} then truncate",
-                        if is_docker { "container log" } else { "log" },
-                        p.display(),
-                        crate::util::human(bytes as i64),
-                        crate::util::human(o.tail_keep as i64)
-                    ),
-                    action: Action::TailAndTruncate {
-                        path: p,
-                        keep: o.tail_keep,
-                    },
-                    frees: bytes.saturating_sub(o.tail_keep),
-                },
-            };
-            items.push(item);
-        }
-    }
+    items.extend(log_items(
+        o,
+        &o.root.join("var/log"),
+        Some(&o.root.join("var/lib/docker/containers")),
+        &open,
+    ));
     if o.level < 3 {
         return items;
     }
@@ -530,6 +434,150 @@ pub fn audit(entry: serde_json::Value) {
 
 /// The never-touch check for one action, on every path it writes. Fails
 /// closed when the list cannot be read.
+/// Rotated copies to remove and big active logs to truncate under `log_dir`
+/// (and container logs in `docker`): the level-2 rules, for /var/log or any
+/// folder approved for automatic cleanup.
+pub fn log_items(
+    o: &Options,
+    log_dir: &Path,
+    docker: Option<&Path>,
+    open: &HashSet<(u64, u64)>,
+) -> Vec<Item> {
+    let mut items = Vec::new();
+    // Everything under /var/log is a log; elsewhere only files that look
+    // like one (a big database file or backup.tar.1 is never touched).
+    let all_logs = log_dir == o.root.join("var/log");
+    // Level 2a: rotated logs, newest `rotated_keep` of each kept.
+    let mut groups: HashMap<(PathBuf, String), Vec<(PathBuf, std::fs::Metadata)>> = HashMap::new();
+    for (p, m) in files_under(log_dir, 6) {
+        let rel = p.strip_prefix(log_dir).unwrap_or(&p).to_path_buf();
+        if is_protected(&rel) || is_binary_log(&p) || open.contains(&(m.dev(), m.ino())) {
+            continue;
+        }
+        if !all_logs && !looks_like_log(&p) {
+            continue;
+        }
+        let name = p
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        if let Some(base) = rotated_base(&name) {
+            groups
+                .entry((p.parent().unwrap_or(log_dir).to_path_buf(), base))
+                .or_default()
+                .push((p, m));
+        }
+    }
+    let mut rotated: Vec<Item> = Vec::new();
+    for ((_, base), mut files) in groups {
+        files.sort_by_key(|(_, m)| std::cmp::Reverse(m.mtime()));
+        for (p, m) in files.into_iter().skip(o.rotated_keep) {
+            rotated.push(Item {
+                level: 2,
+                what: format!("rotated log of {base}"),
+                action: Action::Remove { path: p },
+                frees: m.blocks() * 512,
+            });
+        }
+    }
+    rotated.sort_by_key(|i| std::cmp::Reverse(i.frees));
+    items.extend(rotated);
+
+    // Level 2b: big active logs, only when the disk is getting full.
+    if o.used_pct >= o.logs_min_used_pct {
+        let mut candidates: Vec<(PathBuf, std::fs::Metadata, bool)> = files_under(log_dir, 6)
+            .into_iter()
+            .filter(|(p, _)| {
+                let name = p.file_name().unwrap_or_default().to_string_lossy();
+                rotated_base(&name).is_none()
+                    && !is_protected(p.strip_prefix(log_dir).unwrap_or(p))
+                    && !is_binary_log(p)
+                    && (all_logs || looks_like_log(p))
+            })
+            .map(|(p, m)| (p, m, false))
+            .collect();
+        if let Some(docker) = docker {
+            candidates.extend(
+                files_under(docker, 1)
+                    .into_iter()
+                    .filter(|(p, _)| p.to_string_lossy().ends_with("-json.log"))
+                    .map(|(p, m)| (p, m, true)),
+            );
+        }
+        let mut forced: HashSet<PathBuf> = HashSet::new();
+        for (p, m, is_docker) in candidates {
+            let bytes = m.blocks() * 512;
+            if bytes < o.big_log {
+                continue;
+            }
+            let conf = (!is_docker)
+                .then(|| logrotate_config_for(&o.root, &p))
+                .flatten();
+            // One forced rotation per config, however many of its logs are big.
+            if let Some(c) = &conf {
+                if !forced.insert(c.clone()) {
+                    continue;
+                }
+            }
+            let item = match conf {
+                Some(c) => Item {
+                    level: 2,
+                    what: format!(
+                        "big log {} ({}), rotate with its logrotate config",
+                        p.display(),
+                        crate::util::human(bytes as i64)
+                    ),
+                    action: Action::Run {
+                        program: "logrotate".into(),
+                        args: vec!["-f".into(), c.to_string_lossy().into_owned()],
+                    },
+                    frees: bytes.saturating_sub(o.tail_keep),
+                },
+                None => Item {
+                    level: 2,
+                    what: format!(
+                        "big {} {} ({}), keep last {} then truncate",
+                        if is_docker { "container log" } else { "log" },
+                        p.display(),
+                        crate::util::human(bytes as i64),
+                        crate::util::human(o.tail_keep as i64)
+                    ),
+                    action: Action::TailAndTruncate {
+                        path: p,
+                        keep: o.tail_keep,
+                    },
+                    frees: bytes.saturating_sub(o.tail_keep),
+                },
+            };
+            items.push(item);
+        }
+    }
+    items
+}
+
+fn looks_like_log(p: &Path) -> bool {
+    let dir = p.parent().unwrap_or(Path::new("")).to_string_lossy();
+    let name = p.file_name().unwrap_or_default().to_string_lossy();
+    crate::insight::is_log(dir.as_bytes(), name.as_bytes())
+}
+
+/// Files some process has open (dev, inode).
+pub fn open_now() -> HashSet<(u64, u64)> {
+    open_files()
+}
+
+/// The paths an action changes, for never-touch and approved-folder checks.
+pub fn targets(item: &Item) -> Option<Vec<PathBuf>> {
+    Some(match &item.action {
+        Action::Remove { path } | Action::RemoveTree { path } | Action::RemoveUserPath { path } => {
+            vec![path.clone()]
+        }
+        Action::TailAndTruncate { path, .. } => vec![path.clone(), tail_path(path)],
+        Action::Run { program, args } => crate::protect::command_scope(program, args)?,
+    })
+}
+
 pub fn allowed(item: &Item) -> Result<()> {
     let targets: Vec<PathBuf> = match &item.action {
         Action::Remove { path } | Action::RemoveTree { path } | Action::RemoveUserPath { path } => {

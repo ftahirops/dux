@@ -106,9 +106,8 @@ pub struct Settings {
     pub walk_trigger_bytes: u64,
     pub walk_threads: usize,
     pub snapshot_dir: std::path::PathBuf,
-    /// Emergency cleanup level run automatically when the disk holding
-    /// /var/log goes critical. 0 = off (default).
-    pub auto_cleanup_level: u8,
+    /// Automatic cleanup (spec 4.5): off unless enabled and approved.
+    pub auto: crate::auto::Policy,
 }
 
 impl Default for Settings {
@@ -148,7 +147,7 @@ impl Default for Settings {
             walk_trigger_bytes: 1 << 30,
             walk_threads: 2,
             snapshot_dir: std::path::PathBuf::from(crate::snapshot::DEFAULT_DIR),
-            auto_cleanup_level: 0,
+            auto: crate::auto::Policy::default(),
         }
     }
 }
@@ -258,7 +257,13 @@ impl Settings {
                 parse_bytes(&v).with_context(|| format!("DUX_WALK_TRIGGER={v}"))?;
         }
         s.walk_threads = (num("DUX_WALK_THREADS", s.walk_threads as f64)? as usize).clamp(1, 16);
-        s.auto_cleanup_level = (num("DUX_AUTO_CLEANUP_LEVEL", 0.0)? as u8).min(3);
+        s.auto = crate::auto::Policy::from_raw(&get)?;
+        if get("DUX_AUTO_CLEANUP_LEVEL").is_some_and(|v| v != "0") {
+            // AUTO-1: the old level setting never turns the new cleanup on.
+            tracing::warn!(
+                "DUX_AUTO_CLEANUP_LEVEL is no longer used; automatic cleanup now needs approved folders and actions: run dux setup"
+            );
+        }
         if let Some(v) = get("DUX_SNAPSHOT_DIR") {
             s.snapshot_dir = std::path::PathBuf::from(v);
         }
@@ -1082,7 +1087,9 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
     let mut next_check: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     let mut latency = crate::probes::Latency::default();
     let disks = crate::probes::physical_disks();
-    let (mut last_probe, mut last_smart, mut last_cleanup) = (0i64, 0i64, 0i64);
+    let (mut last_probe, mut last_smart, mut last_regrow) = (0i64, 0i64, 0i64);
+    let mut last_auto: HashMap<String, i64> = HashMap::new();
+    let auto_busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut sentinel = Sentinel::new(settings, host.clone());
     let mut last_mount_refresh = now_secs();
     crate::util::systemd_notify("READY=1\nSTATUS=watching free space and inodes");
@@ -1148,6 +1155,7 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
         }
         let mut alerts = Vec::new();
         let mut used: Vec<(String, u64)> = Vec::new();
+        let mut pcts: Vec<(String, f64)> = Vec::new();
         let mut seen_remote: Vec<(u64, u64, u64, u64)> = Vec::new();
         for m in &mount_list {
             // Adaptive checks (spec MON-1): every `interval` while a disk is
@@ -1170,6 +1178,7 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
                     if attrib::walkable(&m.fstype) {
                         used.push((m.path.clone(), u.used));
                     }
+                    pcts.push((m.path.clone(), u.used_pct()));
                     alerts.extend(sentinel.observe(m, &u, now));
                     let hot = u.used_pct() >= sentinel.settings.warn_pct
                         || u.inode_pct()
@@ -1223,35 +1232,44 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
                 alerts.extend(sentinel.feed(f, true, now));
             }
         }
-        let level = sentinel.settings.auto_cleanup_level;
-        // Automatic cleanup deletes files: never in a dry run.
-        if level > 0 && !cfg.dry_run && now - last_cleanup >= 600 {
-            let log_mount = mount_list
-                .iter()
-                .filter(|m| m.path == "/" || under("/var/log", &m.path))
-                .max_by_key(|m| m.path.len())
-                .map(|m| m.path.clone());
-            let critical_here = log_mount.as_ref().is_some_and(|lm| {
-                alerts
-                    .iter()
-                    .any(|a| a.severity == Severity::Critical && a.key == format!("space:{lm}"))
-            });
-            if critical_here {
-                last_cleanup = now;
-                let cfg2 = cfg.clone();
-                let host2 = host.clone();
-                let target = sentinel.settings.crit_pct - 10.0;
-                if once {
-                    // --once exits right after this pass: finish the cleanup first.
-                    emergency_cleanup(&cfg2, &host2, level, target);
-                } else {
-                    let _ = std::thread::Builder::new()
-                        .name("dux-cleanup".into())
-                        .spawn(move || {
-                            emergency_cleanup(&cfg2, &host2, level, target);
-                        });
+        // Automatic cleanup (spec 4.5): only when the user enabled and
+        // approved it, per disk at its start level, never in a dry run.
+        let auto = &sentinel.settings.auto;
+        if auto.enabled && !cfg.dry_run {
+            for (mp, pct) in &pcts {
+                let due = now - last_auto.get(mp).copied().unwrap_or(0) >= 600;
+                if *pct >= auto.start_pct
+                    && due
+                    && !auto_busy.swap(true, std::sync::atomic::Ordering::SeqCst)
+                {
+                    last_auto.insert(mp.clone(), now);
+                    let (cfg2, pol, host2, mp2) =
+                        (cfg.clone(), auto.clone(), host.clone(), mp.clone());
+                    let dir = sentinel.settings.snapshot_dir.clone();
+                    let busy = auto_busy.clone();
+                    let job = move || {
+                        crate::auto::run_live(&cfg2, &pol, &host2, &mp2, &dir);
+                        busy.store(false, std::sync::atomic::Ordering::SeqCst);
+                    };
+                    if once {
+                        job();
+                    } else if std::thread::Builder::new()
+                        .name("dux-auto".into())
+                        .spawn(job)
+                        .is_err()
+                    {
+                        auto_busy.store(false, std::sync::atomic::Ordering::SeqCst);
+                    }
                 }
             }
+        }
+        if now - last_regrow >= 60 {
+            last_regrow = now;
+            alerts.extend(crate::auto::regrowth(
+                &sentinel.settings.snapshot_dir,
+                &host,
+                now,
+            ));
         }
         if let Some(s) = sched.as_mut() {
             for a in &alerts {
@@ -1306,45 +1324,6 @@ pub fn run(cfg: &NotifyConfig, settings: Settings, once: bool) -> Result<()> {
 
 /// Run cleanup up to `level`, safest first, stopping once the disk holding
 /// /var/log is at or below `target_pct`; report what was done.
-fn emergency_cleanup(cfg: &NotifyConfig, host: &str, level: u8, target_pct: f64) {
-    let Ok(before) = statvfs("/var/log") else {
-        return;
-    };
-    let opts = crate::cleanup::Options {
-        level,
-        used_pct: before.used_pct(),
-        ..crate::cleanup::Options::default()
-    };
-    let mut done = Vec::new();
-    for item in crate::cleanup::plan(&opts) {
-        if statvfs("/var/log")
-            .map(|u| u.used_pct() <= target_pct)
-            .unwrap_or(true)
-        {
-            break;
-        }
-        match crate::cleanup::apply(&item) {
-            Ok(()) => done.push(format!("L{} {}", item.level, item.what)),
-            Err(e) => tracing::warn!("emergency cleanup skipped {}: {e:#}", item.what),
-        }
-    }
-    let after = statvfs("/var/log").unwrap_or(before);
-    let freed = before.used.saturating_sub(after.used);
-    let alert = Alert {
-        severity: Severity::Warning,
-        title: format!("dux freed {} automatically (level {level})", h(freed)),
-        body: format!(
-            "disk now {:.1}% full; {} actions:\n{}",
-            after.used_pct(),
-            done.len(),
-            done.iter().take(10).cloned().collect::<Vec<_>>().join("\n")
-        ),
-        key: "cleanup:/var/log".into(),
-        host: host.to_string(),
-    };
-    notify::send(cfg, &alert, false, now_secs());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

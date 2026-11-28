@@ -1,4 +1,5 @@
 mod attrib;
+mod auto;
 mod cleanup;
 mod config;
 mod deleted;
@@ -256,6 +257,18 @@ enum Cmd {
     Actions {
         #[arg(value_parser = ["on", "off", "status"], default_value = "status")]
         state: String,
+    },
+    /// Automatic cleanup: what is approved, announced and watched
+    ///
+    /// `dux auto` shows the approved folders and actions, build output
+    /// announced for deletion, and logs watched after cleanup. `dux auto keep
+    /// PATH` keeps announced build output from automatic deletion.
+    Auto {
+        #[arg(value_parser = ["status", "keep", "unkeep"], default_value = "status")]
+        op: String,
+        path: Option<PathBuf>,
+        #[arg(long, default_value = notify::DEFAULT_CONFIG)]
+        config: PathBuf,
     },
     /// Guided setup: alerts (with a test), thresholds, never-touch, cleanup
     ///
@@ -1327,6 +1340,70 @@ fn real_main() -> Result<()> {
                     human(r.size),
                     util::display_path(&r.path)
                 );
+            }
+        }
+        Some(Cmd::Auto { op, path, config }) => {
+            let (_, s) = notify::NotifyConfig::load_checked(&config)?;
+            let dir = s.snapshot_dir.clone();
+            let mut st = auto::State::load(&dir);
+            match (op.as_str(), path) {
+                ("keep" | "unkeep", Some(p)) => {
+                    let p = protect::normalize(&std::path::absolute(&p)?.to_string_lossy());
+                    if op == "keep" {
+                        if !st.keep.contains(&p) {
+                            st.keep.push(p.clone());
+                        }
+                        st.announced.remove(&p);
+                        println!("automatic cleanup will not delete {p}");
+                    } else {
+                        st.keep.retain(|k| *k != p);
+                        println!("{p} may be cleaned automatically again");
+                    }
+                    st.save(&dir)?;
+                }
+                ("keep" | "unkeep", None) => anyhow::bail!("dux auto {op} PATH"),
+                _ => {
+                    let a = &s.auto;
+                    if !a.enabled {
+                        println!("Automatic cleanup: off (turn it on with dux setup)");
+                    } else {
+                        let stop = if a.stop_pct > 0.0 {
+                            format!(", stops below {:.0}%", a.stop_pct)
+                        } else {
+                            String::new()
+                        };
+                        println!("Automatic cleanup: on, starts at {:.0}%{stop}", a.start_pct);
+                        let kinds = [
+                            auto::Kind::Journal,
+                            auto::Kind::RotatedLogs,
+                            auto::Kind::TruncateLogs,
+                            auto::Kind::BuildCaches,
+                            auto::Kind::DockerImages,
+                            auto::Kind::DockerVolumes,
+                        ];
+                        let on: Vec<&str> = kinds
+                            .iter()
+                            .filter(|k| a.allows(**k))
+                            .map(|k| k.label())
+                            .collect();
+                        println!("  approved: {}", on.join(", "));
+                        println!("  folders:  {}", a.folders.join(", "));
+                    }
+                    let now = util::now_secs();
+                    for (p, t) in &st.announced {
+                        let left = (auto::NOTICE_SECS - (now - t)).max(0);
+                        println!(
+                            "  announced: {p} (deleted in {}h unless kept: dux auto keep {p})",
+                            left / 3600
+                        );
+                    }
+                    for k in &st.keep {
+                        println!("  kept: {k}");
+                    }
+                    for p in st.watched.keys() {
+                        println!("  watched after cleanup: {p}");
+                    }
+                }
             }
         }
         Some(Cmd::Setup {

@@ -8,7 +8,7 @@ use crate::config::{self, Kind, Setting, SETTINGS};
 use anyhow::{bail, Result};
 use std::collections::HashMap;
 use std::io::{BufRead, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Answers come from here: a terminal normally, a script in tests.
 pub trait Ask {
@@ -279,18 +279,105 @@ pub fn run(a: &mut dyn Ask, path: &Path, never_touch: &Path) -> Result<()> {
         to_add.push(p.to_string());
     }
 
-    a.say("\n4/4 Automatic cleanup on a critical disk (needs your approval here).");
-    a.say("  0 = off (dux only alerts and suggests), 1 = shrink the journal,");
-    a.say("  2 = + remove rotated logs, 3 = + package caches and temp files.");
-    loop {
-        d.ask(a, "cleanup", "auto_level", "Level");
-        match d
-            .get(find("cleanup", "auto_level"))
-            .unwrap_or("0")
-            .parse::<u8>()
-        {
-            Ok(0..=3) => break,
-            _ => a.say("    0, 1, 2 or 3"),
+    a.say("\n4/4 Automatic cleanup. Off unless you turn it on here; each action and");
+    a.say("  every folder it may touch needs your approval. Everything it does is alerted.");
+    d.ask(a, "auto", "enabled", "Turn on automatic cleanup? (yes/no)");
+    if d.get(find("auto", "enabled")).is_some_and(yes) {
+        loop {
+            d.ask(a, "auto", "start_pct", "Start when a disk is this % full");
+            d.ask(
+                a,
+                "auto",
+                "stop_pct",
+                "Stop once below this % (0 = free all it may)",
+            );
+            let start: f64 = d
+                .get(find("auto", "start_pct"))
+                .unwrap_or("90")
+                .parse()
+                .unwrap_or(90.0);
+            let stop: f64 = d
+                .get(find("auto", "stop_pct"))
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0.0);
+            if stop == 0.0 || stop < start {
+                break;
+            }
+            a.say("    the stop level must be below the start level (or 0)");
+        }
+        a.say("  Approve each action (yes/no):");
+        d.ask(a, "auto", "journal", "Shrink the systemd journal to 1 GiB");
+        d.ask(
+            a,
+            "auto",
+            "rotated_logs",
+            "Remove rotated log copies (newest 3 kept)",
+        );
+        d.ask(
+            a,
+            "auto",
+            "truncate_logs",
+            "Empty active logs over 50 MiB in place (last 10 MiB kept)",
+        );
+        d.ask(
+            a,
+            "auto",
+            "build_caches",
+            "Remove build output of projects idle 10+ days (alerted 24 h before)",
+        );
+        d.ask(
+            a,
+            "auto",
+            "docker_images",
+            "Remove Docker images no container uses, older than 30 days",
+        );
+        d.ask(
+            a,
+            "auto",
+            "docker_volumes",
+            "Remove Docker volumes no container uses (they may hold databases: say no unless sure)",
+        );
+        let fl = find("auto", "folders");
+        let mut folders: Vec<String> = d
+            .get(fl)
+            .map(|v| {
+                v.split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        a.say("  Folders it may touch (nothing outside them is ever changed):");
+        for f in suggested_folders() {
+            let had = folders.contains(&f);
+            let q = format!("    {f} [{}]: ", if had { "yes" } else { "no" });
+            let v = a.line(&q);
+            if v.is_empty() {
+                continue;
+            }
+            folders.retain(|x| *x != f);
+            if yes(&v) {
+                folders.push(f);
+            }
+        }
+        let more = a.line("    Other folders (comma-separated full paths, Enter = none): ");
+        for f in more.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+            if !f.starts_with('/') || f == "/" {
+                a.say(&format!("    {f}: a full path below /; skipped"));
+            } else if !folders.iter().any(|x| x == f) {
+                folders.push(f.to_string());
+            }
+        }
+        if folders.is_empty() {
+            d.values.remove(&Draft::id(fl));
+        } else {
+            d.values.insert(Draft::id(fl), folders.join(","));
+        }
+        if let Err(e) = crate::auto::Policy::from_raw(&|k| d.raw().get(k).cloned()) {
+            a.say(&format!("    {e:#}: automatic cleanup stays off"));
+            d.values
+                .insert(Draft::id(find("auto", "enabled")), "false".into());
         }
     }
 
@@ -333,6 +420,44 @@ pub fn run(a: &mut dyn Ask, path: &Path, never_touch: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Folders worth approving (AUTO-3): where logs, container logs and
+/// projects usually are on this machine.
+pub fn suggested_folders() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |p: String| {
+        if Path::new(&p).is_dir() && !out.contains(&p) {
+            out.push(p);
+        }
+    };
+    add("/var/log".into());
+    add("/var/lib/docker/containers".into());
+    for base in ["/srv", "/opt", "/var/www"] {
+        if let Ok(rd) = std::fs::read_dir(base) {
+            let mut names: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+            names.sort();
+            for app in names.into_iter().take(20) {
+                for sub in ["logs", "log", "storage/logs"] {
+                    add(app.join(sub).to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    let mut homes = vec![PathBuf::from("/root")];
+    if let Ok(rd) = std::fs::read_dir("/home") {
+        homes.extend(rd.flatten().map(|e| e.path()));
+    }
+    for h in &homes {
+        add(h.join(".pm2/logs").to_string_lossy().into_owned());
+    }
+    // Projects (for build output).
+    for h in homes {
+        add(h.to_string_lossy().into_owned());
+    }
+    add("/srv".into());
+    add("/opt".into());
+    out
+}
+
 pub fn run_terminal(path: &Path) -> Result<()> {
     if !std::io::stdin().is_terminal() {
         bail!(
@@ -347,14 +472,15 @@ pub fn run_terminal(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    struct Script(Vec<&'static str>, Vec<String>);
+    /// Answers by prompt text: the first unused (substring, answer) that
+    /// matches; Enter otherwise. Records everything shown.
+    struct Script(Vec<(&'static str, &'static str)>, Vec<String>);
     impl Ask for Script {
         fn line(&mut self, prompt: &str) -> String {
             self.1.push(prompt.to_string());
-            if self.0.is_empty() {
-                String::new()
-            } else {
-                self.0.remove(0).to_string()
+            match self.0.iter().position(|(k, _)| prompt.contains(k)) {
+                Some(i) => self.0.remove(i).1.to_string(),
+                None => String::new(),
             }
         }
         fn say(&mut self, t: &str) {
@@ -371,21 +497,22 @@ mod tests {
         let nt = d.join("never-touch");
         let mut a = Script(
             vec![
-                "ntfy.sh/x", // not a URL: asked again
-                "https://ntfy.sh/x",
-                "",   // token
-                "",   // slack
-                "",   // webhook
-                "",   // smtp
-                "no", // broadcast
-                "n",  // no test send
-                "96",
-                "95", // warn >= crit: both asked again
-                "80",
-                "",
-                "/srv/db, relative", // never-touch
-                "5",
-                "1", // auto level
+                ("ntfy topic", "ntfy.sh/x"), // not a URL: asked again
+                ("ntfy topic", "https://ntfy.sh/x"),
+                ("Broadcast", "no"),
+                ("test alert", "n"),
+                ("Warning when", "96"),
+                ("Critical when", "95"), // warn >= crit: both asked again
+                ("Warning when", "80"),
+                ("Add folders", "/srv/db, relative"),
+                ("Turn on automatic", "yes"),
+                ("Start when", "90"),
+                ("Stop once", "95"), // above start: asked again
+                ("Start when", ""),
+                ("Stop once", "80"),
+                ("rotated log", "yes"),
+                ("Docker volumes", "no"),
+                ("Other folders", "/srv/app/logs, /"),
             ],
             vec![],
         );
@@ -397,18 +524,36 @@ mod tests {
         let l = config::load(&p).unwrap();
         assert_eq!(l.raw["DUX_NTFY_URL"], "https://ntfy.sh/x");
         assert_eq!(l.raw["DUX_WARN_PCT"], "80");
-        assert_eq!(l.raw["DUX_AUTO_CLEANUP_LEVEL"], "1");
+        assert!(out.contains("stop level must be below"), "{out}");
+        assert!(out.contains("/: a full path below /"), "{out}");
+        assert_eq!(l.raw["DUX_AUTO"], "true");
+        assert_eq!(l.raw["DUX_AUTO_STOP_PCT"], "80");
+        assert_eq!(l.raw["DUX_AUTO_ROTATED_LOGS"], "true");
+        assert!(l.raw["DUX_AUTO_FOLDERS"]
+            .split(',')
+            .any(|f| f == "/srv/app/logs"));
+        assert!(
+            !l.raw.contains_key("DUX_AUTO_DOCKER_VOLUMES")
+                || l.raw["DUX_AUTO_DOCKER_VOLUMES"] == "false"
+        );
         assert_eq!(l.raw["DUX_WALL"], "false");
         assert!(crate::protect::load_from(&nt)
             .iter()
             .any(|x| x == "/srv/db"));
         // Re-run: Enter everywhere keeps every value; "-" clears one.
-        let mut b = Script(vec!["-"], vec![]);
+        let mut b = Script(vec![("ntfy topic", "-")], vec![]);
         run(&mut b, &p, &nt).unwrap();
         let l = config::load(&p).unwrap();
         assert!(!l.raw.contains_key("DUX_NTFY_URL"), "cleared");
         assert_eq!(l.raw["DUX_WARN_PCT"], "80", "kept");
-        assert_eq!(l.raw["DUX_AUTO_CLEANUP_LEVEL"], "1", "kept");
+        assert_eq!(l.raw["DUX_AUTO"], "true", "kept");
+        assert!(l.raw["DUX_AUTO_FOLDERS"].contains("/srv/app/logs"), "kept");
+        // Turned on with nothing approved: refused, stays off.
+        let d2 = d.join("b.toml");
+        let mut c = Script(vec![("Turn on automatic", "yes")], vec![]);
+        run(&mut c, &d2, &nt).unwrap();
+        assert!(c.1.join("\n").contains("automatic cleanup stays off"));
+        assert_eq!(config::load(&d2).unwrap().raw["DUX_AUTO"], "false");
         std::fs::remove_dir_all(&d).unwrap();
     }
 }
